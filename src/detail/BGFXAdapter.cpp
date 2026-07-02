@@ -133,6 +133,19 @@ bgfx::TextureHandle BGFXAdapter::createTexture2D(uint16_t width, uint16_t height
                                  mem);
 }
 
+bgfx::TextureHandle BGFXAdapter::createTexture2DFromData(uint16_t width, uint16_t height,
+                                                          bgfx::TextureFormat::Enum format,
+                                                          const void* data, uint32_t size,
+                                                          uint64_t flags)
+{
+    if (width == 0 || height == 0 || data == nullptr || size == 0) {
+        return BGFX_INVALID_HANDLE;
+    }
+    const bgfx::Memory* mem = bgfx::copy(data, size);
+    return bgfx::createTexture2D(width, height, false, 1, format,
+                                 static_cast<uint64_t>(flags), mem);
+}
+
 void BGFXAdapter::destroy(bgfx::VertexBufferHandle h)
 {
     if (bgfx::isValid(h)) {

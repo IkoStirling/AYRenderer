@@ -40,6 +40,7 @@ enum class VertexAttribute : uint8_t {
     Position,
     Normal,
     TexCoord0,
+    Tangent,
     Color0,
 };
 

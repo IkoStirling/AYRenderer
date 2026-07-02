@@ -63,6 +63,10 @@ public:
     void setMaterialColor(MaterialHandle material, const char* propertyName,
                           float r, float g, float b, float a = 1.0f);
 
+    void setMaterialFloat(MaterialHandle material, const char* uniformName, float value);
+    void setMaterialVec3(MaterialHandle material, const char* uniformName,
+                         float x, float y, float z);
+
     void setMaterialMatrix4(MaterialHandle material, const char* uniformName,
                             const ayt::math::Float4x4& matrix);
 
@@ -80,6 +84,9 @@ public:
                                         float aspect,
                                         float nearZ,
                                         float farZ);
+
+    void setDirectionalLight(const ayt::math::FVector3& direction,
+                             const ayt::math::FVector3& color);
 
     void destroyMesh(MeshHandle& mesh);
     void destroyMaterial(MaterialHandle& material);

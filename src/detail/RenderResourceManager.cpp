@@ -25,6 +25,28 @@ namespace ayt::render::detail
 
 namespace {
 
+void storeUniformSlot(GpuMaterial& material, shader::BindingId binding,
+                      const void* data, size_t size)
+{
+    if (binding == shader::InvalidBinding || data == nullptr || size == 0 || size > 64) {
+        return;
+    }
+
+    for (GpuMaterial::UniformSlot& slot : material.uniformSlots) {
+        if (slot.binding == binding) {
+            std::memcpy(slot.data, data, size);
+            slot.size = static_cast<uint16_t>(size);
+            return;
+        }
+    }
+
+    GpuMaterial::UniformSlot slot;
+    slot.binding = binding;
+    std::memcpy(slot.data, data, size);
+    slot.size = static_cast<uint16_t>(size);
+    material.uniformSlots.push_back(slot);
+}
+
 struct PosVertex {
     float x;
     float y;
@@ -455,6 +477,59 @@ void RenderResourceManager::setMaterialColor(MaterialHandle material, const char
     mat.colorBinding = binding;
 }
 
+void RenderResourceManager::setMaterialFloat(MaterialHandle material, const char* uniformName,
+                                             float value)
+{
+    if (!material.isValid() || uniformName == nullptr) {
+        return;
+    }
+
+    const auto it = _materials.find(material.id);
+    if (it == _materials.end()) {
+        return;
+    }
+
+    GpuMaterial& mat = it->second;
+    const shader::BindingId binding = mat.shader.getUniformBinding(uniformName);
+    storeUniformSlot(mat, binding, &value, sizeof(float));
+}
+
+void RenderResourceManager::setMaterialVec2(MaterialHandle material, const char* uniformName,
+                                            float x, float y)
+{
+    if (!material.isValid() || uniformName == nullptr) {
+        return;
+    }
+
+    const auto it = _materials.find(material.id);
+    if (it == _materials.end()) {
+        return;
+    }
+
+    const float values[2] = {x, y};
+    GpuMaterial& mat = it->second;
+    const shader::BindingId binding = mat.shader.getUniformBinding(uniformName);
+    storeUniformSlot(mat, binding, values, sizeof(values));
+}
+
+void RenderResourceManager::setMaterialVec3(MaterialHandle material, const char* uniformName,
+                                            float x, float y, float z)
+{
+    if (!material.isValid() || uniformName == nullptr) {
+        return;
+    }
+
+    const auto it = _materials.find(material.id);
+    if (it == _materials.end()) {
+        return;
+    }
+
+    const float values[3] = {x, y, z};
+    GpuMaterial& mat = it->second;
+    const shader::BindingId binding = mat.shader.getUniformBinding(uniformName);
+    storeUniformSlot(mat, binding, values, sizeof(values));
+}
+
 void RenderResourceManager::setMaterialMatrix4(MaterialHandle material, const char* uniformName,
                                                const ayt::math::Float4x4& matrix)
 {
@@ -524,6 +599,44 @@ TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint
     gpuTex.width  = static_cast<uint16_t>(width);
     gpuTex.height = static_cast<uint16_t>(height);
     gpuTex.handle = _adapter.createTexture2D(gpuTex.width, gpuTex.height, pixels);
+    if (!bgfx::isValid(gpuTex.handle)) {
+        return out;
+    }
+
+    const uint64_t id = _nextTextureId++;
+    _textures.emplace(id, gpuTex);
+    if (!cacheKey.empty()) {
+        _textureCacheByKey.emplace(cacheKey, id);
+    }
+    out.id = id;
+    return out;
+}
+
+TextureHandle RenderResourceManager::createTextureFromData(uint32_t width, uint32_t height,
+                                                           uint32_t bgfxTextureFormat,
+                                                           const void* data, uint32_t size,
+                                                           const std::string& cacheKey)
+{
+    TextureHandle out;
+    if (!_adapter.isInitialized() || width == 0 || height == 0 || data == nullptr || size == 0) {
+        return out;
+    }
+
+    if (!cacheKey.empty()) {
+        const auto cached = _textureCacheByKey.find(cacheKey);
+        if (cached != _textureCacheByKey.end()) {
+            out.id = cached->second;
+            return out;
+        }
+    }
+
+    GpuTexture gpuTex;
+    gpuTex.width  = static_cast<uint16_t>(width);
+    gpuTex.height = static_cast<uint16_t>(height);
+    gpuTex.handle = _adapter.createTexture2DFromData(
+        gpuTex.width, gpuTex.height,
+        static_cast<bgfx::TextureFormat::Enum>(bgfxTextureFormat),
+        data, size);
     if (!bgfx::isValid(gpuTex.handle)) {
         return out;
     }

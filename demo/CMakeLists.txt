@@ -2,6 +2,13 @@ add_executable(AYRenderer_Demo RotatingCubeDemo.cpp)
 
 target_link_libraries(AYRenderer_Demo PRIVATE
     AYRenderer
+    AYResource
+)
+
+target_include_directories(AYRenderer_Demo PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../AYResource/include/assetsImpl
+    ${CMAKE_CURRENT_SOURCE_DIR}/../AYResource/interface
+    ${CMAKE_CURRENT_SOURCE_DIR}/../AYResource/interface/assetsDefs
 )
 
 if(WIN32)

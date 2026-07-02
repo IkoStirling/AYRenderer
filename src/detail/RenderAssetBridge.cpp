@@ -5,6 +5,8 @@
 #include "AYAssetPath.h"
 #include "assetsImpl/AYMaterial.h"
 
+#include <bgfx/bgfx.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -51,9 +53,19 @@ void applyMaterialParameter(RenderResourceManager& mgr,
         mgr.setMaterialColor(handle, name, value.x, value.y, value.z, value.w);
         break;
     }
+    case MaterialParamType::Float: {
+        mgr.setMaterialFloat(handle, name, material.getFloat(name));
+        break;
+    }
+    case MaterialParamType::Float2: {
+        float values[2];
+        material.getFloat2(name, values);
+        mgr.setMaterialVec2(handle, name, values[0], values[1]);
+        break;
+    }
     case MaterialParamType::Float3: {
         const ayt::math::FVector3 value = material.getVector3(name);
-        mgr.setMaterialColor(handle, name, value.x, value.y, value.z, 1.0f);
+        mgr.setMaterialVec3(handle, name, value.x, value.y, value.z);
         break;
     }
     case MaterialParamType::Float4x4: {
@@ -100,11 +112,6 @@ std::string normalizeAssetPathKey(const std::string& path)
 
 bool vertexLayoutFromMesh(const ayt::resource::IMesh& mesh, VertexLayoutDesc& out)
 {
-    const uint8_t mask = mesh.getAttributeMask();
-    if ((mask & (1u << static_cast<uint8_t>(MeshAttribute::Tangent))) != 0) {
-        return false;
-    }
-
     out = VertexLayoutDesc{};
 
     if (!addMeshFloatAttribute(out, mesh, MeshAttribute::Position, VertexAttribute::Position, 3)) {
@@ -114,6 +121,9 @@ bool vertexLayoutFromMesh(const ayt::resource::IMesh& mesh, VertexLayoutDesc& ou
         return false;
     }
     if (!addMeshFloatAttribute(out, mesh, MeshAttribute::UV, VertexAttribute::TexCoord0, 2)) {
+        return false;
+    }
+    if (!addMeshFloatAttribute(out, mesh, MeshAttribute::Tangent, VertexAttribute::Tangent, 4)) {
         return false;
     }
     if (!addMeshFloatAttribute(out, mesh, MeshAttribute::Color, VertexAttribute::Color0, 4)) {
@@ -171,13 +181,29 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     return handle;
 }
 
+namespace
+{
+
+bool mapAyTextureFormat(TextureFormat format, bgfx::TextureFormat::Enum& out)
+{
+    switch (format) {
+    case TextureFormat::RGBA8: out = bgfx::TextureFormat::RGBA8; return true;
+    case TextureFormat::RGB8:  out = bgfx::TextureFormat::RGB8;  return true;
+    case TextureFormat::BC1:   out = bgfx::TextureFormat::BC1;   return true;
+    case TextureFormat::BC3:   out = bgfx::TextureFormat::BC3;   return true;
+    case TextureFormat::BC4:   out = bgfx::TextureFormat::BC4;   return true;
+    case TextureFormat::BC5:   out = bgfx::TextureFormat::BC5;   return true;
+    case TextureFormat::BC7:   out = bgfx::TextureFormat::BC7;   return true;
+    default: return false;
+    }
+}
+
+} // namespace
+
 TextureHandle uploadTextureFromResource(RenderResourceManager& mgr,
                                           const ayt::resource::ITexture& texture,
                                           const std::string& cacheKey)
 {
-    if (texture.getFormat() != TextureFormat::RGBA8) {
-        return {};
-    }
     if (texture.getMipmapCount() == 0) {
         return {};
     }
@@ -187,10 +213,17 @@ TextureHandle uploadTextureFromResource(RenderResourceManager& mgr,
         return {};
     }
 
-    return mgr.createTextureFromRgba8(texture.getWidth(),
-                                      texture.getHeight(),
-                                      pixels,
-                                      cacheKey);
+    bgfx::TextureFormat::Enum bgfxFormat = bgfx::TextureFormat::RGBA8;
+    if (!mapAyTextureFormat(texture.getFormat(), bgfxFormat)) {
+        return {};
+    }
+
+    return mgr.createTextureFromData(texture.getWidth(),
+                                     texture.getHeight(),
+                                     static_cast<uint32_t>(bgfxFormat),
+                                     pixels,
+                                     texture.getMipmapSize(0),
+                                     cacheKey);
 }
 
 } // namespace ayt::render::detail

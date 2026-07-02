@@ -17,7 +17,7 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 | R1.5 | `VertexLayoutDesc` + `createMesh` | ✅ |
 | R2a | `RenderResourceManager` + texture upload/bind (AYIO, no AYResource) | ✅ |
 | R2b | AYResource bridge (aymat / aymesh / aytex) | ✅ |
-| R3 | Camera + 简单光照 uniform；可选第二 Pass | ⬜ |
+| R3 | Camera + directional light frame uniforms | ✅ |
 | R4 | hot-reload（`pool.pollHotReload`）+ 开发调试 overlay | ⬜ |
 | R5+ | Shadow / GBuffer / PostProcess / Command Queue | 🅿 延后 |
 
@@ -44,6 +44,9 @@ renderer.setMaterialColor(mat, "baseColor", 1.f, 0.2f, 0.1f, 1.f);
 ayt::render::MeshHandle mesh = renderer.createUnitCube();
 // Or load cooked assets via AYResource (R2b):
 // ayt::render::MeshHandle mesh = renderer.loadMesh("assets/models/cube.aymesh");
+
+renderer.setDirectionalLight(ayt::math::FVector3(0.2f, -1.0f, -0.2f),
+                             ayt::math::FVector3(1.0f, 0.95f, 0.85f));
 
 ayt::render::RenderScene scene;
 scene.add(mesh, mat);

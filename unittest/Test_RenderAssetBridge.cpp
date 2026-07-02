@@ -1,15 +1,22 @@
 #include "AYRenderer.h"
 #include "detail/RenderAssetBridge.h"
 
+#include "assetsImpl/AYMaterial.h"
 #include "assetsImpl/AYMesh.h"
 #include "assetsImpl/AYTexture.h"
 
+#include "AYAssetPath.h"
 #include "AYFile.h"
 #include "AYTest.h"
 
 #include <cstdio>
 #include <string>
+#include <sys/stat.h>
 #include <vector>
+
+#ifndef AY_SHADER_SHADERC_HINT
+#  define AY_SHADER_SHADERC_HINT ""
+#endif
 
 #ifdef _WIN32
 #  ifndef NOMINMAX
@@ -20,11 +27,24 @@
 
 namespace {
 
-struct PosVertex {
-    float x;
-    float y;
-    float z;
-};
+const char* kBridgeMaterialShader = R"(
+material BridgeTest {
+    texture2d albedoMap
+    property baseColor = vec4(0.2, 0.8, 0.3, 1.0)
+    property metallic = 0.1
+
+    vertex {
+        in pos : position
+        in uv  : texcoord
+        out uvOut : texcoord = vec2(0.0, 0.0)
+        return u_modelViewProj * vec4(pos, 1.0)
+    }
+    fragment {
+        in uvOut : texcoord
+        return sample(albedoMap, uvOut) * baseColor
+    }
+}
+)";
 
 std::string tempPath(const char* name)
 {
@@ -48,9 +68,24 @@ bool writeBinaryFile(const std::string& path, const std::vector<ayt::resource::U
     return file.write(data.data(), data.size()) == data.size();
 }
 
+bool writeTextFile(const std::string& path, const std::string& text)
+{
+    ayt::io::File file(path, ayt::io::File::Mode::Write);
+    if (!file.isOpen()) {
+        return false;
+    }
+    return file.write(text.data(), text.size()) == text.size();
+}
+
 void removeFile(const std::string& path)
 {
     std::remove(path.c_str());
+}
+
+bool fileExists(const std::string& path)
+{
+    struct stat st;
+    return !path.empty() && ::stat(path.c_str(), &st) == 0;
 }
 
 } // namespace
@@ -65,7 +100,17 @@ TEST_CASE(vertex_layout_from_cube_mesh)
     ayt::render::VertexLayoutDesc layout;
     CHECK(ayt::render::detail::vertexLayoutFromMesh(mesh, layout));
     CHECK(layout.strideBytes() == mesh.getVertexStride());
-    CHECK(layout.elementCount == 3);
+    CHECK(layout.elementCount == 3u);
+}
+
+TEST_CASE(vertex_layout_supports_tangent_attribute)
+{
+    ayt::render::VertexLayoutDesc layout;
+    CHECK(layout.add({ayt::render::VertexAttribute::Position, 3,
+                      ayt::render::VertexComponentType::Float, false}));
+    CHECK(layout.add({ayt::render::VertexAttribute::Tangent, 4,
+                      ayt::render::VertexComponentType::Float, false}));
+    CHECK(layout.strideBytes() == 28u);
 }
 
 TEST_CASE(load_mesh_from_aymesh_file)
@@ -97,6 +142,12 @@ TEST_CASE(load_mesh_from_aymesh_file)
 
 TEST_CASE(create_mesh32_uploads_large_indices)
 {
+    struct PosVertex {
+        float x;
+        float y;
+        float z;
+    };
+
     const PosVertex vertices[] = {
         {0.0f, 0.0f, 0.0f},
         {1.0f, 0.0f, 0.0f},
@@ -146,6 +197,54 @@ TEST_CASE(load_texture_from_aytex_file)
     renderer.destroyTexture(first);
     renderer.shutdown();
     removeFile(path);
+}
+
+TEST_CASE(load_material_from_aymat_file)
+{
+    if (!fileExists(AY_SHADER_SHADERC_HINT)) {
+        return;
+    }
+
+    const std::string shaderPath = tempPath("bridge_test.phoskia");
+    const std::string texPath = tempPath("bridge_albedo.aytex");
+    const std::string matPath = tempPath("bridge_test.aymat");
+
+    CHECK(writeTextFile(shaderPath, kBridgeMaterialShader));
+
+    ayt::resource::Texture texture;
+    texture.createCheckerboard(8, 8, 4);
+    std::vector<ayt::resource::UInt8> texBinary;
+    CHECK(texture.saveToBinary(texBinary));
+    CHECK(writeBinaryFile(texPath, texBinary));
+
+    ayt::resource::Material material;
+    material.setShader("bridge_test.phoskia");
+    material.setTexture("albedoMap", "bridge_albedo.aytex");
+    material.setFloat("metallic", 0.25f);
+    std::vector<ayt::resource::UInt8> matBinary;
+    CHECK(material.saveToBinary(matBinary));
+    CHECK(writeBinaryFile(matPath, matBinary));
+
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend = ayt::render::Backend::Noop;
+    CHECK(renderer.initialize(desc));
+
+    ayt::render::MaterialHandle handle = renderer.loadMaterial(matPath);
+    if (!handle.isValid()) {
+        renderer.shutdown();
+        removeFile(shaderPath);
+        removeFile(texPath);
+        removeFile(matPath);
+        return;
+    }
+    CHECK(handle.isValid());
+
+    renderer.destroyMaterial(handle);
+    renderer.shutdown();
+    removeFile(shaderPath);
+    removeFile(texPath);
+    removeFile(matPath);
 }
 
 TEST_SUITE_END

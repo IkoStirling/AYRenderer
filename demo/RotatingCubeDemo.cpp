@@ -1,4 +1,4 @@
-// RotatingCubeDemo.cpp — windowed smoke test: AYRenderer + AYShader (Win32)
+// RotatingCubeDemo.cpp — windowed smoke test: AYRenderer + AYShader + AYResource (Win32)
 
 #ifndef UNICODE
 #  define UNICODE
@@ -14,33 +14,111 @@
 #include "AYRenderer.h"
 #include "AYMathUtils.h"
 
+#include "assetsImpl/AYMaterial.h"
+#include "assetsImpl/AYMesh.h"
+#include "assetsImpl/AYTexture.h"
+
+#include "AYFile.h"
+
 #include <chrono>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
 constexpr int kWindowWidth  = 1280;
 constexpr int kWindowHeight = 720;
 
-const char* kRotatingCubePhoskia = R"(
-material RotatingCube {
-    property baseColor = vec4(0.25, 0.55, 0.95, 1.0)
+const char* kSimpleLitPhoskia = R"(
+material SimpleLit {
+    texture2d albedoMap
+    uniform vec3 cameraPos
+    uniform vec3 lightDir
+    uniform vec3 lightColor
+    property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
 
     vertex {
         in pos : position
+        in nrm : normal
+        in uv  : texcoord
+        out worldNormal : normal = vec3(0.0, 0.0, 1.0)
+        out uvOut : texcoord = vec2(0.0, 0.0)
         return u_modelViewProj * vec4(pos, 1.0)
     }
     fragment {
-        return baseColor
+        in worldNormal : normal
+        in uvOut : texcoord
+        let albedo = sample(albedoMap, uvOut) * baseColor
+        let N = normalize(worldNormal)
+        let L = normalize(-lightDir)
+        let ndotl = max(dot(N, L), 0.05)
+        return vec4(albedo.rgb * lightColor * ndotl, albedo.a)
     }
 }
 )";
+
+struct DemoAssets {
+    std::string meshPath;
+    std::string materialPath;
+    std::string shaderPath;
+    std::string texturePath;
+};
 
 struct DemoState {
     ayt::render::Renderer* renderer = nullptr;
     bool running = true;
 };
+
+bool writeBytes(const std::string& path, const void* data, size_t size)
+{
+    ayt::io::File file(path, ayt::io::File::Mode::BinaryWrite);
+    if (!file.isOpen()) {
+        return false;
+    }
+    return file.write(data, size) == size;
+}
+
+bool writeText(const std::string& path, const std::string& text)
+{
+    ayt::io::File file(path, ayt::io::File::Mode::Write);
+    if (!file.isOpen()) {
+        return false;
+    }
+    return file.write(text.data(), text.size()) == text.size();
+}
+
+DemoAssets bakeDemoAssets(const std::string& prefix)
+{
+    DemoAssets paths;
+    paths.shaderPath  = prefix + "demo_simple_lit.phoskia";
+    paths.texturePath = prefix + "demo_albedo.aytex";
+    paths.materialPath = prefix + "demo_cube.aymat";
+    paths.meshPath    = prefix + "demo_cube.aymesh";
+
+    writeText(paths.shaderPath, kSimpleLitPhoskia);
+
+    ayt::resource::Texture texture;
+    texture.createCheckerboard(64, 64, 8);
+    std::vector<ayt::resource::UInt8> texBinary;
+    texture.saveToBinary(texBinary);
+    writeBytes(paths.texturePath, texBinary.data(), texBinary.size());
+
+    ayt::resource::Material material;
+    material.setShader("demo_simple_lit.phoskia");
+    material.setTexture("albedoMap", "demo_albedo.aytex");
+    std::vector<ayt::resource::UInt8> matBinary;
+    material.saveToBinary(matBinary);
+    writeBytes(paths.materialPath, matBinary.data(), matBinary.size());
+
+    ayt::resource::Mesh mesh;
+    mesh.createCube(1.0f);
+    std::vector<ayt::resource::UInt8> meshBinary;
+    mesh.saveToBinary(meshBinary);
+    writeBytes(paths.meshPath, meshBinary.data(), meshBinary.size());
+
+    return paths;
+}
 
 LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -79,7 +157,7 @@ HWND createDemoWindow(DemoState* state)
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
 
     HWND hwnd = CreateWindowExW(
-        0, wc.lpszClassName, L"AYRenderer — Rotating Cube",
+        0, wc.lpszClassName, L"AYRenderer — Rotating Cube (R2b/R3)",
         WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
         rect.right - rect.left, rect.bottom - rect.top,
         nullptr, nullptr, instance, nullptr);
@@ -118,26 +196,27 @@ int main()
         return 1;
     }
 
-    ayt::render::MaterialHandle material =
-        renderer.createMaterialFromPhoskia(kRotatingCubePhoskia, "demo_rotating_cube");
-    if (!material.isValid()) {
-        std::fprintf(stderr, "Material acquire failed.\n");
+    char tempDir[MAX_PATH] = {};
+    std::string assetPrefix = "demo_assets_";
+    if (GetTempPathA(MAX_PATH, tempDir) > 0) {
+        assetPrefix = std::string(tempDir) + "ayrenderer_";
+    }
+
+    const DemoAssets assets = bakeDemoAssets(assetPrefix);
+
+    ayt::render::MeshHandle mesh = renderer.loadMesh(assets.meshPath);
+    ayt::render::MaterialHandle material = renderer.loadMaterial(assets.materialPath);
+    if (!mesh.isValid() || !material.isValid()) {
+        std::fprintf(stderr, "Failed to load demo assets via AYResource bridge.\n");
         renderer.shutdown();
         return 1;
     }
 
-    ayt::render::MeshHandle mesh = renderer.createUnitCube();
-    if (!mesh.isValid()) {
-        std::fprintf(stderr, "Failed to create unit cube mesh.\n");
-        renderer.destroyMaterial(material);
-        renderer.shutdown();
-        return 1;
-    }
+    renderer.setDirectionalLight(ayt::math::FVector3(0.35f, -0.85f, -0.4f),
+                                 ayt::math::FVector3(1.0f, 0.96f, 0.88f));
 
     ayt::render::RenderScene scene;
     scene.add(mesh, material);
-
-    renderer.setMaterialColor(material, "baseColor", 0.25f, 0.55f, 0.95f, 1.0f);
 
     const auto startTime = std::chrono::steady_clock::now();
 
@@ -159,10 +238,10 @@ int main()
             break;
         }
 
-        const auto now     = std::chrono::steady_clock::now();
+        const auto now      = std::chrono::steady_clock::now();
         const float elapsed = std::chrono::duration<float>(now - startTime).count();
-        const float aspect   = static_cast<float>(kWindowWidth)
-                             / static_cast<float>(kWindowHeight);
+        const float aspect    = static_cast<float>(kWindowWidth)
+                              / static_cast<float>(kWindowHeight);
 
         using namespace ayt::math;
 

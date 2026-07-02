@@ -45,6 +45,11 @@ public:
 
     void setMaterialColor(MaterialHandle material, const char* propertyName,
                           float r, float g, float b, float a);
+    void setMaterialFloat(MaterialHandle material, const char* uniformName, float value);
+    void setMaterialVec2(MaterialHandle material, const char* uniformName,
+                         float x, float y);
+    void setMaterialVec3(MaterialHandle material, const char* uniformName,
+                         float x, float y, float z);
     void setMaterialMatrix4(MaterialHandle material, const char* uniformName,
                             const ayt::math::Float4x4& matrix);
     void setMaterialTexture(MaterialHandle material, const char* textureBindingName,
@@ -53,6 +58,10 @@ public:
     TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
                                          const uint8_t* pixels,
                                          const std::string& cacheKey = "");
+    TextureHandle createTextureFromData(uint32_t width, uint32_t height,
+                                        uint32_t bgfxTextureFormat,
+                                        const void* data, uint32_t size,
+                                        const std::string& cacheKey = "");
     TextureHandle createTextureFromFile(const std::string& path,
                                         const std::string& cacheKey = "");
     TextureHandle loadTexture(const std::string& path);

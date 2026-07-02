@@ -11,6 +11,7 @@ bool mapAttribute(VertexAttribute attr, bgfx::Attrib::Enum& out)
     case VertexAttribute::Position:  out = bgfx::Attrib::Position;  return true;
     case VertexAttribute::Normal:    out = bgfx::Attrib::Normal;    return true;
     case VertexAttribute::TexCoord0: out = bgfx::Attrib::TexCoord0; return true;
+    case VertexAttribute::Tangent:   out = bgfx::Attrib::Tangent;   return true;
     case VertexAttribute::Color0:   out = bgfx::Attrib::Color0;   return true;
     }
     return false;

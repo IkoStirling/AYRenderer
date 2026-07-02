@@ -2,6 +2,7 @@
 
 #include "detail/BGFXAdapter.h"
 #include "detail/ForwardOpaquePass.h"
+#include "detail/FrameContext.h"
 #include "detail/RenderResourceManager.h"
 #include "detail/ShaderPoolSetup.h"
 
@@ -25,6 +26,9 @@ struct Renderer::Impl {
 
     ayt::math::Float4x4           mainView        = ayt::math::Float4x4::identity();
     ayt::math::Float4x4           mainProjection  = ayt::math::Float4x4::identity();
+    ayt::math::FVector3           mainCameraPosition = ayt::math::FVector3(0.0f, 0.0f, 4.0f);
+    ayt::math::FVector3           directionalLightDir = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
+    ayt::math::FVector3           directionalLightColor = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
 
     Impl()
         : resources(adapter, shaderPool)
@@ -102,12 +106,19 @@ void Renderer::render(const RenderScene& scene)
         return;
     }
 
+    detail::FrameContext frame;
+    frame.view             = _impl->mainView;
+    frame.projection       = _impl->mainProjection;
+    frame.cameraPosition   = _impl->mainCameraPosition;
+    frame.lightDirection   = ayt::math::Normalize(_impl->directionalLightDir);
+    frame.lightColor       = _impl->directionalLightColor;
+
     _impl->forwardPass.execute(_impl->adapter, _impl->shaderPool, scene,
                                _impl->resources.meshes(), _impl->resources.textures(),
                                _impl->resources.materials(),
                                static_cast<uint16_t>(_impl->initDesc.width),
                                static_cast<uint16_t>(_impl->initDesc.height),
-                               _impl->mainView, _impl->mainProjection);
+                               frame);
 }
 
 void Renderer::endFrame()
@@ -227,6 +238,23 @@ void Renderer::setMaterialColor(MaterialHandle material, const char* propertyNam
     _impl->resources.setMaterialColor(material, propertyName, r, g, b, a);
 }
 
+void Renderer::setMaterialFloat(MaterialHandle material, const char* uniformName, float value)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->resources.setMaterialFloat(material, uniformName, value);
+}
+
+void Renderer::setMaterialVec3(MaterialHandle material, const char* uniformName,
+                               float x, float y, float z)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->resources.setMaterialVec3(material, uniformName, x, y, z);
+}
+
 void Renderer::setMaterialMatrix4(MaterialHandle material, const char* uniformName,
                                   const ayt::math::Float4x4& matrix)
 {
@@ -255,6 +283,16 @@ void Renderer::setMainCamera(const ayt::math::Float4x4& view,
     _impl->mainProjection = projection;
 }
 
+void Renderer::setDirectionalLight(const ayt::math::FVector3& direction,
+                                   const ayt::math::FVector3& color)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->directionalLightDir   = ayt::math::Normalize(direction);
+    _impl->directionalLightColor = color;
+}
+
 void Renderer::setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,
                                               const ayt::math::FVector3& at,
                                               const ayt::math::FVector3& up,
@@ -280,6 +318,7 @@ void Renderer::setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,
     ayt::math::Float4x4 proj;
     std::memcpy(view.ptr(), viewBx, sizeof(viewBx));
     std::memcpy(proj.ptr(), projBx, sizeof(projBx));
+    _impl->mainCameraPosition = eye;
     setMainCamera(view, proj);
 }
 

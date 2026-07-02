@@ -33,6 +33,13 @@ struct GpuMaterial {
     ayt::math::Float4x4    mat4Override = ayt::math::Float4x4::identity();
     bool                   hasMat4Override = false;
 
+    struct UniformSlot {
+        shader::BindingId binding = shader::InvalidBinding;
+        uint8_t           data[64]{};
+        uint16_t          size = 0;
+    };
+    std::vector<UniformSlot> uniformSlots;
+
     struct TextureSlot {
         shader::BindingId binding = shader::InvalidBinding;
         TextureHandle     texture{};

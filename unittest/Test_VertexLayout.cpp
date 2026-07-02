@@ -33,4 +33,14 @@ TEST_CASE(build_bgfx_vertex_layout_matches_stride)
     CHECK(bgfxLayout.getStride() == desc.strideBytes());
 }
 
+TEST_CASE(build_bgfx_layout_with_tangent)
+{
+    VertexLayoutDesc desc;
+    CHECK(desc.add({VertexAttribute::Position, 3, VertexComponentType::Float, false}));
+    CHECK(desc.add({VertexAttribute::Tangent, 4, VertexComponentType::Float, false}));
+    bgfx::VertexLayout bgfxLayout;
+    CHECK(ayt::render::detail::buildBgfxVertexLayout(desc, bgfxLayout));
+    CHECK(bgfxLayout.getStride() == desc.strideBytes());
+}
+
 TEST_SUITE_END

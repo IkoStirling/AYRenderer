@@ -48,6 +48,10 @@ public:
     bgfx::TextureHandle createTexture2D(uint16_t width, uint16_t height,
                                         const void* rgba8Data,
                                         uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
+    bgfx::TextureHandle createTexture2DFromData(uint16_t width, uint16_t height,
+                                              bgfx::TextureFormat::Enum format,
+                                              const void* data, uint32_t size,
+                                              uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
 
     void destroy(bgfx::VertexBufferHandle h);
     void destroy(bgfx::IndexBufferHandle h);
