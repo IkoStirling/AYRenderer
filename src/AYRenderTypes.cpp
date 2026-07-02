@@ -82,4 +82,12 @@ VertexLayoutDesc VertexLayoutDesc::position3TexCoord2()
     return layout;
 }
 
+VertexLayoutDesc VertexLayoutDesc::position3Normal3TexCoord2()
+{
+    VertexLayoutDesc layout = position3Normal3();
+    layout.add(VertexElement{
+        VertexAttribute::TexCoord0, 2, VertexComponentType::Float, false});
+    return layout;
+}
+
 } // namespace ayt::render

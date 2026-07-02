@@ -94,6 +94,9 @@ public:
 
     void pollShaderHotReload();
 
+    // Debug: dump generated vs/fs/varying.def.sc under dir (creates dir if missing).
+    void setShaderIntermediateDumpDirectory(const std::string& dir);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> _impl;

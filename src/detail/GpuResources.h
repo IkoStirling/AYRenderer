@@ -51,7 +51,8 @@ inline shader::TextureHandle toShaderTexture(bgfx::TextureHandle h)
 {
     shader::TextureHandle out;
     if (bgfx::isValid(h)) {
-        out.id = static_cast<uint64_t>(h.idx);
+        // bgfx handle idx can be 0; shader::TextureHandle uses id==0 as invalid.
+        out.id = static_cast<uint64_t>(h.idx) + 1u;
     }
     return out;
 }

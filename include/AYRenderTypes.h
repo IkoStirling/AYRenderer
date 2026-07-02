@@ -66,10 +66,11 @@ struct VertexLayoutDesc {
     bool isValid() const noexcept;
     uint32_t strideBytes() const noexcept;
 
-    // Common presets (tightly packed, no padding).
+    // Common presets (logical attribute order; bgfx may add padding — repack on upload).
     static VertexLayoutDesc position3();
     static VertexLayoutDesc position3Normal3();
     static VertexLayoutDesc position3TexCoord2();
+    static VertexLayoutDesc position3Normal3TexCoord2();
 };
 
 struct MeshHandle {

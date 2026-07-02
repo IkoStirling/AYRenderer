@@ -21,7 +21,7 @@ material TexturedUnlit {
         in pos : position
         in uv  : texcoord
         out uvOut : texcoord = vec2(0.0, 0.0)
-        return u_modelViewProj * vec4(pos, 1.0)
+        return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
         in uvOut : texcoord

@@ -34,8 +34,13 @@ bool buildBgfxVertexLayout(const VertexLayoutDesc& desc, bgfx::VertexLayout& out
         return false;
     }
 
+    bgfx::RendererType::Enum renderer = bgfx::getRendererType();
+    if (renderer == bgfx::RendererType::Count) {
+        renderer = bgfx::RendererType::Noop;
+    }
+
     out = bgfx::VertexLayout{};
-    out.begin();
+    out.begin(renderer);
     for (uint8_t i = 0; i < desc.elementCount; ++i) {
         const VertexElement& el = desc.elements[i];
         if (el.componentCount == 0 || el.componentCount > 4) {
@@ -51,7 +56,7 @@ bool buildBgfxVertexLayout(const VertexLayoutDesc& desc, bgfx::VertexLayout& out
         out.add(bgfxAttr, el.componentCount, bgfxType, el.normalized);
     }
     out.end();
-    return out.getStride() == desc.strideBytes();
+    return out.getStride() > 0;
 }
 
 } // namespace ayt::render::detail

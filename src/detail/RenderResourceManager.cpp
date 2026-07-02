@@ -191,6 +191,7 @@ void RenderResourceManager::removeMeshCacheEntry(uint64_t id)
 
 MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
                                                      uint32_t vertexCount,
+                                                     uint32_t vertexStride,
                                                      const VertexLayoutDesc& layout,
                                                      const void* indices,
                                                      uint32_t indexCount,
@@ -198,20 +199,24 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
 {
     MeshHandle out;
     if (!_adapter.isInitialized() || vertices == nullptr || indices == nullptr
-        || vertexCount == 0 || indexCount == 0 || !layout.isValid()) {
+        || vertexCount == 0 || indexCount == 0 || vertexStride == 0 || !layout.isValid()) {
         return out;
     }
 
     bgfx::VertexLayout bgfxLayout;
     if (!buildBgfxVertexLayout(layout, bgfxLayout)) {
+        std::fprintf(stderr,
+                     "[RenderResourceManager] buildBgfxVertexLayout failed (decl=%u bgfx=%u)\n",
+                     layout.strideBytes(), bgfxLayout.getStride());
         return out;
     }
 
-    const uint32_t vertexBytes = layout.strideBytes() * vertexCount;
-    const uint32_t indexBytes  = use32BitIndices
+    const uint32_t uploadStride = bgfxLayout.getStride() > 0 ? bgfxLayout.getStride() : vertexStride;
+    const uint32_t vertexBytes  = uploadStride * vertexCount;
+    const uint32_t indexBytes   = use32BitIndices
         ? indexCount * sizeof(uint32_t)
         : indexCount * sizeof(uint16_t);
-    const uint16_t indexFlags  = use32BitIndices ? BGFX_BUFFER_INDEX32 : BGFX_BUFFER_NONE;
+    const uint16_t indexFlags   = use32BitIndices ? BGFX_BUFFER_INDEX32 : BGFX_BUFFER_NONE;
 
     GpuMesh mesh;
     mesh.layout = layout;
@@ -220,6 +225,9 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
     mesh.indexCount   = indexCount;
 
     if (!bgfx::isValid(mesh.vertexBuffer) || !bgfx::isValid(mesh.indexBuffer)) {
+        std::fprintf(stderr,
+                     "[RenderResourceManager] GPU mesh upload failed (stride=%u verts=%u indices=%u)\n",
+                     uploadStride, vertexCount, indexCount);
         _adapter.destroy(mesh.vertexBuffer);
         _adapter.destroy(mesh.indexBuffer);
         return out;
@@ -237,7 +245,8 @@ MeshHandle RenderResourceManager::createMesh(const void* vertices,
                                              const uint16_t* indices,
                                              uint32_t indexCount)
 {
-    return uploadMeshInternal(vertices, vertexCount, layout, indices, indexCount, false);
+    return uploadMeshInternal(vertices, vertexCount, layout.strideBytes(), layout, indices,
+                              indexCount, false);
 }
 
 MeshHandle RenderResourceManager::createMesh32(const void* vertices,
@@ -246,11 +255,13 @@ MeshHandle RenderResourceManager::createMesh32(const void* vertices,
                                                const uint32_t* indices,
                                                uint32_t indexCount)
 {
-    return uploadMeshInternal(vertices, vertexCount, layout, indices, indexCount, true);
+    return uploadMeshInternal(vertices, vertexCount, layout.strideBytes(), layout, indices,
+                              indexCount, true);
 }
 
 MeshHandle RenderResourceManager::createMeshFromResourceData(const void* vertices,
                                                              uint32_t vertexCount,
+                                                             uint32_t vertexStride,
                                                              const VertexLayoutDesc& layout,
                                                              const uint32_t* indices,
                                                              uint32_t indexCount)
@@ -269,10 +280,12 @@ MeshHandle RenderResourceManager::createMeshFromResourceData(const void* vertice
         for (uint32_t i = 0; i < indexCount; ++i) {
             narrowed[i] = static_cast<uint16_t>(indices[i]);
         }
-        return createMesh(vertices, vertexCount, layout, narrowed.data(), indexCount);
+        return uploadMeshInternal(vertices, vertexCount, vertexStride, layout, narrowed.data(),
+                                  indexCount, false);
     }
 
-    return createMesh32(vertices, vertexCount, layout, indices, indexCount);
+    return uploadMeshInternal(vertices, vertexCount, vertexStride, layout, indices, indexCount,
+                              true);
 }
 
 MeshHandle RenderResourceManager::loadMesh(const std::string& path)
@@ -295,15 +308,24 @@ MeshHandle RenderResourceManager::loadMesh(const std::string& path)
     const std::shared_ptr<ayt::resource::IResource> resource =
         ayt::resource::ResourceRegistry::loadByPath(path);
     if (!resource) {
+        std::fprintf(stderr, "[RenderResourceManager] loadMesh failed: ResourceRegistry '%s'\n",
+                     path.c_str());
         return {};
     }
 
     const auto* mesh = dynamic_cast<const ayt::resource::IMesh*>(resource.get());
     if (mesh == nullptr) {
+        std::fprintf(stderr, "[RenderResourceManager] loadMesh failed: not IMesh '%s'\n",
+                     path.c_str());
         return {};
     }
 
     const MeshHandle handle = uploadMeshFromResource(*this, *mesh);
+    if (!handle.isValid()) {
+        std::fprintf(stderr,
+                     "[RenderResourceManager] loadMesh failed: GPU upload '%s' (verts=%u stride=%u)\n",
+                     path.c_str(), mesh->getVertexCount(), mesh->getVertexStride());
+    }
     if (handle.isValid() && !key.empty()) {
         _meshCacheByKey.emplace(key, handle.id);
     }
@@ -390,11 +412,19 @@ MaterialHandle RenderResourceManager::createMaterialFromPhoskia(const std::strin
 
 MaterialHandle RenderResourceManager::createMaterialFromFile(const std::string& path)
 {
-    if (path.empty() || !ayt::io::File::exists(path)) {
+    if (path.empty()) {
+        std::fprintf(stderr, "[RenderResourceManager] createMaterialFromFile: empty path\n");
+        return MaterialHandle{};
+    }
+    if (!ayt::io::File::exists(path)) {
+        std::fprintf(stderr, "[RenderResourceManager] createMaterialFromFile: missing '%s'\n",
+                     path.c_str());
         return MaterialHandle{};
     }
     const std::string source = ayt::io::File::readAllText(path);
     if (source.empty()) {
+        std::fprintf(stderr, "[RenderResourceManager] createMaterialFromFile: empty file '%s'\n",
+                     path.c_str());
         return MaterialHandle{};
     }
     return createMaterialFromPhoskia(source, path);
@@ -420,15 +450,23 @@ MaterialHandle RenderResourceManager::loadMaterial(const std::string& path)
     const std::shared_ptr<ayt::resource::IResource> resource =
         ayt::resource::ResourceRegistry::loadByPath(path);
     if (!resource) {
+        std::fprintf(stderr, "[RenderResourceManager] loadMaterial failed: ResourceRegistry '%s'\n",
+                     path.c_str());
         return {};
     }
 
     const auto* material = dynamic_cast<const ayt::resource::IMaterial*>(resource.get());
     if (material == nullptr) {
+        std::fprintf(stderr, "[RenderResourceManager] loadMaterial failed: not IMaterial '%s'\n",
+                     path.c_str());
         return {};
     }
 
     MaterialHandle handle = bindMaterialFromResource(*this, *material, path);
+    if (!handle.isValid()) {
+        std::fprintf(stderr, "[RenderResourceManager] loadMaterial failed: bridge '%s'\n",
+                     path.c_str());
+    }
     if (handle.isValid() && !key.empty()) {
         _materialCacheByKey.emplace(key, handle.id);
     }
@@ -527,7 +565,8 @@ void RenderResourceManager::setMaterialVec3(MaterialHandle material, const char*
     const float values[3] = {x, y, z};
     GpuMaterial& mat = it->second;
     const shader::BindingId binding = mat.shader.getUniformBinding(uniformName);
-    storeUniformSlot(mat, binding, values, sizeof(values));
+    const float padded[4] = {values[0], values[1], values[2], 0.0f};
+    storeUniformSlot(mat, binding, padded, sizeof(padded));
 }
 
 void RenderResourceManager::setMaterialMatrix4(MaterialHandle material, const char* uniformName,
@@ -565,6 +604,9 @@ void RenderResourceManager::setMaterialTexture(MaterialHandle material,
     GpuMaterial& mat = matIt->second;
     const shader::BindingId binding = mat.shader.getTextureBinding(textureBindingName);
     if (binding == shader::InvalidBinding) {
+        std::fprintf(stderr,
+                     "[RenderResourceManager] setMaterialTexture: no binding '%s'\n",
+                     textureBindingName);
         return;
     }
 

@@ -16,7 +16,7 @@ material MvpTest {
     property baseColor = vec4(1.0, 0.2, 0.2, 1.0)
     vertex {
         in pos : position
-        return u_modelViewProj * vec4(pos, 1.0)
+        return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
         return baseColor

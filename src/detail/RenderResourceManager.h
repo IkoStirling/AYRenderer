@@ -29,6 +29,7 @@ public:
                             uint32_t indexCount);
     MeshHandle createMeshFromResourceData(const void* vertices,
                                           uint32_t vertexCount,
+                                          uint32_t vertexStride,
                                           const VertexLayoutDesc& layout,
                                           const uint32_t* indices,
                                           uint32_t indexCount);
@@ -97,6 +98,7 @@ private:
 
     MeshHandle uploadMeshInternal(const void* vertices,
                                   uint32_t vertexCount,
+                                  uint32_t vertexStride,
                                   const VertexLayoutDesc& layout,
                                   const void* indices,
                                   uint32_t indexCount,

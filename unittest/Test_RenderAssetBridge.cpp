@@ -1,5 +1,6 @@
 #include "AYRenderer.h"
 #include "detail/RenderAssetBridge.h"
+#include "detail/VertexLayoutBridge.h"
 
 #include "assetsImpl/AYMaterial.h"
 #include "assetsImpl/AYMesh.h"
@@ -8,6 +9,8 @@
 #include "AYAssetPath.h"
 #include "AYFile.h"
 #include "AYTest.h"
+
+#include <bgfx/bgfx.h>
 
 #include <cstdio>
 #include <string>
@@ -37,7 +40,7 @@ material BridgeTest {
         in pos : position
         in uv  : texcoord
         out uvOut : texcoord = vec2(0.0, 0.0)
-        return u_modelViewProj * vec4(pos, 1.0)
+        return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
         in uvOut : texcoord
@@ -101,6 +104,31 @@ TEST_CASE(vertex_layout_from_cube_mesh)
     CHECK(ayt::render::detail::vertexLayoutFromMesh(mesh, layout));
     CHECK(layout.strideBytes() == mesh.getVertexStride());
     CHECK(layout.elementCount == 3u);
+}
+
+TEST_CASE(cube_mesh_repack_preserves_uv)
+{
+    ayt::resource::Mesh mesh;
+    mesh.createCube(1.0f);
+
+    ayt::render::VertexLayoutDesc layout;
+    bgfx::VertexLayout bgfxLayout;
+    CHECK(ayt::render::detail::buildBgfxVertexLayoutFromMesh(mesh, layout, bgfxLayout));
+
+    std::vector<uint8_t> repacked;
+    CHECK(ayt::render::detail::repackMeshVertices(mesh, bgfxLayout, repacked));
+    CHECK(repacked.size()
+          == static_cast<size_t>(bgfxLayout.getStride()) * mesh.getVertexCount());
+
+    const uint16_t uvOffset = bgfxLayout.getOffset(bgfx::Attrib::TexCoord0);
+    const uint32_t stride   = bgfxLayout.getStride();
+    const float* uv0        = reinterpret_cast<const float*>(repacked.data() + uvOffset);
+    CHECK(uv0[0] == 0.0f);
+    CHECK(uv0[1] == 1.0f);
+
+    const float* uv1 = reinterpret_cast<const float*>(repacked.data() + stride + uvOffset);
+    CHECK(uv1[0] == 1.0f);
+    CHECK(uv1[1] == 1.0f);
 }
 
 TEST_CASE(vertex_layout_supports_tangent_attribute)

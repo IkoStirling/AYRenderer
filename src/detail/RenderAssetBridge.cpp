@@ -1,6 +1,7 @@
 #include "detail/RenderAssetBridge.h"
 
 #include "detail/RenderResourceManager.h"
+#include "detail/VertexLayoutBridge.h"
 
 #include "AYAssetPath.h"
 #include "assetsImpl/AYMaterial.h"
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -89,6 +91,10 @@ void applyMaterialParameter(RenderResourceManager& mgr,
         const TextureHandle texture = mgr.loadTexture(texturePath);
         if (texture.isValid()) {
             mgr.setMaterialTexture(handle, name, texture);
+        } else {
+            std::fprintf(stderr,
+                         "[RenderAssetBridge] loadTexture failed (param='%s' path='%s' mat='%s')\n",
+                         name, texturePath.c_str(), materialPath.c_str());
         }
         break;
     }
@@ -110,9 +116,32 @@ std::string normalizeAssetPathKey(const std::string& path)
     return key;
 }
 
+bool buildBgfxVertexLayoutFromMesh(const ayt::resource::IMesh& mesh,
+                                   VertexLayoutDesc& desc,
+                                   bgfx::VertexLayout& bgfxLayout)
+{
+    if (!vertexLayoutFromMesh(mesh, desc)) {
+        return false;
+    }
+    return buildBgfxVertexLayout(desc, bgfxLayout);
+}
+
 bool vertexLayoutFromMesh(const ayt::resource::IMesh& mesh, VertexLayoutDesc& out)
 {
     out = VertexLayoutDesc{};
+
+    if (!mesh.hasAttribute(MeshAttribute::Position)) {
+        return false;
+    }
+
+    const bool isPosNormalUv = mesh.hasAttribute(MeshAttribute::Normal)
+        && mesh.hasAttribute(MeshAttribute::UV)
+        && !mesh.hasAttribute(MeshAttribute::Tangent)
+        && !mesh.hasAttribute(MeshAttribute::Color);
+    if (isPosNormalUv) {
+        out = VertexLayoutDesc::position3Normal3TexCoord2();
+        return out.isValid();
+    }
 
     if (!addMeshFloatAttribute(out, mesh, MeshAttribute::Position, VertexAttribute::Position, 3)) {
         return false;
@@ -130,27 +159,151 @@ bool vertexLayoutFromMesh(const ayt::resource::IMesh& mesh, VertexLayoutDesc& ou
         return false;
     }
 
-    if (!out.isValid()) {
+    return out.isValid();
+}
+
+bool meshNeedsVertexRepack(const ayt::resource::IMesh& mesh,
+                           const bgfx::VertexLayout& bgfxLayout)
+{
+    if (bgfxLayout.getStride() != mesh.getVertexStride()) {
+        return true;
+    }
+
+    struct ChannelMap {
+        MeshAttribute      meshAttr;
+        bgfx::Attrib::Enum bgfxAttr;
+    };
+
+    static const ChannelMap kChannels[] = {
+        {MeshAttribute::Position, bgfx::Attrib::Position},
+        {MeshAttribute::Normal,   bgfx::Attrib::Normal},
+        {MeshAttribute::UV,       bgfx::Attrib::TexCoord0},
+        {MeshAttribute::Tangent,  bgfx::Attrib::Tangent},
+        {MeshAttribute::Color,    bgfx::Attrib::Color0},
+    };
+
+    for (const ChannelMap& channel : kChannels) {
+        if (!mesh.hasAttribute(channel.meshAttr)) {
+            continue;
+        }
+        if (!bgfxLayout.has(channel.bgfxAttr)) {
+            return true;
+        }
+        const uint16_t dstOffset = bgfxLayout.getOffset(channel.bgfxAttr);
+        const uint8_t srcOffset  = mesh.getAttributeInfo(channel.meshAttr).offset;
+        if (dstOffset != srcOffset) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool repackMeshVertices(const ayt::resource::IMesh& mesh,
+                        const bgfx::VertexLayout& bgfxLayout,
+                        std::vector<uint8_t>& out)
+{
+    const uint32_t srcStride    = mesh.getVertexStride();
+    const uint32_t dstStride    = bgfxLayout.getStride();
+    const uint32_t vertexCount  = mesh.getVertexCount();
+    const uint8_t* srcBase      = mesh.getVertexData();
+
+    if (srcStride == 0 || dstStride == 0 || vertexCount == 0 || srcBase == nullptr) {
         return false;
     }
-    return out.strideBytes() == mesh.getVertexStride();
+
+    out.resize(static_cast<size_t>(dstStride) * vertexCount);
+    std::memset(out.data(), 0, out.size());
+
+    struct ChannelMap {
+        MeshAttribute         meshAttr;
+        bgfx::Attrib::Enum    bgfxAttr;
+        uint8_t               floatCount;
+    };
+
+    static const ChannelMap kChannels[] = {
+        {MeshAttribute::Position, bgfx::Attrib::Position, 3},
+        {MeshAttribute::Normal,   bgfx::Attrib::Normal,   3},
+        {MeshAttribute::UV,       bgfx::Attrib::TexCoord0, 2},
+        {MeshAttribute::Tangent,  bgfx::Attrib::Tangent,  4},
+        {MeshAttribute::Color,    bgfx::Attrib::Color0,   4},
+    };
+
+    for (uint32_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+        const uint8_t* srcVertex = srcBase + static_cast<size_t>(vertexIndex) * srcStride;
+
+        for (const ChannelMap& channel : kChannels) {
+            if (!mesh.hasAttribute(channel.meshAttr) || !bgfxLayout.has(channel.bgfxAttr)) {
+                continue;
+            }
+
+            const uint8_t srcOffset = mesh.getAttributeInfo(channel.meshAttr).offset;
+            float values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            std::memcpy(values,
+                        srcVertex + srcOffset,
+                        static_cast<size_t>(channel.floatCount) * sizeof(float));
+            bgfx::vertexPack(values,
+                             false,
+                             channel.bgfxAttr,
+                             bgfxLayout,
+                             out.data(),
+                             vertexIndex);
+        }
+    }
+
+    return true;
 }
 
 MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
                                   const ayt::resource::IMesh& mesh)
 {
     VertexLayoutDesc layout;
-    if (!vertexLayoutFromMesh(mesh, layout)) {
+    bgfx::VertexLayout bgfxLayout;
+    if (!buildBgfxVertexLayoutFromMesh(mesh, layout, bgfxLayout)) {
+        std::fprintf(stderr,
+                     "[RenderAssetBridge] buildBgfxVertexLayoutFromMesh failed (mask=0x%02X stride=%u)\n",
+                     mesh.getAttributeMask(), mesh.getVertexStride());
         return {};
     }
 
     if (mesh.getVertexCount() == 0 || mesh.getIndexCount() == 0
         || mesh.getVertexData() == nullptr || mesh.getIndexData() == nullptr) {
+        std::fprintf(stderr, "[RenderAssetBridge] mesh data missing (v=%u i=%u)\n",
+                     mesh.getVertexCount(), mesh.getIndexCount());
         return {};
     }
 
-    return mgr.createMeshFromResourceData(mesh.getVertexData(),
+    const uint16_t meshPosOffset = mesh.hasAttribute(MeshAttribute::Position)
+        ? mesh.getAttributeInfo(MeshAttribute::Position).offset : 0u;
+    const uint16_t meshNrmOffset = mesh.hasAttribute(MeshAttribute::Normal)
+        ? mesh.getAttributeInfo(MeshAttribute::Normal).offset : 0u;
+    const uint16_t meshUvOffset = mesh.hasAttribute(MeshAttribute::UV)
+        ? mesh.getAttributeInfo(MeshAttribute::UV).offset : 0u;
+    const uint16_t bgfxPosOffset = bgfxLayout.getOffset(bgfx::Attrib::Position);
+    const uint16_t bgfxNrmOffset = bgfxLayout.getOffset(bgfx::Attrib::Normal);
+    const uint16_t bgfxUvOffset  = bgfxLayout.getOffset(bgfx::Attrib::TexCoord0);
+
+    std::fprintf(stderr,
+                 "[RenderAssetBridge] mesh upload layout meshStride=%u bgfxStride=%u "
+                 "pos=%u/%u nrm=%u/%u uv=%u/%u\n",
+                 mesh.getVertexStride(), bgfxLayout.getStride(),
+                 meshPosOffset, bgfxPosOffset, meshNrmOffset, bgfxNrmOffset,
+                 meshUvOffset, bgfxUvOffset);
+
+    std::vector<uint8_t> repacked;
+    if (!repackMeshVertices(mesh, bgfxLayout, repacked)) {
+        std::fprintf(stderr,
+                     "[RenderAssetBridge] repack failed (src=%u dst=%u verts=%u)\n",
+                     mesh.getVertexStride(), bgfxLayout.getStride(), mesh.getVertexCount());
+        return {};
+    }
+
+    const void* vertexData = repacked.data();
+    const uint32_t vertexStride = bgfxLayout.getStride();
+
+    return mgr.createMeshFromResourceData(vertexData,
                                           mesh.getVertexCount(),
+                                          vertexStride,
                                           layout,
                                           mesh.getIndexData(),
                                           mesh.getIndexCount());
@@ -162,6 +315,8 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
 {
     const char* shaderRef = material.getShader();
     if (shaderRef == nullptr || shaderRef[0] == '\0') {
+        std::fprintf(stderr, "[RenderAssetBridge] material has empty shader path '%s'\n",
+                     materialPath.c_str());
         return {};
     }
 
@@ -169,6 +324,9 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
         ayt::resource::resolveAssetPath(materialPath, shaderRef);
     MaterialHandle handle = mgr.createMaterialFromFile(shaderPath);
     if (!handle.isValid()) {
+        std::fprintf(stderr,
+                     "[RenderAssetBridge] createMaterialFromFile failed (mat='%s' shader='%s')\n",
+                     materialPath.c_str(), shaderPath.c_str());
         return {};
     }
 
@@ -176,6 +334,10 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
         concrete->forEachParameter([&](const char* name, MaterialParamType type) {
             applyMaterialParameter(mgr, material, materialPath, handle, name, type);
         });
+    }
+
+    if (!material.hasParameter("baseColor")) {
+        mgr.setMaterialColor(handle, "baseColor", 1.0f, 1.0f, 1.0f, 1.0f);
     }
 
     return handle;

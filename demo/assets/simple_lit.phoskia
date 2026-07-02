@@ -1,6 +1,5 @@
 material SimpleLit {
     texture2d albedoMap
-    uniform vec3 cameraPos
     uniform vec3 lightDir
     uniform vec3 lightColor
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
@@ -9,17 +8,15 @@ material SimpleLit {
         in pos : position
         in nrm : normal
         in uv  : texcoord
-        out worldNormal : normal = vec3(0.0, 0.0, 1.0)
-        out uvOut : texcoord = vec2(0.0, 0.0)
-        return u_modelViewProj * vec4(pos, 1.0)
+        out worldNormal : normal = (modelMatrix * vec4(nrm, 0.0)).xyz
+        out uvOut : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
         in worldNormal : normal
         in uvOut : texcoord
         let albedo = sample(albedoMap, uvOut) * baseColor
-        let N = normalize(worldNormal)
-        let L = normalize(-lightDir)
-        let ndotl = max(dot(N, L), 0.05)
+        let ndotl = max(dot(normalize(worldNormal), normalize(lightDir)), 0.05)
         return vec4(albedo.rgb * lightColor * ndotl, albedo.a)
     }
 }

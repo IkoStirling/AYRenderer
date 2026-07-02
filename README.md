@@ -76,6 +76,24 @@ cmake --build D:\Projects\out\build\x64-Debug --target AYRenderer_Demo
 D:\Projects\out\build\x64-Debug\AYRuntime\AYRenderer\demo\AYRenderer_Demo.exe
 ```
 
+**原生 bgfx 对照 Demo**（绕过 AYShader / AYResource，顶点色 cube）：
+
+若全链路 Demo 画面异常，先跑此对照以区分「bgfx/窗口问题」与「AYShader/材质桥接问题」：
+
+```bat
+cmake --build D:\Projects\out\build\x64-Debug --target AYRenderer_BgfxSanityDemo
+D:\Projects\out\build\x64-Debug\AYRuntime\AYRenderer\demo\AYRenderer_BgfxSanityDemo.exe
+```
+
+- 预期：彩色旋转 cube（每面不同 ABGR 顶点色），背景深灰蓝
+- 启动时用 shaderc 编译内置 `vs_color` / `fs_color`（include: `bgfx-install/.../include/bgfx`）
+- **Esc** 或关闭窗口退出
+
+| 结果 | 含义 |
+|---|---|
+| BgfxSanity 正常、Demo 全黑 | 问题在 AYShader 编译/绑定或 AYRenderer 材质路径 |
+| 两者都黑 | 优先查 bgfx 初始化、GPU 驱动、shaderc 编译日志 |
+
 - 1280×720 Win32 窗口，蓝色旋转 cube
 - **Esc** 或关闭窗口退出
 - 需要 shaderc 与 bgfx `common.sh`（CMake 自动探测 `thirdparty/bgfx`）

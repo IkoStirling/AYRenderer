@@ -23,7 +23,12 @@
 #include <chrono>
 #include <cstdio>
 #include <string>
+#include <sys/stat.h>
 #include <vector>
+
+#ifndef AY_SHADER_SHADERC_HINT
+#  define AY_SHADER_SHADERC_HINT ""
+#endif
 
 namespace {
 
@@ -33,7 +38,6 @@ constexpr int kWindowHeight = 720;
 const char* kSimpleLitPhoskia = R"(
 material SimpleLit {
     texture2d albedoMap
-    uniform vec3 cameraPos
     uniform vec3 lightDir
     uniform vec3 lightColor
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
@@ -42,23 +46,22 @@ material SimpleLit {
         in pos : position
         in nrm : normal
         in uv  : texcoord
-        out worldNormal : normal = vec3(0.0, 0.0, 1.0)
-        out uvOut : texcoord = vec2(0.0, 0.0)
-        return u_modelViewProj * vec4(pos, 1.0)
+        out worldNormal : normal = (modelMatrix * vec4(nrm, 0.0)).xyz
+        out uvOut : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
         in worldNormal : normal
         in uvOut : texcoord
         let albedo = sample(albedoMap, uvOut) * baseColor
-        let N = normalize(worldNormal)
-        let L = normalize(-lightDir)
-        let ndotl = max(dot(N, L), 0.05)
+        let ndotl = max(dot(normalize(worldNormal), normalize(lightDir)), 0.05)
         return vec4(albedo.rgb * lightColor * ndotl, albedo.a)
     }
 }
 )";
 
 struct DemoAssets {
+    std::string assetDir;
     std::string meshPath;
     std::string materialPath;
     std::string shaderPath;
@@ -70,54 +73,131 @@ struct DemoState {
     bool running = true;
 };
 
+bool fileExists(const std::string& path)
+{
+    struct stat st;
+    return !path.empty() && ::stat(path.c_str(), &st) == 0;
+}
+
 bool writeBytes(const std::string& path, const void* data, size_t size)
 {
     ayt::io::File file(path, ayt::io::File::Mode::BinaryWrite);
     if (!file.isOpen()) {
+        std::fprintf(stderr, "[Demo] writeBytes failed to open: %s\n", path.c_str());
         return false;
     }
-    return file.write(data, size) == size;
+    if (file.write(data, size) != size) {
+        std::fprintf(stderr, "[Demo] writeBytes failed to write: %s\n", path.c_str());
+        return false;
+    }
+    return true;
 }
 
 bool writeText(const std::string& path, const std::string& text)
 {
     ayt::io::File file(path, ayt::io::File::Mode::Write);
     if (!file.isOpen()) {
+        std::fprintf(stderr, "[Demo] writeText failed to open: %s\n", path.c_str());
         return false;
     }
-    return file.write(text.data(), text.size()) == text.size();
+    if (file.write(text.data(), text.size()) != text.size()) {
+        std::fprintf(stderr, "[Demo] writeText failed to write: %s\n", path.c_str());
+        return false;
+    }
+    return true;
 }
 
-DemoAssets bakeDemoAssets(const std::string& prefix)
+bool ensureAssetDirectory(const std::string& path)
 {
-    DemoAssets paths;
-    paths.shaderPath  = prefix + "demo_simple_lit.phoskia";
-    paths.texturePath = prefix + "demo_albedo.aytex";
-    paths.materialPath = prefix + "demo_cube.aymat";
-    paths.meshPath    = prefix + "demo_cube.aymesh";
+#ifdef _WIN32
+    if (CreateDirectoryA(path.c_str(), nullptr) != 0) {
+        return true;
+    }
+    return GetLastError() == ERROR_ALREADY_EXISTS;
+#else
+    (void)path;
+    return true;
+#endif
+}
 
-    writeText(paths.shaderPath, kSimpleLitPhoskia);
+bool bakeDemoAssets(const std::string& rootPrefix, DemoAssets& out)
+{
+    if (!ensureAssetDirectory(rootPrefix)) {
+        std::fprintf(stderr, "[Demo] failed to create root dir: %s\n", rootPrefix.c_str());
+        return false;
+    }
+
+    out.assetDir     = rootPrefix + "assets\\";
+    out.shaderPath   = out.assetDir + "simple_lit.phoskia";
+    out.texturePath  = out.assetDir + "albedo.aytex";
+    out.materialPath = out.assetDir + "cube.aymat";
+    out.meshPath     = out.assetDir + "cube.aymesh";
+
+    if (!ensureAssetDirectory(out.assetDir)) {
+        std::fprintf(stderr, "[Demo] failed to create asset dir: %s\n", out.assetDir.c_str());
+        return false;
+    }
+
+    if (!writeText(out.shaderPath, kSimpleLitPhoskia)) {
+        return false;
+    }
 
     ayt::resource::Texture texture;
     texture.createCheckerboard(64, 64, 8);
     std::vector<ayt::resource::UInt8> texBinary;
-    texture.saveToBinary(texBinary);
-    writeBytes(paths.texturePath, texBinary.data(), texBinary.size());
+    if (!texture.saveToBinary(texBinary)) {
+        std::fprintf(stderr, "[Demo] texture.saveToBinary failed\n");
+        return false;
+    }
+    if (!writeBytes(out.texturePath, texBinary.data(), texBinary.size())) {
+        return false;
+    }
 
     ayt::resource::Material material;
-    material.setShader("demo_simple_lit.phoskia");
-    material.setTexture("albedoMap", "demo_albedo.aytex");
+    material.setShader("simple_lit.phoskia");
+    const ayt::resource::Float32 baseColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    material.setFloat4("baseColor", baseColor);
+    material.setTexture("albedoMap", "albedo.aytex");
     std::vector<ayt::resource::UInt8> matBinary;
-    material.saveToBinary(matBinary);
-    writeBytes(paths.materialPath, matBinary.data(), matBinary.size());
+    if (!material.saveToBinary(matBinary)) {
+        std::fprintf(stderr, "[Demo] material.saveToBinary failed\n");
+        return false;
+    }
+    if (!writeBytes(out.materialPath, matBinary.data(), matBinary.size())) {
+        return false;
+    }
 
     ayt::resource::Mesh mesh;
     mesh.createCube(1.0f);
     std::vector<ayt::resource::UInt8> meshBinary;
-    mesh.saveToBinary(meshBinary);
-    writeBytes(paths.meshPath, meshBinary.data(), meshBinary.size());
+    if (!mesh.saveToBinary(meshBinary)) {
+        std::fprintf(stderr, "[Demo] mesh.saveToBinary failed\n");
+        return false;
+    }
+    if (!writeBytes(out.meshPath, meshBinary.data(), meshBinary.size())) {
+        return false;
+    }
 
-    return paths;
+    ayt::resource::Mesh verifyMesh;
+    if (!verifyMesh.load(out.meshPath)) {
+        std::fprintf(stderr, "[Demo] verify mesh.load failed: %s\n", out.meshPath.c_str());
+        return false;
+    }
+
+    ayt::resource::Material verifyMat;
+    if (!verifyMat.load(out.materialPath)) {
+        std::fprintf(stderr, "[Demo] verify material.load failed: %s\n", out.materialPath.c_str());
+        return false;
+    }
+
+    std::fprintf(stderr, "[Demo] baked assets in %s\n", out.assetDir.c_str());
+    std::fprintf(stderr, "  mesh     %s (%zu bytes, v=%u)\n",
+                 out.meshPath.c_str(), meshBinary.size(), verifyMesh.getVertexCount());
+    std::fprintf(stderr, "  material %s (shader=%s)\n",
+                 out.materialPath.c_str(), verifyMat.getShader());
+    std::fprintf(stderr, "  texture  %s\n", out.texturePath.c_str());
+    std::fprintf(stderr, "  shader   %s\n", out.shaderPath.c_str());
+    return true;
 }
 
 LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -196,21 +276,47 @@ int main()
         return 1;
     }
 
+    std::fprintf(stderr, "[Demo] shaderc hint: %s (exists=%d)\n",
+                 AY_SHADER_SHADERC_HINT, fileExists(AY_SHADER_SHADERC_HINT) ? 1 : 0);
+
     char tempDir[MAX_PATH] = {};
-    std::string assetPrefix = "demo_assets_";
+    std::string assetRootPrefix = "demo_assets\\";
     if (GetTempPathA(MAX_PATH, tempDir) > 0) {
-        assetPrefix = std::string(tempDir) + "ayrenderer_";
+        assetRootPrefix = std::string(tempDir) + "ayrenderer_demo\\";
     }
 
-    const DemoAssets assets = bakeDemoAssets(assetPrefix);
-
-    ayt::render::MeshHandle mesh = renderer.loadMesh(assets.meshPath);
-    ayt::render::MaterialHandle material = renderer.loadMaterial(assets.materialPath);
-    if (!mesh.isValid() || !material.isValid()) {
-        std::fprintf(stderr, "Failed to load demo assets via AYResource bridge.\n");
+    DemoAssets assets;
+    if (!bakeDemoAssets(assetRootPrefix, assets)) {
+        std::fprintf(stderr, "[Demo] bakeDemoAssets failed.\n");
         renderer.shutdown();
         return 1;
     }
+
+    const std::string shaderDumpDir = assetRootPrefix + "shader_dump\\";
+    if (ensureAssetDirectory(shaderDumpDir)) {
+        renderer.setShaderIntermediateDumpDirectory(shaderDumpDir);
+        std::fprintf(stderr, "[Demo] shader .sc dump dir: %s\n", shaderDumpDir.c_str());
+    }
+
+    ayt::render::MeshHandle mesh = renderer.loadMesh(assets.meshPath);
+    if (!mesh.isValid()) {
+        std::fprintf(stderr, "[Demo] renderer.loadMesh failed: %s\n", assets.meshPath.c_str());
+        renderer.shutdown();
+        return 1;
+    }
+
+    ayt::render::MaterialHandle material = renderer.loadMaterial(assets.materialPath);
+    if (!material.isValid()) {
+        std::fprintf(stderr, "[Demo] renderer.loadMaterial failed: %s\n",
+                     assets.materialPath.c_str());
+        renderer.destroyMesh(mesh);
+        renderer.shutdown();
+        return 1;
+    }
+
+    std::fprintf(stderr, "[Demo] bridge load OK (mesh id=%llu material id=%llu)\n",
+                 static_cast<unsigned long long>(mesh.id),
+                 static_cast<unsigned long long>(material.id));
 
     renderer.setDirectionalLight(ayt::math::FVector3(0.35f, -0.85f, -0.4f),
                                  ayt::math::FVector3(1.0f, 0.96f, 0.88f));

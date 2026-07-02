@@ -15,7 +15,8 @@ void trySetUniformVec3(shader::ShaderResource& shader, const char* name, const f
     if (binding == shader::InvalidBinding || values == nullptr) {
         return;
     }
-    shader.setUniform(binding, values, sizeof(float) * 3);
+    const float padded[4] = {values[0], values[1], values[2], 0.0f};
+    shader.setUniform(binding, padded, sizeof(padded));
 }
 
 void trySetUniformMat4(shader::ShaderResource& shader, const char* primaryName,
@@ -46,8 +47,12 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     trySetUniformMat4(material.shader, "u_modelViewProj", "modelViewProj", modelViewProj);
 
     trySetUniformVec3(material.shader, "cameraPos", frame.cameraPosition.ptr());
-    trySetUniformVec3(material.shader, "lightDir", frame.lightDirection.ptr());
-    trySetUniformVec3(material.shader, "lightDirection", frame.lightDirection.ptr());
+
+    const ayt::math::FVector3 toLight(
+        -frame.lightDirection.x, -frame.lightDirection.y, -frame.lightDirection.z);
+    const ayt::math::FVector3 toLightDir = toLight.normalize();
+    trySetUniformVec3(material.shader, "lightDir", toLightDir.ptr());
+    trySetUniformVec3(material.shader, "lightDirection", toLightDir.ptr());
     trySetUniformVec3(material.shader, "lightColor", frame.lightColor.ptr());
 
     if (material.colorBinding == shader::InvalidBinding) {
@@ -56,9 +61,16 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
             material.colorBinding = material.shader.getUniformBinding("color");
         }
     }
-    if (material.colorBinding != shader::InvalidBinding && material.hasColorOverride) {
-        material.shader.setUniform(material.colorBinding, material.colorOverride.ptr(),
-                                   sizeof(float) * 4);
+    if (material.colorBinding != shader::InvalidBinding) {
+        if (material.hasColorOverride) {
+            material.shader.setUniform(material.colorBinding, material.colorOverride.ptr(),
+                                       sizeof(float) * 4);
+        } else {
+            // Phoskia property defaults are not guaranteed on D3D; use neutral white tint.
+            const float defaultBaseColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+            material.shader.setUniform(material.colorBinding, defaultBaseColor,
+                                       sizeof(defaultBaseColor));
+        }
     }
     if (material.mat4Binding != shader::InvalidBinding && material.hasMat4Override) {
         material.shader.setUniform(material.mat4Binding, material.mat4Override.ptr(),

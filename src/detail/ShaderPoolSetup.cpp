@@ -2,10 +2,20 @@
 
 #include "AYShadercDriver.h"
 
-#include <sys/stat.h>
-
+#include <cstdlib>
 #include <string>
+#include <sys/stat.h>
 #include <vector>
+
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <Windows.h>
+#else
+#  include <cerrno>
+#  include <sys/stat.h>
+#endif
 
 namespace ayt::render::detail
 {
@@ -49,6 +59,22 @@ std::vector<std::string> shadercIncludeDirs()
     return dirs;
 }
 
+bool ensureDirectoryExists(const std::string& path)
+{
+    if (path.empty()) {
+        return false;
+    }
+    if (fileExists(path)) {
+        return true;
+    }
+#ifdef _WIN32
+    return CreateDirectoryA(path.c_str(), nullptr) != 0
+        || GetLastError() == ERROR_ALREADY_EXISTS;
+#else
+    return ::mkdir(path.c_str(), 0755) == 0 || errno == EEXIST;
+#endif
+}
+
 } // namespace
 
 bool configureShaderPool(shader::ShaderResourcePool& pool)
@@ -72,6 +98,13 @@ bool configureShaderPool(shader::ShaderResourcePool& pool)
     pool.setBgfxIncludeDirs(shadercIncludeDirs());
     // Resolve platform/profile from bgfx::getCaps() on first acquire (e.g. D3D11 → s_5_0).
     pool.setAutoProbeFromRendererType(true);
+
+    if (const char* dumpDir = std::getenv("AY_SHADER_DUMP_DIR")) {
+        if (dumpDir[0] != '\0' && ensureDirectoryExists(dumpDir)) {
+            pool.setIntermediateDumpDirectory(dumpDir);
+        }
+    }
+
     return true;
 }
 

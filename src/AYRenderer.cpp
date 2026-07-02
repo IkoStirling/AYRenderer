@@ -110,7 +110,7 @@ void Renderer::render(const RenderScene& scene)
     frame.view             = _impl->mainView;
     frame.projection       = _impl->mainProjection;
     frame.cameraPosition   = _impl->mainCameraPosition;
-    frame.lightDirection   = ayt::math::Normalize(_impl->directionalLightDir);
+    frame.lightDirection   = _impl->directionalLightDir.normalize();
     frame.lightColor       = _impl->directionalLightColor;
 
     _impl->forwardPass.execute(_impl->adapter, _impl->shaderPool, scene,
@@ -196,7 +196,13 @@ MaterialHandle Renderer::createMaterialFromFile(const std::string& path)
 
 MaterialHandle Renderer::loadMaterial(const std::string& path)
 {
-    if (!_impl || !_impl->shaderPoolReady) {
+    if (!_impl || !_impl->adapter.isInitialized()) {
+        std::fprintf(stderr, "[Renderer] loadMaterial: renderer not initialized\n");
+        return {};
+    }
+    if (!_impl->shaderPoolReady) {
+        std::fprintf(stderr,
+                     "[Renderer] loadMaterial: shader pool not ready (check shaderc path)\n");
         return {};
     }
     return _impl->resources.loadMaterial(path);
@@ -289,7 +295,7 @@ void Renderer::setDirectionalLight(const ayt::math::FVector3& direction,
     if (!_impl) {
         return;
     }
-    _impl->directionalLightDir   = ayt::math::Normalize(direction);
+    _impl->directionalLightDir   = direction.normalize();
     _impl->directionalLightColor = color;
 }
 
@@ -354,6 +360,14 @@ void Renderer::pollShaderHotReload()
     if (_impl && _impl->shaderPoolReady) {
         _impl->shaderPool.pollHotReload();
     }
+}
+
+void Renderer::setShaderIntermediateDumpDirectory(const std::string& dir)
+{
+    if (!_impl || !_impl->shaderPoolReady || dir.empty()) {
+        return;
+    }
+    _impl->shaderPool.setIntermediateDumpDirectory(dir);
 }
 
 } // namespace ayt::render
