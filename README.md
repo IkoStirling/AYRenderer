@@ -18,7 +18,11 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 | R2a | `RenderResourceManager` + texture upload/bind (AYIO, no AYResource) | ✅ |
 | R2b | AYResource bridge (aymat / aymesh / aytex) | ✅ |
 | R3 | Camera + directional light frame uniforms | ✅ |
-| R4 | hot-reload（`pool.pollHotReload`）+ 开发调试 overlay | ⬜ |
+| R4 | hot-reload（`pool.pollHotReload`）+ 开发调试 overlay | ✅ |
+| R4-a | hot-reload：`compileFromFile` watch + poll + 材质自动 refresh | ✅ |
+| R4-b | debug overlay：FPS / draw 统计 / bgfx debug text | ✅ |
+| R4-c | `captureScreenshot`：backbuffer PNG（窗口 + 真实 GPU backend） | ✅ |
+| Engine | GameLoop + Entity `RenderSystem` + `RendererSubSystem` | ✅ |
 | R5+ | Shadow / GBuffer / PostProcess / Command Queue | 🅿 延后 |
 
 ---
@@ -34,6 +38,7 @@ init.windowHandle = myWindow;   // 来自 AYDevice / SDL / Win32
 init.width  = 1280;
 init.height = 720;
 init.backend = ayt::render::Backend::Auto;
+init.enableDebugOverlay = true;  // FPS / draw stats HUD (bgfx debug text)
 
 renderer.initialize(init);
 
@@ -54,9 +59,58 @@ scene.add(mesh, mat);
 renderer.beginFrame({});
 renderer.render(scene);
 renderer.endFrame();
+
+// Optional: read stats without HUD
+// const ayt::render::RenderFrameStats& stats = renderer.getFrameStats();
+// renderer.setDebugOverlayEnabled(false);
+
+// Screenshot (after render, before endFrame; window + real GPU backend)
+// renderer.captureScreenshot("capture.png");
 ```
 
-公开头文件：`AYRenderer.h`、`AYRenderScene.h`、`AYRenderTypes.h`。**不含** `<bgfx/bgfx.h>`。
+公开头文件：`AYRenderer.h`、`AYRenderScene.h`、`AYRenderTypes.h`、`AYRendererSubSystem.h`。**不含** `<bgfx/bgfx.h>`。
+
+---
+
+## 引擎集成（GameLoop + ECS）
+
+最小链路：
+
+```
+EntitySubSystem::update  →  World::update  →  RenderSystem（注册 scene builder）
+GameLoop::submitRenderCommands  →  RendererSubSystem::renderFrame  →  Renderer::render
+```
+
+1. **Win32 窗口** — 启动前调用 `RendererSubSystem::setBootstrapWindow(hwnd, w, h)`。
+2. **子系统** — 链接 `AYEntity` + `AYRenderer` 后，`Entity` / `Renderer` 通过 `REGISTER_SUBSYSTEM` 自动注册；`RenderSystem` 把带 `Transform` + `MeshComponent` 的实体提交到 `RenderScene`。
+3. **单线程渲染** — `RendererSubSystem::initialize` 会 `setRenderThreadEnabled(false)` 并在 `submitRenderCommands()` 中同步执行 render callback。
+
+```cpp
+#include "AYEntity.h"
+#include "AYEntityModule.h"
+#include "AYGameLoop.h"
+#include "AYRendererSubSystem.h"
+
+HWND hwnd = /* create window */;
+ayt::render::RendererSubSystem::setBootstrapWindow(hwnd, 1280, 720);
+
+auto& loop = ayt::game::GameLoop::instance();
+loop.setRenderThreadEnabled(false);
+
+ayt::entity::bootstrapModule();   // 静态库：显式注册 Entity + RenderSystem
+
+loop.run();   // pump Win32 messages in onUpdate()
+loop.shutdown();
+```
+
+> 完整设计见 [`../AYEntity/design.md`](../AYEntity/design.md) §15。
+
+**集成 Demo**（旋转 ECS 立方体 + debug overlay）：
+
+```bat
+cmake --build D:\Projects\out\build\x64-Debug --target AYEngineIntegration_Demo
+D:\Projects\out\build\x64-Debug\AYRuntime\AYRenderer\demo\AYEngineIntegration_Demo.exe
+```
 
 ---
 
@@ -95,6 +149,8 @@ D:\Projects\out\build\x64-Debug\AYRuntime\AYRenderer\demo\AYRenderer_BgfxSanityD
 | 两者都黑 | 优先查 bgfx 初始化、GPU 驱动、shaderc 编译日志 |
 
 - 1280×720 Win32 窗口，蓝色旋转 cube
+- 左上角 **debug overlay**（FPS、draw 数、backend、分辨率）
+- **F9** 保存 `{assetRoot}/screenshot.tga` 与 `screenshot.png`（stderr 会打印完整路径）
 - **Esc** 或关闭窗口退出
 - 需要 shaderc 与 bgfx `common.sh`（CMake 自动探测 `thirdparty/bgfx`）
 
@@ -132,4 +188,17 @@ AYRenderer/
 └── src/                    # R1 起
 ```
 
-详细目录与 phase 切片见 `design.md` §12–§13。
+详细目录与 phase 切片见 `design.md` §12–§13、§16（变更记录）。
+
+---
+
+## 变更记录（2026-07）
+
+| 模块 | 文档 | 要点 |
+|------|------|------|
+| AYRenderer | `design.md` §10.4、§16 | Engine 集成、shutdown、ShaderPool 析构修复 |
+| AYEntity | `design.md` §15 | `bootstrapModule`、`RenderSystem`、SparseSet 指针 |
+| AYCore | `README.md` | `AYCoreSerializer.h` 宏提升 |
+| AYSerializer | `README.md` §变更记录 | 默认 `SerializerFor` → `SerializerForReflect` |
+
+**里程碑**：R0–R4 + Engine 闭环已完成；R5+ 延后，可启动 AYUI。

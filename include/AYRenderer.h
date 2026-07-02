@@ -94,6 +94,14 @@ public:
 
     void pollShaderHotReload();
 
+    void setDebugOverlayEnabled(bool enabled);
+    bool isDebugOverlayEnabled() const noexcept;
+    const RenderFrameStats& getFrameStats() const noexcept;
+
+    // Queue a backbuffer capture for this frame. Call after render(), before endFrame().
+    // Writes {base}.tga via bgfx, then {base}.png on the main thread after the frame.
+    bool captureScreenshot(const std::string& filePath);
+
     // Debug: dump generated vs/fs/varying.def.sc under dir (creates dir if missing).
     void setShaderIntermediateDumpDirectory(const std::string& dir);
 

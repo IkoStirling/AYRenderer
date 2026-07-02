@@ -25,15 +25,17 @@ namespace ayt::render::detail
 
 namespace {
 
-void storeUniformSlot(GpuMaterial& material, shader::BindingId binding,
+void storeUniformSlot(GpuMaterial& material, const char* name, shader::BindingId binding,
                       const void* data, size_t size)
 {
-    if (binding == shader::InvalidBinding || data == nullptr || size == 0 || size > 64) {
+    if (name == nullptr || binding == shader::InvalidBinding || data == nullptr
+        || size == 0 || size > 64) {
         return;
     }
 
     for (GpuMaterial::UniformSlot& slot : material.uniformSlots) {
-        if (slot.binding == binding) {
+        if (slot.name == name) {
+            slot.binding = binding;
             std::memcpy(slot.data, data, size);
             slot.size = static_cast<uint16_t>(size);
             return;
@@ -41,6 +43,7 @@ void storeUniformSlot(GpuMaterial& material, shader::BindingId binding,
     }
 
     GpuMaterial::UniformSlot slot;
+    slot.name    = name;
     slot.binding = binding;
     std::memcpy(slot.data, data, size);
     slot.size = static_cast<uint16_t>(size);
@@ -410,6 +413,32 @@ MaterialHandle RenderResourceManager::createMaterialFromPhoskia(const std::strin
     return out;
 }
 
+void RenderResourceManager::resetMaterialBindingCache(GpuMaterial& material)
+{
+    material.colorBinding = shader::InvalidBinding;
+    material.mat4Binding  = shader::InvalidBinding;
+}
+
+void RenderResourceManager::rebindMaterialAfterShaderSwap(GpuMaterial& material)
+{
+    resetMaterialBindingCache(material);
+
+    for (GpuMaterial::UniformSlot& slot : material.uniformSlots) {
+        if (slot.name.empty()) {
+            slot.binding = shader::InvalidBinding;
+            continue;
+        }
+        slot.binding = material.shader.getUniformBinding(slot.name);
+    }
+    for (GpuMaterial::TextureSlot& slot : material.textures) {
+        if (slot.name.empty()) {
+            slot.binding = shader::InvalidBinding;
+            continue;
+        }
+        slot.binding = material.shader.getTextureBinding(slot.name);
+    }
+}
+
 MaterialHandle RenderResourceManager::createMaterialFromFile(const std::string& path)
 {
     if (path.empty()) {
@@ -421,13 +450,65 @@ MaterialHandle RenderResourceManager::createMaterialFromFile(const std::string& 
                      path.c_str());
         return MaterialHandle{};
     }
-    const std::string source = ayt::io::File::readAllText(path);
-    if (source.empty()) {
-        std::fprintf(stderr, "[RenderResourceManager] createMaterialFromFile: empty file '%s'\n",
-                     path.c_str());
+
+    const std::string key = normalizeAssetPathKey(path);
+    if (!key.empty()) {
+        const auto cached = _materialCacheByKey.find(key);
+        if (cached != _materialCacheByKey.end()) {
+            MaterialHandle out;
+            out.id = cached->second;
+            return out;
+        }
+    }
+
+    // compileFromFile registers a hot-reload watch on `path` (acquire(source) does not).
+    shader::ShaderResource shader = _shaderPool.compileFromFile(path);
+    if (!shader.isValid()) {
+        for (const std::string& err : _shaderPool.lastCompileErrors()) {
+            std::fprintf(stderr, "  shader: %s\n", err.c_str());
+        }
         return MaterialHandle{};
     }
-    return createMaterialFromPhoskia(source, path);
+
+    GpuMaterial material;
+    material.shader           = shader;
+    material.shaderSourcePath = path;
+
+    const uint64_t id = _nextMaterialId++;
+    _materials.emplace(id, std::move(material));
+    if (!key.empty()) {
+        _materialCacheByKey.emplace(key, id);
+    }
+
+    MaterialHandle out;
+    out.id = id;
+    return out;
+}
+
+void RenderResourceManager::refreshMaterialsAfterHotReload()
+{
+    for (auto& [materialId, material] : _materials) {
+        (void)materialId;
+        if (material.shaderSourcePath.empty() || material.shader.isValid()) {
+            continue;
+        }
+
+        std::fprintf(stderr,
+                     "[RenderResourceManager] hot-reload refresh '%s'\n",
+                     material.shaderSourcePath.c_str());
+
+        shader::ShaderResource fresh =
+            _shaderPool.compileFromFile(material.shaderSourcePath);
+        if (!fresh.isValid()) {
+            for (const std::string& err : _shaderPool.lastCompileErrors()) {
+                std::fprintf(stderr, "  shader reload: %s\n", err.c_str());
+            }
+            continue;
+        }
+
+        material.shader = fresh;
+        rebindMaterialAfterShaderSwap(material);
+    }
 }
 
 MaterialHandle RenderResourceManager::loadMaterial(const std::string& path)
@@ -529,7 +610,7 @@ void RenderResourceManager::setMaterialFloat(MaterialHandle material, const char
 
     GpuMaterial& mat = it->second;
     const shader::BindingId binding = mat.shader.getUniformBinding(uniformName);
-    storeUniformSlot(mat, binding, &value, sizeof(float));
+    storeUniformSlot(mat, uniformName, binding, &value, sizeof(float));
 }
 
 void RenderResourceManager::setMaterialVec2(MaterialHandle material, const char* uniformName,
@@ -547,7 +628,7 @@ void RenderResourceManager::setMaterialVec2(MaterialHandle material, const char*
     const float values[2] = {x, y};
     GpuMaterial& mat = it->second;
     const shader::BindingId binding = mat.shader.getUniformBinding(uniformName);
-    storeUniformSlot(mat, binding, values, sizeof(values));
+    storeUniformSlot(mat, uniformName, binding, values, sizeof(values));
 }
 
 void RenderResourceManager::setMaterialVec3(MaterialHandle material, const char* uniformName,
@@ -566,7 +647,7 @@ void RenderResourceManager::setMaterialVec3(MaterialHandle material, const char*
     GpuMaterial& mat = it->second;
     const shader::BindingId binding = mat.shader.getUniformBinding(uniformName);
     const float padded[4] = {values[0], values[1], values[2], 0.0f};
-    storeUniformSlot(mat, binding, padded, sizeof(padded));
+    storeUniformSlot(mat, uniformName, binding, padded, sizeof(padded));
 }
 
 void RenderResourceManager::setMaterialMatrix4(MaterialHandle material, const char* uniformName,
@@ -611,13 +692,18 @@ void RenderResourceManager::setMaterialTexture(MaterialHandle material,
     }
 
     for (GpuMaterial::TextureSlot& slot : mat.textures) {
-        if (slot.binding == binding) {
-            slot.texture = texture;
+        if (slot.name == textureBindingName) {
+            slot.binding = binding;
+            slot.texture   = texture;
             return;
         }
     }
 
-    mat.textures.push_back(GpuMaterial::TextureSlot{binding, texture});
+    GpuMaterial::TextureSlot slot;
+    slot.name    = textureBindingName;
+    slot.binding = binding;
+    slot.texture = texture;
+    mat.textures.push_back(slot);
 }
 
 TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint32_t height,

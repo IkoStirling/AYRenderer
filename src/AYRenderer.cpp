@@ -1,9 +1,11 @@
 #include "AYRenderer.h"
 
 #include "detail/BGFXAdapter.h"
+#include "detail/DebugOverlay.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FrameContext.h"
 #include "detail/RenderResourceManager.h"
+#include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
 
 #include "AYShaderResourcePool.h"
@@ -21,8 +23,13 @@ struct Renderer::Impl {
     shader::ShaderResourcePool    shaderPool;
     detail::ForwardOpaquePass     forwardPass;
     detail::RenderResourceManager resources;
+    detail::DebugOverlay          debugOverlay;
     InitDesc                      initDesc{};
     bool                          shaderPoolReady = false;
+    uint32_t                      lastDrawCalls   = 0;
+    uint32_t                      lastSceneItems  = 0;
+    std::string                   pendingScreenshotBase;
+    std::string                   finalizeScreenshotBase;
 
     ayt::math::Float4x4           mainView        = ayt::math::Float4x4::identity();
     ayt::math::Float4x4           mainProjection  = ayt::math::Float4x4::identity();
@@ -71,6 +78,7 @@ bool Renderer::initialize(const InitDesc& desc)
 
     _impl->initDesc        = desc;
     _impl->shaderPoolReady = detail::configureShaderPool(_impl->shaderPool);
+    _impl->debugOverlay.setEnabled(desc.enableDebugOverlay);
     return true;
 }
 
@@ -96,13 +104,21 @@ void Renderer::beginFrame(const ClearDesc& clear)
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+    _impl->debugOverlay.onBeginFrame();
     _impl->adapter.beginFrame();
     _impl->adapter.setViewClear(detail::ForwardOpaquePass::kMainViewId, clear);
 }
 
 void Renderer::render(const RenderScene& scene)
 {
-    if (!_impl || !_impl->adapter.isInitialized() || scene.empty()) {
+    if (!_impl || !_impl->adapter.isInitialized()) {
+        return;
+    }
+
+    _impl->lastSceneItems = static_cast<uint32_t>(scene.items().size());
+    _impl->lastDrawCalls  = 0;
+
+    if (scene.empty()) {
         return;
     }
 
@@ -113,12 +129,13 @@ void Renderer::render(const RenderScene& scene)
     frame.lightDirection   = _impl->directionalLightDir.normalize();
     frame.lightColor       = _impl->directionalLightColor;
 
-    _impl->forwardPass.execute(_impl->adapter, _impl->shaderPool, scene,
-                               _impl->resources.meshes(), _impl->resources.textures(),
-                               _impl->resources.materials(),
-                               static_cast<uint16_t>(_impl->initDesc.width),
-                               static_cast<uint16_t>(_impl->initDesc.height),
-                               frame);
+    _impl->lastDrawCalls = _impl->forwardPass.execute(
+        _impl->adapter, _impl->shaderPool, scene,
+        _impl->resources.meshes(), _impl->resources.textures(),
+        _impl->resources.materials(),
+        static_cast<uint16_t>(_impl->initDesc.width),
+        static_cast<uint16_t>(_impl->initDesc.height),
+        frame);
 }
 
 void Renderer::endFrame()
@@ -126,7 +143,22 @@ void Renderer::endFrame()
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+
+    if (!_impl->pendingScreenshotBase.empty()) {
+        _impl->adapter.requestScreenshot(_impl->pendingScreenshotBase);
+        _impl->finalizeScreenshotBase = _impl->pendingScreenshotBase;
+        _impl->pendingScreenshotBase.clear();
+    }
+
+    _impl->debugOverlay.onEndFrame(_impl->lastDrawCalls, _impl->lastSceneItems,
+                                   static_cast<uint16_t>(_impl->initDesc.width),
+                                   static_cast<uint16_t>(_impl->initDesc.height));
     _impl->adapter.endFrame();
+
+    if (!_impl->finalizeScreenshotBase.empty()) {
+        detail::finalizeScreenshotSidecar(_impl->finalizeScreenshotBase);
+        _impl->finalizeScreenshotBase.clear();
+    }
 }
 
 MeshHandle Renderer::createMesh(const void* vertices,
@@ -359,7 +391,38 @@ void Renderer::pollShaderHotReload()
 {
     if (_impl && _impl->shaderPoolReady) {
         _impl->shaderPool.pollHotReload();
+        _impl->resources.refreshMaterialsAfterHotReload();
     }
+}
+
+void Renderer::setDebugOverlayEnabled(bool enabled)
+{
+    if (_impl) {
+        _impl->debugOverlay.setEnabled(enabled);
+    }
+}
+
+bool Renderer::isDebugOverlayEnabled() const noexcept
+{
+    return _impl && _impl->debugOverlay.isEnabled();
+}
+
+const RenderFrameStats& Renderer::getFrameStats() const noexcept
+{
+    static const RenderFrameStats kEmpty{};
+    return _impl ? _impl->debugOverlay.stats() : kEmpty;
+}
+
+bool Renderer::captureScreenshot(const std::string& filePath)
+{
+    if (!_impl || !_impl->adapter.isInitialized() || filePath.empty()) {
+        return false;
+    }
+    if (_impl->initDesc.backend == Backend::Noop || _impl->initDesc.windowHandle == nullptr) {
+        return false;
+    }
+    _impl->pendingScreenshotBase = detail::screenshotBasePath(filePath);
+    return true;
 }
 
 void Renderer::setShaderIntermediateDumpDirectory(const std::string& dir)

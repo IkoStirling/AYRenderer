@@ -25,6 +25,8 @@ struct GpuTexture {
 
 struct GpuMaterial {
     shader::ShaderResource shader;
+    // Non-empty when the shader was loaded from disk; enables hot-reload refresh.
+    std::string            shaderSourcePath;
     shader::BindingId      colorBinding = shader::InvalidBinding;
     ayt::math::FVector4    colorOverride{1.0f, 1.0f, 1.0f, 1.0f};
     bool                   hasColorOverride = false;
@@ -34,6 +36,7 @@ struct GpuMaterial {
     bool                   hasMat4Override = false;
 
     struct UniformSlot {
+        std::string       name;
         shader::BindingId binding = shader::InvalidBinding;
         uint8_t           data[64]{};
         uint16_t          size = 0;
@@ -41,6 +44,7 @@ struct GpuMaterial {
     std::vector<UniformSlot> uniformSlots;
 
     struct TextureSlot {
+        std::string       name;
         shader::BindingId binding = shader::InvalidBinding;
         TextureHandle     texture{};
     };

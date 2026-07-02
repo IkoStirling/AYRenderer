@@ -44,6 +44,9 @@ public:
     MaterialHandle loadMaterial(const std::string& path);
     void destroyMaterial(MaterialHandle& material);
 
+    // Re-compile materials whose ShaderResource was invalidated by pool hot-reload.
+    void refreshMaterialsAfterHotReload();
+
     void setMaterialColor(MaterialHandle material, const char* propertyName,
                           float r, float g, float b, float a);
     void setMaterialFloat(MaterialHandle material, const char* uniformName, float value);
@@ -95,6 +98,9 @@ private:
     void removeMaterialCacheEntry(uint64_t id);
     void removeTextureCacheEntry(uint64_t id);
     void removeMeshCacheEntry(uint64_t id);
+
+    void resetMaterialBindingCache(GpuMaterial& material);
+    void rebindMaterialAfterShaderSwap(GpuMaterial& material);
 
     MeshHandle uploadMeshInternal(const void* vertices,
                                   uint32_t vertexCount,

@@ -86,3 +86,28 @@ target_compile_definitions(AYRenderer_BgfxSanityDemo PRIVATE
     AY_SHADER_SHADERC_HINT="${AY_SHADER_SHADERC_PATH}"
     AY_BGFX_SHADER_INCLUDE_HINT="${AY_BGFX_SHADER_INCLUDE_DIR}"
 )
+
+add_executable(AYEngineIntegration_Demo EngineIntegrationDemo.cpp)
+
+target_link_libraries(AYEngineIntegration_Demo PRIVATE
+    AYRenderer
+    AYEntity
+    AYGameLoop
+    AYResource
+)
+
+target_include_directories(AYEngineIntegration_Demo PRIVATE
+    ${AY_RESOURCE_ROOT}/include/assetsImpl
+    ${AY_RESOURCE_ROOT}/interface
+    ${AY_RESOURCE_ROOT}/interface/assetsDefs
+)
+
+if(WIN32)
+    target_link_libraries(AYEngineIntegration_Demo PRIVATE user32 gdi32)
+endif()
+
+target_compile_definitions(AYEngineIntegration_Demo PRIVATE
+    AY_SHADER_SHADERC_HINT="${AY_SHADER_SHADERC_PATH}"
+    AY_SHADER_BGFX_COMMON_HINT="${AY_SHADER_BGFX_COMMON_DIR}"
+    AY_SHADER_BGFX_SRC_HINT="${AY_SHADER_BGFX_SRC_DIR}"
+)

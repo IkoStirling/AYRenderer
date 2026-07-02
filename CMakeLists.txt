@@ -32,12 +32,15 @@ target_link_libraries(AYRenderer PUBLIC
     AYShader
     AYMath
     AYIO
+    AYGameLoop
 )
 
 target_link_libraries(AYRenderer PRIVATE
     AYResource
     bgfx::bgfx
+    bgfx::bimg
     bgfx::bimg_decode
+    bgfx::bimg_encode
 )
 
 if(MSVC)

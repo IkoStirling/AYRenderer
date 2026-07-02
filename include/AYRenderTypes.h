@@ -25,6 +25,16 @@ struct InitDesc {
     uint32_t height       = 720;
     bool     vsync        = true;
     Backend  backend      = Backend::Auto;
+    bool     enableDebugOverlay = false;
+};
+
+struct RenderFrameStats {
+    float    fps = 0.0f;
+    float    frameTimeMs = 0.0f;
+    float    avgFrameTimeMs = 0.0f;
+    uint32_t drawCalls = 0;
+    uint32_t sceneItems = 0;
+    uint64_t frameCount = 0;
 };
 
 struct ClearDesc {

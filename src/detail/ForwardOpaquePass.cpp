@@ -62,6 +62,11 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
         }
     }
     if (material.colorBinding != shader::InvalidBinding) {
+        if (!material.shader.hasUniformBinding(material.colorBinding)) {
+            material.colorBinding = shader::InvalidBinding;
+        }
+    }
+    if (material.colorBinding != shader::InvalidBinding) {
         if (material.hasColorOverride) {
             material.shader.setUniform(material.colorBinding, material.colorOverride.ptr(),
                                        sizeof(float) * 4);
@@ -73,19 +78,31 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
         }
     }
     if (material.mat4Binding != shader::InvalidBinding && material.hasMat4Override) {
-        material.shader.setUniform(material.mat4Binding, material.mat4Override.ptr(),
-                                   sizeof(float) * 16);
+        if (material.shader.hasUniformBinding(material.mat4Binding)) {
+            material.shader.setUniform(material.mat4Binding, material.mat4Override.ptr(),
+                                       sizeof(float) * 16);
+        } else {
+            material.mat4Binding = shader::InvalidBinding;
+        }
     }
 
     for (const GpuMaterial::UniformSlot& slot : material.uniformSlots) {
-        if (slot.binding == shader::InvalidBinding || slot.size == 0) {
+        if (slot.name.empty() || slot.size == 0) {
             continue;
         }
-        material.shader.setUniform(slot.binding, slot.data, slot.size);
+        const shader::BindingId binding = material.shader.getUniformBinding(slot.name);
+        if (binding == shader::InvalidBinding) {
+            continue;
+        }
+        material.shader.setUniform(binding, slot.data, slot.size);
     }
 
     for (const GpuMaterial::TextureSlot& slot : material.textures) {
-        if (slot.binding == shader::InvalidBinding || !slot.texture.isValid()) {
+        if (slot.name.empty() || !slot.texture.isValid()) {
+            continue;
+        }
+        const shader::BindingId binding = material.shader.getTextureBinding(slot.name);
+        if (binding == shader::InvalidBinding) {
             continue;
         }
         const auto texIt = textures.find(slot.texture.id);
@@ -96,13 +113,13 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     }
 }
 
-void ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResourcePool& /*pool*/,
-                                const RenderScene& scene,
-                                const std::unordered_map<uint64_t, GpuMesh>& meshes,
-                                const std::unordered_map<uint64_t, GpuTexture>& textures,
-                                std::unordered_map<uint64_t, GpuMaterial>& materials,
-                                uint16_t viewportWidth, uint16_t viewportHeight,
-                                const FrameContext& frame)
+uint32_t ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResourcePool& /*pool*/,
+                                  const RenderScene& scene,
+                                  const std::unordered_map<uint64_t, GpuMesh>& meshes,
+                                  const std::unordered_map<uint64_t, GpuTexture>& textures,
+                                  std::unordered_map<uint64_t, GpuMaterial>& materials,
+                                  uint16_t viewportWidth, uint16_t viewportHeight,
+                                  const FrameContext& frame)
 {
     adapter.setViewRect(kMainViewId, 0, 0, viewportWidth, viewportHeight);
     adapter.setViewTransform(kMainViewId, frame.view.ptr(), frame.projection.ptr());
@@ -110,6 +127,8 @@ void ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResourcePool
     const uint64_t defaultState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
                                 | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS
                                 | BGFX_STATE_CULL_CW;
+
+    uint32_t drawCount = 0;
 
     for (const DrawItem& item : scene.items()) {
         if (!item.mesh.isValid() || !item.material.isValid()) {
@@ -142,7 +161,10 @@ void ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResourcePool
         ctx.viewId = kMainViewId;
         ctx.state  = defaultState;
         material.shader.submit(ctx);
+        ++drawCount;
     }
+
+    return drawCount;
 }
 
 } // namespace ayt::render::detail

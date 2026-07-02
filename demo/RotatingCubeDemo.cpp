@@ -237,7 +237,7 @@ HWND createDemoWindow(DemoState* state)
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
 
     HWND hwnd = CreateWindowExW(
-        0, wc.lpszClassName, L"AYRenderer — Rotating Cube (R2b/R3)",
+        0, wc.lpszClassName, L"AYRenderer — Rotating Cube (R4 debug overlay)",
         WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
         rect.right - rect.left, rect.bottom - rect.top,
         nullptr, nullptr, instance, nullptr);
@@ -270,6 +270,7 @@ int main()
     init.height       = static_cast<uint32_t>(kWindowHeight);
     init.vsync        = true;
     init.backend      = ayt::render::Backend::Auto;
+    init.enableDebugOverlay = true;
 
     if (!renderer.initialize(init)) {
         std::fprintf(stderr, "Renderer initialize failed (bgfx init).\n");
@@ -317,6 +318,13 @@ int main()
     std::fprintf(stderr, "[Demo] bridge load OK (mesh id=%llu material id=%llu)\n",
                  static_cast<unsigned long long>(mesh.id),
                  static_cast<unsigned long long>(material.id));
+    std::fprintf(stderr, "[Demo] shader hot-reload enabled (edit %s while running)\n",
+                 assets.shaderPath.c_str());
+    std::fprintf(stderr, "[Demo] debug overlay enabled (FPS / draw stats, top-left)\n");
+    std::fprintf(stderr, "[Demo] press F9 to save screenshot.tga / screenshot.png under asset root\n");
+    std::fprintf(stderr, "[Demo] (F9 avoids Visual Studio F12 = Go To Definition while debugging)\n");
+
+    const std::string screenshotBase = assetRootPrefix + "screenshot";
 
     renderer.setDirectionalLight(ayt::math::FVector3(0.35f, -0.85f, -0.4f),
                                  ayt::math::FVector3(1.0f, 0.96f, 0.88f));
@@ -325,6 +333,7 @@ int main()
     scene.add(mesh, material);
 
     const auto startTime = std::chrono::steady_clock::now();
+    bool f9WasDown = false;
 
     MSG msg{};
     while (state.running) {
@@ -369,7 +378,21 @@ int main()
 
         renderer.beginFrame(clear);
         renderer.render(scene);
+
+        const bool f9Down = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+        if (f9Down && !f9WasDown) {
+            if (renderer.captureScreenshot(screenshotBase)) {
+                std::fprintf(stderr, "[Demo] screenshot queued: %s\n", screenshotBase.c_str());
+            } else {
+                std::fprintf(stderr, "[Demo] screenshot request failed\n");
+            }
+        }
+        f9WasDown = f9Down;
+
         renderer.endFrame();
+
+        // Poll after the frame is submitted so bgfx never draws with a half-swapped shader.
+        renderer.pollShaderHotReload();
 
         if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
             state.running = false;

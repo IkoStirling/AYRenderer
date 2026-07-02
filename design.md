@@ -1,6 +1,6 @@
 # AYRenderer Design
 
-> **文档状态**：2026-07 修订 — 对齐 AYShader Phase 4（`ShaderResource` / `ShaderResourcePool` / `DrawCallContext`）。  
+> **文档状态**：2026-07 修订 — 对齐 AYShader Phase 4；**R0–R4 + Engine 集成已落地**（见 §13、§16）。  
 > **实现状态**：设计稿；`include/` / `src/` 尚未创建。  
 > **关联文档**：[`AYShader/design.md` §8.5](../AYShader/design.md)（opaque handle contract）、[`AYShader/README.md`](../AYShader/README.md)。
 
@@ -547,15 +547,39 @@ AYRenderer::shutdown    → pool.shutdown()   // 释放 bgfx shader handles
 
 `RenderResourceManager` 从 AYResource 加载 aymesh / aytex，上传 GPU，返回 `RenderMesh` / `bgfx::TextureHandle`。
 
-### 10.4 AYEntity / ECS（R3+）
+### 10.4 AYEntity / ECS（Engine 集成，2026-07 落地）
 
 ```
-RenderSystem::update()
-  → 收集 Transform + MeshRenderer 组件
-  → RenderScene::addRenderable(...)
-Main loop
-  → AYRenderer::renderFrame(scene)
+EntitySubSystem::update()
+  → World::update() → RenderSystem::onStart / onUpdate
+RenderSystem::buildRenderScene()
+  → query<Transform, MeshComponent>
+  → Renderer::loadMesh / loadMaterial
+  → RenderScene::add(mesh, material, worldMatrix)
+
+GameLoop::submitRenderCommands()
+  → RendererSubSystem::renderFrame()
+  → scene builder callback → Renderer::render(scene)
 ```
+
+| 类 | 职责 |
+|---|---|
+| `RendererSubSystem` | GameLoop 子系统；持有 `Renderer`；注册 render callback |
+| `RenderSystem` | ECS System；填充 `RenderScene` |
+| `bootstrapModule()` | 静态库显式注册 Entity 子系统 + RenderSystem + 组件类型 |
+
+**Bootstrap API**（`AYRendererSubSystem.h`）：
+
+```cpp
+RendererSubSystem::setBootstrapWindow(hwnd, w, h);
+RendererSubSystem::setBootstrapShaderDumpDirectory(dir);  // 可选，initialize 后生效
+```
+
+**Shutdown 顺序**（避免静态析构崩溃）：
+
+1. `GameLoop::shutdown()` → 逆序 `ISubSystem::shutdown()`
+2. `RendererSubSystem::shutdown()`：清空 render callback → `Renderer::shutdown()`
+3. `ShaderResourcePool` registry 使用 intentionally-leaked 堆存储，避免进程退出时 static 析构顺序问题
 
 Renderer **不**依赖 ECS 头文件；只消费 `RenderScene`。
 
@@ -622,40 +646,47 @@ include/AYRenderer/
 
 ## 13. 实现路线图
 
-### Phase R0 — 设计对齐（当前）
+### Phase R0 — 设计对齐
 
 - [x] 修订 `design.md` 对齐 AYShader Phase 4
 - [x] 添加 `README.md` 状态表
-- [x] `CMakeLists.txt` INTERFACE stub（根 `CMakeLists.txt` 待 R1 取消注释）
+- [x] `CMakeLists.txt`
 
-### Phase R1 — 最小上屏（≈2–3 天）
+### Phase R1 — 最小上屏
 
-- [ ] `BGFXAdapter`：init / frame / view / vb / ib / transform
-- [ ] `ShaderResourcePool`  wiring（shaderc 路径、platform 430）
-- [ ] `RenderMaterial`：`pool.acquire` + 单 texture / property
-- [ ] `ForwardOpaquePass`：一个 cube/mesh + `unittest/golden/unlit.phoskia` 或等价
-- [ ] 验证 draw 顺序 §2.5
-- [ ] 测试：窗口 demo 或 gtest + 人工 checklist
+- [x] `BGFXAdapter`：init / frame / view / vb / ib / transform
+- [x] `ShaderResourcePool` wiring（shaderc 路径、platform 430）
+- [x] `RenderMaterial`：`pool.acquire` + texture / property
+- [x] `ForwardOpaquePass`：mesh + Phoskia material
+- [x] 验证 draw 顺序 §2.5
+- [x] 测试 + Demo
 
-**验收**：屏幕出现 unlit 颜色 mesh；无 `bgfx::ProgramHandle` 出现在 `include/AYRenderer/` 公开头文件。
+**验收**：屏幕出现 lit mesh；公开头文件无 `bgfx::ProgramHandle`。
 
-### Phase R2 — 资源管理（≈2–3 天）
+### Phase R2 — 资源管理
 
-- [ ] `RenderResourceManager`：mesh/texture 缓存
-- [ ] aymat → Phoskia 路径配置
-- [ ] `pbr_with_texture.phoskia` 级 material 跑通
+- [x] `RenderResourceManager`：mesh/texture 缓存
+- [x] AYResource bridge：aymat / aymesh / aytex
+- [x] `SimpleLit` 级 material 跑通
 
-### Phase R3 — 相机与光照（≈2 天）
+### Phase R3 — 相机与光照
 
-- [ ] `CameraManager`：view/proj → UBO 或 per-draw uniform
-- [ ] `LightManager`：至少一个方向光
-- [ ] 可选 `TransparentPass`
+- [x] `setMainCameraLookAtPerspective`：view/proj → uniform
+- [x] 方向光 frame uniform
+- [ ] 可选 `TransparentPass`（延后）
 
-### Phase R4 — 工具链（≈1 天）
+### Phase R4 — 工具链
 
-- [ ] `pollHotReload` 接入编辑器循环
-- [ ] debug text / 帧统计
-- [ ] `CaptureScreenshot`（可选）
+- [x] `pollHotReload` / `pollShaderHotReload`
+- [x] debug overlay（FPS / draw stats）
+- [x] `captureScreenshot`
+
+### Phase Engine — GameLoop + ECS（2026-07）
+
+- [x] `RendererSubSystem` + `REGISTER_SUBSYSTEM`
+- [x] `RenderSystem` + `bootstrapModule()` 引导
+- [x] `AYEngineIntegration_Demo`：旋转 ECS 立方体 + overlay
+- [x] 单线程 render callback（`setRenderThreadEnabled(false)`）
 
 ### Phase R5+ — 延后
 
@@ -688,3 +719,37 @@ include/AYRenderer/
 - [AYDevice design](../AYDevice/design.md)
 - [bgfx API](https://bkaradzic.github.io/bgfx/)
 - bgfx examples：`01-cubes`（R1 几何参考）
+
+---
+
+## 16. 变更记录（2026-07）
+
+### 引擎闭环（R4 + Engine）
+
+- `RendererSubSystem`：GameLoop 子系统，单线程 `renderFrame` callback。
+- `RenderSystem`（AYEntity）：ECS → `RenderScene` → `ForwardOpaquePass`。
+- Demo：`AYEngineIntegration_Demo` 验证全链路。
+
+### Bootstrap / Shutdown
+
+| API | 说明 |
+|-----|------|
+| `setBootstrapWindow` | Win32 HWND + 分辨率（`initialize` 前） |
+| `setBootstrapShaderDumpDirectory` | Phoskia 中间产物 dump（`initialize` 后写入 pool） |
+| `RendererSubSystem::shutdown` | 先 `setRenderCallback({})`，再 `Renderer::shutdown()` |
+| `GameLoop::shutdown` | Demo 退出前调用，逆序关闭子系统 |
+
+### AYShader 协作修复
+
+- `ShaderResourcePool::Impl` 的全局 pool registry 改为 **intentionally-leaked** 堆 map，
+  修复进程退出时 `unregisterPool` 访问已析构 static map 的 AV（C0000005）。
+
+### 依赖模块同步
+
+- **AYEntity**：`bootstrapModule()`、`SparseSet` 指针语义（见 AYEntity `design.md` §15）。
+- **AYCore**：`AYCoreSerializer.h` 提升属性宏。
+- **AYSerializer**：`SerializerFor<T,void>` 默认 reflect 路由（见 AYSerializer README §变更记录）。
+
+### 下一步（R5+，不阻塞 AYUI）
+
+Shadow / GBuffer / PostProcess / Command Queue / TransparentPass / DrawListBuilder。

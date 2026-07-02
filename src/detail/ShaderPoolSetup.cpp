@@ -98,6 +98,7 @@ bool configureShaderPool(shader::ShaderResourcePool& pool)
     pool.setBgfxIncludeDirs(shadercIncludeDirs());
     // Resolve platform/profile from bgfx::getCaps() on first acquire (e.g. D3D11 → s_5_0).
     pool.setAutoProbeFromRendererType(true);
+    pool.setHotReloadEnabled(true);
 
     if (const char* dumpDir = std::getenv("AY_SHADER_DUMP_DIR")) {
         if (dumpDir[0] != '\0' && ensureDirectoryExists(dumpDir)) {

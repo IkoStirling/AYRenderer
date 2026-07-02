@@ -5,6 +5,7 @@
 #include <bgfx/bgfx.h>
 
 #include <cstdint>
+#include <string>
 
 namespace ayt::render::detail
 {
@@ -28,6 +29,8 @@ public:
 
     void beginFrame();
     void endFrame();
+
+    bool requestScreenshot(const std::string& filePath);
 
     void setViewRect(uint8_t viewId, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
     void setViewClear(uint8_t viewId, const ClearDesc& clear);

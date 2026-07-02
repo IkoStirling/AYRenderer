@@ -37,6 +37,7 @@ bool BGFXAdapter::initialize(const BGFXInitParams& params)
     init.resolution.width  = params.width;
     init.resolution.height = params.height;
     init.resolution.reset  = params.vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+    init.callback          = nullptr;
 
     if (!bgfx::init(init)) {
         return false;
@@ -63,6 +64,15 @@ void BGFXAdapter::beginFrame()
 void BGFXAdapter::endFrame()
 {
     bgfx::frame();
+}
+
+bool BGFXAdapter::requestScreenshot(const std::string& filePath)
+{
+    if (!_initialized || filePath.empty()) {
+        return false;
+    }
+    bgfx::requestScreenShot(BGFX_INVALID_HANDLE, filePath.c_str());
+    return true;
 }
 
 void BGFXAdapter::setViewRect(uint8_t viewId, uint16_t x, uint16_t y, uint16_t w, uint16_t h)
