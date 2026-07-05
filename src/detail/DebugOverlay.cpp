@@ -21,12 +21,24 @@ void DebugOverlay::setEnabled(bool enabled)
     applyDebugMode();
 }
 
+void DebugOverlay::setSuppressed(bool suppressed)
+{
+    _suppressed = suppressed;
+}
+
 void DebugOverlay::onBeginFrame()
 {
     _frameStart = std::chrono::steady_clock::now();
 }
 
+void DebugOverlay::resetStats()
+{
+    _stats           = {};
+    _smoothedFrameMs = 0.0f;
+}
+
 void DebugOverlay::onEndFrame(uint32_t drawCalls, uint32_t sceneItems,
+                              uint16_t viewportX, uint16_t viewportY,
                               uint16_t width, uint16_t height)
 {
     const auto now = std::chrono::steady_clock::now();
@@ -38,39 +50,37 @@ void DebugOverlay::onEndFrame(uint32_t drawCalls, uint32_t sceneItems,
     _stats.sceneItems  = sceneItems;
     ++_stats.frameCount;
 
-    ++_sampleCount;
-    _totalFrameMs += static_cast<double>(frameMs);
-    _stats.avgFrameTimeMs =
-        static_cast<float>(_totalFrameMs / static_cast<double>(_sampleCount));
-    if (_stats.avgFrameTimeMs > 0.0f) {
-        _stats.fps = 1000.0f / _stats.avgFrameTimeMs;
+    if (_smoothedFrameMs <= 0.0f) {
+        _smoothedFrameMs = frameMs;
     } else {
-        _stats.fps = 0.0f;
+        constexpr float kAlpha = 0.08f;
+        _smoothedFrameMs = kAlpha * frameMs + (1.0f - kAlpha) * _smoothedFrameMs;
     }
-
-    if (!_enabled) {
-        return;
-    }
+    _stats.avgFrameTimeMs = _smoothedFrameMs;
+    _stats.fps = _smoothedFrameMs > 0.0f ? 1000.0f / _smoothedFrameMs : 0.0f;
 
     bgfx::dbgTextClear();
 
-    const char* rendererName = bgfx::getRendererName(bgfx::getRendererType());
+    if (!_enabled || _suppressed || width < 8 || height < 16) {
+        return;
+    }
 
-    bgfx::dbgTextPrintf(0, 0, 0x0f, "AYRenderer Debug");
-    bgfx::dbgTextPrintf(0, 1, 0x0a, "FPS: %.1f  Frame: %.2f ms", _stats.fps, frameMs);
-    bgfx::dbgTextPrintf(0, 2, 0x0a, "Draw: %u  Scene: %u", drawCalls, sceneItems);
-    bgfx::dbgTextPrintf(0, 3, 0x07, "Backend: %s  %ux%u",
-                        rendererName != nullptr ? rendererName : "?",
-                        static_cast<unsigned>(width),
-                        static_cast<unsigned>(height));
+    // dbgText is backbuffer-relative; anchor to the viewport top-left.
+    constexpr uint16_t kCellW = 8;
+    constexpr uint16_t kCellH = 16;
+    const uint16_t col = static_cast<uint16_t>(viewportX / kCellW);
+    const uint16_t row = static_cast<uint16_t>(viewportY / kCellH);
 
+    uint32_t triPrims = 0;
     const bgfx::Stats* bgfxStats = bgfx::getStats();
     if (bgfxStats != nullptr) {
-        const uint32_t triPrims = bgfxStats->numPrims[bgfx::Topology::TriList]
-                                + bgfxStats->numPrims[bgfx::Topology::TriStrip];
-        bgfx::dbgTextPrintf(0, 4, 0x07, "bgfx draws: %u  tris: %u",
-                            bgfxStats->numDraw, triPrims);
+        triPrims = bgfxStats->numPrims[bgfx::Topology::TriList]
+                 + bgfxStats->numPrims[bgfx::Topology::TriStrip];
     }
+
+    bgfx::dbgTextPrintf(col, row + 0, 0x0a, "FPS %.1f  %.1fms", _stats.fps, frameMs);
+    bgfx::dbgTextPrintf(col, row + 1, 0x07, "DC %u  SC %u  Tri %u", drawCalls, sceneItems,
+                        triPrims);
 }
 
 } // namespace ayt::render::detail

@@ -7,6 +7,8 @@
 #include "detail/RenderResourceManager.h"
 #include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
+#include "detail/UiGpuContext.h"
+#include "AYUIRenderBackend.h"
 
 #include "AYShaderResourcePool.h"
 
@@ -20,7 +22,7 @@ namespace ayt::render
 
 struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
-    shader::ShaderResourcePool    shaderPool;
+    ayt::shader::ShaderResourcePool    shaderPool;
     detail::ForwardOpaquePass     forwardPass;
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
@@ -36,6 +38,11 @@ struct Renderer::Impl {
     ayt::math::FVector3           mainCameraPosition = ayt::math::FVector3(0.0f, 0.0f, 4.0f);
     ayt::math::FVector3           directionalLightDir = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
     ayt::math::FVector3           directionalLightColor = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
+
+    uint16_t                      viewportX = 0;
+    uint16_t                      viewportY = 0;
+    uint16_t                      viewportW = 0;
+    uint16_t                      viewportH = 0;
 
     Impl()
         : resources(adapter, shaderPool)
@@ -77,6 +84,10 @@ bool Renderer::initialize(const InitDesc& desc)
     }
 
     _impl->initDesc        = desc;
+    _impl->viewportW       = static_cast<uint16_t>(desc.width);
+    _impl->viewportH       = static_cast<uint16_t>(desc.height);
+    _impl->viewportX       = 0;
+    _impl->viewportY       = 0;
     _impl->shaderPoolReady = detail::configureShaderPool(_impl->shaderPool);
     _impl->debugOverlay.setEnabled(desc.enableDebugOverlay);
     return true;
@@ -133,9 +144,31 @@ void Renderer::render(const RenderScene& scene)
         _impl->adapter, _impl->shaderPool, scene,
         _impl->resources.meshes(), _impl->resources.textures(),
         _impl->resources.materials(),
-        static_cast<uint16_t>(_impl->initDesc.width),
-        static_cast<uint16_t>(_impl->initDesc.height),
+        _impl->viewportX, _impl->viewportY,
+        _impl->viewportW, _impl->viewportH,
         frame);
+}
+
+void Renderer::resize(uint32_t width, uint32_t height)
+{
+    if (!_impl || !_impl->adapter.isInitialized()) {
+        return;
+    }
+
+    _impl->initDesc.width  = width;
+    _impl->initDesc.height = height;
+    _impl->adapter.resetResolution(width, height, _impl->initDesc.vsync);
+}
+
+void Renderer::setViewportRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->viewportX = x;
+    _impl->viewportY = y;
+    _impl->viewportW = width;
+    _impl->viewportH = height;
 }
 
 void Renderer::endFrame()
@@ -151,8 +184,8 @@ void Renderer::endFrame()
     }
 
     _impl->debugOverlay.onEndFrame(_impl->lastDrawCalls, _impl->lastSceneItems,
-                                   static_cast<uint16_t>(_impl->initDesc.width),
-                                   static_cast<uint16_t>(_impl->initDesc.height));
+                                   _impl->viewportX, _impl->viewportY,
+                                   _impl->viewportW, _impl->viewportH);
     _impl->adapter.endFrame();
 
     if (!_impl->finalizeScreenshotBase.empty()) {
@@ -407,6 +440,25 @@ bool Renderer::isDebugOverlayEnabled() const noexcept
     return _impl && _impl->debugOverlay.isEnabled();
 }
 
+void Renderer::setDebugOverlaySuppressed(bool suppressed)
+{
+    if (_impl) {
+        _impl->debugOverlay.setSuppressed(suppressed);
+    }
+}
+
+bool Renderer::isDebugOverlaySuppressed() const noexcept
+{
+    return _impl && _impl->debugOverlay.isSuppressed();
+}
+
+void Renderer::resetDebugOverlayStats()
+{
+    if (_impl) {
+        _impl->debugOverlay.resetStats();
+    }
+}
+
 const RenderFrameStats& Renderer::getFrameStats() const noexcept
 {
     static const RenderFrameStats kEmpty{};
@@ -431,6 +483,55 @@ void Renderer::setShaderIntermediateDumpDirectory(const std::string& dir)
         return;
     }
     _impl->shaderPool.setIntermediateDumpDirectory(dir);
+}
+
+void Renderer::setShaderCacheDirectory(const std::string& dir)
+{
+    if (!_impl || !_impl->shaderPoolReady || dir.empty()) {
+        return;
+    }
+    _impl->shaderPool.setCacheDirectory(dir);
+}
+
+detail::BGFXAdapter* Renderer::bgfxAdapter() noexcept
+{
+    return _impl ? &_impl->adapter : nullptr;
+}
+
+const detail::BGFXAdapter* Renderer::bgfxAdapter() const noexcept
+{
+    return _impl ? &_impl->adapter : nullptr;
+}
+
+ayt::shader::ShaderResourcePool* Renderer::shaderPool() noexcept
+{
+    return _impl && _impl->shaderPoolReady ? &_impl->shaderPool : nullptr;
+}
+
+const ayt::shader::ShaderResourcePool* Renderer::shaderPool() const noexcept
+{
+    return _impl && _impl->shaderPoolReady ? &_impl->shaderPool : nullptr;
+}
+
+bool Renderer::initializeUiRenderBackend(UIRenderBackend& backend)
+{
+    detail::BGFXAdapter* adapter = bgfxAdapter();
+    ayt::shader::ShaderResourcePool* pool = shaderPool();
+    if (adapter == nullptr || pool == nullptr || !adapter->isInitialized()) {
+        return false;
+    }
+    return backend.initializeFromRenderer(*this, *adapter, *pool);
+}
+
+void Renderer::shutdownUiRenderBackend(UIRenderBackend& backend)
+{
+    detail::BGFXAdapter* adapter = bgfxAdapter();
+    ayt::shader::ShaderResourcePool* pool = shaderPool();
+    if (adapter != nullptr && pool != nullptr) {
+        backend.shutdownFromRenderer(*adapter, *pool);
+    } else {
+        backend.shutdownFromRendererWithoutAdapter();
+    }
 }
 
 } // namespace ayt::render

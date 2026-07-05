@@ -52,6 +52,8 @@ void BGFXAdapter::shutdown()
     if (!_initialized) {
         return;
     }
+    // Drain pending submits before D3D11 teardown (reduces Intel driver noise on exit).
+    bgfx::frame();
     bgfx::shutdown();
     _initialized = false;
 }
@@ -96,6 +98,15 @@ void BGFXAdapter::setViewClear(uint8_t viewId, const ClearDesc& clear)
 void BGFXAdapter::setViewTransform(uint8_t viewId, const float* view, const float* proj)
 {
     bgfx::setViewTransform(viewId, view, proj);
+}
+
+void BGFXAdapter::resetResolution(uint32_t width, uint32_t height, bool vsync)
+{
+    if (!_initialized) {
+        return;
+    }
+    const uint32_t reset = vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+    bgfx::reset(width, height, reset);
 }
 
 void BGFXAdapter::setTransform(const ayt::math::Float4x4& world)

@@ -24,36 +24,36 @@ struct GpuTexture {
 };
 
 struct GpuMaterial {
-    shader::ShaderResource shader;
+    ayt::shader::ShaderResource shader;
     // Non-empty when the shader was loaded from disk; enables hot-reload refresh.
-    std::string            shaderSourcePath;
-    shader::BindingId      colorBinding = shader::InvalidBinding;
-    ayt::math::FVector4    colorOverride{1.0f, 1.0f, 1.0f, 1.0f};
-    bool                   hasColorOverride = false;
+    std::string                 shaderSourcePath;
+    ayt::shader::BindingId      colorBinding = ayt::shader::InvalidBinding;
+    ayt::math::FVector4         colorOverride{1.0f, 1.0f, 1.0f, 1.0f};
+    bool                        hasColorOverride = false;
 
-    shader::BindingId      mat4Binding = shader::InvalidBinding;
-    ayt::math::Float4x4    mat4Override = ayt::math::Float4x4::identity();
-    bool                   hasMat4Override = false;
+    ayt::shader::BindingId      mat4Binding = ayt::shader::InvalidBinding;
+    ayt::math::Float4x4         mat4Override = ayt::math::Float4x4::identity();
+    bool                        hasMat4Override = false;
 
     struct UniformSlot {
-        std::string       name;
-        shader::BindingId binding = shader::InvalidBinding;
-        uint8_t           data[64]{};
-        uint16_t          size = 0;
+        std::string          name;
+        ayt::shader::BindingId binding = ayt::shader::InvalidBinding;
+        uint8_t              data[64]{};
+        uint16_t             size = 0;
     };
     std::vector<UniformSlot> uniformSlots;
 
     struct TextureSlot {
-        std::string       name;
-        shader::BindingId binding = shader::InvalidBinding;
-        TextureHandle     texture{};
+        std::string          name;
+        ayt::shader::BindingId binding = ayt::shader::InvalidBinding;
+        TextureHandle        texture{};
     };
     std::vector<TextureSlot> textures;
 };
 
-inline shader::TextureHandle toShaderTexture(bgfx::TextureHandle h)
+inline ayt::shader::TextureHandle toShaderTexture(bgfx::TextureHandle h)
 {
-    shader::TextureHandle out;
+    ayt::shader::TextureHandle out;
     if (bgfx::isValid(h)) {
         // bgfx handle idx can be 0; shader::TextureHandle uses id==0 as invalid.
         out.id = static_cast<uint64_t>(h.idx) + 1u;

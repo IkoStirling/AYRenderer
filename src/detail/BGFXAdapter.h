@@ -36,6 +36,8 @@ public:
     void setViewClear(uint8_t viewId, const ClearDesc& clear);
     void setViewTransform(uint8_t viewId, const float* view, const float* proj);
 
+    void resetResolution(uint32_t width, uint32_t height, bool vsync);
+
     void setTransform(const ayt::math::Float4x4& world);
     void setVertexBuffer(bgfx::VertexBufferHandle vb, uint32_t start = 0,
                          uint32_t count = UINT32_MAX);

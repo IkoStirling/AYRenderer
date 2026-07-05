@@ -118,10 +118,11 @@ uint32_t ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResource
                                   const std::unordered_map<uint64_t, GpuMesh>& meshes,
                                   const std::unordered_map<uint64_t, GpuTexture>& textures,
                                   std::unordered_map<uint64_t, GpuMaterial>& materials,
+                                  uint16_t viewportX, uint16_t viewportY,
                                   uint16_t viewportWidth, uint16_t viewportHeight,
                                   const FrameContext& frame)
 {
-    adapter.setViewRect(kMainViewId, 0, 0, viewportWidth, viewportHeight);
+    adapter.setViewRect(kMainViewId, viewportX, viewportY, viewportWidth, viewportHeight);
     adapter.setViewTransform(kMainViewId, frame.view.ptr(), frame.projection.ptr());
 
     const uint64_t defaultState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A

@@ -27,6 +27,7 @@ public:
                      const std::unordered_map<uint64_t, GpuMesh>& meshes,
                      const std::unordered_map<uint64_t, GpuTexture>& textures,
                      std::unordered_map<uint64_t, GpuMaterial>& materials,
+                     uint16_t viewportX, uint16_t viewportY,
                      uint16_t viewportWidth, uint16_t viewportHeight,
                      const FrameContext& frame);
 };

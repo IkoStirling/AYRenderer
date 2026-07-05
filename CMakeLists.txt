@@ -17,6 +17,7 @@ target_include_directories(AYRenderer PUBLIC
 
 target_include_directories(AYRenderer PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../AYFont
     ${CMAKE_CURRENT_SOURCE_DIR}/../AYResource/include/assetsImpl
     ${CMAKE_CURRENT_SOURCE_DIR}/../AYResource/interface
     ${CMAKE_CURRENT_SOURCE_DIR}/../AYResource/interface/assetsDefs
@@ -33,15 +34,19 @@ target_link_libraries(AYRenderer PUBLIC
     AYMath
     AYIO
     AYGameLoop
+    AYUI
 )
 
 target_link_libraries(AYRenderer PRIVATE
     AYResource
+    AYFont
     bgfx::bgfx
     bgfx::bimg
     bgfx::bimg_decode
     bgfx::bimg_encode
 )
+
+# UI text uses AYFont (FreeType glyph atlas).
 
 if(MSVC)
     # bgfx/bx headers require conforming preprocessor and __cplusplus on MSVC.
@@ -78,10 +83,25 @@ if(NOT DEFINED AY_SHADER_BGFX_SRC_DIR AND AY_SHADER_BGFX_COMMON_DIR)
     set(AY_SHADER_BGFX_SRC_DIR "${AY_SHADER_BGFX_COMMON_DIR}/../../src")
 endif()
 
+if(NOT DEFINED AY_BGFX_SHADER_INCLUDE_DIR)
+    set(_ays_bgfx_include_search
+        "${CMAKE_CURRENT_SOURCE_DIR}/../AYShader/thirdParty/bgfx-install/debug/include/bgfx"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/bgfx/include"
+    )
+    set(AY_BGFX_SHADER_INCLUDE_DIR "")
+    foreach(_dir IN LISTS _ays_bgfx_include_search)
+        if(EXISTS "${_dir}/bgfx_shader.sh")
+            set(AY_BGFX_SHADER_INCLUDE_DIR "${_dir}")
+            break()
+        endif()
+    endforeach()
+endif()
+
 target_compile_definitions(AYRenderer PRIVATE
     AY_SHADER_SHADERC_HINT="${AY_SHADER_SHADERC_PATH}"
     AY_SHADER_BGFX_COMMON_HINT="${AY_SHADER_BGFX_COMMON_DIR}"
     AY_SHADER_BGFX_SRC_HINT="${AY_SHADER_BGFX_SRC_DIR}"
+    AY_BGFX_SHADER_INCLUDE_HINT="${AY_BGFX_SHADER_INCLUDE_DIR}"
 )
 
 enable_testing()

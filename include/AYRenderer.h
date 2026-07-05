@@ -11,8 +11,18 @@
 #include <memory>
 #include <string>
 
+namespace ayt::shader {
+class ShaderResourcePool;
+}
+
 namespace ayt::render
 {
+
+class UIRenderBackend;
+
+namespace detail {
+class BGFXAdapter;
+}
 
 // High-level renderer: frame loop, resource handles, draw submission.
 // GPU backend details live in src/detail/ only.
@@ -33,6 +43,9 @@ public:
     void beginFrame(const ClearDesc& clear = {});
     void render(const RenderScene& scene);
     void endFrame();
+
+    void resize(uint32_t width, uint32_t height);
+    void setViewportRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
 
     MeshHandle createMesh(const void* vertices,
                           uint32_t vertexCount,
@@ -96,6 +109,9 @@ public:
 
     void setDebugOverlayEnabled(bool enabled);
     bool isDebugOverlayEnabled() const noexcept;
+    void setDebugOverlaySuppressed(bool suppressed);
+    bool isDebugOverlaySuppressed() const noexcept;
+    void resetDebugOverlayStats();
     const RenderFrameStats& getFrameStats() const noexcept;
 
     // Queue a backbuffer capture for this frame. Call after render(), before endFrame().
@@ -105,7 +121,19 @@ public:
     // Debug: dump generated vs/fs/varying.def.sc under dir (creates dir if missing).
     void setShaderIntermediateDumpDirectory(const std::string& dir);
 
+    // Persistent compiled shader cache (ShaderResourcePool Tier-1/2).
+    void setShaderCacheDirectory(const std::string& dir);
+
+    bool initializeUiRenderBackend(UIRenderBackend& backend);
+    void shutdownUiRenderBackend(UIRenderBackend& backend);
+
 private:
+    friend class UIRenderBackend;
+    detail::BGFXAdapter* bgfxAdapter() noexcept;
+    const detail::BGFXAdapter* bgfxAdapter() const noexcept;
+    ayt::shader::ShaderResourcePool* shaderPool() noexcept;
+    const ayt::shader::ShaderResourcePool* shaderPool() const noexcept;
+
     struct Impl;
     std::unique_ptr<Impl> _impl;
 };

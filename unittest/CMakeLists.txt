@@ -13,6 +13,7 @@ target_link_libraries(${TEST_NAME} PRIVATE
 
 target_include_directories(${TEST_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../AYFont
     ${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource/include/assetsImpl
     ${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource/interface
     ${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource/interface/assetsDefs

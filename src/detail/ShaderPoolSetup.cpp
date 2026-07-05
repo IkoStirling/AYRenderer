@@ -56,6 +56,22 @@ std::vector<std::string> shadercIncludeDirs()
     if (AY_SHADER_BGFX_SRC_HINT[0] && fileExists(AY_SHADER_BGFX_SRC_HINT)) {
         dirs.push_back(AY_SHADER_BGFX_SRC_HINT);
     }
+#ifndef AY_BGFX_SHADER_INCLUDE_HINT
+#  define AY_BGFX_SHADER_INCLUDE_HINT ""
+#endif
+    if (AY_BGFX_SHADER_INCLUDE_HINT[0] && fileExists(AY_BGFX_SHADER_INCLUDE_HINT)) {
+        dirs.push_back(AY_BGFX_SHADER_INCLUDE_HINT);
+    }
+    static const char* kInstallIncludeFallbacks[] = {
+        "AYRuntime/AYShader/thirdParty/bgfx-install/debug/include/bgfx",
+        "../AYShader/thirdParty/bgfx-install/debug/include/bgfx",
+        "../../AYShader/thirdParty/bgfx-install/debug/include/bgfx",
+    };
+    for (const char* path : kInstallIncludeFallbacks) {
+        if (fileExists(path)) {
+            dirs.push_back(path);
+        }
+    }
     return dirs;
 }
 
