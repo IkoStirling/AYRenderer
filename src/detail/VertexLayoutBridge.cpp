@@ -8,11 +8,15 @@ namespace {
 bool mapAttribute(VertexAttribute attr, bgfx::Attrib::Enum& out)
 {
     switch (attr) {
-    case VertexAttribute::Position:  out = bgfx::Attrib::Position;  return true;
-    case VertexAttribute::Normal:    out = bgfx::Attrib::Normal;    return true;
-    case VertexAttribute::TexCoord0: out = bgfx::Attrib::TexCoord0; return true;
-    case VertexAttribute::Tangent:   out = bgfx::Attrib::Tangent;   return true;
-    case VertexAttribute::Color0:   out = bgfx::Attrib::Color0;   return true;
+    case VertexAttribute::Position:    out = bgfx::Attrib::Position;    return true;
+    case VertexAttribute::Normal:      out = bgfx::Attrib::Normal;      return true;
+    case VertexAttribute::TexCoord0:   out = bgfx::Attrib::TexCoord0;   return true;
+    case VertexAttribute::Tangent:     out = bgfx::Attrib::Tangent;     return true;
+    case VertexAttribute::Color0:      out = bgfx::Attrib::Color0;      return true;
+    // Phase 0 RD-02: the AY-layer names are BoneIndices / BoneWeights; this bgfx
+    // fork ships them as Indices / Weight (singular). The bridge normalises.
+    case VertexAttribute::BoneIndices: out = bgfx::Attrib::Indices;     return true;
+    case VertexAttribute::BoneWeights: out = bgfx::Attrib::Weight;      return true;
     }
     return false;
 }

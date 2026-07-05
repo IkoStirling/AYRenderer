@@ -52,6 +52,8 @@ enum class VertexAttribute : uint8_t {
     TexCoord0,
     Tangent,
     Color0,
+    BoneIndices,   // uint4 (4x u8, normalized) — for skeletal skinning (Phase 0 RD-02)
+    BoneWeights,   // float4 (4x f32)            — for skeletal skinning (Phase 0 RD-02)
 };
 
 enum class VertexComponentType : uint8_t {
@@ -67,7 +69,7 @@ struct VertexElement {
 };
 
 struct VertexLayoutDesc {
-    static constexpr uint8_t kMaxElements = 8;
+    static constexpr uint8_t kMaxElements = 10;
 
     VertexElement elements[kMaxElements]{};
     uint8_t       elementCount = 0;
@@ -81,6 +83,10 @@ struct VertexLayoutDesc {
     static VertexLayoutDesc position3Normal3();
     static VertexLayoutDesc position3TexCoord2();
     static VertexLayoutDesc position3Normal3TexCoord2();
+
+    // Skinning addon: BoneIndices (4x u8 normalized) + BoneWeights (4x f32).
+    // 24 bytes total. Phase 0 RD-02.
+    static VertexLayoutDesc skinnedAddon();
 };
 
 struct MeshHandle {

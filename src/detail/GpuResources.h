@@ -13,7 +13,12 @@ namespace ayt::render::detail
 struct GpuMesh {
     bgfx::VertexBufferHandle vertexBuffer = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle  indexBuffer  = BGFX_INVALID_HANDLE;
+    uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
+    // Phase 0 RD-02: true when this GpuMesh's vertex layout includes BoneIndices /
+    // BoneWeights channels and the IMesh supplied non-null skin weights. Phase 1's
+    // SkinnedForwardPass (RD-05) uses this flag to bind bone matrices.
+    bool     hasSkinWeights = false;
     VertexLayoutDesc layout{};
 };
 

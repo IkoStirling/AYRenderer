@@ -134,7 +134,13 @@ bool vertexLayoutFromMesh(const ayt::resource::IMesh& mesh, VertexLayoutDesc& ou
         return false;
     }
 
-    const bool isPosNormalUv = mesh.hasAttribute(MeshAttribute::Normal)
+    // Phase 0 fast-path: when SkinWeight is present we must NOT use the posNormalUv
+    // preset (it's a 3-element layout with no room for skin channels). Fall through
+    // to the per-attribute path which can append skin channels.
+    const bool hasSkin = mesh.hasAttribute(MeshAttribute::SkinWeight);
+
+    const bool isPosNormalUv = !hasSkin
+        && mesh.hasAttribute(MeshAttribute::Normal)
         && mesh.hasAttribute(MeshAttribute::UV)
         && !mesh.hasAttribute(MeshAttribute::Tangent)
         && !mesh.hasAttribute(MeshAttribute::Color);
@@ -157,6 +163,15 @@ bool vertexLayoutFromMesh(const ayt::resource::IMesh& mesh, VertexLayoutDesc& ou
     }
     if (!addMeshFloatAttribute(out, mesh, MeshAttribute::Color, VertexAttribute::Color0, 4)) {
         return false;
+    }
+
+    // Phase 0 RD-02: append skin channels last (deterministic order).
+    // The skinnedAddon() preset adds BoneIndices (4x u8 normalized) + BoneWeights (4x f32).
+    if (hasSkin) {
+        const VertexLayoutDesc addon = VertexLayoutDesc::skinnedAddon();
+        if (!out.add(addon.elements[0]) || !out.add(addon.elements[1])) {
+            return false;
+        }
     }
 
     return out.isValid();
@@ -221,19 +236,62 @@ bool repackMeshVertices(const ayt::resource::IMesh& mesh,
         uint8_t               floatCount;
     };
 
+    // Phase 0 RD-02: the SkinWeight mesh attr maps to TWO bgfx channels
+    // (Indices u8 normalized + Weight f32, in this bgfx fork). Listed here so
+    // the loop handles both halves in deterministic order.
     static const ChannelMap kChannels[] = {
-        {MeshAttribute::Position, bgfx::Attrib::Position, 3},
-        {MeshAttribute::Normal,   bgfx::Attrib::Normal,   3},
-        {MeshAttribute::UV,       bgfx::Attrib::TexCoord0, 2},
-        {MeshAttribute::Tangent,  bgfx::Attrib::Tangent,  4},
-        {MeshAttribute::Color,    bgfx::Attrib::Color0,   4},
+        {MeshAttribute::Position,   bgfx::Attrib::Position,   3},
+        {MeshAttribute::Normal,     bgfx::Attrib::Normal,     3},
+        {MeshAttribute::UV,         bgfx::Attrib::TexCoord0,  2},
+        {MeshAttribute::Tangent,    bgfx::Attrib::Tangent,    4},
+        {MeshAttribute::Color,      bgfx::Attrib::Color0,     4},
+        {MeshAttribute::SkinWeight, bgfx::Attrib::Indices,    4},
+        {MeshAttribute::SkinWeight, bgfx::Attrib::Weight,     4},
     };
+
+    // Get the IMesh-side skin weight table once; null if mesh has no skin weights.
+    const ayt::resource::VertexSkinWeight* skinWeights = mesh.getSkinWeights();
 
     for (uint32_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
         const uint8_t* srcVertex = srcBase + static_cast<size_t>(vertexIndex) * srcStride;
 
         for (const ChannelMap& channel : kChannels) {
             if (!mesh.hasAttribute(channel.meshAttr) || !bgfxLayout.has(channel.bgfxAttr)) {
+                continue;
+            }
+
+            // SkinWeight channel: read from getSkinWeights() (separate buffer) not
+            // from the interleaved vertex stream.
+            if (channel.meshAttr == MeshAttribute::SkinWeight) {
+                if (skinWeights == nullptr) {
+                    continue;
+                }
+                if (channel.bgfxAttr == bgfx::Attrib::Indices) {
+                    // bgfx::vertexPack with normalized=true expects the value in
+                    // [0,1] and re-encodes as uint8 = value * 255. IMesh stores
+                    // raw uint8 boneIndex; divide by 255 here so pack produces
+                    // the same byte.
+                    const uint8_t* src = skinWeights[vertexIndex].boneIndex;
+                    constexpr float kInv255 = 1.0f / 255.0f;
+                    float values[4] = {
+                        static_cast<float>(src[0]) * kInv255,
+                        static_cast<float>(src[1]) * kInv255,
+                        static_cast<float>(src[2]) * kInv255,
+                        static_cast<float>(src[3]) * kInv255
+                    };
+                    bgfx::vertexPack(values, true, channel.bgfxAttr, bgfxLayout,
+                                     out.data(), vertexIndex);
+                } else {
+                    // Weight (in this bgfx fork): 4 x f32 direct memcpy.
+                    float values[4] = {
+                        skinWeights[vertexIndex].boneWeight[0],
+                        skinWeights[vertexIndex].boneWeight[1],
+                        skinWeights[vertexIndex].boneWeight[2],
+                        skinWeights[vertexIndex].boneWeight[3]
+                    };
+                    bgfx::vertexPack(values, false, channel.bgfxAttr, bgfxLayout,
+                                     out.data(), vertexIndex);
+                }
                 continue;
             }
 
@@ -282,13 +340,24 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
     const uint16_t bgfxPosOffset = bgfxLayout.getOffset(bgfx::Attrib::Position);
     const uint16_t bgfxNrmOffset = bgfxLayout.getOffset(bgfx::Attrib::Normal);
     const uint16_t bgfxUvOffset  = bgfxLayout.getOffset(bgfx::Attrib::TexCoord0);
+    const uint16_t bgfxBiOffset  = bgfxLayout.has(bgfx::Attrib::Indices)
+        ? bgfxLayout.getOffset(bgfx::Attrib::Indices) : 0u;
+    const uint16_t bgfxBwOffset  = bgfxLayout.has(bgfx::Attrib::Weight)
+        ? bgfxLayout.getOffset(bgfx::Attrib::Weight) : 0u;
+
+    // Phase 0 RD-02: skin flag is the IMesh contract, not the layout. Pass it down
+    // so RenderResourceManager records it on the resulting GpuMesh.
+    const bool meshHasSkin = mesh.hasAttribute(MeshAttribute::SkinWeight)
+        && mesh.hasSkinWeights()
+        && mesh.getSkinWeights() != nullptr;
 
     std::fprintf(stderr,
                  "[RenderAssetBridge] mesh upload layout meshStride=%u bgfxStride=%u "
-                 "pos=%u/%u nrm=%u/%u uv=%u/%u\n",
+                 "pos=%u/%u nrm=%u/%u uv=%u/%u bi=%u bw=%u skin=%d\n",
                  mesh.getVertexStride(), bgfxLayout.getStride(),
                  meshPosOffset, bgfxPosOffset, meshNrmOffset, bgfxNrmOffset,
-                 meshUvOffset, bgfxUvOffset);
+                 meshUvOffset, bgfxUvOffset, bgfxBiOffset, bgfxBwOffset,
+                 meshHasSkin ? 1 : 0);
 
     std::vector<uint8_t> repacked;
     if (!repackMeshVertices(mesh, bgfxLayout, repacked)) {
@@ -306,7 +375,8 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
                                           vertexStride,
                                           layout,
                                           mesh.getIndexData(),
-                                          mesh.getIndexCount());
+                                          mesh.getIndexCount(),
+                                          meshHasSkin);
 }
 
 MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,

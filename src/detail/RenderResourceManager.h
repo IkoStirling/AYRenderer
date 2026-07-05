@@ -32,7 +32,8 @@ public:
                                           uint32_t vertexStride,
                                           const VertexLayoutDesc& layout,
                                           const uint32_t* indices,
-                                          uint32_t indexCount);
+                                          uint32_t indexCount,
+                                          bool hasSkinWeights = false);
     MeshHandle loadMesh(const std::string& path);
     MeshHandle createUnitCube();
     MeshHandle createTexturedUnitCube();
@@ -108,7 +109,8 @@ private:
                                   const VertexLayoutDesc& layout,
                                   const void* indices,
                                   uint32_t indexCount,
-                                  bool use32BitIndices);
+                                  bool use32BitIndices,
+                                  bool hasSkinWeights = false);
 };
 
 } // namespace ayt::render::detail

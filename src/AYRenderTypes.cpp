@@ -90,4 +90,16 @@ VertexLayoutDesc VertexLayoutDesc::position3Normal3TexCoord2()
     return layout;
 }
 
+VertexLayoutDesc VertexLayoutDesc::skinnedAddon()
+{
+    VertexLayoutDesc layout;
+    // BoneIndices: 4 x u8, normalized to [0,1] so bgfx exposes them as float in the shader.
+    layout.add(VertexElement{
+        VertexAttribute::BoneIndices, 4, VertexComponentType::Uint8, true});
+    // BoneWeights: 4 x f32.
+    layout.add(VertexElement{
+        VertexAttribute::BoneWeights, 4, VertexComponentType::Float, false});
+    return layout;
+}
+
 } // namespace ayt::render
