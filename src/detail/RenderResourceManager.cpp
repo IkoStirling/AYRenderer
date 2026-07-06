@@ -371,6 +371,7 @@ void RenderResourceManager::destroyMesh(MeshHandle& mesh)
     }
 
     removeMeshCacheEntry(mesh.id);
+    _meshCacheByKey.clear();  // Phase 1: invalidate on destroy; full LRU is future work.
 
     const auto it = _meshes.find(mesh.id);
     if (it != _meshes.end()) {
@@ -849,6 +850,25 @@ void RenderResourceManager::destroyTexture(TextureHandle& texture)
         _textures.erase(it);
     }
     texture = {};
+}
+
+// Phase 1 SC-01: path-keyed lookup helpers. Use the same
+// `normalizeAssetPathKey` helper as the internal loaders so
+// `\` → `/` normalization matches what was cached.
+MeshHandle RenderResourceManager::getMeshHandleByPath(const std::string& path) const
+{
+    if (path.empty()) return {};
+    const auto it = _meshCacheByKey.find(normalizeAssetPathKey(path));
+    if (it == _meshCacheByKey.end()) return {};
+    return MeshHandle{ it->second };
+}
+
+MaterialHandle RenderResourceManager::getMaterialHandleByPath(const std::string& path) const
+{
+    if (path.empty()) return {};
+    const auto it = _materialCacheByKey.find(normalizeAssetPathKey(path));
+    if (it == _materialCacheByKey.end()) return {};
+    return MaterialHandle{ it->second };
 }
 
 } // namespace ayt::render::detail

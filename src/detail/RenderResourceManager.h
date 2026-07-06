@@ -77,6 +77,16 @@ public:
     const std::unordered_map<uint64_t, GpuMaterial>& materials() const { return _materials; }
     const std::unordered_map<uint64_t, GpuTexture>& textures() const { return _textures; }
 
+    // Phase 1 SC-01: path-keyed lookup. Returns an invalid handle
+    // when the path was never loaded. Use this from gameplay/ECS
+    // code (e.g. SkinnedMeshRenderSystem) to reuse the existing
+    // GPU mesh/material that loadMesh/loadMaterial already cached.
+    // Both lookups are O(1) against `_meshCacheByKey` /
+    // `_materialCacheByKey`. Normalizes `\` → `/` so the same
+    // physical path resolves identically regardless of separator.
+    MeshHandle    getMeshHandleByPath(const std::string& path) const;
+    MaterialHandle getMaterialHandleByPath(const std::string& path) const;
+
 private:
     BGFXAdapter&                 _adapter;
     shader::ShaderResourcePool&  _shaderPool;

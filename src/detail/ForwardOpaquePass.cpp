@@ -43,6 +43,15 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
         return;
     }
 
+    // Phase 1 RD-04: lazy-resolve the `Skeleton` UBO binding for
+    // skinned materials. ForwardOpaquePass::execute uses this to
+    // upload bone matrices per-draw.
+    if (material.boneBlockBinding == shader::InvalidBinding) {
+        material.boneBlockBinding =
+            material.shader.getUniformBlockBinding("Skeleton");
+        // Stays InvalidBinding for non-skinned materials — that's fine.
+    }
+
     const ayt::math::Float4x4 modelViewProj = frame.projection * frame.view * world;
     trySetUniformMat4(material.shader, "u_modelViewProj", "modelViewProj", modelViewProj);
 
@@ -157,6 +166,41 @@ uint32_t ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResource
         adapter.setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
 
         flushMaterial(material, textures, frame, item.world);
+
+        // Phase 1 RD-04: upload per-frame bone matrices to the
+        // material's `Skeleton` UBO when the draw is skinned.
+        // `boneBlockBinding` is resolved lazily on the first skinned
+        // draw of this material; subsequent draws reuse the binding id.
+        if (item.boneMatrices != nullptr && item.jointCount > 0
+            && material.boneBlockBinding != shader::InvalidBinding
+            && material.shader.isValid()) {
+            const size_t byteCount = static_cast<size_t>(item.jointCount) * 64;
+            // Pack jointCount mat4 entries as 16 floats each (column-
+            // major row[4].x/y/z/w memory layout already matches
+            // std140 mat4; we can memcpy straight from the Float4x4
+            // array). Heap-alloc only when the per-frame block exceeds
+            // the small stack buffer (128 bones = 8192 bytes; we
+            // avoid the stack spill for typical small rigs).
+            if (byteCount <= 1024) {
+                float stackBuf[1024 / sizeof(float)];
+                for (uint32_t k = 0; k < item.jointCount; ++k) {
+                    std::memcpy(&stackBuf[k * 16],
+                                item.boneMatrices[k].ptr(),
+                                sizeof(float) * 16);
+                }
+                material.shader.setUniformBlock(material.boneBlockBinding,
+                                                stackBuf, byteCount);
+            } else {
+                std::vector<float> heapBuf(item.jointCount * 16);
+                for (uint32_t k = 0; k < item.jointCount; ++k) {
+                    std::memcpy(&heapBuf[k * 16],
+                                item.boneMatrices[k].ptr(),
+                                sizeof(float) * 16);
+                }
+                material.shader.setUniformBlock(material.boneBlockBinding,
+                                                heapBuf.data(), byteCount);
+            }
+        }
 
         shader::DrawCallContext ctx;
         ctx.viewId = kMainViewId;

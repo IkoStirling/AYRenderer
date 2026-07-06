@@ -40,6 +40,13 @@ struct GpuMaterial {
     ayt::math::Float4x4         mat4Override = ayt::math::Float4x4::identity();
     bool                        hasMat4Override = false;
 
+    // Phase 1 RD-04: cached UBO binding for the SkinnedLit's
+    // `Skeleton` uniform block (mat4 bones[128]). ForwardOpaquePass
+    // resolves this on first skinned draw and writes the per-frame
+    // bone matrices via setUniformBlock on each subsequent draw.
+    // InvalidBinding means "this material doesn't have a Skeleton block".
+    ayt::shader::BindingId      boneBlockBinding = ayt::shader::InvalidBinding;
+
     struct UniformSlot {
         std::string          name;
         ayt::shader::BindingId binding = ayt::shader::InvalidBinding;

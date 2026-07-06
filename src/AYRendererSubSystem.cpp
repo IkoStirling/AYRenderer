@@ -333,11 +333,22 @@ void RendererSubSystem::setViewportRect(uint16_t x, uint16_t y, uint16_t width, 
 
 
 void RendererSubSystem::setSceneBuilder(SceneBuildCallback callback)
-
 {
-
-    _sceneBuilder = std::move(callback);
-
+    // Phase 1 SC-01: scene builders form an ordered chain. The first
+    // registered callback runs first; subsequent ones are appended.
+    // This lets multiple ECS systems (RenderSystem + SkinnedMeshRenderSystem)
+    // share the same per-frame scene buffer without one overwriting
+    // the other. Order of registration = order of execution.
+    if (!callback) return;
+    if (_sceneBuilder) {
+        SceneBuildCallback previous = _sceneBuilder;
+        _sceneBuilder = [previous, callback](RenderScene& scene) {
+            previous(scene);
+            callback(scene);
+        };
+    } else {
+        _sceneBuilder = std::move(callback);
+    }
 }
 
 
