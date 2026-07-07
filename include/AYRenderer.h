@@ -122,6 +122,14 @@ public:
     // Writes {base}.tga via bgfx, then {base}.png on the main thread after the frame.
     bool captureScreenshot(const std::string& filePath);
 
+    // RD-07: path-cache introspection for unit tests / diagnostics.
+    // Returns the number of distinct (normalized) asset paths currently
+    // cached by RenderResourceManager for meshes and materials. Lets
+    // tests assert that repeated loadMesh(loadMaterial) calls do not
+    // grow the cache (the per-frame 0 disk-I/O invariant). O(1).
+    size_t meshCacheSize() const;
+    size_t materialCacheSize() const;
+
     // Debug: dump generated vs/fs/varying.def.sc under dir (creates dir if missing).
     void setShaderIntermediateDumpDirectory(const std::string& dir);
 

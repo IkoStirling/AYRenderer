@@ -91,6 +91,13 @@ public:
     MeshHandle    getMeshHandleByPath(const std::string& path) const;
     MaterialHandle getMaterialHandleByPath(const std::string& path) const;
 
+    // RD-07: cache-size introspection for unit tests / diagnostics.
+    // Lets RD-07 tests assert "N unique paths → N cache entries" and
+    // "second loadMesh of same path doesn't grow the cache". These
+    // are O(1) and safe to call from release builds.
+    size_t meshCacheSize() const     { return _meshCacheByKey.size(); }
+    size_t materialCacheSize() const { return _materialCacheByKey.size(); }
+
 private:
     BGFXAdapter&                 _adapter;
     shader::ShaderResourcePool&  _shaderPool;

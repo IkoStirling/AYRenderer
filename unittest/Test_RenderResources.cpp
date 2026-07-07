@@ -1,6 +1,10 @@
 #include "AYRenderer.h"
 #include "AYTest.h"
 
+#include "assetsImpl/AYMesh.h"
+
+#include "AYFile.h"
+
 #include <iostream>
 #include <string>
 #include <sys/stat.h>
@@ -51,6 +55,28 @@ std::vector<uint8_t> makeCheckerboardRgba8(uint32_t width, uint32_t height, uint
         }
     }
     return pixels;
+}
+
+#ifdef _WIN32
+std::string tempPath(const char* name)
+{
+    char tempDir[MAX_PATH] = {};
+    const DWORD len = GetTempPathA(MAX_PATH, tempDir);
+    std::string path = name;
+    if (len > 0 && len < MAX_PATH) {
+        path = std::string(tempDir) + "ayengine_rd07_" + name;
+    }
+    return path;
+}
+#endif
+
+bool writeBinaryFile(const std::string& path, const std::vector<ayt::resource::UInt8>& data)
+{
+    ayt::io::File file(path, ayt::io::File::Mode::BinaryWrite);
+    if (!file.isOpen()) {
+        return false;
+    }
+    return file.write(data.data(), data.size()) == data.size();
 }
 
 } // namespace
@@ -119,6 +145,80 @@ TEST_CASE(textured_material_draw_one_frame)
     renderer.destroyMesh(mesh);
     renderer.destroyTexture(texture);
     renderer.destroyMaterial(material);
+    renderer.shutdown();
+}
+
+// RD-07: RenderResourceManager must cache by path so the ECS layer
+// (RenderSystem / SkinnedMeshRenderSystem) can call loadMesh every
+// frame without re-uploading the GPU mesh. The contract is:
+//   1. First loadMesh(path) populates the cache with one entry.
+//   2. Subsequent loadMesh(path) for the same path returns the same
+//      MeshHandle.id WITHOUT touching ResourceRegistry (proven by
+//      deleting the file in between — cache hit must still succeed).
+//   3. meshCacheSize() reflects the number of distinct (normalized)
+//      paths, not the number of load calls.
+TEST_CASE(mesh_cache_returns_same_handle_on_repeat_loads)
+{
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend = ayt::render::Backend::Noop;
+    desc.width   = 64;
+    desc.height  = 64;
+    CHECK(renderer.initialize(desc));
+
+    // Bake a real .aymesh on disk (the same shape RenderResourceManager
+    // will be asked to load from gameplay code).
+#ifdef _WIN32
+    const std::string meshPath = tempPath("rd07_cube.aymesh");
+    {
+        ayt::resource::Mesh mesh;
+        mesh.createCube(1.0f);
+        std::vector<ayt::resource::UInt8> bin;
+        CHECK(mesh.saveToBinary(bin));
+        CHECK(writeBinaryFile(meshPath, bin));
+    }
+
+    const size_t cacheBefore = renderer.meshCacheSize();
+
+    // First load: populates the cache.
+    const ayt::render::MeshHandle first = renderer.loadMesh(meshPath);
+    CHECK(first.isValid());
+    const size_t cacheAfterFirst = renderer.meshCacheSize();
+    CHECK(cacheAfterFirst == cacheBefore + 1u);
+
+    // Repeat loads with the same path: cache size must not grow.
+    const ayt::render::MeshHandle second = renderer.loadMesh(meshPath);
+    const ayt::render::MeshHandle third  = renderer.loadMesh(meshPath);
+    CHECK(renderer.meshCacheSize() == cacheAfterFirst);
+    CHECK(second.id == first.id);
+    CHECK(third.id  == first.id);
+
+    // Cache hit must not depend on the file still existing on disk.
+    // Delete the file, then load again — if loadMesh is doing disk I/O
+    // the call will return invalid; cache hit returns the cached id.
+    std::remove(meshPath.c_str());
+    const ayt::render::MeshHandle afterDelete = renderer.loadMesh(meshPath);
+    CHECK(afterDelete.id == first.id);
+
+    // Path normalization: backslash/forward-slash should resolve to
+    // the same cache entry. RenderSystem passes Windows-style paths
+    // so this must hold.
+    const std::string altPath = meshPath + std::string(".alt");
+    {
+        ayt::resource::Mesh mesh;
+        mesh.createCube(1.0f);
+        std::vector<ayt::resource::UInt8> bin;
+        CHECK(mesh.saveToBinary(bin));
+        CHECK(writeBinaryFile(altPath, bin));
+    }
+    const ayt::render::MeshHandle alt = renderer.loadMesh(altPath);
+    CHECK(alt.id != first.id);
+    CHECK(renderer.meshCacheSize() == cacheAfterFirst + 1u);
+    std::remove(altPath.c_str());
+#else
+    printf("    [SKIP] RD-07 test is Win32-only (uses Windows temp paths)\n");
+#endif
+
     renderer.shutdown();
 }
 

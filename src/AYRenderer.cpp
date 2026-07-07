@@ -492,6 +492,18 @@ bool Renderer::captureScreenshot(const std::string& filePath)
     return true;
 }
 
+size_t Renderer::meshCacheSize() const
+{
+    if (!_impl) return 0;
+    return _impl->resources.meshCacheSize();
+}
+
+size_t Renderer::materialCacheSize() const
+{
+    if (!_impl) return 0;
+    return _impl->resources.materialCacheSize();
+}
+
 void Renderer::setShaderIntermediateDumpDirectory(const std::string& dir)
 {
     if (!_impl || !_impl->shaderPoolReady || dir.empty()) {
