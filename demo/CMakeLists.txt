@@ -111,3 +111,31 @@ target_compile_definitions(AYEngineIntegration_Demo PRIVATE
     AY_SHADER_BGFX_COMMON_HINT="${AY_SHADER_BGFX_COMMON_DIR}"
     AY_SHADER_BGFX_SRC_HINT="${AY_SHADER_BGFX_SRC_DIR}"
 )
+
+# Phase 1 mid-point: end-to-end GPU skinning demo (4-bone skeleton +
+# 24-vertex skinned cube + 2-sec spine-bone animation, screenshot at
+# frame 0/30/60).
+add_executable(AYSuzanneSkinned_Demo SuzanneSkinnedDemo.cpp)
+
+target_link_libraries(AYSuzanneSkinned_Demo PRIVATE
+    AYRenderer
+    AYEntity
+    AYGameLoop
+    AYResource
+)
+
+target_include_directories(AYSuzanneSkinned_Demo PRIVATE
+    ${AY_RESOURCE_ROOT}/include/assetsImpl
+    ${AY_RESOURCE_ROOT}/interface
+    ${AY_RESOURCE_ROOT}/interface/assetsDefs
+)
+
+if(WIN32)
+    target_link_libraries(AYSuzanneSkinned_Demo PRIVATE user32 gdi32)
+endif()
+
+target_compile_definitions(AYSuzanneSkinned_Demo PRIVATE
+    AY_SHADER_SHADERC_HINT="${AY_SHADER_SHADERC_PATH}"
+    AY_SHADER_BGFX_COMMON_HINT="${AY_SHADER_BGFX_COMMON_DIR}"
+    AY_SHADER_BGFX_SRC_HINT="${AY_SHADER_BGFX_SRC_DIR}"
+)

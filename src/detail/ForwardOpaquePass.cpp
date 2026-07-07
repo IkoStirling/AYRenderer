@@ -3,6 +3,9 @@
 #include "detail/FrameContext.h"
 
 #include <bgfx/bgfx.h>
+#include <cstdio>
+#include <cstring>
+#include <vector>
 
 namespace ayt::render::detail
 {
@@ -49,7 +52,6 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     if (material.boneBlockBinding == shader::InvalidBinding) {
         material.boneBlockBinding =
             material.shader.getUniformBlockBinding("Skeleton");
-        // Stays InvalidBinding for non-skinned materials — that's fine.
     }
 
     const ayt::math::Float4x4 modelViewProj = frame.projection * frame.view * world;
@@ -168,19 +170,10 @@ uint32_t ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResource
         flushMaterial(material, textures, frame, item.world);
 
         // Phase 1 RD-04: upload per-frame bone matrices to the
-        // material's `Skeleton` UBO when the draw is skinned.
-        // `boneBlockBinding` is resolved lazily on the first skinned
-        // draw of this material; subsequent draws reuse the binding id.
+        // material's `Skeleton` UBO or top-level `bones[]` uniform.
         if (item.boneMatrices != nullptr && item.jointCount > 0
-            && material.boneBlockBinding != shader::InvalidBinding
             && material.shader.isValid()) {
             const size_t byteCount = static_cast<size_t>(item.jointCount) * 64;
-            // Pack jointCount mat4 entries as 16 floats each (column-
-            // major row[4].x/y/z/w memory layout already matches
-            // std140 mat4; we can memcpy straight from the Float4x4
-            // array). Heap-alloc only when the per-frame block exceeds
-            // the small stack buffer (128 bones = 8192 bytes; we
-            // avoid the stack spill for typical small rigs).
             if (byteCount <= 1024) {
                 float stackBuf[1024 / sizeof(float)];
                 for (uint32_t k = 0; k < item.jointCount; ++k) {
@@ -188,8 +181,28 @@ uint32_t ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResource
                                 item.boneMatrices[k].ptr(),
                                 sizeof(float) * 16);
                 }
-                material.shader.setUniformBlock(material.boneBlockBinding,
-                                                stackBuf, byteCount);
+                bool uploaded = false;
+                if (material.boneBlockBinding != shader::InvalidBinding) {
+                    material.shader.setUniformBlock(material.boneBlockBinding,
+                                                    stackBuf, byteCount);
+                    uploaded = true;
+                } else {
+                    const shader::BindingId bonesUniform =
+                        material.shader.getUniformBinding("bones");
+                    if (bonesUniform != shader::InvalidBinding) {
+                        material.shader.setUniform(bonesUniform, stackBuf, byteCount);
+                        uploaded = true;
+                    }
+                }
+                if (!uploaded) {
+                    static uint32_t s_missingBoneBindingLog = 0;
+                    if (s_missingBoneBindingLog < 3) {
+                        std::fprintf(stderr,
+                                     "[ForwardOpaquePass] skinned draw skipped bone upload "
+                                     "(Skeleton UBO / bones[] binding missing)\n");
+                        ++s_missingBoneBindingLog;
+                    }
+                }
             } else {
                 std::vector<float> heapBuf(item.jointCount * 16);
                 for (uint32_t k = 0; k < item.jointCount; ++k) {
@@ -197,8 +210,16 @@ uint32_t ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResource
                                 item.boneMatrices[k].ptr(),
                                 sizeof(float) * 16);
                 }
-                material.shader.setUniformBlock(material.boneBlockBinding,
-                                                heapBuf.data(), byteCount);
+                if (material.boneBlockBinding != shader::InvalidBinding) {
+                    material.shader.setUniformBlock(material.boneBlockBinding,
+                                                    heapBuf.data(), byteCount);
+                } else {
+                    const shader::BindingId bonesUniform =
+                        material.shader.getUniformBinding("bones");
+                    if (bonesUniform != shader::InvalidBinding) {
+                        material.shader.setUniform(bonesUniform, heapBuf.data(), byteCount);
+                    }
+                }
             }
         }
 

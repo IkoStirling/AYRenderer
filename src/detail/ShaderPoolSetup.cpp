@@ -111,7 +111,18 @@ bool configureShaderPool(shader::ShaderResourcePool& pool)
     }
 
     pool.setShadercExecutable(shadercPath);
-    pool.setBgfxIncludeDirs(shadercIncludeDirs());
+    const std::vector<std::string> includeDirs = shadercIncludeDirs();
+    pool.setBgfxIncludeDirs(includeDirs);
+    std::fprintf(stderr, "[ShaderPoolSetup] shaderc=%s\n", shadercPath.c_str());
+    for (const std::string& dir : includeDirs) {
+        std::fprintf(stderr, "[ShaderPoolSetup]   include: %s\n", dir.c_str());
+    }
+    if (includeDirs.empty()) {
+        std::fprintf(stderr,
+                     "[ShaderPoolSetup] WARNING: no bgfx include dirs; "
+                     "common.sh may be missing\n");
+    }
+    std::fflush(stderr);
     // Resolve platform/profile from bgfx::getCaps() on first acquire (e.g. D3D11 → s_5_0).
     pool.setAutoProbeFromRendererType(true);
     pool.setHotReloadEnabled(true);

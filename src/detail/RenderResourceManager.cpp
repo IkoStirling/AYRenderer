@@ -129,11 +129,11 @@ void RenderResourceManager::shutdown()
 
 void RenderResourceManager::releaseAllMaterials()
 {
-    for (auto& [id, mat] : _materials) {
-        (void)id;
-        if (mat.shader.isValid()) {
-            _shaderPool.release(mat.shader);
+    for (auto it = _materials.begin(); it != _materials.end(); ++it) {
+        if (it->second.shader.isValid()) {
+            _shaderPool.release(it->second.shader);
         }
+        it->second = GpuMaterial{};
     }
     _materials.clear();
     _materialCacheByKey.clear();
@@ -418,10 +418,59 @@ MaterialHandle RenderResourceManager::createMaterialFromPhoskia(const std::strin
     return out;
 }
 
+MaterialHandle RenderResourceManager::createMaterialFromBgfxSc(const std::string& vertexSc,
+                                                               const std::string& fragmentSc,
+                                                               const std::string& varyingDefSc,
+                                                               const std::string& cacheKey)
+{
+    MaterialHandle out;
+    if (vertexSc.empty() || fragmentSc.empty() || varyingDefSc.empty()) {
+        return out;
+    }
+
+    if (!cacheKey.empty()) {
+        const auto cached = _materialCacheByKey.find(cacheKey);
+        if (cached != _materialCacheByKey.end()) {
+            out.id = cached->second;
+            return out;
+        }
+    }
+
+    std::fprintf(stderr, "[RenderResourceManager] compiling bgfx .sc material '%s'\n",
+                 cacheKey.empty() ? "(anonymous)" : cacheKey.c_str());
+    std::fflush(stderr);
+
+    shader::ShaderResource shader =
+        _shaderPool.acquireFromBgfxSc(vertexSc, fragmentSc, varyingDefSc, cacheKey);
+    if (!shader.isValid()) {
+        std::fprintf(stderr,
+                     "[RenderResourceManager] createMaterialFromBgfxSc failed '%s'\n",
+                     cacheKey.c_str());
+        for (const std::string& err : _shaderPool.lastCompileErrors()) {
+            std::fprintf(stderr, "  shader: %s\n", err.c_str());
+        }
+        std::fflush(stderr);
+        return out;
+    }
+
+    const uint64_t id = _nextMaterialId++;
+    GpuMaterial& mat = _materials.emplace(id, GpuMaterial{}).first->second;
+    mat.shader = shader;
+    if (!cacheKey.empty()) {
+        _materialCacheByKey.emplace(cacheKey, id);
+    }
+    out.id = id;
+    std::fprintf(stderr, "[RenderResourceManager] bgfx .sc material ready '%s'\n",
+                 cacheKey.c_str());
+    std::fflush(stderr);
+    return out;
+}
+
 void RenderResourceManager::resetMaterialBindingCache(GpuMaterial& material)
 {
     material.colorBinding = shader::InvalidBinding;
     material.mat4Binding  = shader::InvalidBinding;
+    material.boneBlockBinding = shader::InvalidBinding;
 }
 
 void RenderResourceManager::rebindMaterialAfterShaderSwap(GpuMaterial& material)

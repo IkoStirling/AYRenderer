@@ -41,6 +41,10 @@ public:
 
     MaterialHandle createMaterialFromPhoskia(const std::string& source,
                                              const std::string& cacheKey = "");
+    MaterialHandle createMaterialFromBgfxSc(const std::string& vertexSc,
+                                            const std::string& fragmentSc,
+                                            const std::string& varyingDefSc,
+                                            const std::string& cacheKey = "");
     MaterialHandle createMaterialFromFile(const std::string& path);
     MaterialHandle loadMaterial(const std::string& path);
     void destroyMaterial(MaterialHandle& material);

@@ -89,6 +89,9 @@ bool Renderer::initialize(const InitDesc& desc)
     _impl->viewportX       = 0;
     _impl->viewportY       = 0;
     _impl->shaderPoolReady = detail::configureShaderPool(_impl->shaderPool);
+    if (_impl->shaderPoolReady) {
+        _impl->shaderPool.resolvePlatformFromRenderer();
+    }
     _impl->debugOverlay.setEnabled(desc.enableDebugOverlay);
     return true;
 }
@@ -249,6 +252,18 @@ MaterialHandle Renderer::createMaterialFromPhoskia(const std::string& source,
         return {};
     }
     return _impl->resources.createMaterialFromPhoskia(source, cacheKey);
+}
+
+MaterialHandle Renderer::createMaterialFromBgfxSc(const std::string& vertexSc,
+                                                  const std::string& fragmentSc,
+                                                  const std::string& varyingDefSc,
+                                                  const std::string& cacheKey)
+{
+    if (!_impl || !_impl->shaderPoolReady) {
+        return {};
+    }
+    return _impl->resources.createMaterialFromBgfxSc(vertexSc, fragmentSc, varyingDefSc,
+                                                    cacheKey);
 }
 
 MaterialHandle Renderer::createMaterialFromFile(const std::string& path)
