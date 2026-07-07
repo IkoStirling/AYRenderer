@@ -70,7 +70,7 @@ std::string tempPath(const char* name)
 }
 #endif
 
-bool writeBinaryFile(const std::string& path, const std::vector<ayt::resource::UInt8>& data)
+bool writeBinaryFile(const std::string& path, const std::vector<ayt::math::UInt8>& data)
 {
     ayt::io::File file(path, ayt::io::File::Mode::BinaryWrite);
     if (!file.isOpen()) {
@@ -159,9 +159,11 @@ TEST_CASE(textured_material_draw_one_frame)
 //      paths, not the number of load calls.
 TEST_CASE(mesh_cache_returns_same_handle_on_repeat_loads)
 {
-    ayt::render::Renderer renderer;
-    ayt::render::InitDesc desc;
-    desc.backend = ayt::render::Backend::Noop;
+    using namespace ayt::render;
+
+    Renderer renderer;
+    InitDesc desc;
+    desc.backend = Backend::Noop;
     desc.width   = 64;
     desc.height  = 64;
     CHECK(renderer.initialize(desc));
@@ -173,7 +175,7 @@ TEST_CASE(mesh_cache_returns_same_handle_on_repeat_loads)
     {
         ayt::resource::Mesh mesh;
         mesh.createCube(1.0f);
-        std::vector<ayt::resource::UInt8> bin;
+        std::vector<ayt::math::UInt8> bin;
         CHECK(mesh.saveToBinary(bin));
         CHECK(writeBinaryFile(meshPath, bin));
     }
@@ -200,18 +202,21 @@ TEST_CASE(mesh_cache_returns_same_handle_on_repeat_loads)
     const ayt::render::MeshHandle afterDelete = renderer.loadMesh(meshPath);
     CHECK(afterDelete.id == first.id);
 
-    // Path normalization: backslash/forward-slash should resolve to
-    // the same cache entry. RenderSystem passes Windows-style paths
-    // so this must hold.
-    const std::string altPath = meshPath + std::string(".alt");
+    // Distinct path: write a SECOND .aymesh (same content, different
+    // name) and confirm the cache grows by one AND the new handle
+    // differs from the first. The second file must use the .aymesh
+    // extension — ResourceRegistry only recognizes known suffixes,
+    // and an invalid handle would skip the cache write at L336.
+    const std::string altPath = tempPath("rd07_cube2.aymesh");
     {
         ayt::resource::Mesh mesh;
         mesh.createCube(1.0f);
-        std::vector<ayt::resource::UInt8> bin;
+        std::vector<ayt::math::UInt8> bin;
         CHECK(mesh.saveToBinary(bin));
         CHECK(writeBinaryFile(altPath, bin));
     }
     const ayt::render::MeshHandle alt = renderer.loadMesh(altPath);
+    CHECK(alt.isValid());
     CHECK(alt.id != first.id);
     CHECK(renderer.meshCacheSize() == cacheAfterFirst + 1u);
     std::remove(altPath.c_str());
