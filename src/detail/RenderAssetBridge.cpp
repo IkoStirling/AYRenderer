@@ -9,8 +9,11 @@
 #include <bgfx/bgfx.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -315,6 +318,20 @@ bool repackMeshVertices(const ayt::resource::IMesh& mesh,
 MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
                                   const ayt::resource::IMesh& mesh)
 {
+    // RD diagnostic: opt-in per-call counter + wall-clock timing
+    // when AY_RENDERER_UPLOAD_TIMING is set. Counts how many times
+    // uploadMeshFromResource is called per editor frame; if it is
+    // called >1x/frame on a stable scene, something is forcing the
+    // scene-bridge to re-decode or re-upload every tick.
+    static std::atomic<uint64_t> s_uploadCount{0};
+    static std::atomic<uint64_t> s_uploadLastReport{0};
+    static std::atomic<uint64_t> s_frameMarker{0};
+    using namespace std::chrono;
+    const auto t0 = (std::getenv("AY_RENDERER_UPLOAD_TIMING") != nullptr)
+                        ? high_resolution_clock::now() : high_resolution_clock::time_point{};
+    s_uploadCount.fetch_add(1, std::memory_order_relaxed);
+    const uint64_t callIdx = s_uploadCount.load(std::memory_order_relaxed);
+
     VertexLayoutDesc layout;
     bgfx::VertexLayout bgfxLayout;
     if (!buildBgfxVertexLayoutFromMesh(mesh, layout, bgfxLayout)) {
@@ -370,13 +387,28 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
     const void* vertexData = repacked.data();
     const uint32_t vertexStride = bgfxLayout.getStride();
 
-    return mgr.createMeshFromResourceData(vertexData,
+    const MeshHandle handle = mgr.createMeshFromResourceData(vertexData,
                                           mesh.getVertexCount(),
                                           vertexStride,
                                           layout,
                                           mesh.getIndexData(),
                                           mesh.getIndexCount(),
                                           meshHasSkin);
+
+    // Diag closure: print once per ~256 calls so a runaway
+    // upload is loud but a stable scene is silent.
+    if (std::getenv("AY_RENDERER_UPLOAD_TIMING") != nullptr) {
+        const auto t1 = high_resolution_clock::now();
+        const double ms = duration<double, std::milli>(t1 - t0).count();
+        std::fprintf(stderr,
+                     "[RenderAssetBridge diag] upload #%llu took %.2fms "
+                     "(verts=%u indices=%u meshStride=%u)\n",
+                     static_cast<unsigned long long>(callIdx),
+                     ms,
+                     mesh.getVertexCount(), mesh.getIndexCount(),
+                     mesh.getVertexStride());
+    }
+    return handle;
 }
 
 MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
