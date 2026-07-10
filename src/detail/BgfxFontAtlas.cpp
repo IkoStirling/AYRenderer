@@ -89,14 +89,16 @@ bool BgfxFontAtlas::initialize(BGFXAdapter& adapter)
     }
 
     _atlasTextureIdx = handle.idx;
-    _atlasDirty      = true;
+    _atlasDirty      = false;
     return true;
 }
 
 void BgfxFontAtlas::shutdown(BGFXAdapter& adapter)
 {
-    if (bgfx::getRendererType() != bgfx::RendererType::Count && _atlasTextureIdx != kInvalidIdx) {
+    if (adapter.isInitialized() && _atlasTextureIdx != kInvalidIdx) {
         adapter.destroy(bgfx::TextureHandle{_atlasTextureIdx});
+        _atlasTextureIdx = kInvalidIdx;
+    } else if (_atlasTextureIdx != kInvalidIdx) {
         _atlasTextureIdx = kInvalidIdx;
     }
 
@@ -108,6 +110,7 @@ void BgfxFontAtlas::shutdown(BGFXAdapter& adapter)
     _fontsBySize.clear();
     _bgraScratch.clear();
     _atlasDirty = true;
+    _knownGlyphs.clear();
     _adapter    = nullptr;
 }
 
@@ -177,6 +180,23 @@ ayt::font::IFont* BgfxFontAtlas::acquireFont(int pixelSize)
 void BgfxFontAtlas::markAtlasDirty()
 {
     _atlasDirty = true;
+}
+
+void BgfxFontAtlas::prepareGlyphs(ayt::font::IFont* font, int pixelSize, const std::wstring& text)
+{
+    if (font == nullptr) {
+        return;
+    }
+
+    for (wchar_t ch : text) {
+        const uint32_t codepoint = static_cast<uint32_t>(ch);
+        font->getGlyph(codepoint);
+        const uint64_t key =
+            (static_cast<uint64_t>(static_cast<uint32_t>(pixelSize)) << 32) | codepoint;
+        if (_knownGlyphs.insert(key).second) {
+            markAtlasDirty();
+        }
+    }
 }
 
 void BgfxFontAtlas::syncAtlasToGpu(ayt::font::IFont* font)

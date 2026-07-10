@@ -39,6 +39,9 @@ public:
 
     static RendererSubSystem* findRegistered();
 
+    // Explicit registration (replaces static REGISTER_SUBSYSTEM for static-lib safety).
+    static void registerSubSystem();
+
     bool isReady() const { return _ready; }
     void renderCompositeFrame(bool renderScene3D, UIRenderBackend* uiBackend, CompositeUiPass uiPass);
 

@@ -169,21 +169,21 @@ bgfx::TextureHandle BGFXAdapter::createTexture2DFromData(uint16_t width, uint16_
 
 void BGFXAdapter::destroy(bgfx::VertexBufferHandle h)
 {
-    if (bgfx::isValid(h)) {
+    if (_initialized && bgfx::isValid(h)) {
         bgfx::destroy(h);
     }
 }
 
 void BGFXAdapter::destroy(bgfx::IndexBufferHandle h)
 {
-    if (bgfx::isValid(h)) {
+    if (_initialized && bgfx::isValid(h)) {
         bgfx::destroy(h);
     }
 }
 
 void BGFXAdapter::destroy(bgfx::TextureHandle h)
 {
-    if (bgfx::isValid(h)) {
+    if (_initialized && bgfx::isValid(h)) {
         bgfx::destroy(h);
     }
 }

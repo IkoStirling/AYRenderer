@@ -4,7 +4,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace ayt::render::detail {
@@ -29,6 +31,10 @@ public:
     ayt::font::IFont* acquireFont(int pixelSize);
     uint16_t          atlasTextureIdx() const { return _atlasTextureIdx; }
 
+    // Rasterize glyphs for this draw; marks atlas dirty only when a new
+    // (pixelSize, codepoint) pair is seen for the first time this session.
+    void prepareGlyphs(ayt::font::IFont* font, int pixelSize, const std::wstring& text);
+
     void markAtlasDirty();
     bool isAtlasDirty() const { return _atlasDirty; }
     void syncAtlasToGpu(ayt::font::IFont* font);
@@ -44,6 +50,7 @@ private:
     bool                 _atlasDirty      = true;
     std::vector<uint8_t> _bgraScratch;
     BGFXAdapter*         _adapter         = nullptr;
+    std::unordered_set<uint64_t> _knownGlyphs;
 };
 
 } // namespace ayt::render::detail

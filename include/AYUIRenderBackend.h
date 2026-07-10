@@ -10,6 +10,10 @@ namespace ayt::shader {
 class ShaderResourcePool;
 }
 
+namespace ayt::font {
+class IFont;
+}
+
 namespace ayt::render {
 
 class Renderer;
@@ -63,6 +67,7 @@ private:
     void shutdownFromRendererWithoutAdapter();
 
     void flushColoredRects();
+    void syncTextAtlasIfNeeded();
     void drawTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
                           const ayt::math::FVector4& tint);
 
@@ -91,6 +96,11 @@ private:
     std::unique_ptr<detail::BgfxFontAtlas> _fontAtlas;
 
     std::vector<ColoredRect> _pendingRects;
+
+    std::vector<UiVertex> _scratchVertices;
+    std::vector<uint32_t> _scratchIndices;
+
+    ayt::font::IFont* _textSyncFont = nullptr;
 };
 
 } // namespace ayt::render

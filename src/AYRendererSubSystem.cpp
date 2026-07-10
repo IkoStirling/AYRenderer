@@ -471,9 +471,18 @@ void RendererSubSystem::renderCompositeFrame(bool renderScene3D, UIRenderBackend
 
 
 
-REGISTER_SUBSYSTEM(RendererSubSystem, {"Entity"}, 100);
-
-
+void RendererSubSystem::registerSubSystem()
+{
+    static bool registered = false;
+    if (registered) {
+        return;
+    }
+    registered = true;
+    if (findRegistered() != nullptr) {
+        return;
+    }
+    ::ayt::game::IGameLoop::instance().registerSubSystem(new RendererSubSystem());
+}
 
 } // namespace ayt::render
 

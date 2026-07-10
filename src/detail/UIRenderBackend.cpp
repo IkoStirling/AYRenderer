@@ -109,6 +109,9 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
     _shaderPool  = nullptr;
     _initialized = false;
     _pendingRects.clear();
+    _scratchVertices.clear();
+    _scratchIndices.clear();
+    _textSyncFont = nullptr;
 }
 
 void UIRenderBackend::shutdownFromRendererWithoutAdapter()
@@ -119,6 +122,9 @@ void UIRenderBackend::shutdownFromRendererWithoutAdapter()
     _shaderPool  = nullptr;
     _initialized = false;
     _pendingRects.clear();
+    _scratchVertices.clear();
+    _scratchIndices.clear();
+    _textSyncFont = nullptr;
 }
 
 void UIRenderBackend::setFramebufferSize(uint16_t width, uint16_t height)
@@ -131,6 +137,12 @@ void UIRenderBackend::beginFrame()
 {
     _drawCalls = 0;
     _pendingRects.clear();
+    _textSyncFont = nullptr;
+
+    if (_scratchVertices.capacity() < 1024u) {
+        _scratchVertices.reserve(1024u);
+        _scratchIndices.reserve(1536u);
+    }
 
     if (_gpu == nullptr || _width < 1 || _height < 1) {
         return;
@@ -149,6 +161,23 @@ void UIRenderBackend::endCanvas() {}
 void UIRenderBackend::endFrame()
 {
     flushColoredRects();
+}
+
+void UIRenderBackend::syncTextAtlasIfNeeded()
+{
+    if (_fontAtlas == nullptr || !_fontAtlas->isAtlasDirty()) {
+        return;
+    }
+
+    ayt::font::IFont* font = _textSyncFont;
+    if (font == nullptr) {
+        font = _fontAtlas->acquireFont(14);
+    }
+    if (font == nullptr) {
+        return;
+    }
+
+    _fontAtlas->syncAtlasToGpu(font);
 }
 
 void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, const ayt::math::FVector4& color)
@@ -179,40 +208,40 @@ void UIRenderBackend::flushColoredRects()
         return;
     }
 
-    std::vector<UiVertex> vertices;
-    std::vector<uint32_t> indices;
-    vertices.reserve(_pendingRects.size() * 4);
-    indices.reserve(_pendingRects.size() * 6);
+    _scratchVertices.clear();
+    _scratchIndices.clear();
+    _scratchVertices.reserve(_pendingRects.size() * 4u);
+    _scratchIndices.reserve(_pendingRects.size() * 6u);
 
     for (const ColoredRect& rect : _pendingRects) {
-        const uint32_t base = static_cast<uint32_t>(vertices.size());
+        const uint32_t base = static_cast<uint32_t>(_scratchVertices.size());
         const uint32_t abgr = toAbgr(rect.color);
         const float    z    = 0.0f;
 
-        vertices.push_back({toNdcX(rect.bounds.minX, static_cast<float>(_width)),
-                            toNdcY(rect.bounds.minY, static_cast<float>(_height)), z, abgr, 0.0f,
-                            0.0f});
-        vertices.push_back({toNdcX(rect.bounds.maxX, static_cast<float>(_width)),
-                            toNdcY(rect.bounds.minY, static_cast<float>(_height)), z, abgr, 1.0f,
-                            0.0f});
-        vertices.push_back({toNdcX(rect.bounds.maxX, static_cast<float>(_width)),
-                            toNdcY(rect.bounds.maxY, static_cast<float>(_height)), z, abgr, 1.0f,
-                            1.0f});
-        vertices.push_back({toNdcX(rect.bounds.minX, static_cast<float>(_width)),
-                            toNdcY(rect.bounds.maxY, static_cast<float>(_height)), z, abgr, 0.0f,
-                            1.0f});
+        _scratchVertices.push_back({toNdcX(rect.bounds.minX, static_cast<float>(_width)),
+                                    toNdcY(rect.bounds.minY, static_cast<float>(_height)), z, abgr,
+                                    0.0f, 0.0f});
+        _scratchVertices.push_back({toNdcX(rect.bounds.maxX, static_cast<float>(_width)),
+                                    toNdcY(rect.bounds.minY, static_cast<float>(_height)), z, abgr,
+                                    1.0f, 0.0f});
+        _scratchVertices.push_back({toNdcX(rect.bounds.maxX, static_cast<float>(_width)),
+                                    toNdcY(rect.bounds.maxY, static_cast<float>(_height)), z, abgr,
+                                    1.0f, 1.0f});
+        _scratchVertices.push_back({toNdcX(rect.bounds.minX, static_cast<float>(_width)),
+                                    toNdcY(rect.bounds.maxY, static_cast<float>(_height)), z, abgr,
+                                    0.0f, 1.0f});
 
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
+        _scratchIndices.push_back(base + 0);
+        _scratchIndices.push_back(base + 1);
+        _scratchIndices.push_back(base + 2);
+        _scratchIndices.push_back(base + 0);
+        _scratchIndices.push_back(base + 2);
+        _scratchIndices.push_back(base + 3);
     }
 
-    _gpu->submitColoredQuads(kViewId, *_adapter, vertices.data(),
-                             static_cast<uint32_t>(vertices.size()), sizeof(UiVertex),
-                             indices.data(), static_cast<uint32_t>(indices.size()));
+    _gpu->submitColoredQuads(kViewId, *_adapter, _scratchVertices.data(),
+                             static_cast<uint32_t>(_scratchVertices.size()), sizeof(UiVertex),
+                             _scratchIndices.data(), static_cast<uint32_t>(_scratchIndices.size()));
 
     ++_drawCalls;
     _pendingRects.clear();
@@ -245,8 +274,8 @@ void UIRenderBackend::drawTexturedQuad(const ayt::math::FRectangle& bounds, uint
 void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::wstring& text,
                                int fontSize, const ayt::math::FVector4& color)
 {
-    if (text.empty() || _width < 1 || _height < 1 || _gpu == nullptr || _adapter == nullptr
-        || _fontAtlas == nullptr) {
+    if (!_initialized || text.empty() || _width < 1 || _height < 1 || _gpu == nullptr
+        || _adapter == nullptr || _fontAtlas == nullptr) {
         return;
     }
 
@@ -256,13 +285,10 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         return;
     }
 
-    for (wchar_t ch : text) {
-        font->getGlyph(static_cast<uint32_t>(ch));
-    }
-
-    _fontAtlas->markAtlasDirty();
+    _fontAtlas->prepareGlyphs(font, fontSize, text);
+    _textSyncFont = font;
+    syncTextAtlasIfNeeded();
     flushColoredRects();
-    _fontAtlas->syncAtlasToGpu(font);
 
     const uint16_t atlasIdx = _fontAtlas->atlasTextureIdx();
     if (atlasIdx == detail::UiGpuContext::kInvalidIdx) {
@@ -285,8 +311,30 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     vertices.reserve(text.size() * 4u);
     indices.reserve(text.size() * 6u);
 
-    auto appendGlyphQuad = [&](float x0, float y0, float x1, float y1, float u0, float v0,
-                               float u1, float v1) {
+    for (wchar_t ch : text) {
+        ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
+        if (glyph == nullptr) {
+            cursorX += metrics.lineHeight * 0.25f;
+            continue;
+        }
+
+        const int glyphW = glyph->metrics.width;
+        const int glyphH = glyph->metrics.height;
+        if (glyphW <= 0 || glyphH <= 0) {
+            cursorX += static_cast<float>(glyph->metrics.advance);
+            continue;
+        }
+
+        const float x0 = cursorX + static_cast<float>(glyph->metrics.bearingX);
+        const float y0 = baselineY - static_cast<float>(glyph->metrics.bearingY);
+        const float x1 = x0 + static_cast<float>(glyphW);
+        const float y1 = y0 + static_cast<float>(glyphH);
+
+        const float u0 = glyph->atlasPosX / atlasW;
+        const float v0 = glyph->atlasPosY / atlasH;
+        const float u1 = (glyph->atlasPosX + glyph->atlasWidth) / atlasW;
+        const float v1 = (glyph->atlasPosY + glyph->atlasHeight) / atlasH;
+
         const uint32_t base = static_cast<uint32_t>(vertices.size());
         const float    z    = 0.0f;
         vertices.push_back({toNdcX(x0, fbW), toNdcY(y0, fbH), z, abgr, u0, v0});
@@ -299,31 +347,6 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         indices.push_back(base + 0);
         indices.push_back(base + 2);
         indices.push_back(base + 3);
-    };
-
-    for (wchar_t ch : text) {
-        ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
-        if (glyph == nullptr) {
-            cursorX += metrics.lineHeight * 0.25f;
-            continue;
-        }
-
-        if (glyph->metrics.width <= 0 || glyph->metrics.height <= 0) {
-            cursorX += static_cast<float>(glyph->metrics.advance);
-            continue;
-        }
-
-        const float x0 = cursorX + static_cast<float>(glyph->metrics.bearingX);
-        const float y0 = baselineY - static_cast<float>(glyph->metrics.bearingY);
-        const float x1 = x0 + static_cast<float>(glyph->metrics.width);
-        const float y1 = y0 + static_cast<float>(glyph->metrics.height);
-
-        const float u0 = glyph->atlasPosX / atlasW;
-        const float v0 = glyph->atlasPosY / atlasH;
-        const float u1 = (glyph->atlasPosX + glyph->atlasWidth) / atlasW;
-        const float v1 = (glyph->atlasPosY + glyph->atlasHeight) / atlasH;
-
-        appendGlyphQuad(x0, y0, x1, y1, u0, v0, u1, v1);
         cursorX += static_cast<float>(glyph->metrics.advance);
     }
 

@@ -18,9 +18,8 @@
 
 #include <bgfx/bgfx.h>
 
-
-
 #include <cstdio>
+#include <cstring>
 
 
 
@@ -146,45 +145,106 @@ void submitMesh(uint8_t viewId, BGFXAdapter& adapter, shader::ShaderResource& sh
 
 
 
-    const bgfx::Memory* vbMem = bgfx::copy(vertices, vertexCount * vertexStride);
-
-    const bgfx::Memory* ibMem =
-
-        bgfx::copy(indices, static_cast<uint32_t>(indexCount * sizeof(uint32_t)));
-
-
-
     const bgfx::VertexLayout layout = uiVertexLayout();
 
-    const bgfx::VertexBufferHandle vb = bgfx::createVertexBuffer(vbMem, layout);
+    constexpr bool kIndex32         = true;
+    const uint32_t availVertices = bgfx::getAvailTransientVertexBuffer(vertexCount, layout);
 
-    const bgfx::IndexBufferHandle  ib = bgfx::createIndexBuffer(ibMem, BGFX_BUFFER_INDEX32);
+    const uint32_t availIndices  = bgfx::getAvailTransientIndexBuffer(indexCount, kIndex32);
 
 
 
-    if (!bgfx::isValid(vb) || !bgfx::isValid(ib)) {
+    if (availVertices >= vertexCount && availIndices >= indexCount) {
 
-        if (bgfx::isValid(vb)) {
+        bgfx::TransientVertexBuffer tvb;
 
-            bgfx::destroy(vb);
+        bgfx::TransientIndexBuffer  tib;
+
+        bgfx::allocTransientVertexBuffer(&tvb, vertexCount, layout);
+
+        bgfx::allocTransientIndexBuffer(&tib, indexCount, kIndex32);
+
+        const uint32_t dstStride = layout.getStride();
+        const auto*    srcBytes  = static_cast<const uint8_t*>(vertices);
+        auto*          dstBytes  = static_cast<uint8_t*>(tvb.data);
+        if (dstStride == vertexStride) {
+            std::memcpy(dstBytes, srcBytes, static_cast<size_t>(vertexCount) * vertexStride);
+        } else {
+            for (uint32_t i = 0; i < vertexCount; ++i) {
+                std::memcpy(dstBytes + static_cast<size_t>(i) * dstStride,
+                            srcBytes + static_cast<size_t>(i) * vertexStride, vertexStride);
+            }
+        }
+
+        std::memcpy(tib.data, indices, static_cast<size_t>(indexCount) * sizeof(uint32_t));
+
+        bgfx::setVertexBuffer(0, &tvb);
+
+        bgfx::setIndexBuffer(&tib);
+
+    } else {
+
+        const bgfx::Memory* vbMem = bgfx::copy(vertices, vertexCount * vertexStride);
+
+        const bgfx::Memory* ibMem =
+
+            bgfx::copy(indices, static_cast<uint32_t>(indexCount * sizeof(uint32_t)));
+
+
+
+        const bgfx::VertexBufferHandle vb = bgfx::createVertexBuffer(vbMem, layout);
+
+        const bgfx::IndexBufferHandle  ib = bgfx::createIndexBuffer(ibMem, BGFX_BUFFER_INDEX32);
+
+
+
+        if (!bgfx::isValid(vb) || !bgfx::isValid(ib)) {
+
+            if (bgfx::isValid(vb)) {
+
+                bgfx::destroy(vb);
+
+            }
+
+            if (bgfx::isValid(ib)) {
+
+                bgfx::destroy(ib);
+
+            }
+
+            return;
 
         }
 
-        if (bgfx::isValid(ib)) {
 
-            bgfx::destroy(ib);
 
-        }
+        adapter.setVertexBuffer(vb);
+
+        adapter.setIndexBuffer(ib);
+
+
+
+        shader.setTexture(0, texBinding, toShaderTexture(bgfx::TextureHandle{textureIdx}));
+
+
+
+        shader::DrawCallContext ctx;
+
+        ctx.viewId = viewId;
+
+        ctx.state  = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA;
+
+        shader.submit(ctx);
+
+
+
+        bgfx::destroy(vb);
+
+        bgfx::destroy(ib);
 
         return;
 
     }
-
-
-
-    adapter.setVertexBuffer(vb);
-
-    adapter.setIndexBuffer(ib);
 
 
 
@@ -199,14 +259,6 @@ void submitMesh(uint8_t viewId, BGFXAdapter& adapter, shader::ShaderResource& sh
     ctx.state  = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA;
 
     shader.submit(ctx);
-
-
-
-    // bgfx retains destroyed handles until the next bgfx::frame().
-
-    bgfx::destroy(vb);
-
-    bgfx::destroy(ib);
 
 }
 

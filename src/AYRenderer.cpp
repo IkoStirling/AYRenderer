@@ -554,7 +554,7 @@ void Renderer::shutdownUiRenderBackend(UIRenderBackend& backend)
 {
     detail::BGFXAdapter* adapter = bgfxAdapter();
     ayt::shader::ShaderResourcePool* pool = shaderPool();
-    if (adapter != nullptr && pool != nullptr) {
+    if (adapter != nullptr && adapter->isInitialized() && pool != nullptr) {
         backend.shutdownFromRenderer(*adapter, *pool);
     } else {
         backend.shutdownFromRendererWithoutAdapter();
