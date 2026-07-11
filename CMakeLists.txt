@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# C++ standard follows the root CMakeLists (currently C++23; may move to C++26).
+# Do not pin a standard here.
 
 file(GLOB AYRENDERER_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
