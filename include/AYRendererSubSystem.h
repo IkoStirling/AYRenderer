@@ -14,6 +14,12 @@ class UIRenderBackend;
 using SceneBuildCallback = std::function<void(RenderScene&)>;
 using CompositeUiPass    = std::function<void(bool skipViewportPanel)>;
 
+// Supplies the native window handle + size at initialize() time. Lets the
+// application wire the renderer to a window source (e.g. AYDevice's
+// DeviceSubSystem) without the renderer depending on that module's headers.
+// Returns false if no window is available yet.
+using WindowProvider = std::function<bool(void*& outHandle, uint32_t& outWidth, uint32_t& outHeight)>;
+
 // GameLoop subsystem: owns Renderer, submits frames via render callback.
 class RendererSubSystem : public ayt::game::ISubSystem {
 public:
@@ -21,6 +27,10 @@ public:
     static void setBootstrapViewport(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
     static void setBootstrapShaderDumpDirectory(const std::string& dir);
     static void setBootstrapShaderCacheDirectory(const std::string& dir);
+
+    // Optional window source, preferred over the static bootstrap window when
+    // set. Call before the subsystem initializes (i.e. before GameLoop::run()).
+    static void setWindowProvider(WindowProvider provider);
 
     const char* getName() const override { return "Renderer"; }
     const ayt::game::SubSystemDescriptor& getDescriptor() const override;

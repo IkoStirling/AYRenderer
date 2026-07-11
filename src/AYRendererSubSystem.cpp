@@ -42,6 +42,8 @@ std::string g_bootstrapShaderDumpDir;
 
 std::string g_bootstrapShaderCacheDir;
 
+WindowProvider g_windowProvider;
+
 
 
 } // namespace
@@ -59,6 +61,16 @@ void RendererSubSystem::setBootstrapWindow(void* nativeWindowHandle, uint32_t wi
     g_bootstrapWidth  = width;
 
     g_bootstrapHeight = height;
+
+}
+
+
+
+void RendererSubSystem::setWindowProvider(WindowProvider provider)
+
+{
+
+    g_windowProvider = std::move(provider);
 
 }
 
@@ -110,7 +122,7 @@ const ayt::game::SubSystemDescriptor& RendererSubSystem::getDescriptor() const
 
         .name         = "Renderer",
 
-        .dependencies = {"Entity"},
+        .dependencies = {"Entity", "Device"},
 
         .basePriority = 100,
 
@@ -128,19 +140,53 @@ bool RendererSubSystem::initialize()
 
 {
 
-    _windowHandle = g_bootstrapWindow;
+    // Prefer a window provider (e.g. AYDevice's DeviceSubSystem) when set;
+    // otherwise fall back to the static bootstrap window (editor / demos).
 
-    _width        = g_bootstrapWidth;
+    void*    providedHandle = nullptr;
 
-    _height       = g_bootstrapHeight;
+    uint32_t providedWidth  = 0;
 
-    _viewportX    = g_bootstrapViewportX;
+    uint32_t providedHeight = 0;
 
-    _viewportY    = g_bootstrapViewportY;
+    if (g_windowProvider && g_windowProvider(providedHandle, providedWidth, providedHeight)
 
-    _viewportW    = g_bootstrapViewportW;
+        && providedHandle != nullptr) {
 
-    _viewportH    = g_bootstrapViewportH;
+        _windowHandle = providedHandle;
+
+        _width        = providedWidth;
+
+        _height       = providedHeight;
+
+        // Default the viewport to the full provided window (client builds have
+        // no separate viewport panel like the editor does).
+
+        _viewportX    = 0;
+
+        _viewportY    = 0;
+
+        _viewportW    = static_cast<uint16_t>(providedWidth);
+
+        _viewportH    = static_cast<uint16_t>(providedHeight);
+
+    } else {
+
+        _windowHandle = g_bootstrapWindow;
+
+        _width        = g_bootstrapWidth;
+
+        _height       = g_bootstrapHeight;
+
+        _viewportX    = g_bootstrapViewportX;
+
+        _viewportY    = g_bootstrapViewportY;
+
+        _viewportW    = g_bootstrapViewportW;
+
+        _viewportH    = g_bootstrapViewportH;
+
+    }
 
 
 
