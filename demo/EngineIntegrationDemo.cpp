@@ -15,13 +15,13 @@
 #include "AYEntityModule.h"
 #include "AYGameLoop.h"
 #include "AYRendererSubSystem.h"
-#include "AYMathUtils.h"
+#include "aymath/MathUtils.h"
 
 #include "assetsImpl/AYMaterial.h"
 #include "assetsImpl/AYMesh.h"
 #include "assetsImpl/AYTexture.h"
 
-#include "AYFile.h"
+#include "ayio/File.h"
 
 #include <chrono>
 #include <cstdio>
@@ -324,6 +324,7 @@ int main()
     loop.setRenderThreadEnabled(false);
 
     ayt::entity::bootstrapModule();
+    ayt::render::RendererSubSystem::registerSubSystem();
 
     loop.run();
     loop.offUpdate(listenerId);

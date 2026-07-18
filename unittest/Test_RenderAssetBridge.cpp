@@ -7,7 +7,7 @@
 #include "assetsImpl/AYTexture.h"
 
 #include "AYAssetPath.h"
-#include "AYFile.h"
+#include "ayio/File.h"
 #include "AYTest.h"
 
 #include <bgfx/bgfx.h>

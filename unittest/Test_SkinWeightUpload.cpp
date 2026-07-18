@@ -14,7 +14,7 @@
 
 #include "assetsImpl/AYMesh.h"
 
-#include "AYFile.h"
+#include "ayio/File.h"
 #include "AYTest.h"
 
 #include <bgfx/bgfx.h>

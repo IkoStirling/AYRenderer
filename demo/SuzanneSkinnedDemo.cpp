@@ -41,7 +41,7 @@
 #include "AYWorld.h"
 #include "AYGameLoop.h"
 #include "AYRendererSubSystem.h"
-#include "AYMathUtils.h"
+#include "aymath/MathUtils.h"
 
 #include "components/AYAnimationComponent.h"
 #include "components/AYMeshComponent.h"
@@ -52,7 +52,7 @@
 #include "assetsImpl/AYSkeleton.h"
 #include "assetsImpl/AYAnimation.h"
 
-#include "AYFile.h"
+#include "ayio/File.h"
 
 #include <chrono>
 #include <cstdio>
@@ -437,6 +437,7 @@ ayt::entity::Entity* spawnSkinnedEntity(const DemoAssets& assets)
 bool prepareDemoWorld()
 {
     ayt::entity::bootstrapModule();
+    ayt::render::RendererSubSystem::registerSubSystem();
     if (!ayt::entity::World::instance().initialize()) {
         std::fprintf(stderr, "[SkinnedDemo] World::initialize failed\n");
         return false;

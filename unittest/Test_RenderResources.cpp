@@ -3,7 +3,7 @@
 
 #include "assetsImpl/AYMesh.h"
 
-#include "AYFile.h"
+#include "ayio/File.h"
 
 #include <iostream>
 #include <string>

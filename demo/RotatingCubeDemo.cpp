@@ -12,13 +12,13 @@
 #include <Windows.h>
 
 #include "AYRenderer.h"
-#include "AYMathUtils.h"
+#include "aymath/MathUtils.h"
 
 #include "assetsImpl/AYMaterial.h"
 #include "assetsImpl/AYMesh.h"
 #include "assetsImpl/AYTexture.h"
 
-#include "AYFile.h"
+#include "ayio/File.h"
 
 #include <chrono>
 #include <cstdio>
