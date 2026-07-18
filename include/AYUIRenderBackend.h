@@ -4,7 +4,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <vector>
 
 namespace ayt::shader {
 class ShaderResourcePool;
@@ -25,9 +24,14 @@ class UiGpuContext;
 }
 
 // bgfx-backed UI renderer for single-window editor composite (E2-composite).
+// Mutable frame buffers live in a heap-allocated FrameState (see .cpp) so
+// adding batching members does not change this class size — avoids MSVC stack
+// cookie failures when EditorApp's uiBackend is stack-allocated and TUs are
+// incrementally rebuilt with mismatched layouts.
 class UIRenderBackend : public ayt::ui::IRenderBackend {
 public:
-    static constexpr uint8_t kViewId = 1;
+    // View 0 = full-window clear, view 1 = 3D scene (composite), view 2 = UI.
+    static constexpr uint8_t kViewId = 2;
 
     UIRenderBackend();
     ~UIRenderBackend() override;
@@ -55,10 +59,14 @@ public:
     void drawWithAlpha(const ayt::math::FRectangle& bounds, void* textureHandle,
                        float alpha) override;
 
+    void flushBatches() override;
+
     int getDrawCallCount() const override { return _drawCalls; }
 
 private:
     friend class Renderer;
+
+    struct FrameState;
 
     bool initializeFromRenderer(Renderer& renderer, detail::BGFXAdapter& adapter,
                                 shader::ShaderResourcePool& shaderPool);
@@ -67,23 +75,10 @@ private:
     void shutdownFromRendererWithoutAdapter();
 
     void flushColoredRects();
+    void flushPendingText();
     void syncTextAtlasIfNeeded();
     void drawTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
                           const ayt::math::FVector4& tint);
-
-    struct ColoredRect {
-        ayt::math::FRectangle bounds;
-        ayt::math::FVector4   color;
-    };
-
-    struct UiVertex {
-        float    x;
-        float    y;
-        float    z;
-        uint32_t abgr;
-        float    u;
-        float    v;
-    };
 
     bool     _initialized = false;
     uint16_t _width         = 0;
@@ -94,13 +89,7 @@ private:
     shader::ShaderResourcePool*           _shaderPool  = nullptr;
     std::unique_ptr<detail::UiGpuContext> _gpu;
     std::unique_ptr<detail::BgfxFontAtlas> _fontAtlas;
-
-    std::vector<ColoredRect> _pendingRects;
-
-    std::vector<UiVertex> _scratchVertices;
-    std::vector<uint32_t> _scratchIndices;
-
-    ayt::font::IFont* _textSyncFont = nullptr;
+    std::unique_ptr<FrameState>           _frame;
 };
 
 } // namespace ayt::render

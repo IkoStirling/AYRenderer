@@ -496,8 +496,10 @@ void RendererSubSystem::renderCompositeFrame(bool renderScene3D, UIRenderBackend
     clear.b = 0.11f;
     clear.a = 1.0f;
 
-    _renderer.setViewportRect(0, 0, static_cast<uint16_t>(_width), static_cast<uint16_t>(_height));
-    _renderer.beginFrame(clear);
+    // Full-window clear on view 0; 3D uses view 1; UI uses view 2 (CLEAR_NONE).
+    // Shrinking view 0 to the 3D hole left chrome (splitter) pixels uncleared.
+    _renderer.beginCompositeFrame(clear, static_cast<uint16_t>(_width),
+                                  static_cast<uint16_t>(_height));
 
     if (renderScene3D && _viewportW >= 32 && _viewportH >= 32) {
         _renderer.setViewportRect(_viewportX, _viewportY, _viewportW, _viewportH);

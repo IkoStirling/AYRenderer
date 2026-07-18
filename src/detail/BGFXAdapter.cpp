@@ -1,6 +1,6 @@
 #include "detail/BGFXAdapter.h"
 
-#include "AYMathTypes.h"
+#include "aymath/MathTypes.h"
 
 namespace ayt::render::detail
 {
@@ -93,6 +93,11 @@ void BGFXAdapter::setViewClear(uint8_t viewId, const ClearDesc& clear)
                         | static_cast<uint32_t>(clear.b * 255.0f) << 8
                         | static_cast<uint32_t>(clear.a * 255.0f);
     bgfx::setViewClear(viewId, flags, rgba, 1.0f, 0);
+}
+
+void BGFXAdapter::setViewClearNone(uint8_t viewId)
+{
+    bgfx::setViewClear(viewId, BGFX_CLEAR_NONE, 0, 1.0f, 0);
 }
 
 void BGFXAdapter::setViewTransform(uint8_t viewId, const float* view, const float* proj)

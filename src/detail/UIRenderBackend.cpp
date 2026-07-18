@@ -15,6 +15,25 @@ namespace ayt::render {
 
 namespace {
 
+struct UiVertex {
+    float    x;
+    float    y;
+    float    z;
+    uint32_t abgr;
+    float    u;
+    float    v;
+};
+
+struct ColoredRect {
+    ayt::math::FRectangle bounds;
+    ayt::math::FVector4   color;
+};
+
+struct PendingTextBatch {
+    std::vector<UiVertex> vertices;
+    std::vector<uint32_t> indices;
+};
+
 uint32_t toAbgr(const ayt::math::FVector4& color)
 {
     const uint8_t r = static_cast<uint8_t>(color.x * 255.0f);
@@ -36,7 +55,18 @@ float toNdcY(float py, float height)
 
 } // namespace
 
-UIRenderBackend::UIRenderBackend() = default;
+struct UIRenderBackend::FrameState {
+    std::vector<ColoredRect>          pendingRects;
+    std::vector<UiVertex>             scratchVertices;
+    std::vector<uint32_t>             scratchIndices;
+    std::unique_ptr<PendingTextBatch> textBatch;
+    ayt::font::IFont*                 textSyncFont = nullptr;
+};
+
+UIRenderBackend::UIRenderBackend()
+    : _frame(std::make_unique<FrameState>())
+{
+}
 
 UIRenderBackend::~UIRenderBackend()
 {
@@ -59,6 +89,10 @@ bool UIRenderBackend::initializeFromRenderer(Renderer& renderer, detail::BGFXAda
     AYUNREFERENCED_PARAM(renderer);
     if (_initialized) {
         return true;
+    }
+
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
     }
 
     _gpu        = std::make_unique<detail::UiGpuContext>();
@@ -95,6 +129,18 @@ void UIRenderBackend::shutdown()
 void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
                                            shader::ShaderResourcePool& shaderPool)
 {
+    if (_frame != nullptr) {
+        _frame->pendingRects.clear();
+        _frame->scratchVertices.clear();
+        _frame->scratchIndices.clear();
+        if (_frame->textBatch != nullptr) {
+            _frame->textBatch->vertices.clear();
+            _frame->textBatch->indices.clear();
+        }
+        _frame->textSyncFont = nullptr;
+        _frame->textBatch.reset();
+    }
+
     if (_fontAtlas != nullptr) {
         _fontAtlas->shutdown(adapter);
         _fontAtlas.reset();
@@ -108,23 +154,27 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
     _adapter     = nullptr;
     _shaderPool  = nullptr;
     _initialized = false;
-    _pendingRects.clear();
-    _scratchVertices.clear();
-    _scratchIndices.clear();
-    _textSyncFont = nullptr;
 }
 
 void UIRenderBackend::shutdownFromRendererWithoutAdapter()
 {
+    if (_frame != nullptr) {
+        _frame->pendingRects.clear();
+        _frame->scratchVertices.clear();
+        _frame->scratchIndices.clear();
+        if (_frame->textBatch != nullptr) {
+            _frame->textBatch->vertices.clear();
+            _frame->textBatch->indices.clear();
+        }
+        _frame->textSyncFont = nullptr;
+        _frame->textBatch.reset();
+    }
+
     _gpu.reset();
     _fontAtlas.reset();
     _adapter     = nullptr;
     _shaderPool  = nullptr;
     _initialized = false;
-    _pendingRects.clear();
-    _scratchVertices.clear();
-    _scratchIndices.clear();
-    _textSyncFont = nullptr;
 }
 
 void UIRenderBackend::setFramebufferSize(uint16_t width, uint16_t height)
@@ -136,12 +186,28 @@ void UIRenderBackend::setFramebufferSize(uint16_t width, uint16_t height)
 void UIRenderBackend::beginFrame()
 {
     _drawCalls = 0;
-    _pendingRects.clear();
-    _textSyncFont = nullptr;
 
-    if (_scratchVertices.capacity() < 1024u) {
-        _scratchVertices.reserve(1024u);
-        _scratchIndices.reserve(1536u);
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+
+    FrameState& frame = *_frame;
+    frame.pendingRects.clear();
+    frame.textSyncFont = nullptr;
+
+    if (frame.scratchVertices.capacity() < 1024u) {
+        frame.scratchVertices.reserve(1024u);
+        frame.scratchIndices.reserve(1536u);
+    }
+
+    if (frame.textBatch == nullptr) {
+        frame.textBatch = std::make_unique<PendingTextBatch>();
+    }
+    frame.textBatch->vertices.clear();
+    frame.textBatch->indices.clear();
+    if (frame.textBatch->vertices.capacity() < 512u) {
+        frame.textBatch->vertices.reserve(512u);
+        frame.textBatch->indices.reserve(768u);
     }
 
     if (_gpu == nullptr || _width < 1 || _height < 1) {
@@ -163,13 +229,18 @@ void UIRenderBackend::endFrame()
     flushColoredRects();
 }
 
+void UIRenderBackend::flushBatches()
+{
+    flushPendingText();
+}
+
 void UIRenderBackend::syncTextAtlasIfNeeded()
 {
-    if (_fontAtlas == nullptr || !_fontAtlas->isAtlasDirty()) {
+    if (_fontAtlas == nullptr || !_fontAtlas->isAtlasDirty() || _frame == nullptr) {
         return;
     }
 
-    ayt::font::IFont* font = _textSyncFont;
+    ayt::font::IFont* font = _frame->textSyncFont;
     if (font == nullptr) {
         font = _fontAtlas->acquireFont(14);
     }
@@ -182,7 +253,17 @@ void UIRenderBackend::syncTextAtlasIfNeeded()
 
 void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, const ayt::math::FVector4& color)
 {
-    _pendingRects.push_back({bounds, color});
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+
+    // Cut the text batch before any new rect so overlays drawn after text
+    // keep correct z-order (rect submit follows flushed text).
+    if (_frame->textBatch != nullptr && !_frame->textBatch->vertices.empty()) {
+        flushPendingText();
+    }
+
+    _frame->pendingRects.push_back({bounds, color});
 }
 
 void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textureHandle,
@@ -202,49 +283,90 @@ void UIRenderBackend::drawWithAlpha(const ayt::math::FRectangle& bounds, void* t
 
 void UIRenderBackend::flushColoredRects()
 {
-    if (_pendingRects.empty() || !_initialized || _gpu == nullptr || _adapter == nullptr
-        || _width < 1 || _height < 1) {
-        _pendingRects.clear();
+    if (_frame == nullptr) {
         return;
     }
 
-    _scratchVertices.clear();
-    _scratchIndices.clear();
-    _scratchVertices.reserve(_pendingRects.size() * 4u);
-    _scratchIndices.reserve(_pendingRects.size() * 6u);
+    FrameState& frame = *_frame;
+    if (frame.pendingRects.empty() || !_initialized || _gpu == nullptr || _adapter == nullptr
+        || _width < 1 || _height < 1) {
+        frame.pendingRects.clear();
+        return;
+    }
 
-    for (const ColoredRect& rect : _pendingRects) {
-        const uint32_t base = static_cast<uint32_t>(_scratchVertices.size());
+    frame.scratchVertices.clear();
+    frame.scratchIndices.clear();
+    frame.scratchVertices.reserve(frame.pendingRects.size() * 4u);
+    frame.scratchIndices.reserve(frame.pendingRects.size() * 6u);
+
+    for (const ColoredRect& rect : frame.pendingRects) {
+        const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
         const uint32_t abgr = toAbgr(rect.color);
         const float    z    = 0.0f;
 
-        _scratchVertices.push_back({toNdcX(rect.bounds.minX, static_cast<float>(_width)),
-                                    toNdcY(rect.bounds.minY, static_cast<float>(_height)), z, abgr,
-                                    0.0f, 0.0f});
-        _scratchVertices.push_back({toNdcX(rect.bounds.maxX, static_cast<float>(_width)),
-                                    toNdcY(rect.bounds.minY, static_cast<float>(_height)), z, abgr,
-                                    1.0f, 0.0f});
-        _scratchVertices.push_back({toNdcX(rect.bounds.maxX, static_cast<float>(_width)),
-                                    toNdcY(rect.bounds.maxY, static_cast<float>(_height)), z, abgr,
-                                    1.0f, 1.0f});
-        _scratchVertices.push_back({toNdcX(rect.bounds.minX, static_cast<float>(_width)),
-                                    toNdcY(rect.bounds.maxY, static_cast<float>(_height)), z, abgr,
-                                    0.0f, 1.0f});
+        frame.scratchVertices.push_back({toNdcX(rect.bounds.minX, static_cast<float>(_width)),
+                                         toNdcY(rect.bounds.minY, static_cast<float>(_height)), z,
+                                         abgr, 0.0f, 0.0f});
+        frame.scratchVertices.push_back({toNdcX(rect.bounds.maxX, static_cast<float>(_width)),
+                                         toNdcY(rect.bounds.minY, static_cast<float>(_height)), z,
+                                         abgr, 1.0f, 0.0f});
+        frame.scratchVertices.push_back({toNdcX(rect.bounds.maxX, static_cast<float>(_width)),
+                                         toNdcY(rect.bounds.maxY, static_cast<float>(_height)), z,
+                                         abgr, 1.0f, 1.0f});
+        frame.scratchVertices.push_back({toNdcX(rect.bounds.minX, static_cast<float>(_width)),
+                                         toNdcY(rect.bounds.maxY, static_cast<float>(_height)), z,
+                                         abgr, 0.0f, 1.0f});
 
-        _scratchIndices.push_back(base + 0);
-        _scratchIndices.push_back(base + 1);
-        _scratchIndices.push_back(base + 2);
-        _scratchIndices.push_back(base + 0);
-        _scratchIndices.push_back(base + 2);
-        _scratchIndices.push_back(base + 3);
+        frame.scratchIndices.push_back(base + 0);
+        frame.scratchIndices.push_back(base + 1);
+        frame.scratchIndices.push_back(base + 2);
+        frame.scratchIndices.push_back(base + 0);
+        frame.scratchIndices.push_back(base + 2);
+        frame.scratchIndices.push_back(base + 3);
     }
 
-    _gpu->submitColoredQuads(kViewId, *_adapter, _scratchVertices.data(),
-                             static_cast<uint32_t>(_scratchVertices.size()), sizeof(UiVertex),
-                             _scratchIndices.data(), static_cast<uint32_t>(_scratchIndices.size()));
+    _gpu->submitColoredQuads(kViewId, *_adapter, frame.scratchVertices.data(),
+                             static_cast<uint32_t>(frame.scratchVertices.size()), sizeof(UiVertex),
+                             frame.scratchIndices.data(),
+                             static_cast<uint32_t>(frame.scratchIndices.size()));
 
     ++_drawCalls;
-    _pendingRects.clear();
+    frame.pendingRects.clear();
+}
+
+void UIRenderBackend::flushPendingText()
+{
+    if (_frame == nullptr) {
+        return;
+    }
+
+    FrameState& frame = *_frame;
+    if (frame.textBatch == nullptr || frame.textBatch->vertices.empty() || !_initialized
+        || _gpu == nullptr || _adapter == nullptr || _fontAtlas == nullptr || _width < 1
+        || _height < 1) {
+        if (frame.textBatch != nullptr) {
+            frame.textBatch->vertices.clear();
+            frame.textBatch->indices.clear();
+        }
+        return;
+    }
+
+    syncTextAtlasIfNeeded();
+
+    const uint16_t atlasIdx = _fontAtlas->atlasTextureIdx();
+    if (atlasIdx == detail::UiGpuContext::kInvalidIdx) {
+        frame.textBatch->vertices.clear();
+        frame.textBatch->indices.clear();
+        return;
+    }
+
+    _gpu->submitTexturedQuads(kViewId, *_adapter, atlasIdx, frame.textBatch->vertices.data(),
+                              static_cast<uint32_t>(frame.textBatch->vertices.size()),
+                              sizeof(UiVertex), frame.textBatch->indices.data(),
+                              static_cast<uint32_t>(frame.textBatch->indices.size()));
+    ++_drawCalls;
+    frame.textBatch->vertices.clear();
+    frame.textBatch->indices.clear();
 }
 
 void UIRenderBackend::drawTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
@@ -279,6 +401,11 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         return;
     }
 
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+    FrameState& frame = *_frame;
+
     ayt::font::IFont* font = _fontAtlas->acquireFont(fontSize);
     if (font == nullptr) {
         drawRect(bounds, color);
@@ -286,13 +413,12 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     }
 
     _fontAtlas->prepareGlyphs(font, fontSize, text);
-    _textSyncFont = font;
+    frame.textSyncFont = font;
     syncTextAtlasIfNeeded();
     flushColoredRects();
 
-    const uint16_t atlasIdx = _fontAtlas->atlasTextureIdx();
-    if (atlasIdx == detail::UiGpuContext::kInvalidIdx) {
-        return;
+    if (frame.textBatch == nullptr) {
+        frame.textBatch = std::make_unique<PendingTextBatch>();
     }
 
     const ayt::font::FontMetrics& metrics = font->getMetrics();
@@ -305,11 +431,6 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     const float    atlasH = static_cast<float>(detail::BgfxFontAtlas::kAtlasHeight);
     const float    fbW    = static_cast<float>(_width);
     const float    fbH    = static_cast<float>(_height);
-
-    std::vector<UiVertex> vertices;
-    std::vector<uint32_t> indices;
-    vertices.reserve(text.size() * 4u);
-    indices.reserve(text.size() * 6u);
 
     for (wchar_t ch : text) {
         ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
@@ -335,29 +456,20 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         const float u1 = (glyph->atlasPosX + glyph->atlasWidth) / atlasW;
         const float v1 = (glyph->atlasPosY + glyph->atlasHeight) / atlasH;
 
-        const uint32_t base = static_cast<uint32_t>(vertices.size());
+        const uint32_t base = static_cast<uint32_t>(frame.textBatch->vertices.size());
         const float    z    = 0.0f;
-        vertices.push_back({toNdcX(x0, fbW), toNdcY(y0, fbH), z, abgr, u0, v0});
-        vertices.push_back({toNdcX(x1, fbW), toNdcY(y0, fbH), z, abgr, u1, v0});
-        vertices.push_back({toNdcX(x1, fbW), toNdcY(y1, fbH), z, abgr, u1, v1});
-        vertices.push_back({toNdcX(x0, fbW), toNdcY(y1, fbH), z, abgr, u0, v1});
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
+        frame.textBatch->vertices.push_back({toNdcX(x0, fbW), toNdcY(y0, fbH), z, abgr, u0, v0});
+        frame.textBatch->vertices.push_back({toNdcX(x1, fbW), toNdcY(y0, fbH), z, abgr, u1, v0});
+        frame.textBatch->vertices.push_back({toNdcX(x1, fbW), toNdcY(y1, fbH), z, abgr, u1, v1});
+        frame.textBatch->vertices.push_back({toNdcX(x0, fbW), toNdcY(y1, fbH), z, abgr, u0, v1});
+        frame.textBatch->indices.push_back(base + 0);
+        frame.textBatch->indices.push_back(base + 1);
+        frame.textBatch->indices.push_back(base + 2);
+        frame.textBatch->indices.push_back(base + 0);
+        frame.textBatch->indices.push_back(base + 2);
+        frame.textBatch->indices.push_back(base + 3);
         cursorX += static_cast<float>(glyph->metrics.advance);
     }
-
-    if (vertices.empty()) {
-        return;
-    }
-
-    _gpu->submitTexturedQuads(kViewId, *_adapter, atlasIdx, vertices.data(),
-                              static_cast<uint32_t>(vertices.size()), sizeof(UiVertex),
-                              indices.data(), static_cast<uint32_t>(indices.size()));
-    ++_drawCalls;
 }
 
 } // namespace ayt::render

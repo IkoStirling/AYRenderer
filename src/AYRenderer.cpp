@@ -44,6 +44,9 @@ struct Renderer::Impl {
     uint16_t                      viewportW = 0;
     uint16_t                      viewportH = 0;
 
+    // -1 = normal (3D on view 0). >=0 = composite scene view (usually 1).
+    int                           compositeSceneViewId = -1;
+
     Impl()
         : resources(adapter, shaderPool)
     {
@@ -118,9 +121,27 @@ void Renderer::beginFrame(const ClearDesc& clear)
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+    _impl->compositeSceneViewId = -1;
     _impl->debugOverlay.onBeginFrame();
     _impl->adapter.beginFrame();
     _impl->adapter.setViewClear(detail::ForwardOpaquePass::kMainViewId, clear);
+}
+
+void Renderer::beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uint16_t fbHeight)
+{
+    if (!_impl || !_impl->adapter.isInitialized()) {
+        return;
+    }
+    _impl->debugOverlay.onBeginFrame();
+
+    // View 0: full-window clear only (never shrink this rect to the 3D hole).
+    _impl->adapter.setViewRect(0, 0, 0, fbWidth, fbHeight);
+    _impl->adapter.setViewClear(0, clear);
+    _impl->adapter.beginFrame(); // touch(0) so the clear runs
+
+    // View 1: 3D into the editor viewport; must not clear (would wipe chrome).
+    _impl->compositeSceneViewId = 1;
+    _impl->adapter.setViewClearNone(1);
 }
 
 void Renderer::render(const RenderScene& scene)
@@ -143,13 +164,18 @@ void Renderer::render(const RenderScene& scene)
     frame.lightDirection   = _impl->directionalLightDir.normalize();
     frame.lightColor       = _impl->directionalLightColor;
 
+    const uint8_t viewId = _impl->compositeSceneViewId >= 0
+                               ? static_cast<uint8_t>(_impl->compositeSceneViewId)
+                               : detail::ForwardOpaquePass::kMainViewId;
+
     _impl->lastDrawCalls = _impl->forwardPass.execute(
         _impl->adapter, _impl->shaderPool, scene,
         _impl->resources.meshes(), _impl->resources.textures(),
         _impl->resources.materials(),
         _impl->viewportX, _impl->viewportY,
         _impl->viewportW, _impl->viewportH,
-        frame);
+        frame,
+        viewId);
 }
 
 void Renderer::resize(uint32_t width, uint32_t height)
@@ -190,6 +216,7 @@ void Renderer::endFrame()
                                    _impl->viewportX, _impl->viewportY,
                                    _impl->viewportW, _impl->viewportH);
     _impl->adapter.endFrame();
+    _impl->compositeSceneViewId = -1;
 
     if (!_impl->finalizeScreenshotBase.empty()) {
         detail::finalizeScreenshotSidecar(_impl->finalizeScreenshotBase);

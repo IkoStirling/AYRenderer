@@ -4,8 +4,8 @@
 #include "AYRenderScene.h"
 #include "AYRenderTypes.h"
 
-#include "AYMathTypes.h"
-#include "AYMathUtils.h"
+#include "aymath/MathTypes.h"
+#include "aymath/MathUtils.h"
 
 #include <cstdint>
 #include <memory>
@@ -41,6 +41,9 @@ public:
     bool isInitialized() const noexcept;
 
     void beginFrame(const ClearDesc& clear = {});
+    // Full-window clear on view 0; subsequent render() draws 3D on view 1 with CLEAR_NONE.
+    // Use with UIRenderBackend (view 2) so chrome pixels are not left uncleared.
+    void beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uint16_t fbHeight);
     void render(const RenderScene& scene);
     void endFrame();
 

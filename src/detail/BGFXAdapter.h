@@ -34,6 +34,7 @@ public:
 
     void setViewRect(uint8_t viewId, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
     void setViewClear(uint8_t viewId, const ClearDesc& clear);
+    void setViewClearNone(uint8_t viewId);
     void setViewTransform(uint8_t viewId, const float* view, const float* proj);
 
     void resetResolution(uint32_t width, uint32_t height, bool vsync);

@@ -12,7 +12,7 @@
 #include "IAYMesh.h"
 #include "IAYTexture.h"
 
-#include <AYFile.h>
+#include <ayio/File.h>
 
 #include <bgfx/bgfx.h>
 #include <algorithm>

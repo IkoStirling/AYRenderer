@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYMathTypes.h"
+#include "aymath/MathTypes.h"
 
 namespace ayt::render::detail
 {

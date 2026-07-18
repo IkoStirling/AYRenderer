@@ -29,7 +29,8 @@ public:
                      std::unordered_map<uint64_t, GpuMaterial>& materials,
                      uint16_t viewportX, uint16_t viewportY,
                      uint16_t viewportWidth, uint16_t viewportHeight,
-                     const FrameContext& frame);
+                     const FrameContext& frame,
+                     uint8_t viewId = kMainViewId);
 };
 
 } // namespace ayt::render::detail
