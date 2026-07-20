@@ -41,6 +41,8 @@
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
 
+#include <bgfx/bgfx.h>
+
 #include <cstdint>
 #include <unordered_map>
 
@@ -70,6 +72,24 @@ struct PassExecContext {
     // mode hands 1 to the scene passes; non-composite hands 0. UIPass
     // ignores it (UIRenderBackend hard-codes kViewId = 2 today).
     uint8_t                 viewId         = 0;
+
+    // P2 (PR-D, 2026-07-20) — shared scene color/depth FBO owned by
+    // Renderer::Impl. ForwardOpaquePass + TransparentPass bind it as
+    // their view's draw target (instead of the default backbuffer) so
+    // PostProcessPass can sample the scene color via attach0.
+    //
+    // Passes must treat BGFX_INVALID_HANDLE as "no scene RT for this
+    // frame → use default backbuffer" (legacy behavior). This protects
+    // the headless test path (Noop backend ⇒ Impl never produces a
+    // valid sceneFbo) and gives hosts a clean off-switch via
+    // `Renderer::setSceneRenderTargetEnabled(false)` once we add it.
+    //
+    // The FBO is borrowed, not owned, by PassExecContext — Impl owns
+    // the underlying handle and rebuilds it on resize(). Passes that
+    // want to bind the default backbuffer again (PostProcessPass's
+    // post-blit-back submit) call `adapter.setViewFrameBuffer(viewId,
+    // BGFX_INVALID_HANDLE)` themselves; this field stays untouched.
+    bgfx::FrameBufferHandle sceneFbo       = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
 };
 
 } // namespace ayt::render::detail

@@ -133,44 +133,27 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // R5+ — the post-process view id. We reuse the same viewId that
-    // ForwardOpaquePass + TransparentPass wrote the scene color to
-    // (this is intentional — the input "scene color" is the backbuffer
-    // after those passes). The offscreen FBO we bind below captures
-    // the result of drawing the fullscreen triangle.
     (void)viewId;
 
-    // R5+ — acquire / resize the FBO. ensureFbo() tracks dimensions
-    // and only re-creates when the size actually changed (avoids
-    // recreating every frame for a stable-viewport host).
-    ensureFbo(adapter, viewportWidth, viewportHeight);
-    if (!BGFXAdapter::isValid(_fbo)) {
-        // BGFXAdapter::createFrameBuffer returned invalid — likely the
-        // active backend refused the format. Skip the post-process
-        // step this frame rather than crashing; the scene will appear
-        // without effects (matches "host opt-out" semantics).
-        return 0;
-    }
+    // P2 (PR-D, 2026-07-20) — the post-process source FBO. We
+    // borrow the shared scene FBO from PassExecContext when it's
+    // valid (Renderer built it ⇒ ForwardOpaque/Transparent drew into
+    // it ⇒ it carries the real scene color). When the FBO is invalid
+    // (Noop backend, SceneRT-off host, ensureSceneFbo failed this
+    // frame) we fall back to the pre-PR-D self-FBO path so headless
+    // tests + backbuffer-only hosts keep working unchanged.
+    const bgfx::FrameBufferHandle sceneFbo = ctx.sceneFbo;
+    const bool                      hasSceneFbo = BGFXAdapter::isValid(sceneFbo);
 
-    // R5+ — acquire the fullscreen triangle VB/IB once. Lazily created
-    // on first execute(); static vertex data is the same on every
-    // frame so the BGX-managed buffer lives for the pass's lifetime.
+    // P2 — resolve the program, FBOs, and quad lazily so the
+    // headless test path short-circuits at the earliest possible
+    // point. We always need the fullscreen quad + program ready
+    // for the blit-back, so do those regardless of source.
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
         || !BGFXAdapter::isValid(_fullscreenIB)) {
         return 0;
     }
-
-    // R5.1 — lazily acquire / compile the Phoskia post-process
-    // program from the shader pool. First execute() triggers the
-    // shaderc invocation; subsequent calls reuse the cached handle.
-    // If pool acquire fails (shaderc missing on CI + parse error +
-    // disk cache miss), _program stays invalid — we degrade to the
-    // R5+ "draw geometry only" path below: a submit-with-invalid-
-    // program draw + the FBO restore. The scene still shows on the
-    // backbuffer because ForwardOpaque + Transparent wrote there
-    // before us (the post-process "blit" just doesn't run, so no
-    // tonemap/bloom/exposure is applied).
     ensureProgram(pool);
     const bool programReady = _program.isValid()
         && _uBloomStrength != ayt::shader::InvalidBinding
@@ -178,97 +161,99 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         && _uTonemapMode   != ayt::shader::InvalidBinding
         && _tSceneColor    != ayt::shader::InvalidBinding;
 
-    // R5+ (Pass-side backfill, 2026-07-20) — bind the FBO color
-    // attachment as a sampler so the post-process fragment can
-    // `sample(u_sceneColor, vUv)`. Adapter wraps bgfx::getTexture;
-    // the returned TextureHandle is borrowed (no destroy), stays
-    // valid as long as the FBO is alive. We capture it every frame
-    // (cheap pointer deref) so a future ensureFbo() resize
-    // invalidates the prior handle cleanly. The same accessor will
-    // be reused by the GBufferPass consumer when R5+ lands the
-    // deferred MRT reads.
-    const bgfx::TextureHandle fboColor = adapter.getFboAttachment(_fbo, 0);
+    // P2 — pick the source color attachment. Preferred: borrow the
+    // scene FBO attach0 (this is what ForwardOpaque + Transparent
+    // just drew into). Fallback: the pre-PR-D self-FBO attach0
+    // (still wired, but never carries the real scene color; exists
+    // so the program path remains exercisable on hosts without a
+    // sceneFbo).
+    bgfx::FrameBufferHandle sourceFbo = sceneFbo;
+    if (!hasSceneFbo) {
+        ensureFbo(adapter, viewportWidth, viewportHeight);
+        if (!BGFXAdapter::isValid(_fbo)) {
+            return 0;
+        }
+        sourceFbo = _fbo;
+    }
 
-    // R5+ — bind the offscreen FBO as the draw target for the
-    // post-process view. We use a view id separate from ForwardOpaque
-    // / Transparent so the FBO can capture the post-processed result
-    // without clobbering the backbuffer depth that UIPass needs.
-    // PostProcessPass uses the same viewId arg passed in (default 0)
-    // — hosts that want to render to a different view for the chrome
-    // composite can override.
-    adapter.setViewFrameBuffer(viewId, _fbo);
+    // R5+ (Pass-side backfill, 2026-07-20) — bind the source FBO
+    // color attachment as a sampler so the post-process fragment
+    // can `sample(u_sceneColor, vUv)`.
+    const bgfx::TextureHandle fboColor = adapter.getFboAttachment(sourceFbo, 0);
+    if (!BGFXAdapter::isValid(fboColor)) {
+        return 0;
+    }
+
+    // P2 — bind the source FBO as the draw target. We re-bind the
+    // SAME viewId on purpose: bgfx treats setViewFrameBuffer as a
+    // view-scoped binding that overrides earlier per-view setView*
+    // calls for that view. The downstream UIPass then rebinds view 2
+    // (its own kViewId), which is unaffected. This matches
+    // ForwardOpaque / Transparent's viewId choice (the scene view).
+    adapter.setViewFrameBuffer(viewId, sourceFbo);
     adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
 
     // R5+ (Pass-side backfill) — full 5-arg view clear through the
-    // adapter. Replaces the prior bgfx::setViewClear direct call so
-    // every Pass → bgfx interaction goes through BGFXAdapter.
-    adapter.setViewClearRaw(viewId,
-                            BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                            /*rgba=*/0x00000000,
-                            /*depth=*/1.0f,
-                            /*stencil=*/0);
+    // adapter. We only clear the depth when the source was the
+    // pre-PR-D self-FBO (which was just created / resized and never
+    // written yet); for the scene FBO we keep the depth ForwardOpaque
+    // wrote so a future DepthOfField pass can read it.
+    if (!hasSceneFbo) {
+        adapter.setViewClearRaw(viewId,
+                                BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                                /*rgba=*/0x00000000,
+                                /*depth=*/1.0f,
+                                /*stencil=*/0);
+    }
 
     // R5.1 — wire the post-process knobs into the fragment shader.
     // The 4 bindings were resolved in ensureProgram() once; we look
     // them up by cached ID here. The Phoskia `uniform int tonemapMode`
     // is 4 bytes on the GLSL side, matching our int32_t cast.
-    //
-    // We then defer the actual bgfx::submit to ShaderResource::submit
-    // (called below) — ShaderResource holds the bgfx::ProgramHandle
-    // internally; manually constructing `bgfx::ProgramHandle{_program.id()}`
-    // would mangle the handle (ShaderResource id is a pool handle,
-    // not a bgfx handle). Following the ForwardOpaquePass pattern
-    // (ForwardOpaquePass.cpp:185 `material.shader.submit(ctx)`) keeps
-    // the draw path in one well-tested code path.
-    if (programReady && BGFXAdapter::isValid(fboColor)) {
-        // bgfx idx → shader::TextureHandle.id (+1 offset so id==0
-        // stays invalid; see GpuResources.h:73 toShaderTexture).
+    if (programReady) {
         const ayt::shader::TextureHandle texHandle =
             ayt::render::detail::toShaderTexture(fboColor);
-        _program.setTexture(0, _tSceneColor, texHandle);
         const float bloomStrength = frame.bloomStrength;
         const float exposure      = frame.exposure;
         const int32_t tonemapMode = static_cast<int32_t>(frame.tonemapMode);
+        _program.setTexture(0, _tSceneColor, texHandle);
         _program.setUniform(_uBloomStrength, &bloomStrength, sizeof(bloomStrength));
         _program.setUniform(_uExposure,      &exposure,      sizeof(exposure));
         _program.setUniform(_uTonemapMode,   &tonemapMode,   sizeof(tonemapMode));
 
-        // R5+ — submit the FBO-targeted draw via ShaderResource so
-        // bgfx::setTexture/setUniform pending lists flush + bgfx::submit
-        // is called with the impl->programHandle (correct bgfx handle).
-        ayt::shader::DrawCallContext ctx;
-        ctx.viewId = viewId;
-        ctx.state  = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
-                   | BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_WRITE_Z;
-        _program.submit(ctx);
+        // P2 — the FBO-targeted draw. Bypasses depth writes since
+        // there's no depth buffer involved here; the fullscreen
+        // triangle is always at the far plane.
+        ayt::shader::DrawCallContext sub;
+        sub.viewId = viewId;
+        sub.state  = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
+                   | BGFX_STATE_DEPTH_TEST_ALWAYS;
+        _program.submit(sub);
 
-        // R5.1 — real blit-back step. Re-bind the default backbuffer
-        // and submit the SAME fullscreen triangle AGAIN, this time
-        // with the FBO color attached as a sampler (the post-process
-        // program does the actual copy). The second submit uses the
-        // SAME pending uniform + texture bindings (ShaderResource
-        // hasn't been cleared between submits — see AYShaderResource.cpp
-        // line 243: pendingTextures.clear() runs at end of submit,
-        // so we re-set them).
+        // P2 / R5.1 — blit-back to the default backbuffer. Re-bind
+        // view to backbuffer (not the FBO), re-set the texture +
+        // uniforms (bgfx cleared the pending list on the prior submit),
+        // and re-submit. Same fullscreen-triangle path so no extra
+        // GPU state. UIPass (view 2) draws cleanly over this output
+        // because we never touched view 2 here.
         adapter.setViewFrameBuffer(viewId, BGFX_INVALID_HANDLE);
         adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
         adapter.setTransformIdentity();
         adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
         adapter.setIndexBuffer(_fullscreenIB, 0, 3);
 
-        // sampler + uniform re-bind (submit() clears pending lists).
         _program.setTexture(0, _tSceneColor, texHandle);
         _program.setUniform(_uBloomStrength, &bloomStrength, sizeof(bloomStrength));
         _program.setUniform(_uExposure,      &exposure,      sizeof(exposure));
         _program.setUniform(_uTonemapMode,   &tonemapMode,   sizeof(tonemapMode));
-        _program.submit(ctx);
+        _program.submit(sub);
         return 2;  // FBO-target draw + backbuffer-target draw
     }
 
-    // R5+ (Pass-side backfill) — fallback no-program path. We submit
-    // through the adapter so the bgfx::submit call site doesn't leak
-    // into the Pass file. Restore the default backbuffer so UIPass
-    // can composite chrome over the unfiltered scene color. Return 1
+    // R5+ (Pass-side backfill) — fallback no-program path. Submit
+    // through the adapter so bgfx::submit doesn't leak into the
+    // Pass file. Restore the default backbuffer so UIPass can
+    // composite chrome over the unfiltered scene color. Return 1
     // to record the bgfx::submit that fired (the program is invalid
     // so the GPU effectively records the call but discards the
     // actual draw).
