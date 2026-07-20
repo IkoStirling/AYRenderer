@@ -23,9 +23,34 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 | R4-b | debug overlay：FPS / draw 统计 / bgfx debug text | ✅ |
 | R4-c | `captureScreenshot`：backbuffer PNG（窗口 + 真实 GPU backend） | ✅ |
 | Engine | GameLoop + Entity `RenderSystem` + `RendererSubSystem` | ✅ |
-| R5+ | PostProcess | ⚠ partial — Phoskia 程序 + 真 blit-back 已 wire（commit 9dab8cc），但采样的是其**自有空 FBO**而非场景色（scene RT 闭环见 `docs/execution-plan.md` P2） |
-| R5+ | Shadow | 🅪 stub — depth-only FBO + identity light xform（commit 53fb866），**未 `addPass` 默认管线**；cut-2 见 `docs/execution-plan.md` P3，§5 segfault 约束生效前不动 |
+| R5+ | PostProcess | ✅ Phoskia 程序 + **从 scene FBO attach0 采样** + 真 blit-back（PR-D 2026-07-20, commit `b66deb8`）；bloom/exposure/tonemap 真作用 |
+| R5+ | Shadow | 🅪 partial — depth-only FBO + **真 light-space ortho**（PR-F1' 2026-07-21, 见 feat branch）；`ShadowPass::lightView()/lightProj()/lightViewProj()/shadowFbo()` 已 ship；**仍未 `addPass` 默认管线**，**仍没 pass 采 shadow map**（详见下文"产品光照差距"） |
 | R5+ | GBuffer / Lighting / Command Queue | ❌ missing — 仅设计，无代码 |
+
+---
+
+## 当前定位（产品角度，2026-07-21 反映 PR-F1'）
+
+**适合当前能做的：** Editor / Demo 的前向场景 + UI 合成 + 资源加载 + 蒙皮（bone UBO 已 wire）。
+
+**还不能当完整渲染器当的：** 带阴影的产品光照、延迟渲染、复杂后处理（真 bloom chain / DOF / SSR）。
+
+### 距离"带阴影的产品光照"还差的关卡
+
+| 关卡 | 缺口 | 难度 | 说明 |
+|------|------|------|------|
+| 0. Light API 接入 | F1' 把 `RenderScene::Light` 隔离在 `AY_F1_DIAG_LIGHT` OFF 默认；要用户能 `scene.addLight(...)` 需要开 LIGHT 后跑 §5.4 二切 bisect（已布在 `docs/f1-sigsegv-repro.md` 矩阵 #5/#7） | ★★ | 混编风险受 flag 控制 |
+| 1. Forward 采样 shadow FBO | F2 未 ship — ShadowPass 写 depth 完整，FO/Transparent 仍**不读** shadow map | ★★★ | F1' 已提供 getter，Phoskia 加 `texture2dshadow` + bias |
+| 2. Phoskia shadow_caster 程序 | 当前 `bgfx::ProgramHandle{BGFX_INVALID_HANDLE}`，**skinned 模型 joint 不传**，骨头伸处无深度 | ★★ | §5.5 deferred |
+| 3. Scene AABB 自适应 light-space | F1' 用固定 50 单位 ortho 包围原点；超出 ±50 的物体阴影 clamp 切断 | ★★ | 简单 `computeAABB()` 即可 |
+| 4. Cascade / 多光 atlas | 单 directional 光（`Light::castShadow=true` 第一个），多光需 atlas 或 cascade | ★★★ | 显式推迟 P5 |
+| 5. PCF / VSM 滤波 | hard depth compare，锯齿明显 | ★★ | 显式推迟 |
+| 6. Shadow bias | 真 GPU 自遮挡 acne，需 constant + slope-scaled bias | ★ | 跟在 F2 后 |
+| 7. `AYRendererSubSystem` Light 接入 | host 调 `addLight` 需 SubSystem 持 `RenderScene` 句柄 | ★★ | 与 #0 一同 ship |
+| 8. 长时 post-process chain | PP "near-identity" 不是真 bloom（无 downsample/upsample） | ★★★ | P6.3 explicit |
+| 9. DOF / SSR / SSAO | 完全没规划 | ★★★★ | 不在 P0–P6 窗口 |
+
+**简版路线：** S1 = 0+1+3+6+7 = "单 directional 灯 + sharp shadow demo"（1–2 PR）；S2 = 2+4+5+8 = "中端 3A demo"（2–3 PR）。
 
 ---
 

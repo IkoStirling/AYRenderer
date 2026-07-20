@@ -1,6 +1,7 @@
 #pragma once
 // AYRenderScene.h — frame draw list (engine-facing, no GPU types)
 
+#include "AYF1DiagFlags.h"
 #include "AYRenderTypes.h"
 
 #include <vector>
@@ -12,26 +13,36 @@ struct DrawItem {
     MeshHandle     mesh;
     MaterialHandle material;
     ayt::math::Float4x4 world = ayt::math::Float4x4::identity();
-    // Phase 1 SC-01 / RD-04: null when non-skinned. When non-null,
-    // `boneMatrices` points to `jointCount` contiguous mat4 entries
-    // (jointCount <= 128). The renderer copies them into the
-    // material's `Skeleton` UBO via setUniformBlock before draw.
     const ayt::math::Float4x4* boneMatrices = nullptr;
     uint32_t                   jointCount   = 0;
-    // U1++ — sort-key hook for TransparentPass back-to-front sort
-    // (U1.5). Default 0 preserves insertion-order semantics for
-    // callers that do not set it. Camera-space Z will be quantized
-    // into this signed int by an upcoming per-frame Pass::execute()
-    // step; rendering passes that do not sort can ignore it. ABI:
-    // +4 bytes appended to DrawItem (sizeof grows 4 -> still naturally
-    // aligned, no callers affected because DrawItem is always value-
-    // initialized via the engine-side RenderScene::add overloads).
     int32_t                    sortKey      = 0;
 };
 
+#if AY_F1_DIAG_LIGHT
+// F1 diag — enabling this grows sizeof(RenderScene) and therefore
+// sizeof(RendererSubSystem) (member _scene sits before _events).
+// Mismatched TU sizes → EventBusHostScope::subscribe vector crash.
+struct Light {
+    enum class Type : uint8_t {
+        Directional = 0,
+        Point       = 1,
+        Spot        = 2,
+    };
+    Type                  type      = Type::Directional;
+    ayt::math::FVector3   direction = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
+    ayt::math::FVector3   color     = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
+    float                 intensity = 1.0f;
+};
+#endif
+
 class RenderScene {
 public:
-    void clear() { _items.clear(); }
+    void clear() {
+        _items.clear();
+#if AY_F1_DIAG_LIGHT
+        _lights.clear();
+#endif
+    }
 
     void add(const DrawItem& item) { _items.push_back(item); }
 
@@ -44,14 +55,10 @@ public:
         item.world        = world;
         item.boneMatrices = nullptr;
         item.jointCount   = 0;
-        item.sortKey      = 0;  // U1++ — placeholder until U1.5 sort consumer
+        item.sortKey      = 0;
         _items.push_back(item);
     }
 
-    // Phase 1 SC-01: skinned-draw overload. `boneMatrices` points to
-    // `jointCount` entries; both must be consistent (jointCount == 0
-    // iff boneMatrices == nullptr). The pointer is non-owning; the
-    // caller keeps the storage alive until end of frame.
     void add(MeshHandle mesh, MaterialHandle material,
              const ayt::math::Float4x4& world,
              const ayt::math::Float4x4* boneMatrices,
@@ -66,11 +73,19 @@ public:
         _items.push_back(item);
     }
 
+#if AY_F1_DIAG_LIGHT
+    void addLight(const Light& light) { _lights.push_back(light); }
+    const std::vector<Light>& lights() const noexcept { return _lights; }
+#endif
+
     const std::vector<DrawItem>& items() const noexcept { return _items; }
     bool empty() const noexcept { return _items.empty(); }
 
 private:
     std::vector<DrawItem> _items;
+#if AY_F1_DIAG_LIGHT
+    std::vector<Light>    _lights;
+#endif
 };
 
 } // namespace ayt::render

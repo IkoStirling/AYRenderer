@@ -112,6 +112,23 @@ target_compile_definitions(AYRenderer PRIVATE
     AY_BGFX_SHADER_INCLUDE_HINT="${AY_BGFX_SHADER_INCLUDE_DIR}"
 )
 
+# F1 SIGSEGV diagnosis toggles (docs/f1-sigsegv-repro.md).
+# Defaults OFF = product-safe tree. Turn ON one-at-a-time, then
+# Clean rebuild AYRenderer + AYRenderer_Test (never incremental-only).
+option(AY_F1_DIAG_LIGHT "F1 diag: RenderScene::Light storage" OFF)
+option(AY_F1_DIAG_FRAME_SHADOW "F1 diag: FrameContext shadowFbo/lightViewProj + lastFrameShadowFbo" OFF)
+option(AY_F1_DIAG_DEFAULT_SHADOW "F1 diag: default-pipeline addPass(Shadow) enabled" OFF)
+
+foreach(_f1_flag AY_F1_DIAG_LIGHT AY_F1_DIAG_FRAME_SHADOW AY_F1_DIAG_DEFAULT_SHADOW)
+    if(${_f1_flag})
+        set(_f1_val 1)
+    else()
+        set(_f1_val 0)
+    endif()
+    # PUBLIC so every consumer TU (tests, demos) sees the same layout.
+    target_compile_definitions(AYRenderer PUBLIC ${_f1_flag}=${_f1_val})
+endforeach()
+
 enable_testing()
 add_subdirectory(unittest)
 add_subdirectory(demo)

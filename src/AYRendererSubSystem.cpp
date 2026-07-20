@@ -1,15 +1,11 @@
 #include "AYRendererSubSystem.h"
 
-
-
+#include "AYF1DiagFlags.h"
 #include "AYUIRenderBackend.h"
 
 #include <AYSubSystemRegistry.h>
 
-
-
 #include <cstdio>
-
 #include <string>
 
 
@@ -587,6 +583,38 @@ void RendererSubSystem::registerSubSystem()
         return;
     }
     ::ayt::game::IGameLoop::instance().registerSubSystem(new RendererSubSystem());
+}
+
+std::size_t RendererSubSystem::diagSizeofRenderScene()
+{
+    return sizeof(RenderScene);
+}
+
+std::size_t RendererSubSystem::diagSizeofRendererSubSystem()
+{
+    return sizeof(RendererSubSystem);
+}
+
+std::size_t RendererSubSystem::diagSizeofFrameContext()
+{
+    // Implemented in AYRenderer.cpp so this TU never includes FrameContext
+    // (avoids bgfx / MemorySystem header collisions when diag flags are on).
+    return ayt::render::detailDiagSizeofFrameContext();
+}
+
+int RendererSubSystem::diagFlagLight()
+{
+    return AY_F1_DIAG_LIGHT;
+}
+
+int RendererSubSystem::diagFlagFrameShadow()
+{
+    return AY_F1_DIAG_FRAME_SHADOW;
+}
+
+int RendererSubSystem::diagFlagDefaultShadow()
+{
+    return AY_F1_DIAG_DEFAULT_SHADOW;
 }
 
 } // namespace ayt::render

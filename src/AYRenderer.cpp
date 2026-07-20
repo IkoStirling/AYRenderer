@@ -1,5 +1,6 @@
 #include "AYRenderer.h"
 
+#include "AYF1DiagFlags.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/DebugOverlay.h"
 #include "detail/ForwardOpaquePass.h"
@@ -10,6 +11,9 @@
 #include "detail/RenderResourceManager.h"
 #include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
+#if AY_F1_DIAG_DEFAULT_SHADOW
+#  include "detail/ShadowPass.h"
+#endif
 #include "detail/TransparentPass.h"
 #include "detail/UiGpuContext.h"
 #include "detail/UIPass.h"
@@ -25,6 +29,11 @@
 
 namespace ayt::render
 {
+
+std::size_t detailDiagSizeofFrameContext()
+{
+    return sizeof(detail::FrameContext);
+}
 
 struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
@@ -105,14 +114,20 @@ struct Renderer::Impl {
     // (so callers can no-op cleanly).
     bgfx::FrameBufferHandle ensureSceneFbo();
 
+#if AY_F1_DIAG_FRAME_SHADOW
+    // F1 diag — cache written into FrameContext each render().
+    bgfx::FrameBufferHandle lastFrameShadowFbo =
+        bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+#endif
+
     Impl()
         : resources(adapter, shaderPool)
     {
+#if AY_F1_DIAG_DEFAULT_SHADOW
+        pipeline.addPass(std::make_unique<detail::ShadowPass>());
+#endif
         pipeline.addPass(std::make_unique<detail::ForwardOpaquePass>());
         pipeline.addPass(std::make_unique<detail::TransparentPass>());
-        // PostProcess slot — R5.1 wired (Phoskia program + uniforms +
-        // blit-back), but samples its own empty FBO not the scene color.
-        // Scene-RT closed loop is docs/execution-plan.md P2.
         pipeline.addPass(std::make_unique<detail::PostProcessPass>());
         pipeline.addPass(std::make_unique<detail::UIPass>());
     }
@@ -266,6 +281,18 @@ void Renderer::render(const RenderScene& scene)
     frame.exposure      = _impl->postProcessExposure;
     frame.tonemapMode   = _impl->postProcessTonemapMode;
 
+#if AY_F1_DIAG_FRAME_SHADOW
+    frame.shadowFboIdx  = _impl->lastFrameShadowFbo.idx;
+    frame.lightViewProj = ayt::math::Float4x4::identity();
+    frame.lightIndex    = 0;
+#if AY_F1_DIAG_LIGHT
+    if (!scene.lights().empty()) {
+        frame.lightDirection = scene.lights()[0].direction;
+        frame.lightColor     = scene.lights()[0].color;
+    }
+#endif
+#endif
+
     const uint8_t viewId = _impl->compositeSceneViewId >= 0
                                ? static_cast<uint8_t>(_impl->compositeSceneViewId)
                                : detail::ForwardOpaquePass::kMainViewId;
@@ -315,6 +342,16 @@ void Renderer::render(const RenderScene& scene)
     // Per-pass isEnabled() guards are honored by the pipeline; today
     // all four default to true (set by the RenderPass base ctor).
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
+
+#if AY_F1_DIAG_FRAME_SHADOW && AY_F1_DIAG_DEFAULT_SHADOW
+    for (auto& pass : _impl->pipeline.passes()) {
+        if (pass && pass->name() == "Shadow") {
+            auto* shadow = static_cast<detail::ShadowPass*>(pass.get());
+            _impl->lastFrameShadowFbo = shadow->shadowFbo();
+            break;
+        }
+    }
+#endif
 }
 
 void Renderer::resize(uint32_t width, uint32_t height)
