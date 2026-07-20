@@ -65,7 +65,7 @@ Shadow → GBuffer → Lighting → ForwardOpaque → Transparent → PostProces
 | Transparent + `sortKey` | Partial | 只画 `BlendMode::Alpha`；相机 Z 自动填 sortKey 未做 |
 | PostProcess | Partial | Phoskia + **自有** FBO + 公开 knobs（`setPostProcess*`）已在；**采样的是清空后的自有 FBO，不是场景色** |
 | UIPass + UIRenderBackend + composite views | Done | view **0=clear / 1=scene / 2=UI**；头注释仍有「NOT YET DISPATCHED」谎言 |
-| ShadowPass cut-1 | Stub | depth FBO + **identity** light xform；**未 `addPass`**（≠ setEnabled false）；无 shadow 采样；无 `setShadowsEnabled` |
+| ShadowPass cut-1→F1' | Partial | depth FBO + **light-space ortho**（pass 本地矩阵）；**未 `addPass`**；无采样；无 Light / Frame shadow 槽 |
 | GBuffer / Lighting | Missing | 仅设计 |
 | DrawListBuilder / CommandQueue | Missing | 设计延后 |
 | `design.md` / README / 多处 Pass 头注释 | Drift | 文档落后实现，是「乱」的主因之一 |
@@ -176,7 +176,33 @@ P6  合批 / 命令队列 / 文档收口     ← 性能与长期维护
 | E5 | E1+E4 后 Shadow enabled，仍不写 FrameContext ShadowMap | 同上 |
 | E6 | 在 E5 上把 shadow 句柄经 **旁路**（Pass 查询 API / Renderer getter）交给 Forward，**不**进 FrameContext | 验证「采样」是否必须进 Frame |
 
-任一实验稳定挂掉 → 先加深 Noop/shaderc 生命周期（见 P0.3），再重跑，**不要**叠加下一个实验。
+任一实验稳定挂掉 → 先加深 Noop/shaderc 生命周期（见 P0.5），再重跑，**不要**叠加下一个实验。
+
+### 5.5 PR-F1（C' 路径）SIGSEGV — 2026-07-20 阻断记录
+
+**目标路径（已确认会挂，禁止重开同一组合）：**
+Light struct + FrameContext shadow 槽（`shadowFbo` / `lightViewProj` 等）+ 默认 `addPass(Shadow)` **enabled** + 真 light-space ortho；FO/Transparent **不**采样（原定 PR-F2）。
+
+| 步 | 内容 | 结果 |
+|----|------|------|
+| 1 | F1 完整（5-pass + Light + FrameContext shadow + light ortho） | SIGSEGV @ `Test_RenderResources::textured_material_draw_one_frame` |
+| 2 | Shadow `setEnabled(false)`（文件保留） | 仍 SIGSEGV（同位置） |
+| 3 | 从 pipeline **完全移除** Shadow | 仍 SIGSEGV（同位置） |
+| 4 | 回滚 FrameContext shadow 槽 + Light struct + `lastFrameShadowFbo` cache | **3/3** 稳定全绿（报告：447/447） |
+
+**诊断（写入时点）：**
+- SIGSEGV **不是** ShadowPass::execute 触发（步 3 仍 139）。
+- **不是**「仅有 E1 已 ship 的 `shadowMapId` 尾部 POD」单独触发（E1 曾通过；步 4 回滚的是更大的 shadow 槽 + Light + cache）。
+- 与 Shadow 是否挂管线无关 → 嫌疑集中在 **RenderScene Light / FrameContext 扩展 shadow 句柄矩阵 / Renderer 侧 lastFrameShadow 缓存** 的组合，或与 **pre-existing** `textured_material_draw_one_frame` flaky rot 叠加。
+- 回滚到 matched master（报告基线 `b66deb8`）后干净。
+
+**强制后续形态（PR-F1' / 本实现）：**
+- ✅ `buildDirectionalShadowMatrices` + ShadowPass 本地 `_lightView/_lightProj/_lightViewProj` + 本地 `_shadowFbo`
+- ✅ 仍用 `FrameContext::lightDirection`（已有字段）
+- ❌ 不引入 `RenderScene` Light
+- ❌ 不引入 `FrameContext::shadowFbo` / `lightViewProj`（E1 `shadowMapId` 保持只读占位，本 PR **不写**）
+- ❌ 不引入 `lastFrameShadowFbo`
+- ❌ 不默认 `addPass(Shadow)`（enabled 或 disabled 都先不做，直到单独 E4 3/3）
 
 ---
 
@@ -251,11 +277,10 @@ P6  合批 / 命令队列 / 文档收口     ← 性能与长期维护
 | 项 | 动作 | 退出门 |
 |----|------|--------|
 | P3.0 | 跑完 §5.4 E1–E4（记录结果进本文件附录） | 有书面结果表 |
-| P3.1 | Light 方向来源：优先 **复用** `FrameContext::lightDirection`（避免新 Light struct）；ortho/`lookAt` 建 light VP | Shadow FBO 深度随方向变（真 GPU 或 debug blit） |
-| P3.2 | 场景 AABB / 固定半径 frustum 二选一写清；默认固定半径可接受 | 单测钉 matrix 非 identity |
-| P3.3 | 默认管线二选一：`addPass(Shadow)` + **立刻 `setEnabled(false)`**（注意：仅 addPass 会变成 **enabled**），**或** 新增 Host `Renderer::setShadowsEnabled`（今日 **不存在**，需自建；可配合 `findPass` 也需自建） | 默认全量测试与今日一致（Shadow 不跑） |
-| P3.4 | **不要**把 shadow 句柄写入 `FrameContext`，除非 E1/E6 通过；用 `ShadowPass` 查询 API / Renderer getter 旁路 | Forward 仍可不读 |
-| P3.5 | 删掉 ShadowPass 头里「50-unit frustum」「Light caused segfault」；改为 identity→light VP 的真实描述 + 链到 §5 | 注释与代码一致 |
+| P3.1 | Light 方向来源：优先 **复用** `FrameContext::lightDirection`；ortho/`lookAt` 建 light VP；矩阵落在 **ShadowPass 成员**（见 §5.5 PR-F1'） | 单测钉 matrix 非 identity + 随方向变 |
+| P3.2 | 场景 AABB / 固定半径 frustum — **F1' 已选固定半径 50** | 文档与 `kDefaultFrustumRadius` 一致 |
+| P3.3 | **暂缓**默认 `addPass(Shadow)`（含 disabled）— 等 §5.4 E4 单独 3/3；禁止与 Light/Frame shadow 槽同 PR | 默认管线仍 4-pass |
+| P3.4 | **不要**把 shadow 句柄/矩阵写入 `FrameContext`；用 ShadowPass getter（`lightViewProj` / `shadowFbo`） | Forward 仍不读（F2） |
 
 **显式推迟：** cascade、PCF、点光阴影、Phoskia `shadow_caster` 变体、alpha-clip caster。
 
@@ -307,8 +332,8 @@ P6  合批 / 命令队列 / 文档收口     ← 性能与长期维护
 | PR-C | refactor: PassExecContext collapses RenderPass::execute arity | P1 |
 | PR-D | feat: scene `createFrameBuffer` feeds PostProcess（勿占 view 2） | P2 |
 | PR-E | experiment: FrameContext POD tail **或** default-pipe Shadow+disabled（一次一个） | §5.4 E1 / E4 |
-| PR-F | feat: ShadowPass light-space depth (opt-in；自建 enable API) | P3 |
-| PR-G | feat: forward shadow sampling（旁路 getter，先于 FrameContext 槽） | P4 |
+| PR-F | ~~C' Light+ShadowMap+enabled~~ **阻断** → **PR-F1'** light-space on ShadowPass only（§5.5） | P3 / §5.5 |
+| PR-F2 | feat: forward shadow sampling via pass getters（无 FrameContext 槽） | P4 |
 | PR-H | feat: GBuffer + Lighting path switch | P5 |
 
 ---
@@ -363,12 +388,14 @@ git checkout -b fix/renderer-p0-docs-alpha
 | 实验 / PR | 日期 | 跑次 | PASS/FAIL | 备注 |
 |------|------|------|-----------|------|
 | **E1** FrameContext 尾部 POD | 2026-07-20 | **4/4 PASS** (428/428) | tail `uint32_t shadowMapId = 0;`,无语义使用;commit `938c56d` (branch `exp/renderer-framecontext-tail-pod`);4 跑次出于 §5.4 baseline 协议额外加固一次;解锁 E4 / P3 路径 |
-| **P2 / PR-D** Scene RT → PP 闭环 | 2026-07-20 | **3/3 PASS** (447/447) | `PassExecContext` 末尾加 `sceneFbo`,`Renderer::Impl` 持有 + ensure/resize/destroy;`FO+Transparent` 调 `setViewFrameBuffer(viewId, ctx.sceneFbo)`;`PostProcessPass` 借 ctx.sceneFbo 的 attach0 作为 u_sceneColor 输入(UIPass view 2 不动);fallback 路径覆盖 Noop / SceneRT-off;新增 `Test_SceneRT_P2.cpp` 8 case (`p2_ctx_carries_scene_fbo_field` + `p2_ctx_scene_fbo_can_be_set_and_carried` + `p2_ctx_scene_fbo_per_instance_aliasing` + `p2_forward_opaque_tolerates_invalid_scene_fbo` + `p2_transparent_tolerates_invalid_scene_fbo` + `p2_postprocess_source_selection_uses_ctx_scenefbo_when_valid` + `p2_full_pipeline_4pass_dispatch_with_scene_fbo_aliasing` + `p2_renderer_implementation_stores_scene_fbo_state`);19 新测试 (428 → 447);头链 `<bgfx/bgfx.h>` 是为 `bgfx::FrameBufferHandle` 类型完整,无新增 bgfx:: 函数调用 — 全部走 `BGFXAdapter` 帮手 |
-| E2 Light 存储 API | | | | 未跑(E1 + P2 通过后下一刀候选) |
+| **P2 / PR-D** Scene RT → PP 闭环 | 2026-07-20 | **3/3 PASS** (447/447) | 见既有记录；`sceneFbo` on PassExecContext |
+| **PR-F1 C'** Light+Frame shadow槽+enabled Shadow | 2026-07-20 | **FAIL 139** | 见 §5.5；步1–3 均 SIGSEGV；步4 回滚后 3/3 PASS；基线 `b66deb8` |
+| **PR-F1'** light-space on ShadowPass only | 2026-07-21 | **3/3 PASS** (465/465) | `ShadowLightMatrix.h/.cpp` 用 bx 构 view/proj(SAME `homogeneousDepth` 约定同 `setMainCameraLookAtPerspective`);`ShadowPass::_lightView/_lightProj/_lightViewProj` 内部缓存 + getter(`lightView()/lightProj()/lightViewProj()/shadowFbo()`);**不**增 `RenderScene Light`、**不**加 `FrameContext shadow 槽`(改设 `AY_F1_DIAG_LIGHT / AY_F1_DIAG_FRAME_SHADOW / AY_F1_DIAG_DEFAULT_SHADOW` CMake feature flag,默认全 OFF ⇒ master ABI 与 `b66deb8` 一致);**不**默认挂 Shadow;新文件 `include/AYF1DiagFlags.h` + `unittest/Test_F1_LayoutDiag.cpp` 锁住 ABI 一致(测试在三个 flag 全 OFF 时打印 `sizeof(RenderScene)` / `sizeof(FrameContext)` 防混编复发);**附带真修**:`FrameContext.h` 不再 `#include <bgfx/bgfx.h>`(与 `MemorySystem::instance` 在 `AYRendererSubSystem.cpp` 撞名),shadow 槽只存 `uint16_t shadowFboIdx` 而非 `bgfx::FrameBufferHandle`;18 新测试(447 → 465);诊断面板见 `docs/f1-sigsegv-repro.md` |
+| E2 Light 存储 API | | | | **默认 OFF**;开 `AY_F1_DIAG_LIGHT=ON` 时启用,确保 Clean 全编 |
 | E3 非 const FrameContext& | | | | 未跑 |
-| E4 默认挂 Shadow disabled | | | | 未跑(E1 + P2 解锁后候选) |
-| E5 Shadow enabled 无 Frame 槽 | | | | 未跑 |
-| E6 旁路 getter 采样 | | | | 未跑 |
+| E4 默认挂 Shadow disabled | | | | **默认 OFF**;开 `AY_F1_DIAG_DEFAULT_SHADOW=ON` 时启用,需 §5.4 干净树重跑 ≥3 次 |
+| E5 Shadow enabled 无 Frame 槽 | | | | 未跑(在 `AY_F1_DIAG_LIGHT=OFF + AY_F1_DIAG_FRAME_SHADOW=OFF` 下应是基线,需独立验证) |
+| E6 旁路 getter 采样 | | | | F1' 已提供 getter(lightView/lightProj/lightViewProj/shadowFbo),**采样**属 PR-F2 |
 
 ## 附录 B — 关键默认管线索引
 
@@ -376,7 +403,7 @@ git checkout -b fix/renderer-p0-docs-alpha
 |-------|------|------|
 | 0 | ForwardOpaque | on（**含 Alpha，待 P0.4 修**） |
 | 1 | Transparent | on（仅 `BlendMode::Alpha`） |
-| 2 | PostProcess | on（**自有空 FBO 采样；待 P2**） |
+| 2 | PostProcess | on（P2：采 `ctx.sceneFbo` attach0；Noop 仍 early-out） |
 | 3 | UI | on（无 backend 则空） |
 | — | Shadow | 代码存在，**未 `addPass`** |
 | — | GBuffer / Lighting | 不存在 |
@@ -401,6 +428,6 @@ Shadow 深度 FBO 使用 **独立 viewId**（由 ShadowPass / Adapter 分配，�
 | FBO API | `src/detail/BGFXAdapter.h`（`createFrameBuffer` / `createDepthOnlyFrameBuffer`） |
 | Alpha 双画 | `src/detail/ForwardOpaquePass.cpp` + `TransparentPass.cpp` ~L101 |
 | PP 错误输入 | `src/detail/PostProcessPass.cpp` |
-| Shadow stub | `src/detail/ShadowPass.{h,cpp}` |
+| Shadow 矩阵 | `src/detail/ShadowLightMatrix.{h,cpp}`、`ShadowPass.{h,cpp}` |
 | Composite views | `include/AYUIRenderBackend.h`、`include/AYRenderer.h` `beginCompositeFrame` |
 | 公开 blend/post | `include/AYRenderer.h` `setMaterialBlendMode` / `setPostProcess*` |

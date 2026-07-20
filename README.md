@@ -23,9 +23,40 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 | R4-b | debug overlay：FPS / draw 统计 / bgfx debug text | ✅ |
 | R4-c | `captureScreenshot`：backbuffer PNG（窗口 + 真实 GPU backend） | ✅ |
 | Engine | GameLoop + Entity `RenderSystem` + `RendererSubSystem` | ✅ |
-| R5+ | PostProcess | ⚠ partial — Phoskia 程序 + 真 blit-back 已 wire（commit 9dab8cc），但采样的是其**自有空 FBO**而非场景色（scene RT 闭环见 `docs/execution-plan.md` P2） |
-| R5+ | Shadow | 🅪 stub — depth-only FBO + identity light xform（commit 53fb866），**未 `addPass` 默认管线**；cut-2 见 `docs/execution-plan.md` P3，§5 segfault 约束生效前不动 |
+| R5+ | PostProcess | ✅ Phoskia 程序 + **从 scene FBO attach0 采样** + 真 blit-back（PR-D 2026-07-20, commit `b66deb8`）；bloom/exposure/tonemap 真作用 |
+| R5+ | Shadow | 🅪 cut-2 ✅ / cut-3 ❌ — depth-only FBO + **真 light-space ortho**（PR-F1' 2026-07-21, commit `502458b`,feat branch）已 ship；`ShadowPass::shadowFbo()/lightView()/lightProj()/lightViewProj()` getter 给 F2 直接消费。**下一步 = PR-F2**（FO/Transparent 加 Phoskia shadow_caster 采样 + bias,1 PR）。仍不默认挂 Shadow。 |
 | R5+ | GBuffer / Lighting / Command Queue | ❌ missing — 仅设计，无代码 |
+
+---
+
+## 当前定位（产品角度，2026-07-21 反映 PR-F1'）
+
+**适合当前能做的：** Editor / Demo 的前向场景 + UI 合成 + 资源加载 + 蒙皮（bone UBO 已 wire）+ 真 bloom/exposure/tonemap post-process。
+
+**还不能当完整渲染器当的：** 带阴影的产品光照、延迟渲染、复杂后处理（真 bloom chain / DOF / SSR）。
+
+### 唯一"差一步能 demo"的：**PR-F2**
+
+| 项 | 工作量 | 已准备 |
+|---|---|---|
+| FO 加 `texture2dshadow` 采样 + `bias` + 接入 F1' getter | 1 PR ≈200 行 | ✅ F1' 已 ship getter，Phoskia 头资源就绪 |
+| + shadow_caster 程序段（skinned 模型 bone UBO 走 shadow depth）| 加在 PR-F2 同 PR 即可 | ✅ boneBlockBinding 已 ship |
+
+PR-F2 ship 后 **demo 屏幕有 shadow**(硬边缘,bias 还可能 acne,但能看见光斑)。
+
+### 表中★数字 **不等于**"要做几个 PR":仅是设计复杂度
+
+下面这表是「**未来**某条线要做的所有事」的清单,**不代表**接下来的工作量。每行★是设计难度,不是承诺：
+
+| 关卡 | 缺口 | 设计难度 | 说明 |
+|------|------|---------|------|
+| Light API 直连 (`addLight(...)`) | F1' 把 `RenderScene::Light` 隔离在 `AY_F1_DIAG_LIGHT` OFF；要 host 可调需开 flag+跑 §5.4 bisect 矩阵 | ★★ | flag 控制混编风险 |
+| Cascade / 多光 atlas | 单 directional。多光需 atlas 或 cascade | ★★★ | 推迟到 P5 之后 |
+| PCF / VSM 滤波 | hard depth compare，锯齿明显 | ★★ | 推迟 |
+| 真 Scene-AABB 紧贴 | F1' 用固定 50 单位 ortho 包围原点；超出 ±50 物体阴影 clamp | ★★ | 简单 `computeAABB()` |
+| 多 RenderTarget + LightingPass（GBuffer） | 完全没规划 | ★★★★ | 不在 P0–P6 窗口 |
+
+**简版路线：** S1 = **PR-F2 (1 PR,现在就差这 1 个)** = "单 directional 灯 + 一片 hard-edge shadow demo"；S2 = "中端 3A demo" 在 S1 之上展开。
 
 ---
 

@@ -1,4 +1,4 @@
-// ShadowPass R5+ (2026-07-20) — verifies the new shadow caster
+// ShadowPass R5+ / PR-F1' (2026-07-20) — verifies the shadow caster
 // slot wires through cleanly. Tests pin:
 //
 //   1) ShadowPass slot basics — name, default isReady()==false,
@@ -21,8 +21,11 @@
 //      with the existing [ForwardOpaque, Transparent, PostProcess,
 //      UI] passes — verifies the slot doesn't disturb dispatch.
 //
+//   8) PR-F1' — buildDirectionalShadowMatrices produces non-identity
+//      view/proj that change when lightDirection changes (no GPU).
+//
 // All tests use Backend::Noop so the test path is shaderc-free and
-// headless.
+// headless. Default Renderer pipeline must remain 4-pass (no Shadow).
 
 #include "AYTest.h"
 #include "AYRenderScene.h"
@@ -34,6 +37,7 @@
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
 #include "detail/RenderPipeline.h"
+#include "detail/ShadowLightMatrix.h"
 #include "detail/ShadowPass.h"
 #include "detail/TransparentPass.h"
 #include "detail/UIPass.h"
@@ -53,6 +57,23 @@ using ayt::render::detail::UIPass;
 using ayt::render::detail::RenderPipeline;
 using ayt::render::detail::BGFXAdapter;
 using ayt::render::detail::FrameContext;
+using ayt::render::detail::buildDirectionalShadowMatrices;
+
+namespace {
+
+bool matricesEqual(const ayt::math::Float4x4& a, const ayt::math::Float4x4& b)
+{
+    const float* pa = a.ptr();
+    const float* pb = b.ptr();
+    for (int i = 0; i < 16; ++i) {
+        if (pa[i] != pb[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
 
 namespace {
 
@@ -210,6 +231,26 @@ TEST_CASE(r5plus_shadow_pass_destroy_resources_is_noop_when_uninitialized) {
     BGFXAdapter adapter;
     pass.destroyResources(adapter);
     CHECK(pass.isReady() == false);
+}
+
+TEST_CASE(f1_safe_light_space_matrices_non_identity_and_direction_sensitive) {
+    ayt::math::Float4x4 viewA = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 projA = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 viewB = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 projB = ayt::math::Float4x4::identity();
+
+    buildDirectionalShadowMatrices(
+        ayt::math::FVector3(0.3f, -0.8f, -0.4f), viewA, projA);
+    buildDirectionalShadowMatrices(
+        ayt::math::FVector3(-0.3f, -0.8f, 0.4f), viewB, projB);
+
+    CHECK(matricesEqual(viewA, ayt::math::Float4x4::identity()) == false);
+    CHECK(matricesEqual(projA, ayt::math::Float4x4::identity()) == false);
+    CHECK(matricesEqual(viewA, viewB) == false);
+
+    ShadowPass pass;
+    CHECK(matricesEqual(pass.lightView(), ayt::math::Float4x4::identity()) == true);
+    CHECK(matricesEqual(pass.lightProj(), ayt::math::Float4x4::identity()) == true);
 }
 
 // R5+ (Pass-side backfill, 2026-07-20) — verify the new

@@ -12,6 +12,7 @@
 #include <AYAppEventHost.h>
 #include <ayevent/Events/WindowEvents.h>
 
+#include <cstddef>
 #include <functional>
 
 namespace ayt::render
@@ -80,6 +81,16 @@ public:
 
     bool isReady() const { return _ready; }
     void renderCompositeFrame(bool renderScene3D, UIRenderBackend* uiBackend, CompositeUiPass uiPass);
+
+    // F1 diag — sizeof as seen by the AYRenderer static lib TU.
+    // Test binary compares against its own sizeof(); mismatch ⇒ ODR /
+    // incremental-build layout bug (not an EventBus logic bug).
+    static std::size_t diagSizeofRenderScene();
+    static std::size_t diagSizeofRendererSubSystem();
+    static std::size_t diagSizeofFrameContext();
+    static int diagFlagLight();
+    static int diagFlagFrameShadow();
+    static int diagFlagDefaultShadow();
 
 private:
     void renderFrame();
