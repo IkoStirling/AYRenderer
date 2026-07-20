@@ -545,15 +545,28 @@ void RendererSubSystem::renderCompositeFrame(bool renderScene3D, UIRenderBackend
     _renderer.beginCompositeFrame(clear, static_cast<uint16_t>(_width),
                                   static_cast<uint16_t>(_height));
 
-    if (renderScene3D && _viewportW >= 32 && _viewportH >= 32) {
-        _renderer.setViewportRect(_viewportX, _viewportY, _viewportW, _viewportH);
-        renderScenePass();
-    }
-
+    // AI-1 (2026-07-20): dispatch order — populate UI BEFORE 3D
+    // renderScenePass so the widget walk accumulates batches that
+    // UIPass::execute (dispatched inside renderScenePass) will flush
+    // via backend->flushBatches(). Pre-AI-1 the order was reversed
+    // (3D first, then UI lambda) and the UI flush lived entirely in
+    // the host lambda, bypassing the RenderPass dispatch.
     if (uiBackend != nullptr) {
         uiBackend->setFramebufferSize(static_cast<uint16_t>(_width), static_cast<uint16_t>(_height));
-        uiPass(renderScene3D);
+        uiPass(renderScene3D, CompositeUiPhase::Populate);
     }
+
+    if (renderScene3D && _viewportW >= 32 && _viewportH >= 32) {
+        _renderer.setViewportRect(_viewportX, _viewportY, _viewportW, _viewportH);
+        renderScenePass();  // dispatches [ForwardOpaque, Transparent, UIPass];
+                            // UIPass::execute now flushes pending text
+    }
+
+    // Flush half — close the IRenderBackend lifecycle (endCanvas +
+    // endFrame; endFrame flushes pendingRects via flushColoredRects).
+    // This call is REQUIRED in AI-1: without it the backend stays in
+    // an open-frame state and the next beginFrame is undefined.
+    uiPass(renderScene3D, CompositeUiPhase::Flush);
 
     _renderer.setDebugOverlaySuppressed(true);
     _renderer.endFrame();

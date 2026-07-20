@@ -20,7 +20,24 @@ namespace ayt::render
 class UIRenderBackend;
 
 using SceneBuildCallback = std::function<void(RenderScene&)>;
-using CompositeUiPass    = std::function<void(bool skipViewportPanel)>;
+// AI-1 (2026-07-20): CompositeUiPass now takes an enum so the host
+// can run the populate half before Renderer::render (which dispatches
+// UIPass::execute that flushes text) and the flush half after. See
+// RendererSubSystem::renderCompositeFrame for the dispatch order.
+//
+// Pre-AI-1 the callback took only `bool skipViewportPanel` and ran
+// populate+flush in one go inside UIManager::render. The split is
+// required so the RenderPass dispatch can own the UI submission
+// boundary (UIPass::execute calls backend->flushBatches after the
+// widget walk has populated the batch).
+enum class CompositeUiPhase {
+    Populate = 0,  // host runs UIManager::populateFrame — walk widget
+                   // tree, accumulate batches on backend
+    Flush    = 1,  // host runs UIManager::flushFrame — close
+                   // IRenderBackend lifecycle (endCanvas + endFrame,
+                   // which internally calls flushColoredRects)
+};
+using CompositeUiPass = std::function<void(bool skipViewportPanel, CompositeUiPhase phase)>;
 
 // Supplies the native window handle + size at initialize() time. Lets the
 // application wire the renderer to a window source (e.g. AYDevice's

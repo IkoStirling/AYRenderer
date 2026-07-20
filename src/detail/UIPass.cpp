@@ -23,24 +23,26 @@ uint32_t UIPass::execute(
     if (!_backend->isInitialized()) {
         return 0;
     }
-    // U1+ — RenderPipeline dispatches us, but we do NOT flushBatches
-    // here. The active flush is owned by the host lambda that drives
-    // UIManager::render (see AYUIManager.cpp:667 — that path calls
-    // flushBatches once at the end of each frame). Calling flush here
-    // too would be a double-flush against an empty _frame buffer
-    // because Renderer::render runs BEFORE the host lambda in
-    // RendererSubSystem::renderCompositeFrame. Moving the active
-    // flush into this execute() is a U1++ change that requires
-    // reordering the host so UIManager::render populates _frame
-    // BEFORE Renderer::render fires.
+    // AI-1 (2026-07-20): RenderPipeline now owns the UI flush
+    // boundary. The host runs UIManager::populateFrame BEFORE
+    // Renderer::render (see RendererSubSystem::renderCompositeFrame),
+    // which walks the widget tree and accumulates draws on the
+    // backend's pendingRects + textBatch. This execute() then:
+    //   1) setFramebufferSize — keeps NDC projection in sync with
+    //      this pass's declared sub-rect.
+    //   2) flushBatches — submits any pending text batches the
+    //      widget walk accumulated. Rects are flushed by
+    //      UIManager::flushFrame() → backend->endFrame() →
+    //      flushColoredRects().
+    //   3) Returns the backend's draw-call count for stats.
     //
-    // What we still do:
-    //   1) setFramebufferSize — keeps the backend's projection in
-    //      sync with the sub-rect the pipeline is rendering into.
-    //   2) return getDrawCallCount — reports the backend's
-    //      last-known draw count (one-frame lag; harmless because
-    //      lastDrawCalls is a debug stat, not a correctness invariant).
+    // Pre-AI-1 contract (U1+ → U1.5) had UIPass deliberately skip
+    // flushBatches and leave the entire flush to the host lambda
+    // that drives UIManager::render. That worked but made the
+    // RenderPass dispatch path semantically incomplete — UI flush
+    // bypassed the Pass taxonomy. AI-1 closes that gap.
     _backend->setFramebufferSize(viewportWidth, viewportHeight);
+    _backend->flushBatches();
     return static_cast<uint32_t>(_backend->getDrawCallCount());
 }
 
