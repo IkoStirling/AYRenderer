@@ -7,6 +7,7 @@
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
+#include "detail/ShadowPass.h"
 
 #include <cstdint>
 #include <string_view>
@@ -32,7 +33,9 @@ private:
     static void flushMaterial(GpuMaterial& material,
                               const std::unordered_map<uint64_t, GpuTexture>& textures,
                               const FrameContext& frame,
-                              const ayt::math::Float4x4& world);
+                              const ayt::math::Float4x4& world,
+                              BGFXAdapter& adapter,
+                              const ShadowPass* shadowPass);
 
 public:
     static constexpr uint8_t kMainViewId = 0;

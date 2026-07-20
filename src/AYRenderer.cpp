@@ -325,6 +325,15 @@ void Renderer::render(const RenderScene& scene)
         frame,
         viewId,
         sceneFbo,
+        // PR-F2 (2026-07-21) — wire the shadow producer pointer. The
+        // Renderer default pipeline does NOT register ShadowPass;
+        // pinging the pipeline is the most natural host-side spot.
+        // nullptr here ⇔ no shadow this frame (no upload, no sampler
+        // bind) — matches current default. Hosts that DO add ShadowPass
+        // manually can override ctx.shadowPass before executeAll, or
+        // we can flip this to a non-null lookup when §5.4 E4 alone is
+        // recorded 3/3 PASS.
+        nullptr,
     };
 
     // Dispatched via RenderPipeline::executeAll in registration order

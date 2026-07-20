@@ -4,8 +4,11 @@
 
 #include "detail/RenderPass.h"
 #include "detail/GpuResources.h"
+#include "detail/ShadowPass.h"
 
 #include "AYShaderResource.h"  // ShaderResource::getUniformBinding / hasUniformBinding / setUniform
+
+#include <bgfx/bgfx.h>
 
 namespace ayt::render::detail
 {
@@ -47,6 +50,35 @@ void RenderPass::resolveAndApplyColorUniforms(GpuMaterial& material)
                                        sizeof(defaultBaseColor));
         }
     }
+}
+
+// PR-F2 (2026-07-21) — see RenderPass.h. Body lifted out of the
+// header so the `ShadowPass*` parameter doesn't need a complete
+// type at the inline definition site (only forward-declaration
+// from the header). Caller passes non-null to actually exercise
+// the upload path; nullptr / invalid FBO are no-ops.
+void tryBindShadowSampler(shader::ShaderResource& shader,
+                          BGFXAdapter& adapter,
+                          const ShadowPass* shadowPass)
+{
+    if (shadowPass == nullptr || !bgfx::isValid(shadowPass->shadowFbo())) {
+        return;
+    }
+    trySetUniformMat4(shader,
+                      "u_lightViewProj", "lightViewProj",
+                      shadowPass->lightViewProj());
+
+    const shader::BindingId shadowBinding =
+        shader.getTextureBinding("shadowMap");
+    if (shadowBinding == shader::InvalidBinding) {
+        return;
+    }
+    const bgfx::TextureHandle shadowTex =
+        adapter.getFboAttachment(shadowPass->shadowFbo(), 0);
+    if (!BGFXAdapter::isValid(shadowTex)) {
+        return;
+    }
+    shader.setTexture(0, shadowBinding, toShaderTexture(shadowTex));
 }
 
 } // namespace ayt::render::detail

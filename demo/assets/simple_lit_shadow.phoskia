@@ -1,0 +1,48 @@
+material SimpleLitShadow {
+    texture2d albedoMap
+    texture2d shadowMap
+    uniform mat4 u_lightViewProj
+    uniform vec3 lightDir
+    uniform vec3 lightColor
+    property baseColor  = vec4(1.0, 1.0, 1.0, 1.0)
+    property shadowBias = 0.005
+
+    vertex {
+        in pos : position
+        in nrm : normal
+        in uv  : texcoord
+        out worldNormal : normal    = vec3(0.0, 0.0, 1.0)
+        out uvOut       : texcoord  = vec2(0.0, 0.0)
+        // PR-F2 (2026-07-21) — export world position so the fragment
+        // can project it into shadow-map clip space for the manual
+        // depth compare. The BGFX converter emits this as
+        // vec3 v_worldPosition : TEXCOORDn (it auto-routes any
+        // `out : position` to the next free TEXCOORD slot, leaving
+        // POSITION free for `in pos : position`).
+        out worldPos    : position  = (modelMatrix * vec4(pos, 1.0)).xyz
+        return modelViewProjection * vec4(pos, 1.0)
+    }
+    fragment {
+        in worldNormal : normal
+        in uvOut       : texcoord
+        in worldPos    : position
+        let albedo    = sample(albedoMap, uvOut) * baseColor
+
+        // Manual shadow compare — F2 deliberately avoids growing
+        // AYShader's sampler kind enum to add `sampler2DShadow`
+        // (cross-module change beyond PR scope). We project the
+        // world position into the shadow producer's clip space,
+        // divide by w, and compare the per-fragment depth against
+        // the depth-attach `.r` sampled as a regular texture2D.
+        // Depth-only FBOs return the depth value in the red channel
+        // when sampled as a non-compare sampler in bgfx.
+        let clipPos  = u_lightViewProj * vec4(worldPos, 1.0)
+        let refDepth = clipPos.z / clipPos.w
+        let occluder = sample(shadowMap, clipPos.xy).r
+        let shadow   = if(refDepth - shadowBias > occluder, 0.0, 1.0)
+
+        let ndotl   = max(dot(normalize(worldNormal), normalize(lightDir)), 0.05)
+        let lit     = albedo.rgb * lightColor * ndotl * shadow
+        return vec4(lit, albedo.a)
+    }
+}

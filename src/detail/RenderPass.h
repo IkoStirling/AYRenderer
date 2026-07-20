@@ -12,6 +12,12 @@
 #include <string_view>
 #include <unordered_map>
 
+// Forward declaration — tryBindShadowSampler (below) only needs a
+// pointer; ShadowPass.h pulls in <bgfx/bgfx.h> and the full class
+// definition which we don't want leaking into every TU that
+// already includes RenderPass.h for the trySet helpers.
+namespace ayt::render::detail { class ShadowPass; }
+
 namespace ayt::render::detail
 {
 
@@ -52,6 +58,30 @@ inline void trySetUniformMat4(shader::ShaderResource& shader, const char* primar
     }
     shader.setUniform(binding, matrix.ptr(), sizeof(float) * 16);
 }
+
+// PR-F2 (2026-07-21) — uploads the light-space VP and binds the
+// shadow FBO's depth attachment as a sampler2D named `shadowMap`.
+// Pure helper. ForwardOpaquePass / TransparentPass both call this
+// immediately after the standard light uniforms so the bytes stay
+// identical between sites (the U1.5 invariant for MVP/light
+// uploads extends to the shadow path).
+//
+// Body lives in RenderPass.cpp because `ShadowPass*` requires the
+// full class definition to call `.lightViewProj()` etc. (a forward
+// declaration here is fine for the parameter type but not for
+// member access). Using a free fn keeps the U1.5 invariant that
+// FO/Transparent upload semantics are byte-for-byte identical
+// (both sites call this same function).
+//
+// `shadowPass == nullptr` ⇔ no producer this frame ⇒ no-op.
+// `bgfx::isValid(shadowPass->shadowFbo()) == false` (Noop backend
+// or first-frame pre-FBO) ⇒ no-op. Likewise for binding lookups —
+// a material that doesn't declare `u_lightViewProj` / `shadowMap`
+// silently continues to render as if shadow wasn't enabled, so
+// pre-F2 shaders stay byte-identical.
+void tryBindShadowSampler(shader::ShaderResource& shader,
+                          BGFXAdapter& adapter,
+                          const ShadowPass* shadowPass);
 
 // U0 (Phase 2 Pass scaffold) — abstract base for one rendering pass.
 // One subclass = one logical draw on one bgfx view. The pipeline

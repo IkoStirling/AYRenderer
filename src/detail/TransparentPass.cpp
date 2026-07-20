@@ -1,5 +1,6 @@
 #include "detail/TransparentPass.h"
 #include "detail/GpuResources.h"
+#include "detail/ShadowPass.h"
 
 #include "AYShaderResource.h"  // for ShaderResource::setUniform
 
@@ -136,6 +137,15 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         trySetUniformVec3(material.shader, "lightDir", toLightDir.ptr());
         trySetUniformVec3(material.shader, "lightDirection", toLightDir.ptr());
         trySetUniformVec3(material.shader, "lightColor", frame.lightColor.ptr());
+
+        // PR-F2 (2026-07-21) — same plumbing as ForwardOpaquePass's
+        // call to tryBindShadowSampler: when ctx.shadowPass has a
+        // ready FBO, upload `u_lightViewProj` and bind the depth
+        // attachment as `shadowMap`. Inline call (TransparentPass
+        // does not share FO's flushMaterial) keeps the helper's
+        // single source-of-truth for the upload shape; mirror site is
+        // ForwardOpaquePass::flushMaterial.
+        tryBindShadowSampler(material.shader, adapter, ctx.shadowPass);
 
         // U1++ — color-uniform upload shared with ForwardOpaquePass
         // via RenderPass::resolveAndApplyColorUniforms.
