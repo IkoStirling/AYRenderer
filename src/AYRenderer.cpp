@@ -4,6 +4,7 @@
 #include "detail/DebugOverlay.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FrameContext.h"
+#include "detail/PostProcessPass.h"
 #include "detail/RenderPipeline.h"
 #include "detail/RenderResourceManager.h"
 #include "detail/ScreenshotSidecar.h"
@@ -18,6 +19,7 @@
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 
+#include <chrono>
 #include <cstring>
 
 namespace ayt::render
@@ -27,10 +29,20 @@ struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
     ayt::shader::ShaderResourcePool    shaderPool;
     // U1+ — RenderPipeline owns the ordered list of RenderPass
-    // subclasses. Today: [ForwardOpaque, Transparent, UI] matching
-    // design.md:467-470 kFullPipelineOrder minus R5+ deferred
-    // (Shadow/GBuffer/Lighting/PostProcess). The pipeline's lifetime
-    // is tied to Impl; addPass() is called once in the Impl ctor.
+    // subclasses. P0 (2026-07-20) inserts PostProcessPass between
+    // Transparent and UI to match design.md:467-470 kFullPipelineOrder:
+    //   kFullPipelineOrder[] = {"Shadow", "GBuffer", "Lighting",
+    //                            "ForwardOpaque", "Transparent",
+    //                            "PostProcess", "UI"};
+    // R5+ deferred slots still absent: Shadow / GBuffer / Lighting
+    // require deferred pipeline plumbing (MRT, shadow map samplers,
+    // multiple UBOs — see design.md:457-461). PostProcessPass is
+    // wired as a no-op slot today (see PostProcessPass.h P0 doc);
+    // R5+ will replace its execute() body with a fullscreen triangle
+    // + FBO ping-pong.
+    //
+    // The pipeline's lifetime is tied to Impl; addPass() is called
+    // once in the Impl ctor.
     detail::RenderPipeline        pipeline;
 
     detail::RenderResourceManager resources;
@@ -48,6 +60,13 @@ struct Renderer::Impl {
     ayt::math::FVector3           directionalLightDir = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
     ayt::math::FVector3           directionalLightColor = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
 
+    // P0 (2026-07-20) — wall-clock origin for FrameContext.timeSeconds.
+    // std::chrono::steady_clock is monotonic (immune to wall-clock
+    // adjustments) which is what R5+ post-process effects (time-of-day
+    // color grading, bloom pulse) need. Set on the first successful
+    // initialize(); consumed by Renderer::render into frame.timeSeconds.
+    std::chrono::steady_clock::time_point renderClockOrigin{};
+
     uint16_t                      viewportX = 0;
     uint16_t                      viewportY = 0;
     uint16_t                      viewportW = 0;
@@ -61,6 +80,11 @@ struct Renderer::Impl {
     {
         pipeline.addPass(std::make_unique<detail::ForwardOpaquePass>());
         pipeline.addPass(std::make_unique<detail::TransparentPass>());
+        // P0 (2026-07-20) — slot kFullPipelineOrder[5] = "PostProcess".
+        // The pass is intentionally a no-op; RenderPipeline dispatches
+        // it in order so R5+ can replace the execute() body without
+        // re-wiring the pipeline.
+        pipeline.addPass(std::make_unique<detail::PostProcessPass>());
         pipeline.addPass(std::make_unique<detail::UIPass>());
     }
 };
@@ -108,6 +132,12 @@ bool Renderer::initialize(const InitDesc& desc)
         _impl->shaderPool.resolvePlatformFromRenderer();
     }
     _impl->debugOverlay.setEnabled(desc.enableDebugOverlay);
+    // P0 — start the wall-clock origin for FrameContext.timeSeconds.
+    // First initialize() = origin 0; subsequent renders see elapsed
+    // seconds since this point. initialize() is idempotent (early
+    // return if adapter already initialized) so the second call won't
+    // re-stamp the origin; render() guards on "origin not yet set".
+    _impl->renderClockOrigin = std::chrono::steady_clock::now();
     return true;
 }
 
@@ -175,6 +205,16 @@ void Renderer::render(const RenderScene& scene)
     frame.cameraPosition   = _impl->mainCameraPosition;
     frame.lightDirection   = _impl->directionalLightDir.normalize();
     frame.lightColor       = _impl->directionalLightColor;
+    // P0 — wall-clock seconds since Renderer::initialize(). Field
+    // was 0 by default before this assignment; existing tests that
+    // built FrameContext manually and checked field-by-field still
+    // see 0.0f. R5+ post-process will read this into a `u_time`
+    // uniform.
+    if (_impl->renderClockOrigin.time_since_epoch().count() != 0) {
+        const auto now = std::chrono::steady_clock::now();
+        const std::chrono::duration<float> elapsed = now - _impl->renderClockOrigin;
+        frame.timeSeconds = elapsed.count();
+    }
 
     const uint8_t viewId = _impl->compositeSceneViewId >= 0
                                ? static_cast<uint8_t>(_impl->compositeSceneViewId)
