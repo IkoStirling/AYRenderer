@@ -120,6 +120,26 @@ uint32_t ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResource
             continue;
         }
 
+        // P0.4 (2026-07-20) — skip BlendMode::Alpha. TransparentPass
+        // already draws Alpha materials (it gates on
+        // `material.blendMode == BlendMode::Alpha`). Without this
+        // skip, Alpha items are submitted TWICE per frame:
+        //   1) ForwardOpaquePass — WRITE_RGB|WRITE_A|WRITE_Z,
+        //      so the alpha pixels are written to the depth buffer
+        //      AND the color buffer. They overwrite anything the
+        //      opaque pass laid down behind them and the alpha z is
+        //      then tested by every later transparent draw, blocking
+        //      legit back-to-front compositing on the GPU.
+        //   2) TransparentPass — BLEND_ALPHA, no WRITE_Z, re-uses
+        //      the opaque z-buffer for occlusion. The duplicate draw
+        //      produces visible double-write (z-fighting + wrong color)
+        //      on real GPU backends and pinches throughput on all.
+        // ForwardOpaquePass owns Opaque only; the pass name is the
+        // contract. See docs/execution-plan.md §1.2 + §P0.4.
+        if (material.blendMode == ayt::render::BlendMode::Alpha) {
+            continue;
+        }
+
         adapter.setTransform(item.world);
         adapter.setVertexBuffer(mesh.vertexBuffer);
         adapter.setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
