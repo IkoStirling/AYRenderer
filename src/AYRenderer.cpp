@@ -28,18 +28,22 @@ namespace ayt::render
 struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
     ayt::shader::ShaderResourcePool    shaderPool;
-    // U1+ — RenderPipeline owns the ordered list of RenderPass
-    // subclasses. P0 (2026-07-20) inserts PostProcessPass between
-    // Transparent and UI to match design.md:467-470 kFullPipelineOrder:
-    //   kFullPipelineOrder[] = {"Shadow", "GBuffer", "Lighting",
-    //                            "ForwardOpaque", "Transparent",
-    //                            "PostProcess", "UI"};
-    // R5+ deferred slots still absent: Shadow / GBuffer / Lighting
-    // require deferred pipeline plumbing (MRT, shadow map samplers,
-    // multiple UBOs — see design.md:457-461). PostProcessPass is
-    // wired as a no-op slot today (see PostProcessPass.h P0 doc);
-    // R5+ will replace its execute() body with a fullscreen triangle
-    // + FBO ping-pong.
+    // R0–R4 (2026-07-20 reality) — RenderPipeline owns 4 default
+    // passes in registration order:
+    //   [0] ForwardOpaque   (depth-test LESS, RGB+A+Z write, cull CW)
+    //   [1] Transparent     (BLEND_ALPHA, depth test only, sortKey desc)
+    //   [2] PostProcess     (R5.1: Phoskia program + uniforms + real
+    //                        blit-back to default backbuffer; still
+    //                        samples its OWN empty FBO, not the scene
+    //                        color — see docs/execution-plan.md P2)
+    //   [3] UIPass          (composite chrome into bgfx view 2)
+    // R5+ deferred slots (Shadow / GBuffer / Lighting) are intentionally
+    // absent from the default pipeline:
+    //   - ShadowPass cut-1 stub exists but default-on is forbidden by
+    //     `docs/execution-plan.md` §5.3 (segfault constraint).
+    //   - GBufferPass / LightingPass do not exist yet.
+    // see `docs/execution-plan.md` §1.1 / §附录 B for the canonical
+    // default-pipeline index.
     //
     // The pipeline's lifetime is tied to Impl; addPass() is called
     // once in the Impl ctor.
@@ -89,10 +93,9 @@ struct Renderer::Impl {
     {
         pipeline.addPass(std::make_unique<detail::ForwardOpaquePass>());
         pipeline.addPass(std::make_unique<detail::TransparentPass>());
-        // P0 (2026-07-20) — slot kFullPipelineOrder[5] = "PostProcess".
-        // The pass is intentionally a no-op; RenderPipeline dispatches
-        // it in order so R5+ can replace the execute() body without
-        // re-wiring the pipeline.
+        // PostProcess slot — R5.1 wired (Phoskia program + uniforms +
+        // blit-back), but samples its own empty FBO not the scene color.
+        // Scene-RT closed loop is docs/execution-plan.md P2.
         pipeline.addPass(std::make_unique<detail::PostProcessPass>());
         pipeline.addPass(std::make_unique<detail::UIPass>());
     }
@@ -237,20 +240,20 @@ void Renderer::render(const RenderScene& scene)
 
     _impl->lastDrawCalls = 0;
 
-    // U1+ — dispatched via RenderPipeline::executeAll in registration
-    // order [ForwardOpaque, Transparent, UI]. ForwardOpaquePass writes
-    // the depth buffer first; TransparentPass then reuses that depth
-    // for STATE_DEPTH_TEST_LESS but never writes its own Z so
-    // transparent fragments composite over the opaque result without
-    // occluding each other (back-to-front sort is deferred to U1++).
-    // UIPass ignores the viewId arg and delegates to its injected
-    // UIRenderBackend (see UIPass.h:35-47 for the chrome lifecycle
-    // contract — flushBatches is intentionally NOT called here in U1+,
-    // the host lambda that drives UIManager::render still owns the
-    // active flush).
+    // Dispatched via RenderPipeline::executeAll in registration order
+    // [ForwardOpaque, Transparent, PostProcess, UI]. ForwardOpaquePass
+    // writes the depth buffer first; TransparentPass reuses that depth
+    // for STATE_DEPTH_TEST_LESS but does not WRITE_Z so transparent
+    // fragments composite over the opaque result without occluding
+    // each other (back-to-front sort is via DrawItem::sortKey descending).
+    // PostProcessPass samples its own FBO today (scene-RT closure is
+    // docs/execution-plan.md P2). UIPass ignores the viewId arg and
+    // delegates to its injected UIRenderBackend (see UIPass.h for the
+    // chrome lifecycle contract — execute() DOES call flushBatches;
+    // beginFrame/endFrame stay on the host's UIManager::render lambda).
     //
     // Per-pass isEnabled() guards are honored by the pipeline; today
-    // all three default to true (set by the RenderPass base ctor).
+    // all four default to true (set by the RenderPass base ctor).
     _impl->lastDrawCalls = _impl->pipeline.executeAll(
         _impl->adapter, _impl->shaderPool, scene,
         _impl->resources.meshes(), _impl->resources.textures(),

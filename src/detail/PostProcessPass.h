@@ -13,19 +13,27 @@
 namespace ayt::render::detail
 {
 
-// R5+ (Phase PostProcess, 2026-07-20) — fullscreen-triangle post-process
-// pass that consumes the scene-color produced by ForwardOpaquePass +
-// TransparentPass and emits a single filtered result to a bound
-// render target (the R5+ offscreen FBO by default; the host can opt
-// to bind the default backbuffer via BGFXAdapter::setViewFrameBuffer
-// before calling Renderer::render if it wants the result on screen
-// directly without our blit-back step).
-//
-// Pipeline slot: kFullPipelineOrder[5], between Transparent and UI.
-// design.md:461 says "全屏 triangle + storage image（Phase 5 延后）";
-// R5+ delivers the triangle + shader-uniform upload + the blit-back
-// that puts the result back into the default backbuffer for UIPass
+// R5.1 (2026-07-20, commit 9dab8cc) — fullscreen-triangle post-process
+// pass. Wires a Phoskia program + u_bloomStrength / u_exposure /
+// u_tonemapMode uniforms + sampler bind of `u_sceneColor` + a real
+// blit-back of the offscreen FBO to the default backbuffer for UIPass
 // to composite chrome over.
+//
+// Pipeline slot: index 2 of the 4-pass default pipeline (between
+// Transparent and UI). See `docs/execution-plan.md` §1.1 / §附录 B.
+//
+// KNOWN LIMIT (post-R5.1, pre-P2): `u_sceneColor` currently samples
+// the pass's OWN empty FBO, not ForwardOpaquePass + TransparentPass's
+// actual scene output. The fullscreen triangle still runs and the
+// blit-back still happens, so headless tests pass and the wire is
+// end-to-end; the visible result is wrong on real GPU backends
+// (PostProcess overwrites whatever ForwardOpaque + Transparent painted
+// to the backbuffer with the cleared FBO color). Closing this loop is
+// `docs/execution-plan.md` P2 — scene `createFrameBuffer` + PP samples
+// scene attach0 + UI stays last. Until P2 lands, prefer
+// `setPostProcessTonemapMode(None)` + `setPostProcessExposure(1.0f)`
+// + `setPostProcessBloomStrength(0.0f)` if your test reads the
+// backbuffer.
 //
 // Algorithm today (R5+ minimal — bloom/exposure/tonemap all wired but
 // the bundled Phoskia program is a near-identity "passthrough with

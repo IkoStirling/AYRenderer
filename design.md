@@ -1,7 +1,8 @@
 # AYRenderer Design
 
-> **文档状态**：2026-07 修订 — 对齐 AYShader Phase 4；**R0–R4 + Engine 集成已落地**（见 §13、§16）。  
-> **实现状态**：设计稿；`include/` / `src/` 尚未创建。  
+> **文档状态**：2026-07 修订 — 对齐 AYShader Phase 4；**R0–R4 + Engine 集成已落地**（见 §13、§16）。
+> **实现状态**：2026-07-20 复核，`include/` / `src/` / `unittest/` / `demo/` 已落地；默认管线 = `[ForwardOpaque, Transparent, PostProcess, UI]`（4 Pass）；ShadowPass 源码存在但**未 `addPass`**（cut-1 stub:identity light xform + depth-only FBO + no-fragment-program submit；见 `docs/execution-plan.md` §1.2 / §5）；GBuffer / Lighting 仍未实现，仅在本文档保留设计占位。
+> **活动执行计划**：[`docs/execution-plan.md`](execution-plan.md)（P0–P6 队列、§5 segfault 约束、§5.4 隔离实验、附录 B/C/D 索引）。本文件是目标架构，与代码不一致时以代码与 execution-plan 为准。
 > **关联文档**：[`AYShader/design.md` §8.5](../AYShader/design.md)（opaque handle contract）、[`AYShader/README.md`](../AYShader/README.md)。
 
 ---
@@ -695,6 +696,37 @@ include/AYRenderer/
 - [ ] Command Queue
 - [ ] `material_shader_mapping` 数据库
 - [ ] 从 AliyatRenderer 迁移 2D/UI/Skybox（**单独评估**；旧栈为 OpenGL，非直接移植）
+
+---
+
+## 14. 测试与生命周期约定（2026-07-20 补）
+
+本节锁定 **测试 / CI 上不可忽略的两条 invariant**。两处都是真实坑,后人不要当偶发神 bug 重新踩。
+
+### 14.1 Sticky Noop 后端 + 进程级 refcount
+
+- `BGFXAdapter` 进程级 ref-count:同进程里首次 `initialize(Backend::Noop)` 锁 Noop,后续任何 `initialize(Backend::* | Auto)` 都返回 invalid(由 `57908fd` 一类修复引入,**未证明修干净**)。
+- 一旦 Noop 锁上,**该进程任何后续 Renderer 都走 Noop**,即使显式要 Direct3D11 也无效。
+- 这是 sticky 而非可恢复:若想真 GPU 必须 **新开进程**(独立 test exe / 新 fixture child)。
+- **CI 落地:** `AYRenderer_Test` 永远 Noop(锁 sticky);真 GPU 跑窗口 Demo(`AYRenderer_Demo` / `AYEngineIntegration_Demo`);不要试图在 Noop 锁定的进程里切到真 backend。
+
+### 14.2 Shaderc + 多 Renderer 实例
+
+- `Test_RenderResources::textured_material_draw_one_frame` 创建 **第二个** Renderer → `createMaterialFromPhoskia` 触发 shaderc 子进程。
+- 子进程路径上的 SIGSEGV / exit 139 bisect 多次稳定出现,与 Shadow 改动无强相关(见 `docs/execution-plan.md` §5)。
+- 多 Renderer / 多 shaderc 子进程的组合在 Noop + Windows 子进程 pipe 上仍有 flaky 残余。修 ABI / 加 Pass / 切 FrameContext 签名时若撞上,**先跑 §5.4 隔离实验 ≥3 次**确认是否新引入,不要默认归 pre-existing rot 草率合并。
+
+### 14.3 测试锚点
+
+每次 PR 必跑:
+
+- `Test_LightingCamera`(`forward_opaque_draw_one_frame` 类的现网回归锚)
+- `Test_RenderResources::textured_material_draw_one_frame`(双 Renderer + shaderc)
+- `Test_PostProcess_R5Plus_*`(R5.1 wire + P2 改动)
+- `Test_ShadowPass`(cut-1 + 未来 cut-2)
+- `Test_UIPass_AI1`(composite + UI view 2 锁)
+
+跑法:同一 commit **连续 3 次**全量 `AYRenderer_Test`,记录 PASS/FAIL;**3 次不全绿**则按 `docs/execution-plan.md` §5 处理,不许合并带赌的 ABI 变更。
 
 ---
 

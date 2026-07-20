@@ -23,7 +23,9 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 | R4-b | debug overlay：FPS / draw 统计 / bgfx debug text | ✅ |
 | R4-c | `captureScreenshot`：backbuffer PNG（窗口 + 真实 GPU backend） | ✅ |
 | Engine | GameLoop + Entity `RenderSystem` + `RendererSubSystem` | ✅ |
-| R5+ | Shadow / GBuffer / PostProcess / Command Queue | 🅿 延后 |
+| R5+ | PostProcess | ⚠ partial — Phoskia 程序 + 真 blit-back 已 wire（commit 9dab8cc），但采样的是其**自有空 FBO**而非场景色（scene RT 闭环见 `docs/execution-plan.md` P2） |
+| R5+ | Shadow | 🅪 stub — depth-only FBO + identity light xform（commit 53fb866），**未 `addPass` 默认管线**；cut-2 见 `docs/execution-plan.md` P3，§5 segfault 约束生效前不动 |
+| R5+ | GBuffer / Lighting / Command Queue | ❌ missing — 仅设计，无代码 |
 
 ---
 

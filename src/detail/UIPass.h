@@ -14,7 +14,7 @@ class UIRenderBackend;
 namespace ayt::render::detail
 {
 
-// U0.5 — second concrete RenderPass subclass. Bridges AYUI's chrome
+// R0.5 — second concrete RenderPass subclass. Bridges AYUI's chrome
 // rendering (driven externally by UIManager::render → IRenderBackend
 // callbacks) into the RenderPass dispatch taxonomy.
 //
@@ -46,11 +46,10 @@ namespace ayt::render::detail
 //     menu-only UI) that need different views override name() + use
 //     viewId.
 //
-// U0.5 scope: this class is constructed and held by Renderer::Impl
-// but is NOT YET DISPATCHED by Renderer::render — that lands in U1+
-// when RenderPipeline takes over dispatch. The class exists today
-// only to prove RenderPass polymorphism with a second concrete
-// subclass and to keep `Impl` ready for the U1+ swap.
+// U1 scope: this class IS dispatched by Renderer::render through
+// RenderPipeline::executeAll in registration order (default index 3).
+// UIPass is the 4th and last pass in the default pipeline;
+// see `docs/execution-plan.md` §1.1 + §附录 B.
 class UIPass : public RenderPass {
 public:
     UIPass() = default;
