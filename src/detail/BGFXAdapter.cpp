@@ -384,6 +384,40 @@ void BGFXAdapter::setViewFrameBuffer(uint8_t viewId, bgfx::FrameBufferHandle fb)
     bgfx::setViewFrameBuffer(viewId, fb);
 }
 
+bgfx::FrameBufferHandle BGFXAdapter::createDepthOnlyFrameBuffer(uint16_t width, uint16_t height)
+{
+    // R5+ (Phase Shadow) — see header. Single D24S8 attachment via
+    // bgfx::Attachment::init(depth, Access::Write) + createFrameBuffer
+    // (uint8_t num, const Attachment*, bool destroyTextures). The
+    // depth texture's lifetime is handed to the FBO via
+    // destroyTextures=true so the existing destroy(fb) path in this
+    // adapter cleans up the depth attachment automatically.
+    if (!_initialized || width == 0 || height == 0) {
+        return BGFX_INVALID_HANDLE;
+    }
+    const uint64_t textureFlags = BGFX_TEXTURE_RT
+                                | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
+    bgfx::TextureHandle depth = bgfx::createTexture2D(
+        width, height, /*hasMips=*/false, /*numLayers=*/1,
+        bgfx::TextureFormat::D24S8, textureFlags, /*mem=*/nullptr);
+    if (!bgfx::isValid(depth)) {
+        return BGFX_INVALID_HANDLE;
+    }
+    bgfx::Attachment depthAtt;
+    depthAtt.handle = depth;
+    depthAtt.access = bgfx::Access::Write;
+    bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
+        /*num=*/1, &depthAtt, /*destroyTextures=*/true);
+    if (bgfx::isValid(fb)) {
+        return fb;
+    }
+    // FBO creation failed — free the depth texture manually since
+    // destroyTextures=false in this branch means the FBO doesn't own
+    // it.
+    bgfx::destroy(depth);
+    return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+}
+
 void BGFXAdapter::destroy(bgfx::FrameBufferHandle h)
 {
     // R5+ — destroy frees the color attachment automatically (bgfx

@@ -82,6 +82,16 @@ public:
                                                   bgfx::TextureFormat::RGBA8,
                                               bool withDepth = true);
 
+    // R5+ (Phase Shadow, 2026-07-20) — depth-only FBO for shadow
+    // maps. Distinct from createFrameBuffer() (which allocates a color
+    // attachment we don't need): a shadow map is a single D24S8
+    // depth texture attached at slot 0. Caller treats the returned
+    // FBO the same way as createFrameBuffer() — setViewFrameBuffer to
+    // bind, bgfx::getTexture(fb, 0) to sample the depth, destroy(fb)
+    // on resize/teardown. Returns invalid when the adapter is
+    // uninitialized or the size is 0.
+    bgfx::FrameBufferHandle createDepthOnlyFrameBuffer(uint16_t width, uint16_t height);
+
     // R5+ — bind `fb` as the draw target for `viewId`. Pass
     // bgfx::kInvalidFrameBufferHandle to revert to the default
     // backbuffer (called by PostProcessPass::execute after blitting
