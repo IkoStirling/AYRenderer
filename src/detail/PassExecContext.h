@@ -49,6 +49,14 @@
 namespace ayt::render::detail
 {
 
+// Forward declaration — ShadowPass is the F2 producer of light-space
+// matrices + depth FBO. PassExecContext holds a borrowed, non-owning
+// pointer so Forward/Transparent can read it without FrameContext
+// mutability (per docs/execution-plan.md §5.3 + §5.4 E6).
+class ShadowPass;
+
+
+
 struct PassExecContext {
     BGFXAdapter&            adapter;
     shader::ShaderResourcePool& pool;
@@ -90,6 +98,30 @@ struct PassExecContext {
     // post-blit-back submit) call `adapter.setViewFrameBuffer(viewId,
     // BGFX_INVALID_HANDLE)` themselves; this field stays untouched.
     bgfx::FrameBufferHandle sceneFbo       = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+
+    // PR-F2 (2026-07-21) — borrowed, non-owning pointer to the
+    // ShadowPass that produced the active shadow map this frame.
+    // Hosts wire this in pipeline-build / per-frame setup (typically
+    // right after dispatching the shadow pass); it is read by
+    // Forward/Transparent passes to upload `u_lightViewProj` and
+    // bind `shadowMap` (the shadow FBO's depth attachment). nullptr
+    // ⇒ forward passes fall back to no-shadow (skip u_lightViewProj
+    // upload, skip shadow sampler bind) — matches PR-F1' default of
+    // "shadow not in default pipeline".
+    //
+    // Lifetime: the pointer must remain valid for the duration of
+    // pipeline::executeAll(ctx). RenderPipeline outlives every
+    // execute() call (the passes are owned via unique_ptr on the
+    // pipeline), so a pipeline-resident ShadowPass is safe across
+    // dispatch.
+    //
+    // Why this lives here (not on FrameContext): FrameContext is
+    // `const` per §5.3 + writes there cause ABI churn when matrix
+    // fields change. A non-owning pointer on the per-dispatch
+    // PassExecContext keeps the FrameContext ABI stable (PR-F1'
+    // invariant) while still letting forward passes read the
+    // shadow producer.
+    const ShadowPass*         shadowPass     = nullptr;
 };
 
 } // namespace ayt::render::detail

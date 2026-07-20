@@ -1,6 +1,7 @@
 #include "detail/ForwardOpaquePass.h"
 
 #include "detail/FrameContext.h"
+#include "detail/ShadowPass.h"
 
 #include <bgfx/bgfx.h>
 #include <cstdio>
@@ -13,7 +14,9 @@ namespace ayt::render::detail
 void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
                                       const std::unordered_map<uint64_t, GpuTexture>& textures,
                                       const FrameContext& frame,
-                                      const ayt::math::Float4x4& world)
+                                      const ayt::math::Float4x4& world,
+                                      BGFXAdapter& adapter,
+                                      const ShadowPass* shadowPass)
 {
     if (!material.shader.isValid()) {
         return;
@@ -38,6 +41,20 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     trySetUniformVec3(material.shader, "lightDir", toLightDir.ptr());
     trySetUniformVec3(material.shader, "lightDirection", toLightDir.ptr());
     trySetUniformVec3(material.shader, "lightColor", frame.lightColor.ptr());
+
+    // PR-F2 (2026-07-21) — when a ShadowPass produced a shadow map
+    // this frame, upload the light-space VP and bind the depth
+    // attachment as sampler `shadowMap`. The Phoskia compare is done
+    // by hand (the .r channel of a D24S8 texture sampled as a plain
+    // sampler2D — see docs/execution-plan.md P4.1 + README "产品定位"
+    // note about hard-edge shadow with possible acne). No shadow
+    // producer ⇒ no upload / no bind ⇒ shaders without
+    // `u_lightViewProj` / `shadowMap` continue working (the helper
+    // no-ops on missing binding or invalid FBO).
+    //
+    // Helper shared with TransparentPass so the upload semantics are
+    // byte-for-byte identical.
+    tryBindShadowSampler(material.shader, adapter, shadowPass);
 
     // U1++ — color-uniform upload lifted to RenderPass helper; see
     // RenderPass.cpp::resolveAndApplyColorUniforms. Identical bytes
@@ -156,7 +173,11 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         adapter.setVertexBuffer(mesh.vertexBuffer);
         adapter.setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
 
-        flushMaterial(material, textures, frame, item.world);
+        // PR-F2 (2026-07-21) — ctx.shadowPass feeds flushMaterial. When
+        // the active shadow producer has a ready FBO, the helper
+        // uploads `u_lightViewProj` and binds `shadowMap`; otherwise
+        // the shader binding misses are no-ops.
+        flushMaterial(material, textures, frame, item.world, adapter, ctx.shadowPass);
 
         // Phase 1 RD-04: upload per-frame bone matrices to the
         // material's `Skeleton` UBO or top-level `bones[]` uniform.
