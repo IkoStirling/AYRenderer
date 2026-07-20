@@ -4,6 +4,14 @@
 
 #include <AYGameLoop.h>
 
+// INT-04 (2026-07-20): Renderer -> EventBus bridge. EventBusHostScope is the
+// host-side RAII container from AYApplication that owns the WindowResize
+// subscription. RendererSubSystem is a pure consumer of WindowResizeEvent
+// (DeviceSubSystem produces it via INT-03); the handler calls
+// Renderer::resize(width, height) which wraps bgfx::reset.
+#include <AYAppEventHost.h>
+#include <ayevent/Events/WindowEvents.h>
+
 #include <functional>
 
 namespace ayt::render
@@ -25,6 +33,7 @@ class RendererSubSystem : public ayt::game::ISubSystem {
 public:
     static void setBootstrapWindow(void* nativeWindowHandle, uint32_t width, uint32_t height);
     static void setBootstrapViewport(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
+    static void setBootstrapBackend(Backend backend);
     static void setBootstrapShaderDumpDirectory(const std::string& dir);
     static void setBootstrapShaderCacheDirectory(const std::string& dir);
 
@@ -59,6 +68,11 @@ private:
     void renderFrame();
     void renderScenePass();
 
+    // INT-04: WindowResize handler. Triggered by EventBus pump (main thread,
+    // sync — Phase 4 contract) when DeviceSubSystem posts a delta. Calls
+    // Renderer::resize(width, height) which wraps bgfx::reset.
+    void onWindowResize(const ayt::event::WindowResizeEvent& e);
+
     Renderer           _renderer;
     RenderScene        _scene;
     SceneBuildCallback _sceneBuilder;
@@ -70,6 +84,13 @@ private:
     uint16_t           _viewportW    = 1280;
     uint16_t           _viewportH    = 720;
     bool               _ready        = false;
+
+    // INT-04: host-side EventBus host scope (Phase 4 lesson applied). The
+    // renderer is a pure consumer today — the scope owns the WindowResize
+    // subscription registered in initialize() and released in shutdown().
+    // Dtor is a no-op so a forgotten disconnect() cannot re-open the
+    // shutdown-time SIGSEGV path documented in [[ay-event-system]] §Phase 4.
+    ayt::app::EventBusHostScope _events;
 };
 
 } // namespace ayt::render

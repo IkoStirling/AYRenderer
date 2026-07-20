@@ -42,6 +42,8 @@ std::string g_bootstrapShaderDumpDir;
 
 std::string g_bootstrapShaderCacheDir;
 
+Backend g_bootstrapBackend = Backend::Auto;
+
 WindowProvider g_windowProvider;
 
 
@@ -89,6 +91,16 @@ void RendererSubSystem::setBootstrapViewport(uint16_t x, uint16_t y, uint16_t wi
     g_bootstrapViewportW = width;
 
     g_bootstrapViewportH = height;
+
+}
+
+
+
+void RendererSubSystem::setBootstrapBackend(Backend backend)
+
+{
+
+    g_bootstrapBackend = backend;
 
 }
 
@@ -224,7 +236,7 @@ bool RendererSubSystem::initialize()
 
     desc.vsync              = true;
 
-    desc.backend            = Backend::Auto;
+    desc.backend            = g_bootstrapBackend;
 
     desc.enableDebugOverlay  = false;
 
@@ -280,6 +292,16 @@ bool RendererSubSystem::initialize()
 
     loop.setRenderCallback([this]() { renderFrame(); });
 
+    // INT-04 (2026-07-20): subscribe WindowResizeEvent on the EventBus. The
+    // handler runs on the main thread (Phase 4 contract: emit/pump are
+    // main-thread-only). DeviceSubSystem (INT-03) posts resize deltas; the
+    // pump() call in GameLoop::tickOnceFrame() flushes them into this
+    // listener before our update() runs.
+    _events.subscribe<ayt::event::WindowResizeEvent>(
+        [this](const ayt::event::WindowResizeEvent& e) {
+            this->onWindowResize(e);
+        });
+
 
 
     _ready = true;
@@ -331,6 +353,11 @@ void RendererSubSystem::shutdown()
         _ready = false;
 
     }
+
+    // INT-04: release the WindowResize subscription BEFORE the renderer
+    // teardown finishes. Phase 4 lesson: explicit disconnect(), never dtor
+    // touches the bus.
+    _events.disconnect();
 
     std::fprintf(stderr, "[RendererSubSystem] shutdown\n");
 
@@ -447,6 +474,23 @@ void RendererSubSystem::renderScenePass()
     }
 
     _renderer.render(_scene);
+}
+
+// INT-04: WindowResize handler. Called on the main thread by EventBus pump
+// (Phase 4 contract). Forwards to Renderer::resize which wraps bgfx::reset.
+void RendererSubSystem::onWindowResize(const ayt::event::WindowResizeEvent& e)
+{
+    if (!_renderer.isInitialized()) {
+        // Device may post a WindowResizeEvent before the renderer initializes
+        // (init order: Device -> Renderer in GameLoop descriptor). Drop the
+        // event silently — Renderer's stored _width/_height will be picked up
+        // from the window provider at initialize() time, so the first frame
+        // is already at the right size.
+        return;
+    }
+    _renderer.resize(e.width, e.height);
+    std::fprintf(stderr, "[RendererSubSystem] WindowResize -> %ux%u\n",
+                 static_cast<unsigned>(e.width), static_cast<unsigned>(e.height));
 }
 
 void RendererSubSystem::renderFrame()

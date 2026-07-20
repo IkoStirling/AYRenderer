@@ -8,6 +8,8 @@ target_link_libraries(${TEST_NAME} PRIVATE
     AYRenderer
     AYResource
     AYTest
+    # INT-04 (2026-07-20): Renderer -> EventBus bridge tests.
+    AYApplication
     bgfx::bgfx
 )
 
@@ -17,6 +19,8 @@ target_include_directories(${TEST_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource/include/assetsImpl
     ${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource/interface
     ${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource/interface/assetsDefs
+    # INT-04: AYAppEventHost.h (EventBusHostScope) + WindowEvents.h.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../AYApplication/interface
 )
 
 if(NOT DEFINED AY_SHADER_SHADERC_PATH)
