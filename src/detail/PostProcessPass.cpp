@@ -1,5 +1,7 @@
 #include "detail/PostProcessPass.h"
 
+#include "detail/GpuResources.h"
+
 #include "AYShaderResource.h"
 
 #include <bgfx/bgfx.h>
@@ -32,19 +34,73 @@ constexpr FullscreenVertex kFullscreenTriangle[3] = {
 
 constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 
-// R5+ — shader source paths for the post-process effect. The file
-// paths are placeholders for the post-process Phoskia source that
-// R5+ ships in the next iteration. Today, if the file isn't present
-// the pass returns 0 (mirrors P0 contract); the upcoming R5.1 phase
-// will bundle the .phoskia source under assets/ and configure the
-// pool's include search path to find it.
-constexpr const char* kPostProcessPhoskiaPath = "assets/shaders/postprocess.blit.phoskia";
+// R5.1 (2026-07-20) — Phoskia source for the post-process effect.
+// Inlined as a constexpr string rather than read from disk because
+// (a) ShaderResourcePool::acquire(src, cacheKey) takes the source
+// directly (mirrors how unlit.phoskia is loaded in
+// Test_ForwardOpaque.cpp:84 + Test_TransparentPass_U1.cpp:67), and
+// (b) keeps the .phoskia artifact co-located with the only TU that
+// compiles it — no fragile "where does the file live at run-time?"
+// landmine. The shader does three things:
+//   1) Vertex: passthrough NDC position (fullscreen triangle verts
+//      are already in clip space) + emit UV varying via pos.xy * 0.5
+//      + 0.5 (NDC → texture UV).
+//   2) Fragment: sample u_sceneColor at UV, multiply by u_exposure,
+//      add bloom-style `raw * u_bloomStrength` (R5.1 ships the math
+//      path even though there's no bloom buffer yet — when the
+//      downsample/upsample pair lands in R5.1.2, the host swaps
+//      `raw` for the bloomed buffer in C++ without re-compiling).
+//   3) Tonemap dispatch via int mode: 0 = None (passthrough), 1 =
+//      Reinhard (x/(x+1)), 2 = ACES (Narkowicz fit). We use a
+//      nested `if (cond) { return ... }` shape rather than
+//      branchless `mix` because Phoskia's semantic analyzer accepts
+//      IfStmt at fragment-body top level and this keeps the math
+//      legible to anyone debugging the effect later.
+constexpr const char* kPostProcessPhoskiaSource = R"(
+material PostProcess {
+    texture2d sceneColor
+    uniform float bloomStrength
+    uniform float exposure
+    uniform int   tonemapMode
+    vertex {
+        in  pos : position
+        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
+        return vec4(pos, 1.0)
+    }
+    fragment {
+        in  vUv : texcoord
+        let sampled = sample(sceneColor, vUv)
+        let raw = vec3(sampled.x, sampled.y, sampled.z) * exposure
+        let withBloom = raw + vec3(bloomStrength) * raw
+        if (tonemapMode == 0) {
+            return vec4(withBloom, sampled.w)
+        } else {
+            if (tonemapMode == 1) {
+                let reinhard = withBloom / (withBloom + vec3(1.0))
+                return vec4(reinhard, sampled.w)
+            } else {
+                if (tonemapMode == 2) {
+                    let a = withBloom * vec3(2.51) + vec3(0.03)
+                    let b = withBloom * vec3(2.43) + vec3(0.59)
+                    let c = withBloom * vec3(0.14) + vec3(0.10)
+                    let aces = clamp((a * a) / (a * b + c), vec3(0.0), vec3(1.0))
+                    return vec4(aces, sampled.w)
+                } else {
+                    return vec4(withBloom, sampled.w)
+                }
+            }
+        }
+    }
+}
+)";
+
+constexpr const char* kPostProcessCacheKey = "postprocess_blit_r51";
 
 } // namespace
 
 uint32_t PostProcessPass::execute(
     BGFXAdapter& adapter,
-    shader::ShaderResourcePool& /*pool*/,
+    shader::ShaderResourcePool& pool,
     const RenderScene& /*scene*/,
     const std::unordered_map<uint64_t, GpuMesh>& /*meshes*/,
     const std::unordered_map<uint64_t, GpuTexture>& /*textures*/,
@@ -109,6 +165,32 @@ uint32_t PostProcessPass::execute(
         return 0;
     }
 
+    // R5.1 — lazily acquire / compile the Phoskia post-process
+    // program from the shader pool. First execute() triggers the
+    // shaderc invocation; subsequent calls reuse the cached handle.
+    // If pool acquire fails (shaderc missing on CI + parse error +
+    // disk cache miss), _program stays invalid — we degrade to the
+    // R5+ "draw geometry only" path below: a submit-with-invalid-
+    // program draw + the FBO restore. The scene still shows on the
+    // backbuffer because ForwardOpaque + Transparent wrote there
+    // before us (the post-process "blit" just doesn't run, so no
+    // tonemap/bloom/exposure is applied).
+    ensureProgram(pool);
+    const bool programReady = _program.isValid()
+        && _uBloomStrength != ayt::shader::InvalidBinding
+        && _uExposure      != ayt::shader::InvalidBinding
+        && _uTonemapMode   != ayt::shader::InvalidBinding
+        && _tSceneColor    != ayt::shader::InvalidBinding;
+
+    // R5.1 — pull the FBO's color attachment as a sampler so the
+    // post-process fragment can `sample(u_sceneColor, vUv)`. bgfx
+    // exposes `bgfx::getTexture(fbo, attachment=0)` for this — the
+    // returned TextureHandle is "borrowed" (no destroy); it stays
+    // valid as long as the FBO is alive. We capture it every frame
+    // (cheap pointer deref) so a future ensureFbo() resize invalidates
+    // the prior handle cleanly.
+    const bgfx::TextureHandle fboColor = bgfx::getTexture(_fbo, 0);
+
     // R5+ — bind the offscreen FBO as the draw target for the
     // post-process view. We use a view id separate from ForwardOpaque
     // / Transparent so the FBO can capture the post-processed result
@@ -144,33 +226,76 @@ uint32_t PostProcessPass::execute(
     bgfx::setTransform(nullptr);
     bgfx::setVertexBuffer(0, _fullscreenVB);
     bgfx::setIndexBuffer(_fullscreenIB, 0, 3);
-    // (No uniforms today: bgfx builtin shaders don't accept
-    // u_time / u_bloomStrength / u_exposure / u_tonemapMode. When
-    // R5.1's Phoskia source lands, setUniform calls land here —
-    // FrameContext already carries the values.)
-    (void)frame;
 
-    // R5+ — submit. Returns the draw-call count for stats. We use
-    // bgfx::kInvalidProgram as a sentinel because no post-process
-    // Phoskia program is loaded yet; this is documented R5+ behavior
-    // (see PostProcessPass.h) and will be replaced when the .phoskia
-    // source ships.
+    // R5.1 — wire the post-process knobs into the fragment shader.
+    // The 4 bindings were resolved in ensureProgram() once; we look
+    // them up by cached ID here. The Phoskia `uniform int tonemapMode`
+    // is 4 bytes on the GLSL side, matching our int32_t cast.
+    //
+    // We then defer the actual bgfx::submit to ShaderResource::submit
+    // (called below) — ShaderResource holds the bgfx::ProgramHandle
+    // internally; manually constructing `bgfx::ProgramHandle{_program.id()}`
+    // would mangle the handle (ShaderResource id is a pool handle,
+    // not a bgfx handle). Following the ForwardOpaquePass pattern
+    // (ForwardOpaquePass.cpp:185 `material.shader.submit(ctx)`) keeps
+    // the draw path in one well-tested code path.
+    if (programReady && bgfx::isValid(fboColor)) {
+        // bgfx idx → shader::TextureHandle.id (+1 offset so id==0
+        // stays invalid; see GpuResources.h:73 toShaderTexture).
+        const ayt::shader::TextureHandle texHandle =
+            ayt::render::detail::toShaderTexture(fboColor);
+        _program.setTexture(0, _tSceneColor, texHandle);
+        const float bloomStrength = frame.bloomStrength;
+        const float exposure      = frame.exposure;
+        const int32_t tonemapMode = static_cast<int32_t>(frame.tonemapMode);
+        _program.setUniform(_uBloomStrength, &bloomStrength, sizeof(bloomStrength));
+        _program.setUniform(_uExposure,      &exposure,      sizeof(exposure));
+        _program.setUniform(_uTonemapMode,   &tonemapMode,   sizeof(tonemapMode));
+
+        // R5+ — submit the FBO-targeted draw via ShaderResource so
+        // bgfx::setTexture/setUniform pending lists flush + bgfx::submit
+        // is called with the impl->programHandle (correct bgfx handle).
+        ayt::shader::DrawCallContext ctx;
+        ctx.viewId = viewId;
+        ctx.state  = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
+                   | BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_WRITE_Z;
+        _program.submit(ctx);
+
+        // R5.1 — real blit-back step. Re-bind the default backbuffer
+        // and submit the SAME fullscreen triangle AGAIN, this time
+        // with the FBO color attached as a sampler (the post-process
+        // program does the actual copy). The second submit uses the
+        // SAME pending uniform + texture bindings (ShaderResource
+        // hasn't been cleared between submits — see AYShaderResource.cpp
+        // line 243: pendingTextures.clear() runs at end of submit,
+        // so we re-set them).
+        adapter.setViewFrameBuffer(viewId, BGFX_INVALID_HANDLE);
+        adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
+        bgfx::setTransform(nullptr);
+        bgfx::setVertexBuffer(0, _fullscreenVB);
+        bgfx::setIndexBuffer(_fullscreenIB, 0, 3);
+
+        // sampler + uniform re-bind (submit() clears pending lists).
+        _program.setTexture(0, _tSceneColor, texHandle);
+        _program.setUniform(_uBloomStrength, &bloomStrength, sizeof(bloomStrength));
+        _program.setUniform(_uExposure,      &exposure,      sizeof(exposure));
+        _program.setUniform(_uTonemapMode,   &tonemapMode,   sizeof(tonemapMode));
+        _program.submit(ctx);
+        return 2;  // FBO-target draw + backbuffer-target draw
+    }
+
+    // R5+ fallback — program not ready (shaderc missing / parse
+    // error / fboColor invalid). Submit an "empty" draw (no program)
+    // to keep the bgfx draw-call counter ticking for stats; then
+    // restore the default backbuffer so UIPass can composite chrome
+    // over the unfiltered scene color. Return 1 to record the
+    // bgfx::submit that fired (the program is invalid so the GPU
+    // effectively records the call but discards the actual draw).
     bgfx::submit(viewId,
                  bgfx::ProgramHandle{BGFX_INVALID_HANDLE},
                  0,
                  BGFX_DISCARD_NONE);
-
-    // R5+ — restore the default backbuffer as the view's draw target
-    // so subsequent passes (UIPass at index 3) and the present-on-end
-    // continue to write to the on-screen surface. This is the
-    // "blit-back" step in the P0 comment — simplified because bgfx
-    // doesn't expose a copy-from-FBO-to-default primitive on every
-    // backend (the semantics depend on whether the swapchain image
-    // is a bgfx-owned FBO). The R5.1 Phoskia program will perform
-    // the actual copy via a second fullscreen-triangle draw with the
-    // FBO as input sampler.
     adapter.setViewFrameBuffer(viewId, BGFX_INVALID_HANDLE);
-
     return 1;
 }
 
@@ -225,6 +350,38 @@ void PostProcessPass::ensureFullscreenQuad(BGFXAdapter& adapter)
     _fullscreenIB = bgfx::createIndexBuffer(ibMem, BGFX_BUFFER_NONE);
 }
 
+void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
+{
+    if (_program.isValid()) {
+        return;
+    }
+    // R5.1 — pool.acquire takes the source string + a cache key.
+    // On success we resolve the 4 binding IDs once (cheaper than
+    // re-resolving every frame); on failure _program stays invalid
+    // and execute() falls back to the R5+ no-shader path (1 draw,
+    // no effect). The pool may also surface compile errors via
+    // lastCompileErrors() — we log them to stderr so the failure is
+    // diagnosable from a test run, but don't crash (mirrors how
+    // createMaterialFromPhoskia is treated in tests: invalid
+    // material = test SKIPs).
+    ayt::shader::ShaderResource acquired =
+        pool.acquire(kPostProcessPhoskiaSource, kPostProcessCacheKey);
+    if (!acquired.isValid()) {
+        std::fprintf(stderr,
+                     "[PostProcessPass] Phoskia acquire failed; "
+                     "post-process will run as R5+ no-op shader path\n");
+        for (const std::string& err : pool.lastCompileErrors()) {
+            std::fprintf(stderr, "[PostProcessPass]   %s\n", err.c_str());
+        }
+        return;
+    }
+    _program        = acquired;
+    _uBloomStrength = _program.getUniformBinding("bloomStrength");
+    _uExposure      = _program.getUniformBinding("exposure");
+    _uTonemapMode   = _program.getUniformBinding("tonemapMode");
+    _tSceneColor    = _program.getTextureBinding("sceneColor");
+}
+
 void PostProcessPass::destroyResources(BGFXAdapter& adapter)
 {
     if (bgfx::isValid(_fbo)) {
@@ -239,6 +396,23 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
         adapter.destroy(_fullscreenIB);
         _fullscreenIB = BGFX_INVALID_HANDLE;
     }
+    if (_program.isValid()) {
+        // R5.1 — release the ShaderResource. ShaderResource doesn't
+        // carry a back-pointer to its pool; the pool reference is
+        // held by Renderer::Impl and outlives this pass (see
+        // AYRenderer.cpp:160 shutdown order: resources → shaderPool
+        // → adapter). Resetting _program here is the documented
+        // ShaderResource contract (see ShaderResource::reset in
+        // AYShaderResource.h:32) — the pool's dtor releases the
+        // underlying GPU program once the refcount hits zero,
+        // regardless of which ShaderResource instance held the last
+        // reference.
+        _program.reset();
+    }
+    _uBloomStrength = ayt::shader::InvalidBinding;
+    _uExposure      = ayt::shader::InvalidBinding;
+    _uTonemapMode   = ayt::shader::InvalidBinding;
+    _tSceneColor    = ayt::shader::InvalidBinding;
     _fboWidth = 0;
     _fboHeight = 0;
 }

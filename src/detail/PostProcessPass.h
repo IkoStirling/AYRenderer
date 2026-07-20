@@ -2,6 +2,8 @@
 
 #include "detail/RenderPass.h"
 
+#include "AYShaderResource.h"
+
 #include <bgfx/bgfx.h>
 
 #include <cstdint>
@@ -98,10 +100,32 @@ private:
     uint16_t                   _fboWidth  = 0;
     uint16_t                   _fboHeight = 0;
 
+    // R5.1 (2026-07-20) — Phoskia program for the post-process effect.
+    // Acquired lazily from the shader pool on first execute() after
+    // adapter initialization; bound to the fullscreen-triangle draw.
+    // Pool acquire may fail (shaderc missing on CI / disk cache miss
+    // + parse error); in that case isReady() returns false and
+    // execute() degrades to the R5+ "draw geometry only" path (no
+    // real blit) — the scene color still appears on screen because
+    // ForwardOpaque + Transparent wrote to the default backbuffer
+    // before us. Cached for the pass's lifetime (program is hot-reload
+    // aware via pool.acquire's cache key).
+    ayt::shader::ShaderResource _program;
+
+    // R5.1 — cached uniform / texture binding IDs. Resolved from
+    // _program on first acquire (cheaper than getUniformBinding every
+    // frame); InvalidBinding (0) means "not yet resolved". Tests use
+    // these to pin that the wire path actually found the names.
+    ayt::shader::BindingId      _uBloomStrength = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uExposure      = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uTonemapMode   = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _tSceneColor    = ayt::shader::InvalidBinding;
+
     // R5+ — helpers. Both are no-ops on the Noop backend (BGFXAdapter
     // gates on isInitialized()), so the headless test path runs clean.
     void ensureFbo(BGFXAdapter& adapter, uint16_t width, uint16_t height);
     void ensureFullscreenQuad(BGFXAdapter& adapter);
+    void ensureProgram(shader::ShaderResourcePool& pool);
     void destroyResources(BGFXAdapter& adapter);
 };
 
