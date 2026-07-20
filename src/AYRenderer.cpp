@@ -7,6 +7,7 @@
 #include "detail/RenderResourceManager.h"
 #include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
+#include "detail/TransparentPass.h"
 #include "detail/UiGpuContext.h"
 #include "detail/UIPass.h"
 #include "AYUIRenderBackend.h"
@@ -35,6 +36,12 @@ struct Renderer::Impl {
     // Impl so the U1+ swap to vector<unique_ptr<RenderPass>> can
     // add this without a follow-up patch to this header.
     std::unique_ptr<detail::UIPass> uiPass;
+
+    // U1 — third concrete RenderPass subclass. Dispatched from
+    // Renderer::render after ForwardOpaquePass; filters
+    // blendMode==Alpha DrawItems and submits with BGFX_STATE_BLEND_ALPHA.
+    std::unique_ptr<detail::TransparentPass> transparentPass;
+
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
     InitDesc                      initDesc{};
@@ -59,9 +66,10 @@ struct Renderer::Impl {
     int                           compositeSceneViewId = -1;
 
     Impl()
-        : resources(adapter, shaderPool)
-        , forwardPass(std::make_unique<detail::ForwardOpaquePass>())
+        : forwardPass(std::make_unique<detail::ForwardOpaquePass>())
         , uiPass(std::make_unique<detail::UIPass>())
+        , transparentPass(std::make_unique<detail::TransparentPass>())
+        , resources(adapter, shaderPool)
     {
     }
 };
@@ -181,14 +189,37 @@ void Renderer::render(const RenderScene& scene)
                                ? static_cast<uint8_t>(_impl->compositeSceneViewId)
                                : detail::ForwardOpaquePass::kMainViewId;
 
-    _impl->lastDrawCalls = _impl->forwardPass->execute(
-        _impl->adapter, _impl->shaderPool, scene,
-        _impl->resources.meshes(), _impl->resources.textures(),
-        _impl->resources.materials(),
-        _impl->viewportX, _impl->viewportY,
-        _impl->viewportW, _impl->viewportH,
-        frame,
-        viewId);
+    _impl->lastDrawCalls = 0;
+
+    // U1 — split into two dispatches. ForwardOpaquePass writes the
+    // depth buffer first; TransparentPass then reuses that depth for
+    // STATE_DEPTH_TEST_LESS but never writes its own Z so transparent
+    // fragments composite over the opaque result without occluding
+    // each other (back-to-front sort is deferred to U1+).
+    //
+    // Per-pass isEnabled() guards are forward-compatible with the
+    // debug overlay / hot-reload toggle work planned later; today
+    // both default to true (set by the RenderPass base ctor).
+    if (_impl->forwardPass && _impl->forwardPass->isEnabled()) {
+        _impl->lastDrawCalls += _impl->forwardPass->execute(
+            _impl->adapter, _impl->shaderPool, scene,
+            _impl->resources.meshes(), _impl->resources.textures(),
+            _impl->resources.materials(),
+            _impl->viewportX, _impl->viewportY,
+            _impl->viewportW, _impl->viewportH,
+            frame,
+            viewId);
+    }
+    if (_impl->transparentPass && _impl->transparentPass->isEnabled()) {
+        _impl->lastDrawCalls += _impl->transparentPass->execute(
+            _impl->adapter, _impl->shaderPool, scene,
+            _impl->resources.meshes(), _impl->resources.textures(),
+            _impl->resources.materials(),
+            _impl->viewportX, _impl->viewportY,
+            _impl->viewportW, _impl->viewportH,
+            frame,
+            viewId);
+    }
 }
 
 void Renderer::resize(uint32_t width, uint32_t height)
@@ -362,6 +393,24 @@ void Renderer::setMaterialColor(MaterialHandle material, const char* propertyNam
         return;
     }
     _impl->resources.setMaterialColor(material, propertyName, r, g, b, a);
+}
+
+void Renderer::setMaterialBlendMode(MaterialHandle material, BlendMode blendMode)
+{
+    // Inline mutates RenderResourceManager's _materials map directly —
+    // the GpuMaterial field is a single POD byte (BlendMode uint8_t)
+    // and threading the setter through RenderResourceManager for one
+    // byte is not worth the surface. Public API no-throws on bad
+    // handle, mirroring setMaterialColor above.
+    if (!_impl) {
+        return;
+    }
+    auto& mats = _impl->resources.materials();
+    auto it = mats.find(material.id);
+    if (it == mats.end()) {
+        return;
+    }
+    it->second.blendMode = blendMode;
 }
 
 void Renderer::setMaterialFloat(MaterialHandle material, const char* uniformName, float value)

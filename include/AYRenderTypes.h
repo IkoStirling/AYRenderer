@@ -19,6 +19,16 @@ enum class Backend : uint8_t {
     Noop,  // headless / unit tests only
 };
 
+// U1 — material-level blend state. Default = Opaque for source-compat
+// with materials created before this PR. Alpha = standard "over"
+// compositing via BGFX_STATE_BLEND_ALPHA — assumes the shader's
+// fragment output is non-premultiplied vec4(rgb, alpha), which is the
+// Phoskia default output shape.
+enum class BlendMode : uint8_t {
+    Opaque = 0,  // default: no blending, depth-write
+    Alpha  = 1,  // BGFX_STATE_BLEND_ALPHA (srcA*src + (1-srcA)*dst)
+};
+
 struct InitDesc {
     void*    windowHandle = nullptr;
     uint32_t width        = 1280;

@@ -83,6 +83,13 @@ public:
     void setMaterialColor(MaterialHandle material, const char* propertyName,
                           float r, float g, float b, float a = 1.0f);
 
+    // U1 — material-level blend mode. Default = Opaque for all
+    // materials created before this PR (no behavior change). Set to
+    // BlendMode::Alpha to make TransparentPass submit this material
+    // with BGFX_STATE_BLEND_ALPHA in its second-pass slot. No-op on
+    // unknown handle.
+    void setMaterialBlendMode(MaterialHandle material, BlendMode blendMode);
+
     void setMaterialFloat(MaterialHandle material, const char* uniformName, float value);
     void setMaterialVec3(MaterialHandle material, const char* uniformName,
                          float x, float y, float z);
