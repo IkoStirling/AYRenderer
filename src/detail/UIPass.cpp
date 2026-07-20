@@ -5,18 +5,11 @@
 namespace ayt::render::detail
 {
 
-uint32_t UIPass::execute(
-    BGFXAdapter& /*adapter*/,
-    shader::ShaderResourcePool& /*pool*/,
-    const RenderScene& /*scene*/,
-    const std::unordered_map<uint64_t, GpuMesh>& /*meshes*/,
-    const std::unordered_map<uint64_t, GpuTexture>& /*textures*/,
-    std::unordered_map<uint64_t, GpuMaterial>& /*materials*/,
-    uint16_t /*viewportX*/, uint16_t /*viewportY*/,
-    uint16_t viewportWidth, uint16_t viewportHeight,
-    const FrameContext& /*frame*/,
-    uint8_t /*viewId*/)
+uint32_t UIPass::execute(PassExecContext& ctx)
 {
+    const uint16_t viewportWidth  = ctx.viewportWidth;
+    const uint16_t viewportHeight = ctx.viewportHeight;
+
     if (_backend == nullptr) {
         return 0;
     }

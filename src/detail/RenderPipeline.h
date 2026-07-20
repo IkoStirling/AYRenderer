@@ -29,6 +29,11 @@ namespace ayt::render::detail
 // Threading: executeAll() is called from the render thread (currently
 // main thread; multiplayer deferred to Phase 5). Matches the
 // RenderPass::execute contract.
+//
+// P1 (PR-C, 2026-07-20): executeAll() now takes a single
+// PassExecContext& instead of 12 unpacked args. The host
+// (Renderer::render) builds the context once per frame and
+// every enabled pass reads from it. See PassExecContext.h.
 class RenderPipeline {
 public:
     // Take ownership. Order of calls determines dispatch order; later
@@ -44,22 +49,13 @@ public:
     // of per-pass execute() return values (used to update
     // RenderFrameStats.drawCalls).
     //
-    // Same 12-arg shape as RenderPass::execute — see that header for
-    // parameter semantics. Threading the same `materials` non-const
-    // ref through every pass is load-bearing: ForwardOpaquePass lazily
-    // resolves BindingIds on first use and caches them in
-    // GpuMaterial fields (see RenderPass.h:60-64 + ForwardOpaquePass.cpp:69-79).
-    uint32_t executeAll(
-        BGFXAdapter& adapter,
-        shader::ShaderResourcePool& pool,
-        const RenderScene& scene,
-        const std::unordered_map<uint64_t, GpuMesh>& meshes,
-        const std::unordered_map<uint64_t, GpuTexture>& textures,
-        std::unordered_map<uint64_t, GpuMaterial>& materials,
-        uint16_t viewportX, uint16_t viewportY,
-        uint16_t viewportWidth, uint16_t viewportHeight,
-        const FrameContext& frame,
-        uint8_t viewId);
+    // P1 (PR-C, 2026-07-20): takes a single PassExecContext& instead
+    // of 12 unpacked args. The host builds the context once per frame
+    // and every enabled pass reads from it. Threading the same
+    // `materials` non-const ref through every pass is load-bearing:
+    // ForwardOpaquePass lazily resolves BindingIds on first use and
+    // caches them in GpuMaterial fields.
+    uint32_t executeAll(PassExecContext& ctx);
 
 private:
     std::vector<std::unique_ptr<RenderPass>> _passes;

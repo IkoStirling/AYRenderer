@@ -4,6 +4,7 @@
 #include "detail/DebugOverlay.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FrameContext.h"
+#include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPipeline.h"
 #include "detail/RenderResourceManager.h"
@@ -240,6 +241,26 @@ void Renderer::render(const RenderScene& scene)
 
     _impl->lastDrawCalls = 0;
 
+    // P1 (PR-C, 2026-07-20): build the PassExecContext once per frame
+    // and hand it to RenderPipeline::executeAll. Every enabled pass
+    // reads from the same context. Adding new per-frame state (e.g.
+    // a ShadowMap slot in P3, scene-RT handles in P2) means adding a
+    // field to PassExecContext, NOT a new execute() arg.
+    detail::PassExecContext ctx{
+        _impl->adapter,
+        _impl->shaderPool,
+        scene,
+        _impl->resources.meshes(),
+        _impl->resources.textures(),
+        _impl->resources.materials(),
+        _impl->viewportX,
+        _impl->viewportY,
+        _impl->viewportW,
+        _impl->viewportH,
+        frame,
+        viewId,
+    };
+
     // Dispatched via RenderPipeline::executeAll in registration order
     // [ForwardOpaque, Transparent, PostProcess, UI]. ForwardOpaquePass
     // writes the depth buffer first; TransparentPass reuses that depth
@@ -254,14 +275,7 @@ void Renderer::render(const RenderScene& scene)
     //
     // Per-pass isEnabled() guards are honored by the pipeline; today
     // all four default to true (set by the RenderPass base ctor).
-    _impl->lastDrawCalls = _impl->pipeline.executeAll(
-        _impl->adapter, _impl->shaderPool, scene,
-        _impl->resources.meshes(), _impl->resources.textures(),
-        _impl->resources.materials(),
-        _impl->viewportX, _impl->viewportY,
-        _impl->viewportW, _impl->viewportH,
-        frame,
-        viewId);
+    _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
 }
 
 void Renderer::resize(uint32_t width, uint32_t height)

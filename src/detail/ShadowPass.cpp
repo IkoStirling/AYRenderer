@@ -29,18 +29,13 @@ ShadowPass::~ShadowPass()
     // Same pattern as PostProcessPass::destroyResources().
 }
 
-uint32_t ShadowPass::execute(
-    BGFXAdapter& adapter,
-    shader::ShaderResourcePool& /*pool*/,
-    const RenderScene& scene,
-    const std::unordered_map<uint64_t, GpuMesh>& meshes,
-    const std::unordered_map<uint64_t, GpuTexture>& /*textures*/,
-    std::unordered_map<uint64_t, GpuMaterial>& /*materials*/,
-    uint16_t /*viewportX*/, uint16_t /*viewportY*/,
-    uint16_t /*viewportWidth*/, uint16_t /*viewportHeight*/,
-    const FrameContext& /*frame*/,
-    uint8_t viewId)
+uint32_t ShadowPass::execute(PassExecContext& ctx)
 {
+    BGFXAdapter& adapter = ctx.adapter;
+    const uint8_t viewId = ctx.viewId;
+    const auto& meshes    = ctx.meshes;
+    const RenderScene& scene = ctx.scene;
+
     // R5+ — mirror PostProcessPass::execute guards. The pass is a
     // hard no-op on the headless test path (Noop backend / not
     // initialized) so the unit tests don't need a real GPU.

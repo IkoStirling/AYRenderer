@@ -41,18 +41,19 @@ struct SortKeyDescending {
 
 } // namespace
 
-uint32_t TransparentPass::execute(
-    BGFXAdapter& adapter,
-    shader::ShaderResourcePool& /*pool*/,
-    const RenderScene& scene,
-    const std::unordered_map<uint64_t, GpuMesh>& meshes,
-    const std::unordered_map<uint64_t, GpuTexture>& /*textures*/,
-    std::unordered_map<uint64_t, GpuMaterial>& materials,
-    uint16_t viewportX, uint16_t viewportY,
-    uint16_t viewportWidth, uint16_t viewportHeight,
-    const FrameContext& frame,
-    uint8_t viewId)
+uint32_t TransparentPass::execute(PassExecContext& ctx)
 {
+    BGFXAdapter& adapter = ctx.adapter;
+    const FrameContext& frame = ctx.frame;
+    const uint8_t viewId = ctx.viewId;
+    const auto& meshes    = ctx.meshes;
+    auto& materials       = ctx.materials;
+    const uint16_t viewportX      = ctx.viewportX;
+    const uint16_t viewportY      = ctx.viewportY;
+    const uint16_t viewportWidth  = ctx.viewportWidth;
+    const uint16_t viewportHeight = ctx.viewportHeight;
+    const RenderScene& scene = ctx.scene;
+
     adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
     adapter.setViewTransform(viewId, frame.view.ptr(), frame.projection.ptr());
 
