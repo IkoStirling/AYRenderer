@@ -7,11 +7,50 @@
 #include "detail/GpuResources.h"
 
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <unordered_map>
 
 namespace ayt::render::detail
 {
+
+// U1.5 — shared per-material uniform-upload helpers. ForwardOpaquePass
+// and TransparentPass both need to upload MVP / cameraPos / lightDir /
+// lightColor with the same lazy-resolve + fallback semantics. Keeping
+// the bodies byte-for-byte identical in one header is cheaper than
+// risking drift between two anonymous-namespace copies. Inline in the
+// header so neither Pass owns the definition; the body is small (no
+// cost to inline). Caller passes a ShaderResource by reference, so the
+// lazy-resolve writes back into ShaderResource's internal binding
+// cache (consistent with ForwardOpaquePass behavior since Phase 1).
+//
+// Why free fns (not static methods): anonymous-namespace free fns in
+// the original ForwardOpaquePass.cpp would need to be exposed at
+// namespace scope for TransparentPass to call them. Inline header
+// free fns in `detail::` get us that visibility without forcing a
+// non-inline definition in a .cpp.
+inline void trySetUniformVec3(shader::ShaderResource& shader, const char* name, const float* values)
+{
+    const shader::BindingId binding = shader.getUniformBinding(name);
+    if (binding == shader::InvalidBinding || values == nullptr) {
+        return;
+    }
+    const float padded[4] = {values[0], values[1], values[2], 0.0f};
+    shader.setUniform(binding, padded, sizeof(padded));
+}
+
+inline void trySetUniformMat4(shader::ShaderResource& shader, const char* primaryName,
+                              const char* fallbackName, const ayt::math::Float4x4& matrix)
+{
+    shader::BindingId binding = shader.getUniformBinding(primaryName);
+    if (binding == shader::InvalidBinding && fallbackName != nullptr) {
+        binding = shader.getUniformBinding(fallbackName);
+    }
+    if (binding == shader::InvalidBinding) {
+        return;
+    }
+    shader.setUniform(binding, matrix.ptr(), sizeof(float) * 16);
+}
 
 // U0 (Phase 2 Pass scaffold) — abstract base for one rendering pass.
 // One subclass = one logical draw on one bgfx view. The pipeline

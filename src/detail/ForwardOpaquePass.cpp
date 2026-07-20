@@ -10,33 +10,6 @@
 namespace ayt::render::detail
 {
 
-namespace {
-
-void trySetUniformVec3(shader::ShaderResource& shader, const char* name, const float* values)
-{
-    const shader::BindingId binding = shader.getUniformBinding(name);
-    if (binding == shader::InvalidBinding || values == nullptr) {
-        return;
-    }
-    const float padded[4] = {values[0], values[1], values[2], 0.0f};
-    shader.setUniform(binding, padded, sizeof(padded));
-}
-
-void trySetUniformMat4(shader::ShaderResource& shader, const char* primaryName,
-                       const char* fallbackName, const ayt::math::Float4x4& matrix)
-{
-    shader::BindingId binding = shader.getUniformBinding(primaryName);
-    if (binding == shader::InvalidBinding && fallbackName != nullptr) {
-        binding = shader.getUniformBinding(fallbackName);
-    }
-    if (binding == shader::InvalidBinding) {
-        return;
-    }
-    shader.setUniform(binding, matrix.ptr(), sizeof(float) * 16);
-}
-
-} // namespace
-
 void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
                                       const std::unordered_map<uint64_t, GpuTexture>& textures,
                                       const FrameContext& frame,
