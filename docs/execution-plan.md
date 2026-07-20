@@ -358,16 +358,16 @@ git checkout -b fix/renderer-p0-docs-alpha
 
 ---
 
-## 附录 A — Segfault 隔离实验结果（待填）
+## 附录 A — Segfault 隔离实验结果
 
 | 实验 | 日期 | 跑次 | PASS/FAIL | 备注 |
 |------|------|------|-----------|------|
-| E1 FrameContext 尾部 POD | | | | |
-| E2 Light 存储 API | | | | |
-| E3 非 const FrameContext& | | | | |
-| E4 默认挂 Shadow disabled | | | | |
-| E5 Shadow enabled 无 Frame 槽 | | | | |
-| E6 旁路 getter 采样 | | | | |
+| **E1** FrameContext 尾部 POD | 2026-07-20 | **4/4 PASS** (428/428) | tail `uint32_t shadowMapId = 0;`,无语义使用;commit `938c56d` (branch `exp/renderer-framecontext-tail-pod`);4 跑次出于 §5.4 baseline 协议额外加固一次;解锁 E4 / P3 路径 |
+| E2 Light 存储 API | | | | 未跑(E1 通过后下一刀候选) |
+| E3 非 const FrameContext& | | | | 未跑 |
+| E4 默认挂 Shadow disabled | | | | 未跑(E1 解锁后候选) |
+| E5 Shadow enabled 无 Frame 槽 | | | | 未跑 |
+| E6 旁路 getter 采样 | | | | 未跑 |
 
 ## 附录 B — 关键默认管线索引
 
