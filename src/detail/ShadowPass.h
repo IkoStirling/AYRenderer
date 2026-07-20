@@ -16,11 +16,13 @@
 namespace ayt::render::detail
 {
 
-// R5+ (Phase Shadow, 2026-07-20) — shadow caster pass slot per
-// design.md §8.3. Default-disabled; a future PR will flip it to
-// default-enabled once the deferred pipeline plumbing (Light
-// struct in RenderScene + lighting consumer in ForwardOpaquePass
-// for forward-lit materials) lands. Today the pass exists so:
+// R5+ (Phase Shadow cut 1, 2026-07-20) — shadow caster pass slot per
+// design.md §8.3. Compile-clean code; NOT addPass'd to the default
+// pipeline. See `docs/execution-plan.md` §5 (Segfault Constraints) and
+// §1.2 (subsystem status) before flipping on. Cut 2 (real light-space
+// depth + opt-in enable) is gated by §5.4 isolation experiments.
+//
+// Today the pass exists so:
 //   1) Hosts can opt into shadow casting by addPass()ing a
 //      ShadowPass in front of their forward pipeline.
 //   2) Tests can pin that the slot wires through RenderPipeline
@@ -28,13 +30,15 @@ namespace ayt::render::detail
 //   3) Future work (cascaded shadow, Point/Spot shadow caster
 //      programs, scene-AABB fit) has a well-typed home.
 //
-// v1 behavior (this PR):
+// v1 behavior (cut 1):
 //   - Renders every DrawItem in scene.items() into a depth-only
 //     FBO at the host-supplied shadow map size (default 1024).
 //   - Uses bgfx's no-fragment-program submit (state = WRITE_Z |
 //     DEPTH_TEST_LESS + DISCARD_ALL flag) to write depth without
 //     fragment shader cost. Same trick every vanilla shadow-map
 //     example uses.
+//   - Light-space transform is **identity** (depth pre-pass equivalent);
+//     the real orthographic light VP arrives in cut 2.
 //   - Auto-degrades to 0 draws on the Noop backend (mirrors
 //     PostProcessPass::execute guard) so headless tests stay clean.
 //
@@ -42,12 +46,11 @@ namespace ayt::render::detail
 //   - No Phoskia shadow_caster program (skin, alpha-clip, etc.)
 //     — see design.md §8.3.4 cut 1 → cut 2 ordering.
 //   - No cascade / cube shadow / shadow bias / PCF filtering.
-//   - No scene-AABB fit — fixed 50-unit-radius frustum at origin.
-//   - No Light struct on RenderScene (the missing piece that
-//     caused the prior segfault). The pass picks the host-supplied
-//     shadow map size only; the light-direction transform is the
-//     default identity (so shadow writes are equivalent to depth
-//     pre-pass; the visual signal will be in cut 2).
+//   - No scene-AABB fit — identity light xform only.
+//   - No Light struct on RenderScene (deferred to cut 2 per
+//     `docs/execution-plan.md` §5.3; the segfault around adding
+//     Light + FrameContext::ShadowMap + non-const Frame is documented
+//     in §5 and isolation-tested per §5.4).
 class ShadowPass : public RenderPass {
 public:
     static constexpr uint16_t kDefaultShadowMapSize = 1024;
