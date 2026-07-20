@@ -429,4 +429,70 @@ void BGFXAdapter::destroy(bgfx::FrameBufferHandle h)
     }
 }
 
+// R5+ (Pass-side backfill, 2026-07-20) — 9 thin wrappers around bgfx
+// so RenderPass implementations never directly call bgfx::*. Each is
+// one line today and one line tomorrow if bgfx changes its API.
+// The wrappers also let us add per-Pass guardrails in future (logging,
+// perf counters, leak detection) without touching every Pass.
+
+void BGFXAdapter::setState(uint64_t state)
+{
+    bgfx::setState(state);
+}
+
+void BGFXAdapter::setTransformIdentity()
+{
+    bgfx::setTransform(nullptr);
+}
+
+void BGFXAdapter::setViewClearRaw(uint8_t viewId, uint16_t flags,
+                                  uint32_t rgba, float depth, uint8_t stencil)
+{
+    bgfx::setViewClear(viewId, flags, rgba, depth, stencil);
+}
+
+void BGFXAdapter::setViewClearDepthOnly(uint8_t viewId, float depth)
+{
+    // R5+ — convenience for depth-only FBOs (ShadowPass). Clears the
+    // depth attachment; color RGBA / stencil left at defaults (bgfx
+    // ignores them when the FBO has no color/stencil attachments).
+    bgfx::setViewClear(viewId,
+                       BGFX_CLEAR_DEPTH,
+                       /*rgba=*/0x00000000,
+                       /*depth=*/depth,
+                       /*stencil=*/0);
+}
+
+void BGFXAdapter::submit(uint8_t viewId,
+                          bgfx::ProgramHandle program,
+                          uint32_t depth, uint8_t flags)
+{
+    // bgfx::submit returns void on this version (caller observes
+    // the draw-call count via the bgfx stats callback, not via the
+    // submit return). Passes that want draw counts must read the
+    // adapter-side counter (BGFXAdapter::lastDrawCalls) when bgfx
+    // exposes that — for now this is a pure proxy.
+    bgfx::submit(viewId, program, depth, flags);
+}
+
+bool BGFXAdapter::isValid(bgfx::VertexBufferHandle h) { return bgfx::isValid(h); }
+bool BGFXAdapter::isValid(bgfx::IndexBufferHandle  h) { return bgfx::isValid(h); }
+bool BGFXAdapter::isValid(bgfx::TextureHandle     h) { return bgfx::isValid(h); }
+bool BGFXAdapter::isValid(bgfx::FrameBufferHandle h) { return bgfx::isValid(h); }
+
+bgfx::TextureHandle BGFXAdapter::getFboAttachment(bgfx::FrameBufferHandle fb,
+                                                   uint8_t attachment)
+{
+    // R5+ (Pass-side backfill) — borrowed accessor, matching the
+    // bgfx contract that the returned TextureHandle is owned by the
+    // FBO and does NOT need destroy(). We gate on isInitialized so
+    // uninitialized adapters return an invalid handle (callers are
+    // trained to check before sampling, so the headless test path
+    // degrades to "skip the sampler bind").
+    if (!_initialized) {
+        return BGFX_INVALID_HANDLE;
+    }
+    return bgfx::getTexture(fb, attachment);
+}
+
 } // namespace ayt::render::detail

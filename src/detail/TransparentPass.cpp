@@ -85,7 +85,8 @@ uint32_t TransparentPass::execute(
         }
 
         const GpuMesh& mesh = meshIt->second;
-        if (!bgfx::isValid(mesh.vertexBuffer) || !bgfx::isValid(mesh.indexBuffer)) {
+        if (!BGFXAdapter::isValid(mesh.vertexBuffer)
+            || !BGFXAdapter::isValid(mesh.indexBuffer)) {
             continue;
         }
 

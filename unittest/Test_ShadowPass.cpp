@@ -204,4 +204,38 @@ TEST_CASE(r5plus_shadow_pass_destroy_resources_is_noop_when_uninitialized) {
     CHECK(pass.isReady() == false);
 }
 
+// R5+ (Pass-side backfill, 2026-07-20) — verify the new
+// BGFXAdapter helpers exist and behave correctly. These are the
+// helpers the 4 RenderPass implementations use to avoid calling
+// bgfx:: directly:
+TEST_CASE(r5plus_bgfxaadapter_pass_side_helpers_noop_safe) {
+    BGFXAdapter adapter;
+    CHECK(adapter.isInitialized() == false);
+
+    // setState / setTransformIdentity / setViewClearRaw /
+    // setViewClearDepthOnly / submit / getFboAttachment are all
+    // intentionally un-guarded on isInitialized (the bgfx global
+    // state queue accepts invalid calls before bgfx::init; the
+    // destruction happens at Adapter::shutdown). Pin that they
+    // compile + don't crash on a default-constructed adapter.
+    adapter.setState(BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS);
+    adapter.setTransformIdentity();
+    adapter.setViewClearRaw(0, BGFX_CLEAR_DEPTH, 0, 1.0f, 0);
+    adapter.setViewClearDepthOnly(0, 1.0f);
+    adapter.submit(0, bgfx::ProgramHandle{BGFX_INVALID_HANDLE}, 0, BGFX_DISCARD_NONE);
+
+    // isValid() static overloads — query-side only, no init needed.
+    CHECK(BGFXAdapter::isValid(bgfx::VertexBufferHandle{BGFX_INVALID_HANDLE}) == false);
+    CHECK(BGFXAdapter::isValid(bgfx::IndexBufferHandle{BGFX_INVALID_HANDLE})  == false);
+    CHECK(BGFXAdapter::isValid(bgfx::TextureHandle{BGFX_INVALID_HANDLE})     == false);
+    CHECK(BGFXAdapter::isValid(bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE}) == false);
+
+    // getFboAttachment on uninitialized adapter returns invalid (the
+    // bgfx::getTexture under the hood would crash; gating on
+    // isInitialized avoids that).
+    const bgfx::TextureHandle fbo0 = adapter.getFboAttachment(
+        bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE}, 0);
+    CHECK(bgfx::isValid(fbo0) == false);
+}
+
 TEST_SUITE_END

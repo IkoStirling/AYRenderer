@@ -98,6 +98,52 @@ public:
     // the offscreen result back, before returning).
     void setViewFrameBuffer(uint8_t viewId, bgfx::FrameBufferHandle fb);
 
+    // R5+ (Pass-side backfill, 2026-07-20) — every method below
+    // exists so the 4 RenderPass implementations
+    // (ForwardOpaquePass / TransparentPass / ShadowPass /
+    // PostProcessPass) can avoid ever calling a bgfx::*
+    // *function* directly. The Pass files still include
+    // <bgfx/bgfx.h> because they hold `bgfx::*Handle` members
+    // (cached FBO/VB/IB IDs require type completeness), but
+    // every bgfx interaction goes through one of these wrappers.
+    //
+    // `static` isValid() overloads stay here even though bgfx::isValid
+    // is query-only with no side effects — pinning the rule "no
+    // `bgfx::` function names in Pass files" makes grep audits
+    // trivial (one regex matches BGFXAdapter.cpp + .h and nothing
+    // else under src/detail/*Pass*).
+    void setState(uint64_t state);
+    void setTransformIdentity();
+    void setViewClearRaw(uint8_t viewId, uint16_t flags,
+                         uint32_t rgba = 0,
+                         float    depth = 1.0f,
+                         uint8_t  stencil = 0);
+    void setViewClearDepthOnly(uint8_t viewId, float depth = 1.0f);
+
+    void submit(uint8_t viewId,
+                bgfx::ProgramHandle program =
+                    bgfx::ProgramHandle{BGFX_INVALID_HANDLE},
+                uint32_t depth = 0,
+                uint8_t  flags = BGFX_DISCARD_NONE);
+
+    static bool isValid(bgfx::VertexBufferHandle h);
+    static bool isValid(bgfx::IndexBufferHandle  h);
+    static bool isValid(bgfx::TextureHandle     h);
+    static bool isValid(bgfx::FrameBufferHandle h);
+
+    // R5+ (Pass-side backfill, 2026-07-20) — borrowed FBO
+    // attachment accessor. Pass callers (PostProcessPass reads the
+    // color attach to feed a sampler; future GBufferPass reads MRT
+    // outputs) need a way to "get the TextureHandle for an FBO
+    // attachment slot" without importing <bgfx/bgfx.h> just for
+    // the bgfx::getTexture function. The returned handle has no
+    // destroy obligation; it's owned by the FBO and dies with it.
+    // Gated on isInitialized() so uninitialized adapters return
+    // an invalid handle (the same shape as Noop) — keeps callers
+    // safe under headless test paths.
+    bgfx::TextureHandle getFboAttachment(bgfx::FrameBufferHandle fb,
+                                         uint8_t attachment = 0);
+
     void destroy(bgfx::VertexBufferHandle h);
     void destroy(bgfx::IndexBufferHandle h);
     void destroy(bgfx::TextureHandle h);

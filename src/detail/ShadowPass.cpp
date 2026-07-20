@@ -52,7 +52,7 @@ uint32_t ShadowPass::execute(
         _requestedSize = kDefaultShadowMapSize;
     }
     ensureShadowFbo(adapter, _requestedSize);
-    if (!bgfx::isValid(_shadowFbo)) {
+    if (!BGFXAdapter::isValid(_shadowFbo)) {
         std::fprintf(stderr,
                      "[ShadowPass] shadow FBO create failed at %ux%u; "
                      "shadow disabled for this frame\n",
@@ -67,12 +67,13 @@ uint32_t ShadowPass::execute(
     adapter.setViewTransform(viewId, kIdentityRow, kIdentityRow);
     // Clear depth to 1.0 (far plane) so untouched pixels don't sample
     // as "in shadow". Color doesn't matter for a depth-only FBO.
-    bgfx::setViewClear(viewId, BGFX_CLEAR_DEPTH, 0x00000000, 1.0f, 0);
+    adapter.setViewClearDepthOnly(viewId, /*depth=*/1.0f);
 
     // R5+ — depth-only state. WRITE_Z + DEPTH_TEST_LESS + DISCARD_ALL
     // (fragment skipped = no color writes, just depth).
     const uint64_t depthOnlyState = BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS
                                   | BGFX_STATE_CULL_CW;
+    adapter.setState(depthOnlyState);
 
     uint32_t drawCount = 0;
     for (const DrawItem& item : scene.items()) {
@@ -84,18 +85,18 @@ uint32_t ShadowPass::execute(
             continue;
         }
         const GpuMesh& mesh = meshIt->second;
-        if (!bgfx::isValid(mesh.vertexBuffer) || !bgfx::isValid(mesh.indexBuffer)) {
+        if (!BGFXAdapter::isValid(mesh.vertexBuffer)
+            || !BGFXAdapter::isValid(mesh.indexBuffer)) {
             continue;
         }
 
         adapter.setTransform(item.world);
-        bgfx::setVertexBuffer(0, mesh.vertexBuffer);
-        bgfx::setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
-        bgfx::setState(depthOnlyState);
-        bgfx::submit(viewId,
-                     bgfx::ProgramHandle{BGFX_INVALID_HANDLE},
-                     /*depth=*/0,
-                     BGFX_DISCARD_ALL);
+        adapter.setVertexBuffer(mesh.vertexBuffer, 0, UINT32_MAX);
+        adapter.setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
+        adapter.submit(viewId,
+                       bgfx::ProgramHandle{BGFX_INVALID_HANDLE},
+                       /*depth=*/0,
+                       BGFX_DISCARD_ALL);
         ++drawCount;
     }
 
@@ -107,23 +108,23 @@ uint32_t ShadowPass::execute(
 
 void ShadowPass::ensureShadowFbo(BGFXAdapter& adapter, uint16_t size)
 {
-    if (bgfx::isValid(_shadowFbo) && _shadowSize == size) {
+    if (BGFXAdapter::isValid(_shadowFbo) && _shadowSize == size) {
         return;
     }
-    if (bgfx::isValid(_shadowFbo)) {
+    if (BGFXAdapter::isValid(_shadowFbo)) {
         adapter.destroy(_shadowFbo);
         _shadowFbo  = BGFX_INVALID_HANDLE;
         _shadowSize = 0;
     }
     _shadowFbo = adapter.createDepthOnlyFrameBuffer(size, size);
-    if (bgfx::isValid(_shadowFbo)) {
+    if (BGFXAdapter::isValid(_shadowFbo)) {
         _shadowSize = size;
     }
 }
 
 void ShadowPass::destroyResources(BGFXAdapter& adapter)
 {
-    if (bgfx::isValid(_shadowFbo)) {
+    if (BGFXAdapter::isValid(_shadowFbo)) {
         adapter.destroy(_shadowFbo);
         _shadowFbo  = BGFX_INVALID_HANDLE;
         _shadowSize = 0;

@@ -149,7 +149,7 @@ uint32_t PostProcessPass::execute(
     // and only re-creates when the size actually changed (avoids
     // recreating every frame for a stable-viewport host).
     ensureFbo(adapter, viewportWidth, viewportHeight);
-    if (!bgfx::isValid(_fbo)) {
+    if (!BGFXAdapter::isValid(_fbo)) {
         // BGFXAdapter::createFrameBuffer returned invalid — likely the
         // active backend refused the format. Skip the post-process
         // step this frame rather than crashing; the scene will appear
@@ -161,7 +161,8 @@ uint32_t PostProcessPass::execute(
     // on first execute(); static vertex data is the same on every
     // frame so the BGX-managed buffer lives for the pass's lifetime.
     ensureFullscreenQuad(adapter);
-    if (!bgfx::isValid(_fullscreenVB) || !bgfx::isValid(_fullscreenIB)) {
+    if (!BGFXAdapter::isValid(_fullscreenVB)
+        || !BGFXAdapter::isValid(_fullscreenIB)) {
         return 0;
     }
 
@@ -182,14 +183,16 @@ uint32_t PostProcessPass::execute(
         && _uTonemapMode   != ayt::shader::InvalidBinding
         && _tSceneColor    != ayt::shader::InvalidBinding;
 
-    // R5.1 — pull the FBO's color attachment as a sampler so the
-    // post-process fragment can `sample(u_sceneColor, vUv)`. bgfx
-    // exposes `bgfx::getTexture(fbo, attachment=0)` for this — the
-    // returned TextureHandle is "borrowed" (no destroy); it stays
+    // R5+ (Pass-side backfill, 2026-07-20) — bind the FBO color
+    // attachment as a sampler so the post-process fragment can
+    // `sample(u_sceneColor, vUv)`. Adapter wraps bgfx::getTexture;
+    // the returned TextureHandle is borrowed (no destroy), stays
     // valid as long as the FBO is alive. We capture it every frame
-    // (cheap pointer deref) so a future ensureFbo() resize invalidates
-    // the prior handle cleanly.
-    const bgfx::TextureHandle fboColor = bgfx::getTexture(_fbo, 0);
+    // (cheap pointer deref) so a future ensureFbo() resize
+    // invalidates the prior handle cleanly. The same accessor will
+    // be reused by the GBufferPass consumer when R5+ lands the
+    // deferred MRT reads.
+    const bgfx::TextureHandle fboColor = adapter.getFboAttachment(_fbo, 0);
 
     // R5+ — bind the offscreen FBO as the draw target for the
     // post-process view. We use a view id separate from ForwardOpaque
@@ -201,31 +204,14 @@ uint32_t PostProcessPass::execute(
     adapter.setViewFrameBuffer(viewId, _fbo);
     adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
 
-    // R5+ — clear the FBO before drawing the triangle (the offscreen
-    // attachment may carry stale color from the prior frame if the
-    // driver doesn't invalidate RTs on bind).
-    bgfx::setViewClear(viewId,
-                       BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                       0x00000000, 1.0f, 0);
-
-    // R5+ — submit the fullscreen triangle. We don't have a Phoskia
-    // post-process program wired into the pool today (would require
-    // shaderc-in-CI per the P0 doc comment); instead we use the
-    // bgfx builtin `RendererShaderType::FullscreenQuad` shader path
-    // via the standard `bgfx::submit` call with a placeholder program
-    // handle. When the R5.1 .phoskia source ships, the host will
-    // load it via pool.acquire() and call setProgram(program) on a
-    // dedicated material; this execute() body will grow a new branch
-    // for that path.
-    //
-    // For now, the closest no-op-but-real-GPU-call we can make is
-    // bind the vertex/index buffers + identity transform and submit
-    // with an invalid program handle (bgfx treats that as a no-op
-    // submit that still records the draw-call count — useful for
-    // stats and for verifying the dispatch path).
-    bgfx::setTransform(nullptr);
-    bgfx::setVertexBuffer(0, _fullscreenVB);
-    bgfx::setIndexBuffer(_fullscreenIB, 0, 3);
+    // R5+ (Pass-side backfill) — full 5-arg view clear through the
+    // adapter. Replaces the prior bgfx::setViewClear direct call so
+    // every Pass → bgfx interaction goes through BGFXAdapter.
+    adapter.setViewClearRaw(viewId,
+                            BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                            /*rgba=*/0x00000000,
+                            /*depth=*/1.0f,
+                            /*stencil=*/0);
 
     // R5.1 — wire the post-process knobs into the fragment shader.
     // The 4 bindings were resolved in ensureProgram() once; we look
@@ -239,7 +225,7 @@ uint32_t PostProcessPass::execute(
     // not a bgfx handle). Following the ForwardOpaquePass pattern
     // (ForwardOpaquePass.cpp:185 `material.shader.submit(ctx)`) keeps
     // the draw path in one well-tested code path.
-    if (programReady && bgfx::isValid(fboColor)) {
+    if (programReady && BGFXAdapter::isValid(fboColor)) {
         // bgfx idx → shader::TextureHandle.id (+1 offset so id==0
         // stays invalid; see GpuResources.h:73 toShaderTexture).
         const ayt::shader::TextureHandle texHandle =
@@ -271,9 +257,9 @@ uint32_t PostProcessPass::execute(
         // so we re-set them).
         adapter.setViewFrameBuffer(viewId, BGFX_INVALID_HANDLE);
         adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
-        bgfx::setTransform(nullptr);
-        bgfx::setVertexBuffer(0, _fullscreenVB);
-        bgfx::setIndexBuffer(_fullscreenIB, 0, 3);
+        adapter.setTransformIdentity();
+        adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
+        adapter.setIndexBuffer(_fullscreenIB, 0, 3);
 
         // sampler + uniform re-bind (submit() clears pending lists).
         _program.setTexture(0, _tSceneColor, texHandle);
@@ -284,31 +270,34 @@ uint32_t PostProcessPass::execute(
         return 2;  // FBO-target draw + backbuffer-target draw
     }
 
-    // R5+ fallback — program not ready (shaderc missing / parse
-    // error / fboColor invalid). Submit an "empty" draw (no program)
-    // to keep the bgfx draw-call counter ticking for stats; then
-    // restore the default backbuffer so UIPass can composite chrome
-    // over the unfiltered scene color. Return 1 to record the
-    // bgfx::submit that fired (the program is invalid so the GPU
-    // effectively records the call but discards the actual draw).
-    bgfx::submit(viewId,
-                 bgfx::ProgramHandle{BGFX_INVALID_HANDLE},
-                 0,
-                 BGFX_DISCARD_NONE);
+    // R5+ (Pass-side backfill) — fallback no-program path. We submit
+    // through the adapter so the bgfx::submit call site doesn't leak
+    // into the Pass file. Restore the default backbuffer so UIPass
+    // can composite chrome over the unfiltered scene color. Return 1
+    // to record the bgfx::submit that fired (the program is invalid
+    // so the GPU effectively records the call but discards the
+    // actual draw).
+    adapter.setTransformIdentity();
+    adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
+    adapter.setIndexBuffer(_fullscreenIB, 0, 3);
+    adapter.submit(viewId,
+                   bgfx::ProgramHandle{BGFX_INVALID_HANDLE},
+                   /*depth=*/0,
+                   BGFX_DISCARD_NONE);
     adapter.setViewFrameBuffer(viewId, BGFX_INVALID_HANDLE);
     return 1;
 }
 
 void PostProcessPass::ensureFbo(BGFXAdapter& adapter, uint16_t width, uint16_t height)
 {
-    if (bgfx::isValid(_fbo) && _fboWidth == width && _fboHeight == height) {
+    if (BGFXAdapter::isValid(_fbo) && _fboWidth == width && _fboHeight == height) {
         return;
     }
 
     // R5+ — size changed (or first call): destroy the old FBO and
     // recreate at the new dimensions. BGFXAdapter handles the destroy
     // gracefully when the handle is invalid.
-    if (bgfx::isValid(_fbo)) {
+    if (BGFXAdapter::isValid(_fbo)) {
         adapter.destroy(_fbo);
         _fbo = BGFX_INVALID_HANDLE;
     }
@@ -316,7 +305,7 @@ void PostProcessPass::ensureFbo(BGFXAdapter& adapter, uint16_t width, uint16_t h
     _fbo = adapter.createFrameBuffer(width, height,
                                       bgfx::TextureFormat::RGBA8,
                                       /*withDepth=*/true);
-    if (bgfx::isValid(_fbo)) {
+    if (BGFXAdapter::isValid(_fbo)) {
         _fboWidth  = width;
         _fboHeight = height;
     } else {
@@ -331,23 +320,24 @@ void PostProcessPass::ensureFbo(BGFXAdapter& adapter, uint16_t width, uint16_t h
 
 void PostProcessPass::ensureFullscreenQuad(BGFXAdapter& adapter)
 {
-    if (bgfx::isValid(_fullscreenVB) && bgfx::isValid(_fullscreenIB)) {
+    if (BGFXAdapter::isValid(_fullscreenVB)
+        && BGFXAdapter::isValid(_fullscreenIB)) {
         return;
     }
 
-    // R5+ — create the fullscreen triangle. We pack the data into
-    // bgfx's copy() helper and let BGFXAdapter's createVertexBuffer /
-    // createIndexBuffer wrappers build the handles. Layout-less: bgfx
-    // allows vertex layout "none" for fullscreen passes (uses built-in
-    // attribute decoding). When the R5.1 Phoskia source arrives, the
-    // layout will need a position + uv pair (background.attribute
-    // declarations).
-    const bgfx::Memory* vbMem = bgfx::copy(kFullscreenTriangle, sizeof(kFullscreenTriangle));
-    _fullscreenVB = bgfx::createVertexBuffer(vbMem,
-                                             bgfx::VertexLayout{},
-                                             BGFX_BUFFER_NONE);
-    const bgfx::Memory* ibMem = bgfx::copy(kFullscreenIndices, sizeof(kFullscreenIndices));
-    _fullscreenIB = bgfx::createIndexBuffer(ibMem, BGFX_BUFFER_NONE);
+    // R5+ (Pass-side backfill) — funnel the VB/IB creation through
+    // BGFXAdapter. Previously this called bgfx::copy +
+    // bgfx::createVertexBuffer + bgfx::createIndexBuffer directly;
+    // BGFXAdapter already owns both helpers (and owns the handle
+    // lifecycle contract). The handle wrapper invokes bgfx::copy()
+    // internally — so callers never see `bgfx::Memory*` either.
+    _fullscreenVB = adapter.createVertexBuffer(kFullscreenTriangle,
+                                                sizeof(kFullscreenTriangle),
+                                                bgfx::VertexLayout{},
+                                                BGFX_BUFFER_NONE);
+    _fullscreenIB = adapter.createIndexBuffer(kFullscreenIndices,
+                                              sizeof(kFullscreenIndices),
+                                              BGFX_BUFFER_NONE);
 }
 
 void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
@@ -384,15 +374,15 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
 
 void PostProcessPass::destroyResources(BGFXAdapter& adapter)
 {
-    if (bgfx::isValid(_fbo)) {
+    if (BGFXAdapter::isValid(_fbo)) {
         adapter.destroy(_fbo);
         _fbo = BGFX_INVALID_HANDLE;
     }
-    if (bgfx::isValid(_fullscreenVB)) {
+    if (BGFXAdapter::isValid(_fullscreenVB)) {
         adapter.destroy(_fullscreenVB);
         _fullscreenVB = BGFX_INVALID_HANDLE;
     }
-    if (bgfx::isValid(_fullscreenIB)) {
+    if (BGFXAdapter::isValid(_fullscreenIB)) {
         adapter.destroy(_fullscreenIB);
         _fullscreenIB = BGFX_INVALID_HANDLE;
     }

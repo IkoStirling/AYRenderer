@@ -72,7 +72,7 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
             continue;
         }
         const auto texIt = textures.find(slot.texture.id);
-        if (texIt == textures.end() || !bgfx::isValid(texIt->second.handle)) {
+        if (texIt == textures.end() || !BGFXAdapter::isValid(texIt->second.handle)) {
             continue;
         }
         material.shader.setTexture(0, slot.binding, toShaderTexture(texIt->second.handle));
@@ -110,7 +110,8 @@ uint32_t ForwardOpaquePass::execute(BGFXAdapter& adapter, shader::ShaderResource
         }
 
         const GpuMesh& mesh = meshIt->second;
-        if (!bgfx::isValid(mesh.vertexBuffer) || !bgfx::isValid(mesh.indexBuffer)) {
+        if (!BGFXAdapter::isValid(mesh.vertexBuffer)
+            || !BGFXAdapter::isValid(mesh.indexBuffer)) {
             continue;
         }
 
