@@ -149,6 +149,14 @@ public:
     bool initializeUiRenderBackend(UIRenderBackend& backend);
     void shutdownUiRenderBackend(UIRenderBackend& backend);
 
+    // U1+ — inject a UIRenderBackend into the RenderPipeline's UIPass
+    // so the renderer can dispatch UI draws from Renderer::render.
+    // Replaces the AYEditorApp hand-roll that bypassed
+    // initializeUiRenderBackend. Null is allowed (UIPass::execute
+    // short-circuits to 0 draws). Pointer is non-owning; backend
+    // lifetime is the host's responsibility.
+    void setUiBackend(UIRenderBackend* backend);
+
 private:
     friend class UIRenderBackend;
     detail::BGFXAdapter* bgfxAdapter() noexcept;

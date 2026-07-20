@@ -15,11 +15,12 @@ namespace ayt::render::detail
 
 // U0 (Phase 2 Pass scaffold) — abstract base for one rendering pass.
 // One subclass = one logical draw on one bgfx view. The pipeline
-// (deferred to U1+) calls execute() in registration order; today the
-// single call site is Renderer::render.
+// (implemented in U1+ at detail/RenderPipeline.{h,cpp}) calls
+// execute() in registration order; today the single call site is
+// Renderer::render via RenderPipeline::executeAll.
 //
-// Design ref: `design.md:431-471` (RenderPass class + PassManager +
-// kFullPipelineOrder default table).
+// Design ref: `design.md:431-471` (RenderPass class + RenderPipeline
+// + kFullPipelineOrder default table).
 //
 // Why a base class NOW: design.md promises polymorphic passes but
 // live code has zero of them — ForwardOpaquePass is a free-standing

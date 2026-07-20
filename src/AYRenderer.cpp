@@ -4,6 +4,7 @@
 #include "detail/DebugOverlay.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FrameContext.h"
+#include "detail/RenderPipeline.h"
 #include "detail/RenderResourceManager.h"
 #include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
@@ -25,22 +26,12 @@ namespace ayt::render
 struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
     ayt::shader::ShaderResourcePool    shaderPool;
-    // U0 — base pointer so the next pass (Transparent / UIPass / etc.)
-    // joins the same registry without Renderer::render learning about
-    // each subclass. Currently a vector of size 1; U1+ will turn this
-    // into RenderPipeline owning multiple.
-    std::unique_ptr<detail::RenderPass> forwardPass;
-    // U0.5 — second concrete RenderPass subclass. Constructed here
-    // (backend null until host injects via Renderer::setUiBackend in
-    // a later PR); not yet dispatched by Renderer::render. Held by
-    // Impl so the U1+ swap to vector<unique_ptr<RenderPass>> can
-    // add this without a follow-up patch to this header.
-    std::unique_ptr<detail::UIPass> uiPass;
-
-    // U1 — third concrete RenderPass subclass. Dispatched from
-    // Renderer::render after ForwardOpaquePass; filters
-    // blendMode==Alpha DrawItems and submits with BGFX_STATE_BLEND_ALPHA.
-    std::unique_ptr<detail::TransparentPass> transparentPass;
+    // U1+ — RenderPipeline owns the ordered list of RenderPass
+    // subclasses. Today: [ForwardOpaque, Transparent, UI] matching
+    // design.md:467-470 kFullPipelineOrder minus R5+ deferred
+    // (Shadow/GBuffer/Lighting/PostProcess). The pipeline's lifetime
+    // is tied to Impl; addPass() is called once in the Impl ctor.
+    detail::RenderPipeline        pipeline;
 
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
@@ -66,11 +57,11 @@ struct Renderer::Impl {
     int                           compositeSceneViewId = -1;
 
     Impl()
-        : forwardPass(std::make_unique<detail::ForwardOpaquePass>())
-        , uiPass(std::make_unique<detail::UIPass>())
-        , transparentPass(std::make_unique<detail::TransparentPass>())
-        , resources(adapter, shaderPool)
+        : resources(adapter, shaderPool)
     {
+        pipeline.addPass(std::make_unique<detail::ForwardOpaquePass>());
+        pipeline.addPass(std::make_unique<detail::TransparentPass>());
+        pipeline.addPass(std::make_unique<detail::UIPass>());
     }
 };
 
@@ -191,35 +182,28 @@ void Renderer::render(const RenderScene& scene)
 
     _impl->lastDrawCalls = 0;
 
-    // U1 — split into two dispatches. ForwardOpaquePass writes the
-    // depth buffer first; TransparentPass then reuses that depth for
-    // STATE_DEPTH_TEST_LESS but never writes its own Z so transparent
-    // fragments composite over the opaque result without occluding
-    // each other (back-to-front sort is deferred to U1+).
+    // U1+ — dispatched via RenderPipeline::executeAll in registration
+    // order [ForwardOpaque, Transparent, UI]. ForwardOpaquePass writes
+    // the depth buffer first; TransparentPass then reuses that depth
+    // for STATE_DEPTH_TEST_LESS but never writes its own Z so
+    // transparent fragments composite over the opaque result without
+    // occluding each other (back-to-front sort is deferred to U1++).
+    // UIPass ignores the viewId arg and delegates to its injected
+    // UIRenderBackend (see UIPass.h:35-47 for the chrome lifecycle
+    // contract — flushBatches is intentionally NOT called here in U1+,
+    // the host lambda that drives UIManager::render still owns the
+    // active flush).
     //
-    // Per-pass isEnabled() guards are forward-compatible with the
-    // debug overlay / hot-reload toggle work planned later; today
-    // both default to true (set by the RenderPass base ctor).
-    if (_impl->forwardPass && _impl->forwardPass->isEnabled()) {
-        _impl->lastDrawCalls += _impl->forwardPass->execute(
-            _impl->adapter, _impl->shaderPool, scene,
-            _impl->resources.meshes(), _impl->resources.textures(),
-            _impl->resources.materials(),
-            _impl->viewportX, _impl->viewportY,
-            _impl->viewportW, _impl->viewportH,
-            frame,
-            viewId);
-    }
-    if (_impl->transparentPass && _impl->transparentPass->isEnabled()) {
-        _impl->lastDrawCalls += _impl->transparentPass->execute(
-            _impl->adapter, _impl->shaderPool, scene,
-            _impl->resources.meshes(), _impl->resources.textures(),
-            _impl->resources.materials(),
-            _impl->viewportX, _impl->viewportY,
-            _impl->viewportW, _impl->viewportH,
-            frame,
-            viewId);
-    }
+    // Per-pass isEnabled() guards are honored by the pipeline; today
+    // all three default to true (set by the RenderPass base ctor).
+    _impl->lastDrawCalls = _impl->pipeline.executeAll(
+        _impl->adapter, _impl->shaderPool, scene,
+        _impl->resources.meshes(), _impl->resources.textures(),
+        _impl->resources.materials(),
+        _impl->viewportX, _impl->viewportY,
+        _impl->viewportW, _impl->viewportH,
+        frame,
+        viewId);
 }
 
 void Renderer::resize(uint32_t width, uint32_t height)
@@ -631,12 +615,23 @@ const ayt::shader::ShaderResourcePool* Renderer::shaderPool() const noexcept
 
 bool Renderer::initializeUiRenderBackend(UIRenderBackend& backend)
 {
+    // DEPRECATED — U1+. New hosts should call setUiBackend directly.
+    // Retained for backward compat: this API used to be the ONLY way
+    // to hand the backend its private initializeFromRenderer pointer
+    // (called transitively via UIRenderBackend::initialize(renderer)).
+    // Today most hosts call UIRenderBackend::initialize(renderer)
+    // directly and use setUiBackend to inject — see AYEditorApp.cpp:452
+    // and ShutdownRepro.cpp:233. This wrapper preserves both legacy
+    // paths: GPU init via initializeFromRenderer AND pointer injection
+    // into the pipeline's UIPass.
     detail::BGFXAdapter* adapter = bgfxAdapter();
     ayt::shader::ShaderResourcePool* pool = shaderPool();
     if (adapter == nullptr || pool == nullptr || !adapter->isInitialized()) {
         return false;
     }
-    return backend.initializeFromRenderer(*this, *adapter, *pool);
+    const bool ok = backend.initializeFromRenderer(*this, *adapter, *pool);
+    setUiBackend(&backend);
+    return ok;
 }
 
 void Renderer::shutdownUiRenderBackend(UIRenderBackend& backend)
@@ -647,6 +642,25 @@ void Renderer::shutdownUiRenderBackend(UIRenderBackend& backend)
         backend.shutdownFromRenderer(*adapter, *pool);
     } else {
         backend.shutdownFromRendererWithoutAdapter();
+    }
+}
+
+void Renderer::setUiBackend(UIRenderBackend* backend)
+{
+    // U1+ — locate the UI pass by name() to keep Impl ignorant of the
+    // concrete UIPass type (U0's polymorphism contract). The lookup is
+    // O(N) over pipeline.passes() (3–7 entries max) and only fires at
+    // host init, not per-frame, so the cost is negligible. If a future
+    // pass also returns name() == "UI" this will hand it the backend
+    // pointer too — that would be a configuration bug, not an API bug.
+    if (!_impl) {
+        return;
+    }
+    for (auto& pass : _impl->pipeline.passes()) {
+        if (pass && pass->name() == "UI") {
+            static_cast<detail::UIPass*>(pass.get())->setBackend(backend);
+            return;
+        }
     }
 }
 
