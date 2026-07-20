@@ -89,6 +89,22 @@ struct Renderer::Impl {
     // -1 = normal (3D on view 0). >=0 = composite scene view (usually 1).
     int                           compositeSceneViewId = -1;
 
+    // P2 (PR-D, 2026-07-20) — shared scene color/depth FBO that
+    // ForwardOpaquePass + TransparentPass draw into. PostProcessPass
+    // samples attach0 as its scene color input. Lifetime: built lazily
+    // in render() once the adapter is initialized + the viewport is
+    // non-zero, rebuilt on resize(), destroyed in shutdown().
+    // INVALID = "no scene RT", which is the test-path default (Noop
+    // backend ⇒ ensureSceneFbo never produces a valid handle).
+    bgfx::FrameBufferHandle        sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    uint16_t                       sceneFboW = 0;
+    uint16_t                       sceneFboH = 0;
+
+    // P2 — ensure sceneFbo matches the current viewport. Returns
+    // BGFX_INVALID_HANDLE when the adapter is uninitialized or size=0
+    // (so callers can no-op cleanly).
+    bgfx::FrameBufferHandle ensureSceneFbo();
+
     Impl()
         : resources(adapter, shaderPool)
     {
@@ -158,6 +174,21 @@ void Renderer::shutdown()
 {
     if (!_impl) {
         return;
+    }
+
+    // P2 (PR-D) — release the scene FBO before tearing down the
+    // adapter. Mirrors the PostProcessPass FBO destroy pattern:
+    // bgfx::destroy on a stale handle after bgfx::shutdown() is the
+    // documented safe sequence (Adapter's destroy() gates on
+    // isInitialized but doesn't tear down the bgfx handle mapping —
+    // it just calls bgfx::destroy, which is a no-op on the dying
+    // handle map). Doing it here guarantees Impl ctor / shutdown
+    // pairs are balanced across the ProcessBgfxAlive sticky window.
+    if (detail::BGFXAdapter::isValid(_impl->sceneFbo)) {
+        _impl->adapter.destroy(_impl->sceneFbo);
+        _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+        _impl->sceneFboW = 0;
+        _impl->sceneFboH = 0;
     }
 
     _impl->resources.shutdown();
@@ -241,6 +272,13 @@ void Renderer::render(const RenderScene& scene)
 
     _impl->lastDrawCalls = 0;
 
+    // P2 (PR-D, 2026-07-20) — ensure the shared scene FBO matches the
+    // current viewport. ensureSceneFbo() is idempotent and rebuilds
+    // when the size changes or when the previous build failed
+    // (adapter uninitialized ⇒ INVALID, which is the off-switch path
+    // the Passes use to fall back to backbuffer).
+    const bgfx::FrameBufferHandle sceneFbo = _impl->ensureSceneFbo();
+
     // P1 (PR-C, 2026-07-20): build the PassExecContext once per frame
     // and hand it to RenderPipeline::executeAll. Every enabled pass
     // reads from the same context. Adding new per-frame state (e.g.
@@ -259,6 +297,7 @@ void Renderer::render(const RenderScene& scene)
         _impl->viewportH,
         frame,
         viewId,
+        sceneFbo,
     };
 
     // Dispatched via RenderPipeline::executeAll in registration order
@@ -287,6 +326,56 @@ void Renderer::resize(uint32_t width, uint32_t height)
     _impl->initDesc.width  = width;
     _impl->initDesc.height = height;
     _impl->adapter.resetResolution(width, height, _impl->initDesc.vsync);
+
+    // P2 (PR-D) — invalidate the scene FBO so render()'s ensureSceneFbo
+    // path rebuilds it at the new size on the next frame. We don't
+    // destroy eagerly here because:
+    //   (a) bgfx::reset may transiently drop view attachments; the FBO
+    //       handle table gets re-validated on the next bgfx::frame().
+    //   (b) ensureSceneFbo is gated on isInitialized() and will detect
+    //       that _sceneFboW != width and recycle.
+    _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    _impl->sceneFboW = 0;
+    _impl->sceneFboH = 0;
+}
+
+bgfx::FrameBufferHandle Renderer::Impl::ensureSceneFbo()
+{
+    // P2 (PR-D, 2026-07-20) — idempotent scene FBO tracker. Called
+    // from render() before PassExecContext is built. Returns the
+    // cached handle when size matches; rebuilds when it doesn't or
+    // when the previous build returned invalid.
+    if (!adapter.isInitialized()) {
+        return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    }
+    const uint32_t w = viewportW;
+    const uint32_t h = viewportH;
+    if (w == 0 || h == 0) {
+        return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    }
+    if (detail::BGFXAdapter::isValid(sceneFbo) && sceneFboW == w && sceneFboH == h) {
+        return sceneFbo;
+    }
+    if (detail::BGFXAdapter::isValid(sceneFbo)) {
+        adapter.destroy(sceneFbo);
+        sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    }
+    sceneFbo = adapter.createFrameBuffer(static_cast<uint16_t>(w),
+                                         static_cast<uint16_t>(h),
+                                         bgfx::TextureFormat::RGBA8,
+                                         /*withDepth=*/true);
+    if (detail::BGFXAdapter::isValid(sceneFbo)) {
+        sceneFboW = static_cast<uint16_t>(w);
+        sceneFboH = static_cast<uint16_t>(h);
+    } else {
+        sceneFboW = 0;
+        sceneFboH = 0;
+        std::fprintf(stderr,
+                     "[Renderer] scene FBO create failed at %ux%u; "
+                     "ForwardOpaque/Transparent will draw to the backbuffer this frame\n",
+                     w, h);
+    }
+    return sceneFbo;
 }
 
 void Renderer::setViewportRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height)

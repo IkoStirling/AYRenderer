@@ -358,14 +358,15 @@ git checkout -b fix/renderer-p0-docs-alpha
 
 ---
 
-## 附录 A — Segfault 隔离实验结果
+## 附录 A — Segfault 隔离实验结果 + PR 落地记录
 
-| 实验 | 日期 | 跑次 | PASS/FAIL | 备注 |
+| 实验 / PR | 日期 | 跑次 | PASS/FAIL | 备注 |
 |------|------|------|-----------|------|
 | **E1** FrameContext 尾部 POD | 2026-07-20 | **4/4 PASS** (428/428) | tail `uint32_t shadowMapId = 0;`,无语义使用;commit `938c56d` (branch `exp/renderer-framecontext-tail-pod`);4 跑次出于 §5.4 baseline 协议额外加固一次;解锁 E4 / P3 路径 |
-| E2 Light 存储 API | | | | 未跑(E1 通过后下一刀候选) |
+| **P2 / PR-D** Scene RT → PP 闭环 | 2026-07-20 | **3/3 PASS** (447/447) | `PassExecContext` 末尾加 `sceneFbo`,`Renderer::Impl` 持有 + ensure/resize/destroy;`FO+Transparent` 调 `setViewFrameBuffer(viewId, ctx.sceneFbo)`;`PostProcessPass` 借 ctx.sceneFbo 的 attach0 作为 u_sceneColor 输入(UIPass view 2 不动);fallback 路径覆盖 Noop / SceneRT-off;新增 `Test_SceneRT_P2.cpp` 8 case (`p2_ctx_carries_scene_fbo_field` + `p2_ctx_scene_fbo_can_be_set_and_carried` + `p2_ctx_scene_fbo_per_instance_aliasing` + `p2_forward_opaque_tolerates_invalid_scene_fbo` + `p2_transparent_tolerates_invalid_scene_fbo` + `p2_postprocess_source_selection_uses_ctx_scenefbo_when_valid` + `p2_full_pipeline_4pass_dispatch_with_scene_fbo_aliasing` + `p2_renderer_implementation_stores_scene_fbo_state`);19 新测试 (428 → 447);头链 `<bgfx/bgfx.h>` 是为 `bgfx::FrameBufferHandle` 类型完整,无新增 bgfx:: 函数调用 — 全部走 `BGFXAdapter` 帮手 |
+| E2 Light 存储 API | | | | 未跑(E1 + P2 通过后下一刀候选) |
 | E3 非 const FrameContext& | | | | 未跑 |
-| E4 默认挂 Shadow disabled | | | | 未跑(E1 解锁后候选) |
+| E4 默认挂 Shadow disabled | | | | 未跑(E1 + P2 解锁后候选) |
 | E5 Shadow enabled 无 Frame 槽 | | | | 未跑 |
 | E6 旁路 getter 采样 | | | | 未跑 |
 

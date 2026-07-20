@@ -96,6 +96,14 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
     adapter.setViewTransform(viewId, frame.view.ptr(), frame.projection.ptr());
 
+    // P2 (PR-D, 2026-07-20) — bind the shared scene FBO so this pass's
+    // depth+color output is captured for PostProcessPass to sample
+    // (and for any future GBufferPass / LightingPass that reads the
+    // offscreen depth). BGFX_INVALID_HANDLE ⇒ fall back to the
+    // default backbuffer (matches pre-PR-D behavior on headless
+    // test paths / SceneRT-off hosts).
+    adapter.setViewFrameBuffer(viewId, ctx.sceneFbo);
+
     const uint64_t defaultState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
                                 | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS
                                 | BGFX_STATE_CULL_CW;

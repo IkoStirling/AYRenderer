@@ -57,6 +57,13 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
     adapter.setViewTransform(viewId, frame.view.ptr(), frame.projection.ptr());
 
+    // P2 (PR-D, 2026-07-20) — bind the shared scene FBO so transparent
+    // composite over the offscreen scene color (matches
+    // ForwardOpaquePass so the depth they wrote lines up with what
+    // PostProcessPass samples). BGFX_INVALID_HANDLE ⇒ backbuffer
+    // fallback (no-op on the headless test path / SceneRT-off hosts).
+    adapter.setViewFrameBuffer(viewId, ctx.sceneFbo);
+
     // U1.5 — back-to-front sort via DrawItem::sortKey. We don't
     // mutate the scene's _items vector; instead we build a transient
     // pointer list, stable_sort it, and iterate that. The default

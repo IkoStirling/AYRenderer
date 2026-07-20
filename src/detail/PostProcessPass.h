@@ -23,18 +23,19 @@ namespace ayt::render::detail
 // Pipeline slot: index 2 of the 4-pass default pipeline (between
 // Transparent and UI). See `docs/execution-plan.md` §1.1 / §附录 B.
 //
-// KNOWN LIMIT (post-R5.1, pre-P2): `u_sceneColor` currently samples
-// the pass's OWN empty FBO, not ForwardOpaquePass + TransparentPass's
-// actual scene output. The fullscreen triangle still runs and the
-// blit-back still happens, so headless tests pass and the wire is
-// end-to-end; the visible result is wrong on real GPU backends
-// (PostProcess overwrites whatever ForwardOpaque + Transparent painted
-// to the backbuffer with the cleared FBO color). Closing this loop is
-// `docs/execution-plan.md` P2 — scene `createFrameBuffer` + PP samples
-// scene attach0 + UI stays last. Until P2 lands, prefer
-// `setPostProcessTonemapMode(None)` + `setPostProcessExposure(1.0f)`
-// + `setPostProcessBloomStrength(0.0f)` if your test reads the
-// backbuffer.
+// KNOWN LIMIT (post-R5.1, pre-P2 → closed in PR-D): `u_sceneColor`
+// used to sample the pass's OWN empty FBO, not ForwardOpaquePass +
+// TransparentPass's actual scene output. The fullscreen triangle
+// ran and the blit-back ran, so headless tests passed and the wire
+// was end-to-end; visible result was wrong on real GPU backends.
+// P2 (PR-D, 2026-07-20) closed the loop: PostProcessPass now prefers
+// `ctx.sceneFbo` (the Renderer-owned color+depth FBO ForwardOpaque +
+// Transparent drew into) over its own self-FBO. The fallback to
+// self-FBO is preserved for the Noop test path + hosts that opt
+// into the backbuffer pipeline. UIPass (view 2) and its
+// UIRenderBackend are untouched. See docs/execution-plan.md P2 /
+// `docs/execution-plan.md` §附录 A for the test pin that this wire
+// works without regressions.
 //
 // Algorithm today (R5+ minimal — bloom/exposure/tonemap all wired but
 // the bundled Phoskia program is a near-identity "passthrough with
