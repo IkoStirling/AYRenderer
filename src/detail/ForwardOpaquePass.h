@@ -5,6 +5,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
+#include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
 
 #include <cstdint>
@@ -38,15 +39,7 @@ public:
 
     std::string_view name() const override { return "ForwardOpaque"; }
 
-    uint32_t execute(BGFXAdapter& adapter, shader::ShaderResourcePool& pool,
-                     const RenderScene& scene,
-                     const std::unordered_map<uint64_t, GpuMesh>& meshes,
-                     const std::unordered_map<uint64_t, GpuTexture>& textures,
-                     std::unordered_map<uint64_t, GpuMaterial>& materials,
-                     uint16_t viewportX, uint16_t viewportY,
-                     uint16_t viewportWidth, uint16_t viewportHeight,
-                     const FrameContext& frame,
-                     uint8_t viewId = kMainViewId) override;
+    uint32_t execute(PassExecContext& ctx) override;
 };
 
 } // namespace ayt::render::detail

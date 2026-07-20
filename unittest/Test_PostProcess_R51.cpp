@@ -51,6 +51,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FrameContext.h"
+#include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
 #include "detail/RenderPipeline.h"
@@ -131,9 +132,11 @@ TEST_CASE(r51_postprocess_noop_backend_returns_zero) {
     ayt::render::detail::BGFXAdapter adapter;
     ayt::shader::ShaderResourcePool pool;
     RenderScene scene;
-    const uint32_t draws = pipe.executeAll(
+    ayt::render::detail::PassExecContext ctx{
         adapter, pool, scene, meshes, textures, materials,
-        0, 0, 1280, 720, frame, /*viewId=*/0);
+        0, 0, 1280, 720, frame, /*viewId=*/0
+    };
+    const uint32_t draws = pipe.executeAll(ctx);
     CHECK(draws == 0);
 }
 

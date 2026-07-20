@@ -30,6 +30,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
 #include "detail/ForwardOpaquePass.h"
+#include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
 #include "detail/RenderPipeline.h"
@@ -62,8 +63,11 @@ void runShadowDispatch(RenderPipeline& pipe, const RenderScene& scene, FrameCont
     std::unordered_map<uint64_t, ayt::render::detail::GpuMaterial> materials;
     BGFXAdapter adapter;
     ayt::shader::ShaderResourcePool pool;
-    pipe.executeAll(adapter, pool, scene, meshes, textures, materials,
-                    0, 0, 1280, 720, frame, /*viewId=*/0);
+    ayt::render::detail::PassExecContext ctx{
+        adapter, pool, scene, meshes, textures, materials,
+        0, 0, 1280, 720, frame, /*viewId=*/0
+    };
+    pipe.executeAll(ctx);
 }
 
 } // namespace
@@ -137,9 +141,11 @@ TEST_CASE(r5plus_shadow_pass_zero_viewport_short_circuits) {
     ayt::shader::ShaderResourcePool pool;
     FrameContext frame;
 
-    const uint32_t draws = pipe.executeAll(
+    ayt::render::detail::PassExecContext ctx{
         adapter, pool, scene, meshes, textures, materials,
-        0, 0, 0, 0, frame, /*viewId=*/0);
+        0, 0, 0, 0, frame, /*viewId=*/0
+    };
+    const uint32_t draws = pipe.executeAll(ctx);
     CHECK(draws == 0);
     CHECK(pass.isReady() == false);
 }
@@ -191,9 +197,11 @@ TEST_CASE(r5plus_full_pipeline_noop_dispatch_sums_to_zero) {
 
     RenderScene scene;
     FrameContext frame;
-    const uint32_t total = pipe.executeAll(
+    ayt::render::detail::PassExecContext ctx{
         adapter, pool, scene, meshes, textures, materials,
-        0, 0, 1280, 720, frame, /*viewId=*/0);
+        0, 0, 1280, 720, frame, /*viewId=*/0
+    };
+    const uint32_t total = pipe.executeAll(ctx);
     CHECK(total == 0);
 }
 

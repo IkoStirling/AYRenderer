@@ -42,6 +42,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FrameContext.h"
+#include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
 #include "detail/RenderPipeline.h"
@@ -74,9 +75,11 @@ void runWithEmptyScene(RenderPipeline& pipe, uint32_t& totalDraws)
     ayt::render::detail::BGFXAdapter adapter;
     ayt::shader::ShaderResourcePool pool;
     RenderScene scene;
-    totalDraws = pipe.executeAll(
+    ayt::render::detail::PassExecContext ctx{
         adapter, pool, scene, meshes, textures, materials,
-        0, 0, 1280, 720, frame, /*viewId=*/0);
+        0, 0, 1280, 720, frame, /*viewId=*/0
+    };
+    totalDraws = pipe.executeAll(ctx);
 }
 
 } // namespace
@@ -101,9 +104,11 @@ TEST_CASE(r5plus_postprocess_noop_backend_returns_zero) {
     ayt::render::detail::BGFXAdapter adapter;
     ayt::shader::ShaderResourcePool pool;
     RenderScene scene;
-    const uint32_t draws = pipe.executeAll(
+    ayt::render::detail::PassExecContext ctx{
         adapter, pool, scene, meshes, textures, materials,
-        0, 0, 1280, 720, frame, /*viewId=*/0);
+        0, 0, 1280, 720, frame, /*viewId=*/0
+    };
+    const uint32_t draws = pipe.executeAll(ctx);
     CHECK(draws == 0);
     // isReady() reports false because the FBO create didn't run on Noop.
     CHECK(pass.isReady() == false);
@@ -203,9 +208,11 @@ TEST_CASE(r5plus_postprocess_zero_viewport_short_circuits) {
     ayt::render::detail::BGFXAdapter adapter;
     ayt::shader::ShaderResourcePool pool;
     RenderScene scene;
-    const uint32_t draws = pipe.executeAll(
+    ayt::render::detail::PassExecContext ctx{
         adapter, pool, scene, meshes, textures, materials,
-        0, 0, 0, 0, frame, /*viewId=*/0);
+        0, 0, 0, 0, frame, /*viewId=*/0
+    };
+    const uint32_t draws = pipe.executeAll(ctx);
     CHECK(draws == 0);
 }
 

@@ -5,6 +5,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
+#include "detail/PassExecContext.h"
 
 #include <cstdint>
 #include <cstring>
@@ -87,33 +88,19 @@ public:
     // Implementations return a static-lifetime string literal (no alloc).
     virtual std::string_view name() const = 0;
 
-    // Render this pass into `viewId`. Returns draw-call count recorded
-    // by the implementation (used to update RenderFrameStats).
+    // Render this pass into the bgfx view + viewport described by
+    // `ctx`. Returns draw-call count recorded by the implementation
+    // (used to update RenderFrameStats).
     //
-    // viewportX/Y/W/H describe the sub-rect of the framebuffer this
-    // pass owns. For passes that draw over the full client (e.g. UI),
-    // the host passes the full window rect.
+    // The 12-arg signature collapsed into `detail::PassExecContext` in
+    // PR-C (P1, 2026-07-20). See PassExecContext.h for what each field
+    // is and why. `frame` stays const per docs/execution-plan.md §5.3.
     //
-    // `materials` is non-const because some passes (ForwardOpaquePass)
-    // lazily resolve BindingIds on first use and cache them in
-    // GpuMaterial::colorBinding/etc. (See ForwardOpaquePass::flushMaterial
-    // at ForwardOpaquePass.cpp:69-79.)
-    //
-    // pool is currently unused by the only concrete subclass
-    // (ForwardOpaquePass) but is kept in the signature so future
-    // passes (PostProcess / UIPass) that need shader-cache lookup
-    // can reach the same ShaderResourcePool the Renderer owns.
-    virtual uint32_t execute(
-        BGFXAdapter& adapter,
-        shader::ShaderResourcePool& pool,
-        const RenderScene& scene,
-        const std::unordered_map<uint64_t, GpuMesh>& meshes,
-        const std::unordered_map<uint64_t, GpuTexture>& textures,
-        std::unordered_map<uint64_t, GpuMaterial>& materials,
-        uint16_t viewportX, uint16_t viewportY,
-        uint16_t viewportWidth, uint16_t viewportHeight,
-        const FrameContext& frame,
-        uint8_t viewId) = 0;
+    // `materials` inside the context is non-const because some passes
+    // (ForwardOpaquePass) lazily resolve BindingIds on first use and
+    // cache them in GpuMaterial::colorBinding/etc. (See
+    // ForwardOpaquePass::flushMaterial.)
+    virtual uint32_t execute(PassExecContext& ctx) = 0;
 
     // Per-pass enable / disable (used by debug overlay toggle /
     // pipeline hot-reload in U1+). Default = enabled. Subclasses

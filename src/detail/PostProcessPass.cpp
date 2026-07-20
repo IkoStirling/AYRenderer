@@ -98,18 +98,15 @@ constexpr const char* kPostProcessCacheKey = "postprocess_blit_r51";
 
 } // namespace
 
-uint32_t PostProcessPass::execute(
-    BGFXAdapter& adapter,
-    shader::ShaderResourcePool& pool,
-    const RenderScene& /*scene*/,
-    const std::unordered_map<uint64_t, GpuMesh>& /*meshes*/,
-    const std::unordered_map<uint64_t, GpuTexture>& /*textures*/,
-    std::unordered_map<uint64_t, GpuMaterial>& /*materials*/,
-    uint16_t viewportX, uint16_t viewportY,
-    uint16_t viewportWidth, uint16_t viewportHeight,
-    const FrameContext& frame,
-    uint8_t viewId)
+uint32_t PostProcessPass::execute(PassExecContext& ctx)
 {
+    BGFXAdapter& adapter = ctx.adapter;
+    shader::ShaderResourcePool& pool = ctx.pool;
+    const FrameContext& frame = ctx.frame;
+    const uint8_t viewId = ctx.viewId;
+    const uint16_t viewportWidth  = ctx.viewportWidth;
+    const uint16_t viewportHeight = ctx.viewportHeight;
+
     // R5+ — Noop-backend short-circuit. The headless test path runs
     // execute() against a default-constructed BGFXAdapter (isInitialized
     // == false). Every BGFXAdapter FBO method gates on isInitialized,
@@ -142,8 +139,6 @@ uint32_t PostProcessPass::execute(
     // after those passes). The offscreen FBO we bind below captures
     // the result of drawing the fullscreen triangle.
     (void)viewId;
-    (void)viewportX;
-    (void)viewportY;
 
     // R5+ — acquire / resize the FBO. ensureFbo() tracks dimensions
     // and only re-creates when the size actually changed (avoids
