@@ -53,6 +53,19 @@ struct FrameContext {
         ACES     = 2,  // ACES filmic approximation
     };
     TonemapMode       tonemapMode      = TonemapMode::None;
+
+    // P3 Shadow cut-2 prep — §5.4 E1 isolation experiment (2026-07-20).
+    // Tail-POD field that pre-allocates the slot P3's ShadowPass will
+    // use to thread a shadow map handle / id through the pipeline.
+    // THIS FIELD IS NOT READ OR WRITTEN BY ANY PASS TODAY. It exists
+    // solely to verify that appending a single uint32_t at the tail
+    // of FrameContext does not introduce crashes, ABI breaks, or
+    // subtle perf regressions — i.e. the §5.3 segfault gate "extend
+    // ABI without enabling feature" is safe. Value 0 is reserved as
+    // "not configured"; P3 will assign 1..N once ShadowPass has a real
+    // FBO handle to publish. See docs/execution-plan.md §5.4 E1 +
+    // §P3.1.
+    uint32_t          shadowMapId      = 0;
 };
 
 } // namespace ayt::render::detail
