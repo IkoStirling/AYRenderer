@@ -24,33 +24,39 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 | R4-c | `captureScreenshot`：backbuffer PNG（窗口 + 真实 GPU backend） | ✅ |
 | Engine | GameLoop + Entity `RenderSystem` + `RendererSubSystem` | ✅ |
 | R5+ | PostProcess | ✅ Phoskia 程序 + **从 scene FBO attach0 采样** + 真 blit-back（PR-D 2026-07-20, commit `b66deb8`）；bloom/exposure/tonemap 真作用 |
-| R5+ | Shadow | 🅪 partial — depth-only FBO + **真 light-space ortho**（PR-F1' 2026-07-21, 见 feat branch）；`ShadowPass::lightView()/lightProj()/lightViewProj()/shadowFbo()` 已 ship；**仍未 `addPass` 默认管线**，**仍没 pass 采 shadow map**（详见下文"产品光照差距"） |
+| R5+ | Shadow | 🅪 cut-2 ✅ / cut-3 ❌ — depth-only FBO + **真 light-space ortho**（PR-F1' 2026-07-21, commit `502458b`,feat branch）已 ship；`ShadowPass::shadowFbo()/lightView()/lightProj()/lightViewProj()` getter 给 F2 直接消费。**下一步 = PR-F2**（FO/Transparent 加 Phoskia shadow_caster 采样 + bias,1 PR）。仍不默认挂 Shadow。 |
 | R5+ | GBuffer / Lighting / Command Queue | ❌ missing — 仅设计，无代码 |
 
 ---
 
 ## 当前定位（产品角度，2026-07-21 反映 PR-F1'）
 
-**适合当前能做的：** Editor / Demo 的前向场景 + UI 合成 + 资源加载 + 蒙皮（bone UBO 已 wire）。
+**适合当前能做的：** Editor / Demo 的前向场景 + UI 合成 + 资源加载 + 蒙皮（bone UBO 已 wire）+ 真 bloom/exposure/tonemap post-process。
 
 **还不能当完整渲染器当的：** 带阴影的产品光照、延迟渲染、复杂后处理（真 bloom chain / DOF / SSR）。
 
-### 距离"带阴影的产品光照"还差的关卡
+### 唯一"差一步能 demo"的：**PR-F2**
 
-| 关卡 | 缺口 | 难度 | 说明 |
-|------|------|------|------|
-| 0. Light API 接入 | F1' 把 `RenderScene::Light` 隔离在 `AY_F1_DIAG_LIGHT` OFF 默认；要用户能 `scene.addLight(...)` 需要开 LIGHT 后跑 §5.4 二切 bisect（已布在 `docs/f1-sigsegv-repro.md` 矩阵 #5/#7） | ★★ | 混编风险受 flag 控制 |
-| 1. Forward 采样 shadow FBO | F2 未 ship — ShadowPass 写 depth 完整，FO/Transparent 仍**不读** shadow map | ★★★ | F1' 已提供 getter，Phoskia 加 `texture2dshadow` + bias |
-| 2. Phoskia shadow_caster 程序 | 当前 `bgfx::ProgramHandle{BGFX_INVALID_HANDLE}`，**skinned 模型 joint 不传**，骨头伸处无深度 | ★★ | §5.5 deferred |
-| 3. Scene AABB 自适应 light-space | F1' 用固定 50 单位 ortho 包围原点；超出 ±50 的物体阴影 clamp 切断 | ★★ | 简单 `computeAABB()` 即可 |
-| 4. Cascade / 多光 atlas | 单 directional 光（`Light::castShadow=true` 第一个），多光需 atlas 或 cascade | ★★★ | 显式推迟 P5 |
-| 5. PCF / VSM 滤波 | hard depth compare，锯齿明显 | ★★ | 显式推迟 |
-| 6. Shadow bias | 真 GPU 自遮挡 acne，需 constant + slope-scaled bias | ★ | 跟在 F2 后 |
-| 7. `AYRendererSubSystem` Light 接入 | host 调 `addLight` 需 SubSystem 持 `RenderScene` 句柄 | ★★ | 与 #0 一同 ship |
-| 8. 长时 post-process chain | PP "near-identity" 不是真 bloom（无 downsample/upsample） | ★★★ | P6.3 explicit |
-| 9. DOF / SSR / SSAO | 完全没规划 | ★★★★ | 不在 P0–P6 窗口 |
+| 项 | 工作量 | 已准备 |
+|---|---|---|
+| FO 加 `texture2dshadow` 采样 + `bias` + 接入 F1' getter | 1 PR ≈200 行 | ✅ F1' 已 ship getter，Phoskia 头资源就绪 |
+| + shadow_caster 程序段（skinned 模型 bone UBO 走 shadow depth）| 加在 PR-F2 同 PR 即可 | ✅ boneBlockBinding 已 ship |
 
-**简版路线：** S1 = 0+1+3+6+7 = "单 directional 灯 + sharp shadow demo"（1–2 PR）；S2 = 2+4+5+8 = "中端 3A demo"（2–3 PR）。
+PR-F2 ship 后 **demo 屏幕有 shadow**(硬边缘,bias 还可能 acne,但能看见光斑)。
+
+### 表中★数字 **不等于**"要做几个 PR":仅是设计复杂度
+
+下面这表是「**未来**某条线要做的所有事」的清单,**不代表**接下来的工作量。每行★是设计难度,不是承诺：
+
+| 关卡 | 缺口 | 设计难度 | 说明 |
+|------|------|---------|------|
+| Light API 直连 (`addLight(...)`) | F1' 把 `RenderScene::Light` 隔离在 `AY_F1_DIAG_LIGHT` OFF；要 host 可调需开 flag+跑 §5.4 bisect 矩阵 | ★★ | flag 控制混编风险 |
+| Cascade / 多光 atlas | 单 directional。多光需 atlas 或 cascade | ★★★ | 推迟到 P5 之后 |
+| PCF / VSM 滤波 | hard depth compare，锯齿明显 | ★★ | 推迟 |
+| 真 Scene-AABB 紧贴 | F1' 用固定 50 单位 ortho 包围原点；超出 ±50 物体阴影 clamp | ★★ | 简单 `computeAABB()` |
+| 多 RenderTarget + LightingPass（GBuffer） | 完全没规划 | ★★★★ | 不在 P0–P6 窗口 |
+
+**简版路线：** S1 = **PR-F2 (1 PR,现在就差这 1 个)** = "单 directional 灯 + 一片 hard-edge shadow demo"；S2 = "中端 3A demo" 在 S1 之上展开。
 
 ---
 
