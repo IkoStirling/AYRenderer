@@ -199,7 +199,7 @@ material PostProcess {
     texture2d sceneColor
     uniform float bloomStrength
     uniform float exposure
-    uniform int   tonemapMode
+    uniform int tonemapMode
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)

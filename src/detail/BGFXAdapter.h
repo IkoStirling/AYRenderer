@@ -95,6 +95,10 @@ public:
 
     static bgfx::RendererType::Enum mapBackend(Backend backend);
 
+    // Process-wide: true after at least one successful initialize() in
+    // this process that left bgfx alive (including sticky Noop).
+    static bool isProcessBgfxAlive() noexcept;
+
 private:
     bool _initialized = false;
 };

@@ -2,8 +2,84 @@
 
 #include "aymath/MathTypes.h"
 
+#include <cstdlib>
+#include <mutex>
+
 namespace ayt::render::detail
 {
+
+// Process-wide bgfx lifetime. Unit tests construct many Renderer
+// instances back-to-back; calling bgfx::shutdown() between them on the
+// Noop backend leaves stale handle tables and UAF on the next
+// submit (Test_LightingCamera → subsequent suite SIGSEGV).
+//
+// Contract:
+//   - First initialize() → bgfx::init, refcount = 1
+//   - Nested initialize() → refcount++, no second init
+//   - shutdown() → refcount--; if >0 keep bgfx
+//   - Last shutdown on Noop → sticky keep-alive (no bgfx::shutdown)
+//   - Last shutdown on real GPU → bgfx::shutdown (editor/demo teardown)
+//   - atexit drains sticky Noop so the process exits cleanly
+namespace bgfx_life {
+
+std::mutex& mutex()
+{
+    static std::mutex* m = new std::mutex();
+    return *m;
+}
+
+int& refCount()
+{
+    static int* count = new int(0);
+    return *count;
+}
+
+bool& noopSticky()
+{
+    static bool* sticky = new bool(false);
+    return *sticky;
+}
+
+bgfx::RendererType::Enum& liveType()
+{
+    static auto* t = new bgfx::RendererType::Enum(bgfx::RendererType::Count);
+    return *t;
+}
+
+bool& ateExitRegistered()
+{
+    static bool* r = new bool(false);
+    return *r;
+}
+
+void shutdownProcessUnlocked()
+{
+    if (refCount() > 0 || noopSticky()
+        || liveType() != bgfx::RendererType::Count) {
+        bgfx::frame();
+        bgfx::shutdown();
+    }
+    refCount() = 0;
+    noopSticky() = false;
+    liveType() = bgfx::RendererType::Count;
+}
+
+void atexitHandler()
+{
+    std::lock_guard<std::mutex> lock(mutex());
+    shutdownProcessUnlocked();
+}
+
+void registerAteExitOnce()
+{
+    if (ateExitRegistered()) {
+        return;
+    }
+    ateExitRegistered() = true;
+    std::atexit(&atexitHandler);
+}
+
+} // namespace bgfx_life
 
 bgfx::RendererType::Enum BGFXAdapter::mapBackend(Backend backend)
 {
@@ -19,14 +95,44 @@ bgfx::RendererType::Enum BGFXAdapter::mapBackend(Backend backend)
     }
 }
 
+bool BGFXAdapter::isProcessBgfxAlive() noexcept
+{
+    std::lock_guard<std::mutex> lock(bgfx_life::mutex());
+    return bgfx_life::refCount() > 0 || bgfx_life::noopSticky();
+}
+
 bool BGFXAdapter::initialize(const BGFXInitParams& params)
 {
     if (_initialized) {
         return true;
     }
 
+    std::lock_guard<std::mutex> lock(bgfx_life::mutex());
+
+    const bgfx::RendererType::Enum requested = mapBackend(params.backend);
+    const bool bgfxAlreadyUp =
+        (bgfx_life::refCount() > 0) || bgfx_life::noopSticky();
+
+    if (bgfxAlreadyUp) {
+        // Reject hard backend switches while a context is sticky/live
+        // (e.g. Noop tests then a real GPU request in the same process).
+        if (requested != bgfx::RendererType::Count
+            && bgfx_life::liveType() != bgfx::RendererType::Count
+            && requested != bgfx_life::liveType()) {
+            return false;
+        }
+
+        const uint32_t reset = params.vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+        bgfx::reset(params.width, params.height, reset);
+
+        ++bgfx_life::refCount();
+        bgfx_life::noopSticky() = false;
+        _initialized = true;
+        return true;
+    }
+
     bgfx::Init init;
-    init.type     = mapBackend(params.backend);
+    init.type     = requested;
     init.vendorId = BGFX_PCI_ID_NONE;
 
     init.platformData.nwh = params.nativeWindowHandle;
@@ -43,6 +149,13 @@ bool BGFXAdapter::initialize(const BGFXInitParams& params)
         return false;
     }
 
+    const bgfx::Caps* caps = bgfx::getCaps();
+    bgfx_life::liveType() =
+        (caps != nullptr) ? caps->rendererType : requested;
+    bgfx_life::refCount() = 1;
+    bgfx_life::noopSticky() = false;
+    bgfx_life::registerAteExitOnce();
+
     _initialized = true;
     return true;
 }
@@ -52,10 +165,33 @@ void BGFXAdapter::shutdown()
     if (!_initialized) {
         return;
     }
-    // Drain pending submits before D3D11 teardown (reduces Intel driver noise on exit).
+
+    std::lock_guard<std::mutex> lock(bgfx_life::mutex());
+
+    // Drain pending submits before dropping our claim (or tearing down).
     bgfx::frame();
-    bgfx::shutdown();
     _initialized = false;
+
+    if (bgfx_life::refCount() > 0) {
+        --bgfx_life::refCount();
+    }
+
+    if (bgfx_life::refCount() > 0) {
+        return;
+    }
+
+    // Last adapter: keep Noop alive for the rest of the process so the
+    // next Renderer::initialize does not re-enter bgfx::init (unsafe on
+    // Noop). Real GPU backends still shut down so editor/demo exit is
+    // clean for the driver.
+    if (bgfx_life::liveType() == bgfx::RendererType::Noop) {
+        bgfx_life::noopSticky() = true;
+        return;
+    }
+
+    bgfx::shutdown();
+    bgfx_life::liveType() = bgfx::RendererType::Count;
+    bgfx_life::noopSticky() = false;
 }
 
 void BGFXAdapter::beginFrame()
@@ -70,13 +206,12 @@ void BGFXAdapter::endFrame()
 
 bool BGFXAdapter::isNoopBackend() const noexcept
 {
-    // R5+ — true when bgfx is currently bound to its Noop backend.
-    // Pass implementations (PostProcessPass today; deferred Shadow /
-    // GBuffer / Lighting R5+) call this to skip GPU work that
-    // wouldn't render meaningfully under Noop AND that would leak
-    // bgfx resources into the shutdown path that Noop doesn't clean
-    // up cleanly. Pre-initialized adapter reports false (caller
-    // should also gate on isInitialized first).
+    // R5+ — true when the underlying bgfx backend is Noop. Useful for
+    // Pass implementations that want to skip GPU work on the headless
+    // test path without breaking their lifecycle hooks (the Noop
+    // backend still returns valid handles from create* so handle
+    // validity alone is not a reliable "skip me" signal). Pre-initialized
+    // adapter reports false (caller should also gate on isInitialized).
     if (!_initialized) {
         return false;
     }
