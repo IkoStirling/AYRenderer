@@ -18,6 +18,15 @@ struct DrawItem {
     // material's `Skeleton` UBO via setUniformBlock before draw.
     const ayt::math::Float4x4* boneMatrices = nullptr;
     uint32_t                   jointCount   = 0;
+    // U1++ — sort-key hook for TransparentPass back-to-front sort
+    // (U1.5). Default 0 preserves insertion-order semantics for
+    // callers that do not set it. Camera-space Z will be quantized
+    // into this signed int by an upcoming per-frame Pass::execute()
+    // step; rendering passes that do not sort can ignore it. ABI:
+    // +4 bytes appended to DrawItem (sizeof grows 4 -> still naturally
+    // aligned, no callers affected because DrawItem is always value-
+    // initialized via the engine-side RenderScene::add overloads).
+    int32_t                    sortKey      = 0;
 };
 
 class RenderScene {
@@ -29,7 +38,14 @@ public:
     void add(MeshHandle mesh, MaterialHandle material,
              const ayt::math::Float4x4& world = ayt::math::Float4x4::identity())
     {
-        _items.push_back(DrawItem{mesh, material, world, nullptr, 0});
+        DrawItem item;
+        item.mesh         = mesh;
+        item.material     = material;
+        item.world        = world;
+        item.boneMatrices = nullptr;
+        item.jointCount   = 0;
+        item.sortKey      = 0;  // U1++ — placeholder until U1.5 sort consumer
+        _items.push_back(item);
     }
 
     // Phase 1 SC-01: skinned-draw overload. `boneMatrices` points to

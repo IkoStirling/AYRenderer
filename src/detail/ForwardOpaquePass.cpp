@@ -66,28 +66,10 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     trySetUniformVec3(material.shader, "lightDirection", toLightDir.ptr());
     trySetUniformVec3(material.shader, "lightColor", frame.lightColor.ptr());
 
-    if (material.colorBinding == shader::InvalidBinding) {
-        material.colorBinding = material.shader.getUniformBinding("baseColor");
-        if (material.colorBinding == shader::InvalidBinding) {
-            material.colorBinding = material.shader.getUniformBinding("color");
-        }
-    }
-    if (material.colorBinding != shader::InvalidBinding) {
-        if (!material.shader.hasUniformBinding(material.colorBinding)) {
-            material.colorBinding = shader::InvalidBinding;
-        }
-    }
-    if (material.colorBinding != shader::InvalidBinding) {
-        if (material.hasColorOverride) {
-            material.shader.setUniform(material.colorBinding, material.colorOverride.ptr(),
-                                       sizeof(float) * 4);
-        } else {
-            // Phoskia property defaults are not guaranteed on D3D; use neutral white tint.
-            const float defaultBaseColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-            material.shader.setUniform(material.colorBinding, defaultBaseColor,
-                                       sizeof(defaultBaseColor));
-        }
-    }
+    // U1++ — color-uniform upload lifted to RenderPass helper; see
+    // RenderPass.cpp::resolveAndApplyColorUniforms. Identical bytes
+    // to the prior inline body; TransparentPass uses the same helper.
+    RenderPass::resolveAndApplyColorUniforms(material);
     if (material.mat4Binding != shader::InvalidBinding && material.hasMat4Override) {
         if (material.shader.hasUniformBinding(material.mat4Binding)) {
             material.shader.setUniform(material.mat4Binding, material.mat4Override.ptr(),

@@ -83,6 +83,17 @@ public:
     bool isEnabled() const { return _enabled; }
 
 protected:
+    // U1++ — shared color-uniform upload step. ForwardOpaquePass +
+    // TransparentPass both need to (1) lazily resolve colorBinding
+    // (baseColor -> color fallback), (2) re-validate the cached
+    // binding each frame (hot-reload safety net), and (3) write
+    // the override value or the neutral white default. Identity =
+    // byte-for-byte between the two passes; lifted here so they
+    // cannot diverge. Pure helper, no I/O beyond setUniform. Caller
+    // must guard `material.shader.isValid()` first (both existing
+    // call sites do).
+    static void resolveAndApplyColorUniforms(GpuMaterial& material);
+
     bool _enabled = true;
 };
 

@@ -80,33 +80,14 @@ uint32_t TransparentPass::execute(
         adapter.setVertexBuffer(mesh.vertexBuffer);
         adapter.setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
 
-        // Mirror ForwardOpaquePass::flushMaterial lines 69-89 with no
-        // skinning branch — U1 transparent draws are non-skinned.
-        // Lazily resolve colorBinding once, then re-validate via
-        // hasUniformBinding each frame (cheaper than re-resolving).
-        if (material.colorBinding == ayt::shader::InvalidBinding) {
-            material.colorBinding = material.shader.getUniformBinding("baseColor");
-            if (material.colorBinding == ayt::shader::InvalidBinding) {
-                material.colorBinding = material.shader.getUniformBinding("color");
-            }
-        }
-        if (material.colorBinding != ayt::shader::InvalidBinding) {
-            if (!material.shader.hasUniformBinding(material.colorBinding)) {
-                material.colorBinding = ayt::shader::InvalidBinding;
-            }
-        }
-        if (material.colorBinding != ayt::shader::InvalidBinding) {
-            if (material.hasColorOverride) {
-                material.shader.setUniform(material.colorBinding,
-                                           material.colorOverride.ptr(),
-                                           sizeof(float) * 4);
-            } else {
-                const float defaultBaseColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-                material.shader.setUniform(material.colorBinding,
-                                           defaultBaseColor,
-                                           sizeof(defaultBaseColor));
-            }
-        }
+        // U1++ — color-uniform upload shared with ForwardOpaquePass
+        // via RenderPass::resolveAndApplyColorUniforms. The two
+        // passes used to maintain a byte-identical 23-line mirror
+        // here; the helper keeps them from diverging. Note we don't
+        // wire skinning / MVP / light uniforms — TransparentPass is
+        // non-skinned and Phoskia's Unlit test shader doesn't sample
+        // MVP/light, so the existing test scene is correct.
+        RenderPass::resolveAndApplyColorUniforms(material);
 
         ayt::shader::DrawCallContext ctx;
         ctx.viewId = viewId;
