@@ -60,6 +60,15 @@ struct Renderer::Impl {
     ayt::math::FVector3           directionalLightDir = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
     ayt::math::FVector3           directionalLightColor = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
 
+    // R5+ (Phase PostProcess, 2026-07-20) — per-host post-process knobs.
+    // Defaults = no effect (bloomStrength=0 disables bloom; exposure=1
+    // is neutral; tonemap=None passes through). Renderer::render()
+    // copies these into FrameContext before dispatching the pipeline
+    // so PostProcessPass::execute sees them in `frame.*`.
+    float                          postProcessBloomStrength = 0.0f;
+    float                          postProcessExposure      = 1.0f;
+    detail::FrameContext::TonemapMode postProcessTonemapMode = detail::FrameContext::TonemapMode::None;
+
     // P0 (2026-07-20) — wall-clock origin for FrameContext.timeSeconds.
     // std::chrono::steady_clock is monotonic (immune to wall-clock
     // adjustments) which is what R5+ post-process effects (time-of-day
@@ -215,6 +224,12 @@ void Renderer::render(const RenderScene& scene)
         const std::chrono::duration<float> elapsed = now - _impl->renderClockOrigin;
         frame.timeSeconds = elapsed.count();
     }
+    // R5+ — host-configured post-process knobs. Rendered every frame
+    // even when the value hasn't changed because the FrameContext is
+    // stack-local; cost is negligible (3 floats + 1 byte enum).
+    frame.bloomStrength = _impl->postProcessBloomStrength;
+    frame.exposure      = _impl->postProcessExposure;
+    frame.tonemapMode   = _impl->postProcessTonemapMode;
 
     const uint8_t viewId = _impl->compositeSceneViewId >= 0
                                ? static_cast<uint8_t>(_impl->compositeSceneViewId)
@@ -490,6 +505,50 @@ void Renderer::setDirectionalLight(const ayt::math::FVector3& direction,
     }
     _impl->directionalLightDir   = direction.normalize();
     _impl->directionalLightColor = color;
+}
+
+void Renderer::setPostProcessBloomStrength(float strength)
+{
+    if (!_impl) {
+        return;
+    }
+    // R5+ — clamps negative values; values >1 are accepted (the shader
+    // is responsible for clamping the final mix). NaN/Inf pass through
+    // and the shader sees them — matches the existing setMaterialFloat
+    // leniency (no validation, host responsibility).
+    _impl->postProcessBloomStrength = strength;
+}
+
+void Renderer::setPostProcessExposure(float exposure)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->postProcessExposure = exposure;
+}
+
+void Renderer::setPostProcessTonemapMode(TonemapMode mode)
+{
+    if (!_impl) {
+        return;
+    }
+    // Bridge from public AYRenderer::TonemapMode to detail::FrameContext
+    // enum. Both share the same underlying values (0/1/2) by design
+    // (see AYRenderer.h:post-process setter block + FrameContext.h),
+    // but going through the cast keeps the two enums structurally
+    // independent so a future change to FrameContext::TonemapMode
+    // ordering doesn't silently break the public surface.
+    switch (mode) {
+    case TonemapMode::None:
+        _impl->postProcessTonemapMode = detail::FrameContext::TonemapMode::None;
+        break;
+    case TonemapMode::Reinhard:
+        _impl->postProcessTonemapMode = detail::FrameContext::TonemapMode::Reinhard;
+        break;
+    case TonemapMode::ACES:
+        _impl->postProcessTonemapMode = detail::FrameContext::TonemapMode::ACES;
+        break;
+    }
 }
 
 void Renderer::setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,

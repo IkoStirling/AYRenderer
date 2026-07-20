@@ -115,6 +115,22 @@ public:
     void setDirectionalLight(const ayt::math::FVector3& direction,
                              const ayt::math::FVector3& color);
 
+    // R5+ (Phase PostProcess, 2026-07-20) — knobs consumed by
+    // PostProcessPass::execute via FrameContext. Defaults = no effect
+    // (bloomStrength=0, exposure=1.0, tonemap=None) so legacy hosts
+    // see the same image as the pre-R5+ forward-only pipeline.
+    // Renderer::render() reads these into FrameContext each frame; the
+    // shader uniform names match (`u_bloomStrength`, `u_exposure`,
+    // `u_tonemapMode`).
+    void setPostProcessBloomStrength(float strength);
+    void setPostProcessExposure(float exposure);
+    enum class TonemapMode : uint8_t {
+        None     = 0,
+        Reinhard = 1,
+        ACES     = 2,
+    };
+    void setPostProcessTonemapMode(TonemapMode mode);
+
     void destroyMesh(MeshHandle& mesh);
     void destroyMaterial(MaterialHandle& material);
     void destroyTexture(TextureHandle& texture);

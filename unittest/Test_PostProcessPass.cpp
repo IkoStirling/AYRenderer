@@ -155,14 +155,21 @@ TEST_CASE(postprocess_isenabled_toggle_skips_dispatch) {
 
     // RenderPipeline::executeAll honors the toggle (zero draws from
     // this slot regardless of how many were nominally scheduled).
+    // R5+ — the BGFXAdapter is default-constructed (not initialized);
+    // BGFXAdapter::createFrameBuffer gates on isInitialized() and
+    // returns invalid, so PostProcessPass::execute short-circuits to
+    // 0 draws. We pass a real ShaderResourcePool (default-constructed
+    // — the pass doesn't consume it yet, see PostProcessPass.cpp
+    // R5+ doc comment).
     ayt::render::detail::FrameContext frame{};
     std::unordered_map<uint64_t, ayt::render::detail::GpuMesh> meshes;
     std::unordered_map<uint64_t, ayt::render::detail::GpuTexture> textures;
     std::unordered_map<uint64_t, ayt::render::detail::GpuMaterial> materials;
     ayt::render::detail::BGFXAdapter adapter;
+    ayt::shader::ShaderResourcePool pool;
     RenderScene scene;
     const uint32_t draws = pipe.executeAll(
-        adapter, *static_cast<ayt::shader::ShaderResourcePool*>(nullptr),
+        adapter, pool,
         scene, meshes, textures, materials,
         0, 0, 1280, 720, frame, /*viewId=*/0);
     CHECK(draws == 0);

@@ -27,6 +27,13 @@ public:
 
     bool isInitialized() const noexcept { return _initialized; }
 
+    // R5+ — true when the underlying bgfx backend is Noop. Useful for
+    // Pass implementations that want to skip GPU work on the headless
+    // test path without breaking their lifecycle hooks (the Noop
+    // backend still returns valid handles from create* so handle
+    // validity alone is not a reliable "skip me" signal).
+    bool isNoopBackend() const noexcept;
+
     void beginFrame();
     void endFrame();
 
@@ -59,9 +66,32 @@ public:
                                               const void* data, uint32_t size,
                                               uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
 
+    // R5+ (Phase PostProcess, 2026-07-20) — framebuffer abstraction.
+    // BGFXAdapter owns FBO handles the same way it owns VB/IB/Texture
+    // handles (single source of truth for GPU resource lifecycle).
+    // Reused by R5+ deferred Shadow / GBuffer / Lighting Passes
+    // (design.md:457-461) — all of those need offscreen color/depth
+    // attachments; building one FBO layer here keeps the ownership
+    // path consistent and avoids per-Pass destructor-order landmines.
+    //
+    // Returns bgfx::kInvalidFrameBufferHandle if not initialized or if
+    // creation fails (caller treats that as "skip post-process this
+    // frame"). Tracking is internal — `destroy()` is the public teardown.
+    bgfx::FrameBufferHandle createFrameBuffer(uint16_t width, uint16_t height,
+                                              bgfx::TextureFormat::Enum colorFormat =
+                                                  bgfx::TextureFormat::RGBA8,
+                                              bool withDepth = true);
+
+    // R5+ — bind `fb` as the draw target for `viewId`. Pass
+    // bgfx::kInvalidFrameBufferHandle to revert to the default
+    // backbuffer (called by PostProcessPass::execute after blitting
+    // the offscreen result back, before returning).
+    void setViewFrameBuffer(uint8_t viewId, bgfx::FrameBufferHandle fb);
+
     void destroy(bgfx::VertexBufferHandle h);
     void destroy(bgfx::IndexBufferHandle h);
     void destroy(bgfx::TextureHandle h);
+    void destroy(bgfx::FrameBufferHandle h);
 
     static bgfx::RendererType::Enum mapBackend(Backend backend);
 

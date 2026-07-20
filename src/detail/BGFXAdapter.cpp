@@ -68,6 +68,22 @@ void BGFXAdapter::endFrame()
     bgfx::frame();
 }
 
+bool BGFXAdapter::isNoopBackend() const noexcept
+{
+    // R5+ — true when bgfx is currently bound to its Noop backend.
+    // Pass implementations (PostProcessPass today; deferred Shadow /
+    // GBuffer / Lighting R5+) call this to skip GPU work that
+    // wouldn't render meaningfully under Noop AND that would leak
+    // bgfx resources into the shutdown path that Noop doesn't clean
+    // up cleanly. Pre-initialized adapter reports false (caller
+    // should also gate on isInitialized first).
+    if (!_initialized) {
+        return false;
+    }
+    const bgfx::Caps* caps = bgfx::getCaps();
+    return caps != nullptr && caps->rendererType == bgfx::RendererType::Noop;
+}
+
 bool BGFXAdapter::requestScreenshot(const std::string& filePath)
 {
     if (!_initialized || filePath.empty()) {
@@ -188,6 +204,57 @@ void BGFXAdapter::destroy(bgfx::IndexBufferHandle h)
 
 void BGFXAdapter::destroy(bgfx::TextureHandle h)
 {
+    if (_initialized && bgfx::isValid(h)) {
+        bgfx::destroy(h);
+    }
+}
+
+bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t height,
+                                                      bgfx::TextureFormat::Enum colorFormat,
+                                                      bool withDepth)
+{
+    // R5+ (Phase PostProcess, 2026-07-20) — single-FBO create path.
+    // Bypasses creation when the adapter isn't initialized so the
+    // headless Noop-backend test path stays alive (returns invalid
+    // handle → PostProcessPass::execute skips the frame's post step
+    // gracefully instead of crashing on bgfx::createFrameBuffer with
+    // no init).
+    if (!_initialized || width == 0 || height == 0) {
+        return BGFX_INVALID_HANDLE;
+    }
+    const uint64_t textureFlags = BGFX_TEXTURE_RT
+                                | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
+    bgfx::TextureHandle color = bgfx::createTexture2D(
+        width, height, /*hasMips=*/false, /*numLayers=*/1,
+        colorFormat, textureFlags, /*mem=*/nullptr);
+    if (!bgfx::isValid(color)) {
+        return BGFX_INVALID_HANDLE;
+    }
+    bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
+        /*num=*/1, &color, /*depth=*/withDepth);
+    // color is owned by the framebuffer now — bgfx manages the
+    // attachment's lifetime once it's attached, so we do NOT destroy
+    // `color` separately (would double-free).
+    if (bgfx::isValid(fb)) {
+        return fb;
+    }
+    return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+}
+
+void BGFXAdapter::setViewFrameBuffer(uint8_t viewId, bgfx::FrameBufferHandle fb)
+{
+    if (!_initialized) {
+        return;
+    }
+    bgfx::setViewFrameBuffer(viewId, fb);
+}
+
+void BGFXAdapter::destroy(bgfx::FrameBufferHandle h)
+{
+    // R5+ — destroy frees the color attachment automatically (bgfx
+    // tracks the lifetime relationship). Same pattern as the VB/IB/
+    // TextureHandle destroys above: no-op on invalid handle or when
+    // not initialized (e.g. Renderer::shutdown ran first).
     if (_initialized && bgfx::isValid(h)) {
         bgfx::destroy(h);
     }

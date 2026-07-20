@@ -2,6 +2,8 @@
 
 #include "detail/RenderPass.h"
 
+#include <bgfx/bgfx.h>
+
 #include <cstdint>
 #include <string_view>
 #include <unordered_map>
@@ -9,54 +11,60 @@
 namespace ayt::render::detail
 {
 
-// P0 — R5+ deferred PostProcess scaffold (Phase P0, 2026-07-20).
+// R5+ (Phase PostProcess, 2026-07-20) — fullscreen-triangle post-process
+// pass that consumes the scene-color produced by ForwardOpaquePass +
+// TransparentPass and emits a single filtered result to a bound
+// render target (the R5+ offscreen FBO by default; the host can opt
+// to bind the default backbuffer via BGFXAdapter::setViewFrameBuffer
+// before calling Renderer::render if it wants the result on screen
+// directly without our blit-back step).
 //
-// Why ship a no-op pass NOW: design.md:461 lists PostProcessPass in
-// kFullPipelineOrder[5] ("Transparent", "PostProcess", "UI") but tags
-// it "全屏 triangle + storage image（Phase 5 延后）". The pass slot
-// has been empty since U1+ shipped [ForwardOpaque, Transparent, UI].
-// materializing a real fullscreen-triangle + RT ping-pong requires:
-//   1) A new bgfx::FrameBufferHandle ownership model on BGFXAdapter
-//      (BGFXAdapter only owns VertexBuffer/IndexBuffer/TextureHandle
-//      today — see BGFXAdapter.h:21-69).
-//   2) A fullscreen-triangle Phoskia shader (needs shaderc in CI;
-//      breaks the Noop-backend headless test path).
-//   3) FrameContext extensions for time/bloomStrength/exposure (none
-//      of these knobs exist yet — see FrameContext.h:8-14).
+// Pipeline slot: kFullPipelineOrder[5], between Transparent and UI.
+// design.md:461 says "全屏 triangle + storage image（Phase 5 延后）";
+// R5+ delivers the triangle + shader-uniform upload + the blit-back
+// that puts the result back into the default backbuffer for UIPass
+// to composite chrome over.
 //
-// Those three are R5+ deferred work. What P0 lands:
-//   * The POLYMORPHIC SLOT between Transparent and UI — RenderPass
-//     base dispatch now visits PostProcess in the correct order even
-//     though it draws zero today.
-//   * The ENABLE hook — `setEnabled(false)` lets hosts skip the slot
-//     without ripping the pass out of the pipeline (matches
-//     UIPass/ForwardOpaquePass per-pass isEnabled() contract from
-//     U1+).
-//   * The TIMING FIELD on FrameContext (`timeSeconds`) so a R5+
-//     PostProcess implementation that drives shader uniforms per
-//     frame does not need to extend the context later.
-//   * The FUTURE-EXPANSION NOTES as a comment breadcrumb so R5+
-//     contributors have the integration points mapped (see .cpp).
+// Algorithm today (R5+ minimal — bloom/exposure/tonemap all wired but
+// the bundled Phoskia program is a near-identity "passthrough with
+// bloom strength + exposure + tonemap knob" composite; future
+// iterations can swap the program handle for a full downsample/upsample
+// bloom pair):
+//   1) Acquire the offscreen FBO from BGFXAdapter (create-once,
+//      resize-on-viewport-change tracked here).
+//   2) bind FBO as the view's draw target for the post-process viewId.
+//   3) Submit a fullscreen triangle (3 verts, 1 instance) reading the
+//      scene color from a sampler named "u_sceneColor" (the fragment
+//      shader is expected to declare `uniform sampler2D u_sceneColor`).
+//      The bundle program reads `u_time`, `u_bloomStrength`,
+//      `u_exposure`, `u_tonemapMode` for effect shaping.
+//   4) Bind the default backbuffer, blit FBO -> backbuffer.
+//   5) Return the draw-call count.
 //
-// Execute semantics (P0, locked):
-//   1) Honor isEnabled() — default true; matches RenderPass base.
-//   2) Skip work if no R5+ setup has been configured (no shader
-//      has been injected; nothing to dispatch). Returns 0.
-//   3) When R5+ lands: bind framebuffer N, run fullscreen triangle
-//      with scene-color-as-texture input + authored shader, blit to
-//      viewId. The execute() body in .cpp will grow at that point —
-//      no signature change required.
+// Noop-backend safety: when BGFXAdapter is uninitialized or the FBO
+// create fails, the entire execute() body short-circuits to 0 draws
+// and 0 side effects. Headless tests in CI rely on this — every
+// `createFrameBuffer` and `setViewFrameBuffer` is gated by an
+// `_adapter.isInitialized()` check inside BGFXAdapter itself.
 //
-// What execute() does NOT do (P0):
-//   - It does NOT touch the adapter (no setViewRect /
-//     setViewTransform / setViewClear) — bgfx's framebuffer model
-//     needs a separate FBO abstraction we haven't built yet.
-//   - It does NOT consume the FrameContext fields other than reading
-//     them for future uniform upload (today the read is stubbed).
-//   - It does NOT allocate any GPU resources — DeferredPostShader
-//     (R5+) will own the fullscreen-triangle mesh + FBO.
+// Lazy FBO lifecycle: FBO is created on the first execute() call
+// after the adapter is initialized, and resized whenever the
+// viewport size changes. BGFXAdapter owns the underlying handle;
+// this class owns the resource cache and release semantics
+// (destroy on shutdown / resize / adapter-reinit).
 class PostProcessPass : public RenderPass {
 public:
+    PostProcessPass() = default;
+    // R5+ — destructor intentionally does NOT touch bgfx handles.
+    // RenderPass base has no BGFXAdapter reference (passes are
+    // adapter-agnostic); passing the adapter in via a method would
+    // break the U0 polymorphism contract. bgfx::shutdown() in
+    // BGFXAdapter::shutdown() invalidates all handles globally, so
+    // releasing at that point is implicit. For mid-frame adapter
+    // teardown (rare), call destroyResources() explicitly with the
+    // adapter before the pass is destroyed.
+    ~PostProcessPass() override = default;
+
     std::string_view name() const override { return "PostProcess"; }
 
     uint32_t execute(
@@ -71,13 +79,30 @@ public:
         const FrameContext& frame,
         uint8_t viewId) override;
 
-    // P0 — query / toggle the future R5+ shader injection. R5+ will
-    // extend this to a real ShaderResource owned by the pass; today
-    // hasShader() == false is the documented no-op branch and
-    // setShader(nullptr) is the documented reset. Public so the host
-    // can introspect whether the pass is wired.
-    bool hasShader() const noexcept { return false; }
-    void setShader(void* /*placeholder*/) noexcept { /* R5+ */ }
+    // R5+ — query whether the pass has a real FBO + program wired.
+    // Useful for hosts that want to skip the slot via setEnabled(false)
+    // when the post-process pipeline cannot be created (e.g. backend
+    // was initialized but the post-process Phoskia program is not in
+    // the pool). Today the pass is "ready" once execute() has built
+    // the FBO at least once.
+    bool isReady() const noexcept { return bgfx::isValid(_fbo); }
+
+private:
+    // R5+ — cached FBO. Invalid until first execute(). BGFXAdapter
+    // owns the underlying bgfx handle; this class owns the cache +
+    // resize/destroy decision (mirrors how RenderResourceManager
+    // caches meshes / materials).
+    bgfx::FrameBufferHandle    _fbo = BGFX_INVALID_HANDLE;
+    bgfx::VertexBufferHandle   _fullscreenVB = BGFX_INVALID_HANDLE;
+    bgfx::IndexBufferHandle    _fullscreenIB = BGFX_INVALID_HANDLE;
+    uint16_t                   _fboWidth  = 0;
+    uint16_t                   _fboHeight = 0;
+
+    // R5+ — helpers. Both are no-ops on the Noop backend (BGFXAdapter
+    // gates on isInitialized()), so the headless test path runs clean.
+    void ensureFbo(BGFXAdapter& adapter, uint16_t width, uint16_t height);
+    void ensureFullscreenQuad(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter);
 };
 
 } // namespace ayt::render::detail
