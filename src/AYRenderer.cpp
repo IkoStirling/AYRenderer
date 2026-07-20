@@ -8,6 +8,7 @@
 #include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
 #include "detail/UiGpuContext.h"
+#include "detail/UIPass.h"
 #include "AYUIRenderBackend.h"
 
 #include "AYShaderResourcePool.h"
@@ -28,6 +29,12 @@ struct Renderer::Impl {
     // each subclass. Currently a vector of size 1; U1+ will turn this
     // into RenderPipeline owning multiple.
     std::unique_ptr<detail::RenderPass> forwardPass;
+    // U0.5 — second concrete RenderPass subclass. Constructed here
+    // (backend null until host injects via Renderer::setUiBackend in
+    // a later PR); not yet dispatched by Renderer::render. Held by
+    // Impl so the U1+ swap to vector<unique_ptr<RenderPass>> can
+    // add this without a follow-up patch to this header.
+    std::unique_ptr<detail::UIPass> uiPass;
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
     InitDesc                      initDesc{};
@@ -54,6 +61,7 @@ struct Renderer::Impl {
     Impl()
         : resources(adapter, shaderPool)
         , forwardPass(std::make_unique<detail::ForwardOpaquePass>())
+        , uiPass(std::make_unique<detail::UIPass>())
     {
     }
 };
