@@ -296,6 +296,13 @@ Light struct + FrameContext shadow 槽（`shadowFbo` / `lightViewProj` 等）+ �
 | P4.2 | bias 常量 + 文档 | 无严重 acne 的 demo 截图 |
 | P4.3 | `setShadowsEnabled(true)` 默认仍 false | 引擎 / Editor 显式打开 |
 
+**P4 已 ship — PR-F2（2026-07-21，commit `8a646ae`）：**
+- ✅ P4.1：`simple_lit_shadow.phoskia` 加 `out worldPos : position` + fragment 手动 `sample(shadowMap, clipPos.xy).r` 比 refDepth。FO/Transparent 通过 `PassExecContext::shadowPass` 旁路 getter 拿 `u_lightViewProj` + bind shadow FBO attach0。
+- ✅ P4.2：`shadowBias` property 已 ship（Phoskia 端可调）；文档待 P5 一次性补。
+- ✅ P4.3：`ctx.shadowPass` 默认 nullptr ⇒ 没有 ShadowPass 时 FO/Transparent skip shadow path ⇒ 等价「setShadowsEnabled(false)」。宿主 opt-in 通过 `pipeline.addPass(ShadowPass)` + 显式 `ctx.shadowPass = &shadow`。
+
+**下一刀 = §P5 Deferred 最小闭环 或 §5.4 E4 单独跑 3/3（解锁默认挂 Shadow）由主人定。**
+
 ---
 
 ### P5 — Deferred 最小闭环（可选大项）
@@ -333,7 +340,7 @@ Light struct + FrameContext shadow 槽（`shadowFbo` / `lightViewProj` 等）+ �
 | PR-D | feat: scene `createFrameBuffer` feeds PostProcess（勿占 view 2） | P2 |
 | PR-E | experiment: FrameContext POD tail **或** default-pipe Shadow+disabled（一次一个） | §5.4 E1 / E4 |
 | PR-F | ~~C' Light+ShadowMap+enabled~~ **阻断** → **PR-F1'** light-space on ShadowPass only（§5.5） | P3 / §5.5 |
-| PR-F2 | feat: forward shadow sampling via pass getters（无 FrameContext 槽） | P4 |
+| PR-F2 | ~~feat: forward shadow sampling via pass getters（无 FrameContext 槽）~~ ✅ **shipped** 2026-07-21 commit `8a646ae` 3/3 stable 485/485 | P4 |
 | PR-H | feat: GBuffer + Lighting path switch | P5 |
 
 ---
@@ -391,11 +398,12 @@ git checkout -b fix/renderer-p0-docs-alpha
 | **P2 / PR-D** Scene RT → PP 闭环 | 2026-07-20 | **3/3 PASS** (447/447) | 见既有记录；`sceneFbo` on PassExecContext |
 | **PR-F1 C'** Light+Frame shadow槽+enabled Shadow | 2026-07-20 | **FAIL 139** | 见 §5.5；步1–3 均 SIGSEGV；步4 回滚后 3/3 PASS；基线 `b66deb8` |
 | **PR-F1'** light-space on ShadowPass only | 2026-07-21 | **3/3 PASS** (465/465) | `ShadowLightMatrix.h/.cpp` 用 bx 构 view/proj(SAME `homogeneousDepth` 约定同 `setMainCameraLookAtPerspective`);`ShadowPass::_lightView/_lightProj/_lightViewProj` 内部缓存 + getter(`lightView()/lightProj()/lightViewProj()/shadowFbo()`);**不**增 `RenderScene Light`、**不**加 `FrameContext shadow 槽`(改设 `AY_F1_DIAG_LIGHT / AY_F1_DIAG_FRAME_SHADOW / AY_F1_DIAG_DEFAULT_SHADOW` CMake feature flag,默认全 OFF ⇒ master ABI 与 `b66deb8` 一致);**不**默认挂 Shadow;新文件 `include/AYF1DiagFlags.h` + `unittest/Test_F1_LayoutDiag.cpp` 锁住 ABI 一致(测试在三个 flag 全 OFF 时打印 `sizeof(RenderScene)` / `sizeof(FrameContext)` 防混编复发);**附带真修**:`FrameContext.h` 不再 `#include <bgfx/bgfx.h>`(与 `MemorySystem::instance` 在 `AYRendererSubSystem.cpp` 撞名),shadow 槽只存 `uint16_t shadowFboIdx` 而非 `bgfx::FrameBufferHandle`;18 新测试(447 → 465);诊断面板见 `docs/f1-sigsegv-repro.md` |
+| **PR-F2** forward shadow sampling via pass getters | 2026-07-21 | **3/3 PASS** (485/485) | `PassExecContext::shadowPass`(const non-owning `ShadowPass*`,默认 nullptr);`RenderPass::tryBindShadowSampler(shader, adapter, ptr)` 助手(FO + Transparent 调用同一份代码保 byte-identical);FO + Transparent 现成当 `ctx.shadowPass != nullptr && bgfx::isValid(它->shadowFbo())` 时 upload `u_lightViewProj` + bind shadow FBO attach0 作 `shadowMap`;Phoskia:`demo/assets/simple_lit_shadow.phoskia` 出 `out worldPos : position` varying + fragment 手动 `sample(shadowMap, clipPos.xy).r` 比 refDepth(避开 AYShader 扩 SamplerKind + flags overload 跨模块成本);**绝不**动 `FrameContext`(§5.3 守);**绝不动** RenderScene Light;**绝不**默认挂 Shadow(§5.4 E4 未过);新 `unittest/Test_F2_ForwardShadow.cpp` 6 case(+20 测试从 465 → 485)锁 plumbing;**已 ship with hard-edge shadow demo-able**;**下一刀 = §P4.2 bias 精修(可调 shadowBias property)/ P3 E4 默认挂 shadow(单独 bisect)/ F3 shadow_caster VS 段(skinned 模型)** |
 | E2 Light 存储 API | | | | **默认 OFF**;开 `AY_F1_DIAG_LIGHT=ON` 时启用,确保 Clean 全编 |
 | E3 非 const FrameContext& | | | | 未跑 |
 | E4 默认挂 Shadow disabled | | | | **默认 OFF**;开 `AY_F1_DIAG_DEFAULT_SHADOW=ON` 时启用,需 §5.4 干净树重跑 ≥3 次 |
 | E5 Shadow enabled 无 Frame 槽 | | | | 未跑(在 `AY_F1_DIAG_LIGHT=OFF + AY_F1_DIAG_FRAME_SHADOW=OFF` 下应是基线,需独立验证) |
-| E6 旁路 getter 采样 | | | | F1' 已提供 getter(lightView/lightProj/lightViewProj/shadowFbo),**采样**属 PR-F2 |
+| E6 旁路 getter 采样 | 2026-07-21 | **3/3 PASS** (485/485) | PR-F2 已直接 ship §5.4 E6 路径(旁路 getter 走 `PassExecContext::shadowPass` 而非 `FrameContext`)|
 
 ## 附录 B — 关键默认管线索引
 

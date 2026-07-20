@@ -24,7 +24,7 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 | R4-c | `captureScreenshot`：backbuffer PNG（窗口 + 真实 GPU backend） | ✅ |
 | Engine | GameLoop + Entity `RenderSystem` + `RendererSubSystem` | ✅ |
 | R5+ | PostProcess | ✅ Phoskia 程序 + **从 scene FBO attach0 采样** + 真 blit-back（PR-D 2026-07-20, commit `b66deb8`）；bloom/exposure/tonemap 真作用 |
-| R5+ | Shadow | 🅪 cut-2 ✅ / cut-3 ❌ — depth-only FBO + **真 light-space ortho**（PR-F1' 2026-07-21, commit `502458b`,feat branch）已 ship；`ShadowPass::shadowFbo()/lightView()/lightProj()/lightViewProj()` getter 给 F2 直接消费。**下一步 = PR-F2**（FO/Transparent 加 Phoskia shadow_caster 采样 + bias,1 PR）。仍不默认挂 Shadow。 |
+| R5+ | Shadow | 🅪 cut-2 ✅ / cut-3 ❌ — depth-only FBO + **真 light-space ortho**（PR-F1' 2026-07-21, commit `502458b`,feat branch）已 ship；**PR-F2 (2026-07-21, commit `8a646ae`) ship** — FO/Transparent 通过 `PassExecContext::shadowPass` 拿 shadow producer 句柄、上传 `u_lightViewProj`、绑 `shadowMap`（bgfx D24S8 depth 平面 `.r` 通道手动比较）。demo 截图会有 hard-edge shadow（bias acne 还在,但屏幕可见）。新 `simple_lit_shadow.phoskia`（`out worldPos : position` varying + 手动 depth compare）也 ship。**仍不默认挂 Shadow**（§5.4 E4 未跑）；host opt-in 路径: `pipeline.addPass(ShadowPass)` + `ctx.shadowPass = &shadow`。 |
 | R5+ | GBuffer / Lighting / Command Queue | ❌ missing — 仅设计，无代码 |
 
 ---
@@ -35,14 +35,15 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 
 **还不能当完整渲染器当的：** 带阴影的产品光照、延迟渲染、复杂后处理（真 bloom chain / DOF / SSR）。
 
-### 唯一"差一步能 demo"的：**PR-F2**
+### 唯一"差一步能 demo"的:**PR-F2** ✅ 已 ship(2026-07-21,commit `8a646ae`)
 
-| 项 | 工作量 | 已准备 |
+| 项 | 工作量 | 已 ship |
 |---|---|---|
-| FO 加 `texture2dshadow` 采样 + `bias` + 接入 F1' getter | 1 PR ≈200 行 | ✅ F1' 已 ship getter，Phoskia 头资源就绪 |
-| + shadow_caster 程序段（skinned 模型 bone UBO 走 shadow depth）| 加在 PR-F2 同 PR 即可 | ✅ boneBlockBinding 已 ship |
+| FO 加 shadow 采样 + `bias` + 接入 F1' getter(Phoskia 手动 depth compare,见 `simple_lit_shadow.phoskia`)| 1 PR ≈200 行 | ✅ `PassExecContext::shadowPass` + `tryBindShadowSampler` helper |
+| + shadow_caster 程序段(skinned 模型 bone UBO 走 shadow depth)| 加在 PR-F2 同 PR 即可 | ⏳ boneBlockBinding 已 ship,但 shadow_caster VS 变体留 P5 (skinned shadow 在 PR-F3 之前为 straightforward — F2 单 PR 不覆盖)|
+| Host opt-in path | — | host 调 `pipeline.addPass(ShadowPass)` + 派发前 `ctx.shadowPass = &shadow` 即可 |
 
-PR-F2 ship 后 **demo 屏幕有 shadow**(硬边缘,bias 还可能 acne,但能看见光斑)。
+PR-F2 ship 后 **demo 屏幕有 hard-edge shadow**(直视 bias 还可能 acne,可调 `shadowBias` property)。
 
 ### 表中★数字 **不等于**"要做几个 PR":仅是设计复杂度
 
