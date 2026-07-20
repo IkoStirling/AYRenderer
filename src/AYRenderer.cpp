@@ -23,7 +23,11 @@ namespace ayt::render
 struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
     ayt::shader::ShaderResourcePool    shaderPool;
-    detail::ForwardOpaquePass     forwardPass;
+    // U0 — base pointer so the next pass (Transparent / UIPass / etc.)
+    // joins the same registry without Renderer::render learning about
+    // each subclass. Currently a vector of size 1; U1+ will turn this
+    // into RenderPipeline owning multiple.
+    std::unique_ptr<detail::RenderPass> forwardPass;
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
     InitDesc                      initDesc{};
@@ -49,6 +53,7 @@ struct Renderer::Impl {
 
     Impl()
         : resources(adapter, shaderPool)
+        , forwardPass(std::make_unique<detail::ForwardOpaquePass>())
     {
     }
 };
@@ -168,7 +173,7 @@ void Renderer::render(const RenderScene& scene)
                                ? static_cast<uint8_t>(_impl->compositeSceneViewId)
                                : detail::ForwardOpaquePass::kMainViewId;
 
-    _impl->lastDrawCalls = _impl->forwardPass.execute(
+    _impl->lastDrawCalls = _impl->forwardPass->execute(
         _impl->adapter, _impl->shaderPool, scene,
         _impl->resources.meshes(), _impl->resources.textures(),
         _impl->resources.materials(),
