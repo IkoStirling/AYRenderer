@@ -59,6 +59,11 @@ public:
     void drawWithAlpha(const ayt::math::FRectangle& bounds, void* textureHandle,
                        float alpha) override;
 
+    TextMetrics measureText(const std::wstring& text, int fontSize,
+                            float maxWidth = 0.0f) const override;
+    ayt::font::FontMetrics getFontMetrics(ayt::font::FontHandle font) const override;
+    ayt::font::FontHandle getFontHandle(const wchar_t* familyName, int baseSize) override;
+
     void flushBatches() override;
 
     int getDrawCallCount() const override { return _drawCalls; }

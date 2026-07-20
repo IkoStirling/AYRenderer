@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IAYFontManager.h"
+#include "IAYShaper.h"
 
 #include <cstdint>
 #include <memory>
@@ -29,11 +30,22 @@ public:
     void shutdown(BGFXAdapter& adapter);
 
     ayt::font::IFont* acquireFont(int pixelSize);
-    uint16_t          atlasTextureIdx() const { return _atlasTextureIdx; }
+    ayt::font::IFont* fontForHandle(ayt::font::FontHandle handle) const;
+    ayt::font::FontHandle handleForSize(int pixelSize) const;
+    uint16_t              atlasTextureIdx() const { return _atlasTextureIdx; }
 
-    // Rasterize glyphs for this draw; marks atlas dirty only when a new
-    // (pixelSize, codepoint) pair is seen for the first time this session.
+    // Shape UTF-16 text with HarfBuzz (falls back to empty on failure).
+    std::vector<ayt::font::ShapedGlyph> shapeText(ayt::font::IFont* font,
+                                                  const std::wstring& text);
+
+    // Rasterize shaped glyphs; marks atlas dirty when a new glyph index appears.
+    void prepareShapedGlyphs(ayt::font::IFont* font, int pixelSize,
+                             const std::vector<ayt::font::ShapedGlyph>& shaped);
+
+    // Legacy char-path warm-up (still used if shaping fails).
     void prepareGlyphs(ayt::font::IFont* font, int pixelSize, const std::wstring& text);
+
+    float measureShapedWidth(const std::vector<ayt::font::ShapedGlyph>& shaped) const;
 
     void markAtlasDirty();
     bool isAtlasDirty() const { return _atlasDirty; }
@@ -42,9 +54,11 @@ public:
 private:
     ayt::font::IFont* registerFontForSize(int pixelSize);
     bool              tryRegisterFont(int pixelSize, const wchar_t* path);
+    ayt::font::IAYShaper* acquireShaper(ayt::font::IFont* font);
 
     std::unique_ptr<ayt::font::IFontManager> _fontManager;
     std::unordered_map<int, ayt::font::FontHandle> _fontsBySize;
+    std::unordered_map<int, std::unique_ptr<ayt::font::IAYShaper>> _shapersByFontId;
 
     uint16_t             _atlasTextureIdx = UINT16_MAX;
     bool                 _atlasDirty      = true;

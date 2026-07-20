@@ -227,6 +227,7 @@ void UIRenderBackend::endCanvas() {}
 void UIRenderBackend::endFrame()
 {
     flushColoredRects();
+    flushPendingText();
 }
 
 void UIRenderBackend::flushBatches()
@@ -393,6 +394,66 @@ void UIRenderBackend::drawTexturedQuad(const ayt::math::FRectangle& bounds, uint
                               indices, 6);
 }
 
+ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(const std::wstring& text,
+                                                                  int fontSize,
+                                                                  float maxWidth) const
+{
+    TextMetrics out{0.0f, 0.0f, 0.0f, 0.0f};
+    if (!_initialized || _fontAtlas == nullptr || fontSize < 8) {
+        return out;
+    }
+
+    auto* atlas = const_cast<detail::BgfxFontAtlas*>(_fontAtlas.get());
+    ayt::font::IFont* font = atlas->acquireFont(fontSize);
+    if (font == nullptr) {
+        return out;
+    }
+
+    const ayt::font::FontMetrics& fm = font->getMetrics();
+    out.ascent  = fm.ascent;
+    out.descent = fm.descent > 0.0f ? fm.descent : -fm.descent;
+    out.height  = fm.lineHeight > 0.0f ? fm.lineHeight : static_cast<float>(fontSize);
+
+    if (text.empty()) {
+        return out;
+    }
+
+    const std::vector<ayt::font::ShapedGlyph> shaped = atlas->shapeText(font, text);
+    if (!shaped.empty()) {
+        out.width = atlas->measureShapedWidth(shaped);
+    } else {
+        out.width = font->measureText(text.c_str(), static_cast<int>(text.size()));
+    }
+
+    // maxWidth reserved for future wrap metrics; callers still get full span.
+    AYUNREFERENCED_PARAM(maxWidth);
+    return out;
+}
+
+ayt::font::FontMetrics UIRenderBackend::getFontMetrics(ayt::font::FontHandle font) const
+{
+    if (!_initialized || _fontAtlas == nullptr) {
+        return ayt::font::FontMetrics{0, 0, 0, 0, 0, 0};
+    }
+    ayt::font::IFont* face = _fontAtlas->fontForHandle(font);
+    if (face == nullptr) {
+        return ayt::font::FontMetrics{0, 0, 0, 0, 0, 0};
+    }
+    return face->getMetrics();
+}
+
+ayt::font::FontHandle UIRenderBackend::getFontHandle(const wchar_t* /*familyName*/, int baseSize)
+{
+    if (!_initialized || _fontAtlas == nullptr) {
+        return ayt::font::FontHandle{-1};
+    }
+    // Size-keyed UI fonts; family name is ignored until multi-face config lands.
+    if (_fontAtlas->acquireFont(baseSize) == nullptr) {
+        return ayt::font::FontHandle{-1};
+    }
+    return _fontAtlas->handleForSize(baseSize);
+}
+
 void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::wstring& text,
                                int fontSize, const ayt::math::FVector4& color)
 {
@@ -412,7 +473,14 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         return;
     }
 
-    _fontAtlas->prepareGlyphs(font, fontSize, text);
+    std::vector<ayt::font::ShapedGlyph> shaped = _fontAtlas->shapeText(font, text);
+    const bool useShaped = !shaped.empty();
+    if (useShaped) {
+        _fontAtlas->prepareShapedGlyphs(font, fontSize, shaped);
+    } else {
+        _fontAtlas->prepareGlyphs(font, fontSize, text);
+    }
+
     frame.textSyncFont = font;
     syncTextAtlasIfNeeded();
     flushColoredRects();
@@ -432,22 +500,23 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     const float    fbW    = static_cast<float>(_width);
     const float    fbH    = static_cast<float>(_height);
 
-    for (wchar_t ch : text) {
-        ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
+    auto emitGlyph = [&](ayt::font::GlyphInfo* glyph, float penX, float penY, float xOff,
+                         float yOff, float xAdv) {
         if (glyph == nullptr) {
-            cursorX += metrics.lineHeight * 0.25f;
-            continue;
+            cursorX = penX + xAdv;
+            return;
         }
 
         const int glyphW = glyph->metrics.width;
         const int glyphH = glyph->metrics.height;
         if (glyphW <= 0 || glyphH <= 0) {
-            cursorX += static_cast<float>(glyph->metrics.advance);
-            continue;
+            cursorX = penX + xAdv;
+            return;
         }
 
-        const float x0 = cursorX + static_cast<float>(glyph->metrics.bearingX);
-        const float y0 = baselineY - static_cast<float>(glyph->metrics.bearingY);
+        const float x0 = penX + xOff + static_cast<float>(glyph->metrics.bearingX);
+        // HB y_offset is up-positive; screen Y grows downward.
+        const float y0 = penY - yOff - static_cast<float>(glyph->metrics.bearingY);
         const float x1 = x0 + static_cast<float>(glyphW);
         const float y1 = y0 + static_cast<float>(glyphH);
 
@@ -468,7 +537,25 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         frame.textBatch->indices.push_back(base + 0);
         frame.textBatch->indices.push_back(base + 2);
         frame.textBatch->indices.push_back(base + 3);
-        cursorX += static_cast<float>(glyph->metrics.advance);
+        cursorX = penX + xAdv;
+    };
+
+    if (useShaped) {
+        for (const ayt::font::ShapedGlyph& sg : shaped) {
+            ayt::font::GlyphInfo* glyph = font->getGlyphByIndex(sg.glyphIndex);
+            const float xOff = static_cast<float>(sg.xOffset) / 64.0f;
+            const float yOff = static_cast<float>(sg.yOffset) / 64.0f;
+            const float xAdv = static_cast<float>(sg.xAdvance) / 64.0f;
+            emitGlyph(glyph, cursorX, baselineY, xOff, yOff, xAdv);
+        }
+    } else {
+        for (wchar_t ch : text) {
+            ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
+            const float xAdv = (glyph != nullptr)
+                                   ? static_cast<float>(glyph->metrics.advance)
+                                   : metrics.lineHeight * 0.25f;
+            emitGlyph(glyph, cursorX, baselineY, 0.0f, 0.0f, xAdv);
+        }
     }
 }
 

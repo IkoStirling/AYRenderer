@@ -102,6 +102,8 @@ void BgfxFontAtlas::shutdown(BGFXAdapter& adapter)
         _atlasTextureIdx = kInvalidIdx;
     }
 
+    _shapersByFontId.clear();
+
     if (_fontManager != nullptr) {
         _fontManager->releaseAll();
         _fontManager.reset();
@@ -177,6 +179,71 @@ ayt::font::IFont* BgfxFontAtlas::acquireFont(int pixelSize)
     return registerFontForSize(pixelSize);
 }
 
+ayt::font::IFont* BgfxFontAtlas::fontForHandle(ayt::font::FontHandle handle) const
+{
+    if (_fontManager == nullptr || !handle.isValid()) {
+        return nullptr;
+    }
+    return _fontManager->getFont(handle);
+}
+
+ayt::font::FontHandle BgfxFontAtlas::handleForSize(int pixelSize) const
+{
+    const auto it = _fontsBySize.find(pixelSize);
+    if (it == _fontsBySize.end()) {
+        return ayt::font::FontHandle{};
+    }
+    return it->second;
+}
+
+ayt::font::IAYShaper* BgfxFontAtlas::acquireShaper(ayt::font::IFont* font)
+{
+    if (font == nullptr) {
+        return nullptr;
+    }
+    const int id = font->getHandle().id;
+    const auto it = _shapersByFontId.find(id);
+    if (it != _shapersByFontId.end()) {
+        return it->second.get();
+    }
+
+    ayt::font::IAYShaper* raw = ayt::font::createShaper(font);
+    if (raw == nullptr) {
+        return nullptr;
+    }
+    _shapersByFontId[id].reset(raw);
+    return raw;
+}
+
+std::vector<ayt::font::ShapedGlyph> BgfxFontAtlas::shapeText(ayt::font::IFont* font,
+                                                             const std::wstring& text)
+{
+    if (font == nullptr || text.empty()) {
+        return {};
+    }
+    ayt::font::IAYShaper* shaper = acquireShaper(font);
+    if (shaper == nullptr) {
+        return {};
+    }
+    return shaper->shape(text.c_str(), static_cast<int>(text.size()));
+}
+
+void BgfxFontAtlas::prepareShapedGlyphs(ayt::font::IFont* font, int pixelSize,
+                                        const std::vector<ayt::font::ShapedGlyph>& shaped)
+{
+    if (font == nullptr) {
+        return;
+    }
+    for (const ayt::font::ShapedGlyph& sg : shaped) {
+        font->getGlyphByIndex(sg.glyphIndex);
+        const uint64_t key =
+            (static_cast<uint64_t>(static_cast<uint32_t>(pixelSize)) << 32) | sg.glyphIndex;
+        if (_knownGlyphs.insert(key).second) {
+            markAtlasDirty();
+        }
+    }
+}
+
 void BgfxFontAtlas::markAtlasDirty()
 {
     _atlasDirty = true;
@@ -197,6 +264,15 @@ void BgfxFontAtlas::prepareGlyphs(ayt::font::IFont* font, int pixelSize, const s
             markAtlasDirty();
         }
     }
+}
+
+float BgfxFontAtlas::measureShapedWidth(const std::vector<ayt::font::ShapedGlyph>& shaped) const
+{
+    float width = 0.0f;
+    for (const ayt::font::ShapedGlyph& sg : shaped) {
+        width += static_cast<float>(sg.xAdvance) / 64.0f;
+    }
+    return width;
 }
 
 void BgfxFontAtlas::syncAtlasToGpu(ayt::font::IFont* font)
