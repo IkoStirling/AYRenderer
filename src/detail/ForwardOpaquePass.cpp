@@ -4,9 +4,6 @@
 #include "detail/ShadowPass.h"
 
 #include <bgfx/bgfx.h>
-#include <cstdio>
-#include <cstring>
-#include <vector>
 
 namespace ayt::render::detail
 {
@@ -179,58 +176,20 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         // the shader binding misses are no-ops.
         flushMaterial(material, textures, frame, item.world, adapter, ctx.shadowPass);
 
-        // Phase 1 RD-04: upload per-frame bone matrices to the
-        // material's `Skeleton` UBO or top-level `bones[]` uniform.
-        if (item.boneMatrices != nullptr && item.jointCount > 0
-            && material.shader.isValid()) {
-            const size_t byteCount = static_cast<size_t>(item.jointCount) * 64;
-            if (byteCount <= 1024) {
-                float stackBuf[1024 / sizeof(float)];
-                for (uint32_t k = 0; k < item.jointCount; ++k) {
-                    std::memcpy(&stackBuf[k * 16],
-                                item.boneMatrices[k].ptr(),
-                                sizeof(float) * 16);
-                }
-                bool uploaded = false;
-                if (material.boneBlockBinding != shader::InvalidBinding) {
-                    material.shader.setUniformBlock(material.boneBlockBinding,
-                                                    stackBuf, byteCount);
-                    uploaded = true;
-                } else {
-                    const shader::BindingId bonesUniform =
-                        material.shader.getUniformBinding("bones");
-                    if (bonesUniform != shader::InvalidBinding) {
-                        material.shader.setUniform(bonesUniform, stackBuf, byteCount);
-                        uploaded = true;
-                    }
-                }
-                if (!uploaded) {
-                    static uint32_t s_missingBoneBindingLog = 0;
-                    if (s_missingBoneBindingLog < 3) {
-                        std::fprintf(stderr,
-                                     "[ForwardOpaquePass] skinned draw skipped bone upload "
-                                     "(Skeleton UBO / bones[] binding missing)\n");
-                        ++s_missingBoneBindingLog;
-                    }
-                }
-            } else {
-                std::vector<float> heapBuf(item.jointCount * 16);
-                for (uint32_t k = 0; k < item.jointCount; ++k) {
-                    std::memcpy(&heapBuf[k * 16],
-                                item.boneMatrices[k].ptr(),
-                                sizeof(float) * 16);
-                }
-                if (material.boneBlockBinding != shader::InvalidBinding) {
-                    material.shader.setUniformBlock(material.boneBlockBinding,
-                                                    heapBuf.data(), byteCount);
-                } else {
-                    const shader::BindingId bonesUniform =
-                        material.shader.getUniformBinding("bones");
-                    if (bonesUniform != shader::InvalidBinding) {
-                        material.shader.setUniform(bonesUniform, heapBuf.data(), byteCount);
-                    }
-                }
-            }
+        // PR-F3 (2026-07-21) — bone-palette upload lifted to the
+        // shared helper. The helper is byte-for-byte identical to
+        // the prior inline block; the Skeleton UBO binding comes
+        // from the cached `material.boneBlockBinding` (lazy-
+        // resolved in flushMaterial). The SkinnedLit's
+        // `castSkinned` binding is Invalid here (no such property
+        // in skinned_lit.phoskia) so the helper silently skips the
+        // uniform write.
+        if (material.shader.isValid()) {
+            tryUploadBonePalette(material.shader,
+                                 material.boneBlockBinding,
+                                 /*castSkinnedBinding=*/shader::InvalidBinding,
+                                 /*castSkinnedValue=*/0u,
+                                 item);
         }
 
         shader::DrawCallContext ctx;

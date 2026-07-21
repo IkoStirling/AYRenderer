@@ -9,6 +9,9 @@
 #include "AYShaderResource.h"  // ShaderResource::getUniformBinding / hasUniformBinding / setUniform
 
 #include <bgfx/bgfx.h>
+#include <cstdio>
+#include <cstring>
+#include <vector>
 
 namespace ayt::render::detail
 {
@@ -79,6 +82,87 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
         return;
     }
     shader.setTexture(0, shadowBinding, toShaderTexture(shadowTex));
+}
+
+// PR-F3 (2026-07-21) — see RenderPass.h. Body lifted from
+// ForwardOpaquePass's execute() inner block; ShadowPass's caster
+// loop now calls the same helper so both sites upload identical
+// bytes and the threshold / fallback behavior cannot drift.
+//
+// `castSkinnedValue` is the uniform toggle the depth caster reads
+// via Phoskia `property castSkinned`. Passing 0 from FO paths is
+// allowed (FO programs don't have that uniform — the helper early-
+// outs when `castSkinnedBinding == InvalidBinding`).
+//
+// Stack-path for ≤ 16 joints (covers all current AYEngine skinned
+// assets; Skeleton UBO can hold up to 128 but the per-frame upload
+// cost is dominated by memcpy, not allocation). Heap-path for
+// larger counts preserves the pre-F3 behavior: std::vector<float>
+// scratch space, header-only allocator.
+void tryUploadBonePalette(shader::ShaderResource& shader,
+                          shader::BindingId skeletonBinding,
+                          shader::BindingId castSkinnedBinding,
+                          uint8_t castSkinnedValue,
+                          const DrawItem& item)
+{
+    const bool hasBones = item.boneMatrices != nullptr && item.jointCount > 0;
+
+    // Set the castSkinned uniform ONLY when (a) it's a binding on
+    // this program and (b) we have bones. Pre-F3 SkinnedLit
+    // materials skip this branch (their castSkinned binding is
+    // Invalid — there's no such property in their .phoskia).
+    if (hasBones
+        && castSkinnedBinding != shader::InvalidBinding) {
+        shader.setUniform(castSkinnedBinding,
+                          &castSkinnedValue, sizeof(castSkinnedValue));
+    }
+
+    if (!hasBones) {
+        return;
+    }
+
+    const size_t byteCount = static_cast<size_t>(item.jointCount) * 64;
+    if (byteCount <= 1024) {
+        float stackBuf[1024 / sizeof(float)];
+        for (uint32_t k = 0; k < item.jointCount; ++k) {
+            std::memcpy(&stackBuf[k * 16],
+                        item.boneMatrices[k].ptr(),
+                        sizeof(float) * 16);
+        }
+        if (skeletonBinding != shader::InvalidBinding) {
+            shader.setUniformBlock(skeletonBinding, stackBuf, byteCount);
+        } else {
+            const shader::BindingId bonesUniform =
+                shader.getUniformBinding("bones");
+            if (bonesUniform != shader::InvalidBinding) {
+                shader.setUniform(bonesUniform, stackBuf, byteCount);
+            } else {
+                static uint32_t s_missingBoneBindingLog = 0;
+                if (s_missingBoneBindingLog < 3) {
+                    std::fprintf(stderr,
+                                 "[RenderPass] skinned draw skipped bone upload "
+                                 "(Skeleton UBO / bones[] binding missing)\n");
+                    ++s_missingBoneBindingLog;
+                }
+            }
+        }
+    } else {
+        std::vector<float> heapBuf(static_cast<size_t>(item.jointCount) * 16);
+        for (uint32_t k = 0; k < item.jointCount; ++k) {
+            std::memcpy(&heapBuf[k * 16],
+                        item.boneMatrices[k].ptr(),
+                        sizeof(float) * 16);
+        }
+        if (skeletonBinding != shader::InvalidBinding) {
+            shader.setUniformBlock(skeletonBinding, heapBuf.data(), byteCount);
+        } else {
+            const shader::BindingId bonesUniform =
+                shader.getUniformBinding("bones");
+            if (bonesUniform != shader::InvalidBinding) {
+                shader.setUniform(bonesUniform, heapBuf.data(), byteCount);
+            }
+        }
+    }
 }
 
 } // namespace ayt::render::detail

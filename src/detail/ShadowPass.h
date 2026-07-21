@@ -70,6 +70,7 @@ public:
 
 private:
     void ensureShadowFbo(BGFXAdapter& adapter, uint16_t size);
+    void ensureCasterProgram(ayt::shader::ShaderResourcePool& pool);
 
     bgfx::FrameBufferHandle    _shadowFbo        = BGFX_INVALID_HANDLE;
     uint16_t                   _shadowSize       = 0;
@@ -78,6 +79,18 @@ private:
     ayt::math::Float4x4        _lightView        = ayt::math::Float4x4::identity();
     ayt::math::Float4x4        _lightProj        = ayt::math::Float4x4::identity();
     ayt::math::Float4x4        _lightViewProj    = ayt::math::Float4x4::identity();
+
+    // PR-F3 (2026-07-21) — depth-only caster program with conditional
+    // `castSkinned` segment so skinned + static geometry can share
+    // one VS shader. Acquired lazily from the ShaderResourcePool
+    // (mirrors PostProcessPass::ensureProgram); when pool has no
+    // shaderc / compile fails, the pass falls back to the BGFXAdapter
+    // INVALID-program submit path (records a draw but writes
+    // nothing — same fallback shape as PostProcessPass does when its
+    // post-process material fails to compile).
+    ayt::shader::ShaderResource _caster;
+    ayt::shader::BindingId      _casterSkeletonBinding = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _casterCastSkinned     = ayt::shader::InvalidBinding;
 };
 
 } // namespace ayt::render::detail

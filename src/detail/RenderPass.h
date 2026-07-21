@@ -83,6 +83,42 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
                           BGFXAdapter& adapter,
                           const ShadowPass* shadowPass);
 
+// PR-F3 (2026-07-21) — bone-palette upload shared by
+// ForwardOpaquePass's draw loop AND ShadowPass's caster draw loop.
+//
+// Lifted from ForwardOpaquePass::execute's inline block (now byte-
+// for-byte identical to that block's CPU behavior — only call site
+// moved). The pass-shader may be the SkinnedLit (forward) or the
+// depth-only Caster — both link a `Skeleton` UBO so the same bytes
+// work.
+//
+// `castSkinned` arg is the uniform toggle for programs that
+// distinguish static / skinned VS segments (the depth caster does
+// via `property castSkinned`). ForwardOpaquePass passes the value
+// it inherits from the GpuMaterial's lazily-resolved uniform (kept
+// = 0 there — SkinnedLit's VS is unconditional); ShadowPass passes
+// `item.boneMatrices != nullptr ? 1 : 0` so the caster program
+// selects the right VS segment.
+//
+// `skeletonBinding` may be `shader::InvalidBinding` for non-
+// skeletal programs — the helper no-ops cleanly (matching the
+// pre-F3 "missing binding → log 3x, skip upload" behavior). When
+// `castSkinned` arg selects is also nullified when
+// `castSkinned == 0` to avoid a redundant uniform write.
+//
+// Stack-path for ≤ 16 joints (the common case — model files
+// today cap joint counts well below the Skeleton UBO's 128-
+// element range). Heap-path for larger counts preserves the pre-
+// F3 allocation pattern.
+//
+// Pure: no other state touched beyond `shader.setUniformBlock` /
+// `shader.setUniform`.
+void tryUploadBonePalette(shader::ShaderResource& shader,
+                          shader::BindingId skeletonBinding,
+                          shader::BindingId castSkinnedBinding,
+                          uint8_t castSkinnedValue,
+                          const DrawItem& item);
+
 // U0 (Phase 2 Pass scaffold) — abstract base for one rendering pass.
 // One subclass = one logical draw on one bgfx view. The pipeline
 // (implemented in U1+ at detail/RenderPipeline.{h,cpp}) calls
