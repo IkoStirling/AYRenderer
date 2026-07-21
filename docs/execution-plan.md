@@ -341,6 +341,7 @@ Light struct + FrameContext shadow 槽（`shadowFbo` / `lightViewProj` 等）+ �
 | PR-E | experiment: FrameContext POD tail **或** default-pipe Shadow+disabled（一次一个） | §5.4 E1 / E4 |
 | PR-F | ~~C' Light+ShadowMap+enabled~~ **阻断** → **PR-F1'** light-space on ShadowPass only（§5.5） | P3 / §5.5 |
 | PR-F2 | ~~feat: forward shadow sampling via pass getters（无 FrameContext 槽）~~ ✅ **shipped** 2026-07-21 commit `8a646ae` 3/3 stable 485/485 | P4 |
+| **PR-F3** | **feat: skinned shadow_caster VS segment（inline Phoskia + `tryUploadBonePalette` helper + `shadow_caster.phoskia` demo 副本）** ✅ **shipped** 2026-07-21 commit `ea5019d` 3/3 stable 502/502 | **§5.5 / P4** |
 | PR-H | feat: GBuffer + Lighting path switch | P5 |
 
 ---
@@ -404,6 +405,7 @@ git checkout -b fix/renderer-p0-docs-alpha
 | E4 默认挂 Shadow disabled | | | | **默认 OFF**;开 `AY_F1_DIAG_DEFAULT_SHADOW=ON` 时启用,需 §5.4 干净树重跑 ≥3 次 |
 | E5 Shadow enabled 无 Frame 槽 | | | | 未跑(在 `AY_F1_DIAG_LIGHT=OFF + AY_F1_DIAG_FRAME_SHADOW=OFF` 下应是基线,需独立验证) |
 | E6 旁路 getter 采样 | 2026-07-21 | **3/3 PASS** (485/485) | PR-F2 已直接 ship §5.4 E6 路径(旁路 getter 走 `PassExecContext::shadowPass` 而非 `FrameContext`)|
+| **PR-F3** skinned shadow_caster VS 段 | 2026-07-21 | **3/3 PASS** (502/502) | `ShadowPass::_caster` (`ShaderResource`) lazy-acquire via `ShaderResourcePool::acquire` of inline `kShadowCasterPhoskiaSource`(与 `PostProcessPass` 镜像);Phoskia `shadow_caster.phoskia` 双段 VS(`property castSkinned=0` ⇒ static `mvp*vec4(pos,1)`;`=1` ⇒ `skinningMatrix(boneId,boneWt,Skeleton.bones, vec4(pos,1))`),fragment 仅占位 `return vec4(0,...)`(depth-only FBO 丢弃 color output);`demo/assets/shadow_caster.phoskia` 同内容的 demo 副本;新提 `RenderPass::tryUploadBonePalette(shader, skeletonBinding, castSkinnedBinding, castSkinnedValue, item)` free fn(byte-for-byte 同 F2 内联块),FO skinned draw path 与 ShadowPass caster loop 共享;PassExecContext 维持 12 字段不变(master "caster 状态在 ShadowPass 私有"铁律);`ShadowPass::execute` 在 `bgfx::isInitialized() && !isNoopBackend()` 后才调 `ensureCasterProgram(pool)`,Noop 路径 bypass,不动 F2 baseline;`ShadowPass::destroyResources` 顺手 `caster.reset()` + invalidate 两 binding;17 新 plumbing 测试(`unittest/Test_F3_SkinnedCaster.cpp`)锁:caster state 默认 Invalid、helper no-op 全 4 路径(nullptr/jointCount=0/missing-skeleton+missing-bones fallback/castSkinned 空 binding)、全 5-pass 管线 Noop 调用不回归、PassExecContext brace-init 形态不变;485 → 502,**F1'、F2、ShadowPass、ForwardOpaque、TransparentPass、PostProcessPass、UIPass 所有旧 plumbing 测试全不回归**;**与 F2 正交**——F3 解决 "shadow 形状对",F2 解决 "主 pass 采到",同窗口不同 PR;**下一刀**: §P4.2 bias 精修 / §5.4 E4 默认挂 shadow + disabled / §P5 Deferred GBuffer + Lighting |
 
 ## 附录 B — 关键默认管线索引
 
