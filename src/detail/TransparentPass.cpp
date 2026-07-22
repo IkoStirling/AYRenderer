@@ -38,6 +38,19 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     const uint16_t viewportHeight = ctx.viewportHeight;
     const RenderScene& scene = ctx.scene;
 
+    // §5.4 (2026-07-22) — `isInitialized()` guard fixes the
+    // pre-existing landmine where Transparent went straight into
+    // `adapter.setViewTransform(viewId, frame.view, frame.projection)`
+    // on an uninitialized adapter. Same rationale as
+    // ForwardOpaquePass.cpp:147 — see that comment for the full
+    // "no isNoopBackend() check" justification (Noop backend's
+    // adapter-internal short-circuits are safe; the test sandbox
+    // relies on the scene-items loop running to count logical
+    // draw submissions).
+    if (!adapter.isInitialized()) {
+        return 0;
+    }
+
     adapter.setViewTransform(viewId, frame.view, frame.projection);
 
     // P6.5 (2026-07-22) — preset state combination replaces the

@@ -145,6 +145,30 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     const uint16_t viewportHeight = ctx.viewportHeight;
     const RenderScene& scene = ctx.scene;
 
+    // §5.4 (2026-07-22) — `isInitialized()` guard fixes the
+    // pre-existing landmine where FO went straight into
+    // `adapter.setViewTransform(viewId, frame.view, frame.projection)`
+    // on an uninitialized adapter — bgfx::setViewTransform is a raw
+    // C-API surface that dereferences internal bgfx state, UB on
+    // uninit on most backends. Mirror ShadowPass.cpp:24-26,
+    // GBufferPass.cpp:127, LightingPass.cpp:24.
+    //
+    // NOTE: We deliberately do NOT add an `isNoopBackend()` check
+    // here. The Noop backend already short-circuits internally in
+    // `BGFXAdapter::setViewTransform` (and other draw commands) —
+    // it's safe to reach the scene-items loop on Noop, the loop's
+    // `++drawCount` is the correct behavior tested by 7+ existing
+    // cases (`debug_overlay_reports_draw_count`, `forward_opaque_draw_one_frame`,
+    // `opaque_alpha_split_counts`, etc.) which count "logical draw
+    // submissions" regardless of GPU outcome. Those tests were
+    // implicitly relying on Noop NOT short-circuiting at the Pass
+    // level. Adding the gate would silently break them. The
+    // `isInitialized()` check alone fixes the actual UB without
+    // disturbing the test semantics.
+    if (!adapter.isInitialized()) {
+        return 0;
+    }
+
     adapter.setViewTransform(viewId, frame.view, frame.projection);
 
     // P2 (PR-D, 2026-07-20) — bind the shared scene FBO so this pass's
