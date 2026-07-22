@@ -321,7 +321,7 @@ Light struct + FrameContext shadow 槽（`shadowFbo` / `lightViewProj` 等）+ �
 | B1 | `enum class RenderPath { Forward, Deferred }` + `RenderPipelineDesc::path = Forward` 默认 + RenderPipeline 仍 Forward 路径 | 2–3 (`AYRenderTypes.h` / `RenderPipeline.{h,cpp}` / test) | 加 enum + 字段默认值；Pipeline 仍 Forward | 3 跑稳；默认零变更 |
 | B2 | `GBufferPass` 空壳 / Noop 0-draw + `PassExecContext::gbufferPass = const GBufferPass*` 借用指针（**镜像 `shadowPass`**） | 5–7 (`detail/GBufferPass.{h,cpp}` / `PassExecContext.h` / `AYRenderer.cpp` / `RenderPipeline.{h,cpp}` / 2 tests) | PassExecContext 加 1 借用指针；FrameContext **0 改**；RenderScene **0 改**；Impl ctor 加 pass 不挂 | 3 跑稳；sizeof(FrameContext) 不变 |
 | B3 | `LightingPass` 空壳 + Forward/Deferred path 显式切换（`Pipeline::executeAll` 看 `desc.path`） | 4–6 (`detail/LightingPass.{h,cpp}` / `RenderPipeline.*` / `AYRenderer.cpp` / tests) | host `configurePipeline(makeDeferred())` 切路径 | 3 跑稳；默认 Forward 无视觉差 |
-| B4 | GBuffer 真 MRT（NOOP 0-draw,真 GPU 真画）── RT0 albedo / RT1 normal / RT2 motion / RT3 depth；BGFXAdapter::createFrameBuffer 复用 | 6–8 (`GBufferResources.{h,cpp}` + `GBufferPass.cpp` 拆分 `B4a attachments` + Phoskia `B4b receiver` + `B4c Phoskia↔.sc 对齐` + tests + docs delta) | 4 attachment + depth + ensure/destroy/resize 模式 | 真 GPU Editor 截图：GBuffer 可视化（debug overlay） |
+| B4 | GBuffer 真 MRT（NOOP 0-draw,真 GPU 真画）── RT0 albedo / RT1 normal / RT2 motion / RT3 depth(D24S8)；**BGFXAdapter 新加 `createGbufferFrameBuffer` API**(现网 `createFrameBuffer` 仅单 color / color+depth,**不能**做 5-attach MRT) | 7–9 (`BGFXAdapter.{h,cpp}` 新 API + `GBufferResources.{h,cpp}` + `GBufferPass.cpp` 拆分 `B4a attachments` + Phoskia `B4b receiver` + `B4c Phoskia↔.sc 对齐` + tests + docs delta) | 5 attachment (RT0–2 RGBA8 + RT3 D24S8) + ensure/destroy/resize 模式 | 真 GPU Editor 截图：GBuffer 可视化（debug overlay） |
 | B5 | LightingPass 真光（NOOP 仍 0-draw）── 1 盏方向光（复用 `FrameContext::lightDirection`） + 全屏三角形（复用 PostProcessPass::vertexLayoutPosUv） | 6–8 (`LightingPass.cpp` 拆分 `B5a tri plumbing` + `B5b sample` + `B5c shadow reuse` + tests + docs) | 共享 Shadow 借用句柄；不进 FrameContext | 真 GPU Editor 截图：1 盏方向光 parity vs Forward |
 | B6 | `RenderPipelineDesc::makeDeferred()` factory + 默认 Forward 不变 + PostProcess source-FBO 选择优先级 (Deferred 走 `ctx.gbufferPass->lightingOutputFbo()`) | 3–5 (`AYRenderTypes.h` / `RenderPipeline.*` / `PostProcessPass.cpp` / docs) | 默认 Forward 零回归；Deferred opt-in 路径稳定 | 3 跑稳；附录 A 加 B0–B6 行 |
 
@@ -352,10 +352,28 @@ Light struct + FrameContext shadow 槽（`shadowFbo` / `lightViewProj` 等）+ �
 - `FrameContext::lightDirection` / `lightColor`（B5 1 盏方向光来源）
 - `RenderPipeline::executeAll` isEnabled 闸（默认 disabled 的新 pass plumbing）
 - `ShadowMapResources` 私有 FBO 模式 ── `GBufferResources` 镜像
-- `ShadowDepthCodec` ndc01 / pack / compare ── 深度编码沿用 R8 复刻（lessons §3.6 + shadow-pass.md L113）
+- `ShadowDepthCodec` ndc01 / pack / compare ── **仅供 ShadowPass**。GBuffer depth 走 §5.2 `RT3 D24S8` 硬件 depth；**不**复刻 Shadow R8 workaround（lessons §3.6 + shadow-pass.md L113 是 **ShadowMap 专用**）。
 - `Test_PublicHeaderSurface` / `Test_F1_LayoutDiag` ── ABI 守门
 
-**当前 pipeline 真值（ship 后再 update）**：默认 Forward 5-pass = Shadow(enabled E5) → FO → Trans → PP → UI；Deferred = Shadow → GBuffer → Lighting → PP → UI（B6 opt-in）。
+**当前 pipeline 真值 + View id 锁（2026-07-22 E5 后 baseline，**B1/B3 必读**）**：
+
+| Pass | Forward view id | Deferred view id | 出处 |
+|------|-----------------|------------------|------|
+| clear（`beginCompositeFrame`）| 0 | 0 | `AYRenderer.cpp:380,384` |
+| Shadow caster | 1 | 1 | `ShadowPass.h:33` |
+| Shadow resolve blit | 2 | 2 | `ShadowPass.h:34` |
+| ForwardOpaque | 3 | (skip) | `AYRenderer.cpp:380,384` |
+| Transparent | 4 | 4 | `TransparentPass.h:37` |
+| PostProcess blit-to-backbuffer | 5 | 5 | `PostProcessPass.h:68` |
+| UI chrome | 6 | 6 | `AYUIRenderBackend.h:40` |
+| **GBuffer** (B4 new) | (n/a) | **7** | B4 ship 时锁 |
+| **Lighting** (B5 new) | (n/a) | **8** | B5 ship 时锁 |
+
+**铁律**：
+- 0–6 全部被 Forward path 钉死 ── Deferred 必须用 **新** view id 7/8 ── **不复用 1/2/3/4/5/6 任何槽**（撞 Shadow = 全黑）。
+- Pipeline 在 Deferred path **不挂 `RenderPassSlot::ForwardOpaque`** ── view 3 被 Renderer 拥有但 0 draw。
+- LightingPass 写 LightingOutput FBO 给 PP sample；**LightingPass vs Transparent 谁先跑 B5 决策**（候选 A: Lighting→Trans→PP / 候选 B: Trans→Lighting→PP ── B5 ship 前必选）。
+- GBuffer depth = D24S8 硬件 depth，**不**复刻 Shadow R8 workaround。
 
 ---
 

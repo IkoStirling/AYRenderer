@@ -67,23 +67,61 @@ PostProcess = 在 Deferred path 改采 ctx.gbufferPass->lightingOutputFbo()
 
 ## 4. View 分配
 
-跟 Shadow 现有 kShadowViewId = 1 / kShadowResolveViewId = 2 同模板（`ShadowPass.h:33-34`），Deferred path 增加两个 view id 常量：
+### 4.1 真实现网（2026-07-22 E5 ship 后 baseline，必对）
+
+代码锁定的 view 分配 ── 在建新 view 前必须先把现网钉住，否则 B1/B3 直接撞：
+
+| view id | 用途 | 出处 |
+|---------|------|------|
+| **0** | full-window clear | `Renderer::Impl::compositeSceneViewId` 重置；`beginCompositeFrame` 全窗 clear |
+| **1** | Shadow caster（光照 depth FBO 写入）| `ShadowPass::kShadowViewId = 1`（`ShadowPass.h:33`）|
+| **2** | Shadow resolve blit（color RT → sampleable tex）| `ShadowPass::kShadowResolveViewId = 2`（`ShadowPass.h:34`）|
+| **3** | ForwardOpaque（FO 用 `ctx.viewId`，Renderer 推 3）| `AYRenderer.cpp:380,384` |
+| **4** | Transparent（独立 view，原与 FO 共享 → 拆）| `TransparentPass::kTransparentViewId = 4`（`TransparentPass.h:37`）|
+| **5** | PostProcess blit-to-backbuffer（独立 view，绝不可与 FO/Trans 共享）| `PostProcessPass::kBlitViewId = 5`（`PostProcessPass.h:68`）|
+| **6** | UI chrome | `UIRenderBackend::kViewId = 6`（`AYUIRenderBackend.h:40`）|
+
+**关键约束**：
+- **view 2 已被 Shadow resolve blit 占用** ── B0 初稿曾错写 `kGBufferViewId=2`，**直接撞 Shadow** ── 现已删除。
+- **view 1/2/3/4/5/6 全部被 Forward path 钉死** ── Deferred 必须 **新加 view id**，不能复用。
+- PostProcess **绝不**占 view 2/3/4（避免破坏 FO 的 depth test + scene FBO blit 路径）。
+- UIPass 始终在 view 6（`UIRenderBackend` 内部硬绑） ── Deferred 也复用 view 6。
+
+### 4.2 Deferred path view 分配（**B3 切换时钉死**）
+
+每个新 Pass 必须有独立 viewId。**view id 不能复用 Forward 任何槽位**：
 
 ```
-GBufferPass::kGBufferViewId    = 2 (composite 时,shadow 仍 1)
-LightingPass::kLightingViewId  = 3
+GBufferPass::kGBufferViewId    = 7   (B4 引入 — 避开现网 1/2/3/4/5/6 全占用)
+LightingPass::kLightingViewId = 8   (B5 引入 — 避开现网)
+ForwardOpaque / Transparent / PostProcess / UIPass / ShadowPass
+   view id 在 Deferred path 仍复用 (§ 4.1 Forward 真值)
+   ⇒ Forward 与 Deferred 共享 0–6；只新增 7/8
 ```
 
-| Path | view 0 | view 1 | view 2 | view 3 | view 4 | view 5 |
-|------|--------|--------|--------|--------|--------|--------|
-| Forward（默认） | full clear | 3D scene (FO/Trans) | composite UI | (Shadow caster) | (shadow resolve) | (PostProcess) |
-| **Deferred（opt-in）** | full clear | Shadow caster | **GBuffer MRT** | **Lighting** | composite UI | (PostProcess) |
+| Path | view 0 | view 1 | view 2 | view 3 | view 4 | view 5 | view 6 | view 7 (新 B4) | view 8 (新 B5) |
+|------|--------|--------|--------|--------|--------|--------|--------|----------------|----------------|
+| **Forward（默认,现网）** | full clear | Shadow caster | Shadow resolve | FO | Transparent | PP blit | UI chrome | ── | ── |
+| **Deferred（opt-in B3+）** | full clear | Shadow caster | Shadow resolve | (FO skip) | Transparent | PP blit | UI chrome | **GBuffer MRT** | **Lighting** |
 
-**约束**：UI 始终在 view 4，PostProcess 必须在 view 5 之后 → PP source-FBO 选择 (B6)：
-- Forward path：`ctx.sceneFbo` (已 ship, P2 closure)
-- Deferred path：`ctx.gbufferPass->lightingOutputFbo()` (B6 改 PP source 优先级,**不**复盖 forward 路径)
+### 4.3 PostProcess source-FBO 选择优先级（B6 锁定）
 
-PP 错用 view 2 / view 3 / view 4 必撞 §5.1。
+PP 永远跑在 view 5 ── 但 source-FBO **两 path 不同**：
+
+- **Forward path**：`ctx.sceneFbo`（Renderer 拥有的 FO+Trans 写过的 color+depth FBO，**已 ship**）─ 优先级 1；fallback 到 PP 自有 FBO（Noop test path）。
+- **Deferred path**：`ctx.gbufferPass->lightingOutputFbo()`（GBufferPass 私有 LightingPass 输出 FBO，**B4 引入**）─ 优先级 1；fallback 到 `ctx.sceneFbo`（safe default，但视觉上 Alpha 会缺光）。
+
+**约束**：
+- B6 必须改 `PostProcessPass::execute` 的 source-FBO 选择优先级 ── 不能改 `PostProcessPass::kBlitViewId = 5`。
+- PP 错用 view 7/8 → 抢 GBuffer/Lighting 槽 ⇒ 全黑或全亮 ⇒ 必崩。
+- Deferred path 下 FO 完全 skip（Pipeline 显式不挂 `RenderPassSlot::ForwardOpaque`）；View 3 仍被 Renderer 拥有，但 **无 draw**。
+
+### 4.4 公开 API 限定（host 视角）
+
+- `RenderPath pipelineDesc().path` ── host 编程枚举。
+- `RenderPipelineDesc::makeDeferred()` factory 隐式设定 path=Deferred + 包含 GBuffer/Lighting slot。
+- **绝不**暴露 `set*ViewId` setter ── viewId 是 pass 内部 constexpr，不让 host 乱碰。
+- **绝不**改 `UIRenderBackend::kViewId = 6` ── 后端硬绑。
 
 ---
 

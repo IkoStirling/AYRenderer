@@ -29,12 +29,18 @@
 | 维度 | Shadow | Deferred 预测 |
 |---|---|---|
 | 文件数 | 7 | 8–10（多 GBuffer receiver contract + Lighting receiver contract + Lighting shader 源）|
-| ViewId | 2（caster + resolve） | 4（caster + GBuffer MRT + Lighting + shadow caster 复用）|
-| MRT / blit | 单 depth FBO | 4-slot MRT（GBuffer）+ 单独输出（Lighting）|
+| **ViewId** | 2（caster + resolve） | **4**（caster + GBuffer MRT = view 7 + Lighting = view 8 + shadow caster 复用 view 1）|
+| **MRT / blit** | **单 depth FBO** | **4-slot MRT（GBuffer 5 attachment：RT0–2 RGBA8 + RT3 D24S8）+ 单独输出（Lighting）**|
 | 多光源 / struct | 无（1 盏走 FrameContext） | **1 盏 → 1 盏 DataSource → 多盏 DataSource ── 多刀** |
 | Phoskia multi-output | 无（单 frag out） | **必须** support multi-frag-out 或先 hand `.sc` |
 | §5.3 红线面 | 4 | 全 4，重合 |
 | 大 bang 风险 | **极高** ── PR-F1 SIGSEGV 历史 | **极高** ── 镜像翻车点 |
+
+> ⚠ View id 现状（2026-07-22 E5 ship baseline）：**0–6 全部占用** ── 0=clear / 1=ShadowC / 2=ShadowR / 3=FO / 4=Trans / 5=PP / 6=UI。Deferred 必须新加 **view 7 / view 8** ── **不复用 1–6 任何**。
+
+> ⚠ GBuffer depth 走 **硬件 D24S8**（standard bgfx 模式），**不复刻 Shadow R8 workaround**（ShadowMapResources 专用，详见 lessons §3.6）。
+
+> ⚠ 现网 `BGFXAdapter::createFrameBuffer` 只能 1× color 或 1× color + 1× depth。B4 **必须**新加 `createGbufferFrameBuffer` API 给 5-attach MRT 用。
 
 → Deferred 落地预算 = **比 Shadow 多 1.5× 文件 + 2× 视图 + 一次 multi-output 编译调试**，每刀 ≤ 8 文件硬约束 + §5.4 隔离实验规矩。
 
@@ -68,7 +74,7 @@ Consumers: Transparent (alpha only) → PostProcess (scene-fbo fallback chain)
 1. **单一矩阵源** ── LightingPass 复用 `FrameContext::lightDirection`（1 盏）；多光走 `ctx.lights` 借用指针（B7+），**不**进 FrameContext 绝不进 RenderScene。
 2. **GBuffer 私有 / Lighting 只读 + host 共享 PostProcess** ── Mirror `shadowSampleTexture()` getter 模式：`gbufferPass()->albedoTexture() / normalTexture() / motionTexture() / depthTexture() / lightingOutputFbo()`。
 3. **显式 path 选择** ── `RenderPath` enum + `RenderPipelineDesc::makeDeferred()` opt-in；默认 Forward 不变（§5.3 #4）。
-4. **深度语义同 Shadow** ── R8 复刻 + `step(0.999, o)` + clear=`0xffffffff`（lessons §3.6 一致）。
+4. **深度语义**：GBuffer RT3 = 硬件 D24S8，**不复刻 Shadow R8 workaround**（ShadowMapResources 专用，详 lessons §3.6 + shadow-pass.md L113）。LightingPass fragment 不用 pack/unpack，直接 sample D24S8 linearize helper（或与 viewProj 反推 depth 比对 — Phoskia converter 自带）。
 5. **诊断 L0–L4** ── `AY_DEFERRED_LOG=0..4`；stamp 写入 stderr（`build=…`）。
 
 ## 三、分阶段计划
