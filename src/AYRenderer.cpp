@@ -66,6 +66,22 @@ RenderPipelineDesc RenderPipelineDesc::makeForwardWithShadows()
     return makeDefault();
 }
 
+RenderPipelineDesc RenderPipelineDesc::makeDeferred()
+{
+    // §P5 B1 (2026-07-22) — plumbing stub. The actual Deferred
+    // dispatch (GBuffer + Lighting slots + view 7/8 allocation +
+    // ForwardOpaque skip) lands in B3. Today this factory returns
+    // the same 5-slot Forward pipeline with `path=Deferred` tagged,
+    // so the public surface compiles + hosts can opt in via
+    // `configurePipeline(makeDeferred())` without behavioral drift
+    // between B1 and B3. Pre-wires `RenderPipelineDesc::path` so
+    // Test_B1_RenderPath can pin the enum plumbing today without
+    // B3's PR being a big-bang.
+    RenderPipelineDesc desc = makeDefault();
+    desc.path = RenderPath::Deferred;
+    return desc;
+}
+
 bool RenderPipelineDesc::contains(RenderPassSlot slot) const noexcept
 {
     for (const RenderPassSlot s : passes) {
@@ -103,8 +119,11 @@ struct Renderer::Impl {
     // Product default = RenderPipelineDesc::makeDefault()
     // (Shadow → FO → Transparent → PostProcess → UI), Shadow enabled
     // by default (E5 §5.4, 2026-07-22). Hosts that want to opt out
-    // pass a custom desc that omits the Shadow slot. GBuffer /
-    // Lighting slots are not implemented yet.
+    // pass a custom desc that omits the Shadow slot.
+    //
+    // §P5 B1 (2026-07-22) — `path` field plumbing only: Forward
+    // default, Deferred opt-in via `makeDeferred()`. Actual
+    // Deferred dispatch lands in B3.
     detail::RenderPipeline        pipeline;
     RenderPipelineDesc            pipelineDesc = RenderPipelineDesc::makeDefault();
 

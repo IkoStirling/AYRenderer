@@ -176,13 +176,38 @@ enum class RenderPassSlot : uint8_t {
     UI,
 };
 
+// §P5 B1 (2026-07-22) — pipeline path selection. Plumbing only at
+// this PR: RenderPipelineDesc carries a `path` field (default
+// Forward); `RenderPipelineDesc::makeDeferred()` factory exists as a
+// stub and produces the same 5-slot Forward pass list — the actual
+// Forward/Deferred branch lands in B3 (GBuffer + Lighting slots
+// swap, view-id allocation per docs/pass-lessons-from-deferred.md
+// §5.1). Deferred path remains opt-in via `configurePipeline(
+// makeDeferred())`; default Forward behavior is unchanged.
+enum class RenderPath : uint8_t {
+    Forward  = 0,
+    Deferred = 1,
+};
+
 struct RenderPipelineDesc {
     std::vector<RenderPassSlot> passes;
+    // §P5 B1 (2026-07-22) — pipeline path. Default Forward keeps the
+    // current 5-slot behavior intact; Deferred becomes meaningful
+    // from B3 onwards (GBuffer + Lighting slots, view 7/8).
+    RenderPath path = RenderPath::Forward;
 
     static RenderPipelineDesc makeDefault();
     static RenderPipelineDesc makeForwardWithShadows();
+    // §P5 B1 stub — same 5-slot Forward pipeline but tagged
+    // `path=Deferred`. Actual Deferred behavior lands in B3; until
+    // then, a host that calls `configurePipeline(makeDeferred())`
+    // sees no behavioral difference (intentional — the B1 commit
+    // pre-wires the plumbing without touching dispatch order or
+    // GPU resources).
+    static RenderPipelineDesc makeDeferred();
 
     bool contains(RenderPassSlot slot) const noexcept;
+    bool isDeferred() const noexcept { return path == RenderPath::Deferred; }
 };
 
 } // namespace ayt::render
