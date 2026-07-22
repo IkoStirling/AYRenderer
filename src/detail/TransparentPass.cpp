@@ -1,6 +1,7 @@
 #include "detail/TransparentPass.h"
 #include "detail/GpuResources.h"
 #include "detail/ShadowPass.h"
+#include "detail/LightingPass.h"
 
 #include "AYShaderResource.h"  // for ShaderResource::setUniform
 
@@ -29,8 +30,18 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 {
     BGFXAdapter& adapter = ctx.adapter;
     const FrameContext& frame = ctx.frame;
-    const uint8_t viewId = ctx.viewId;
+    // Forward: share composite scene view with FO (ctx.viewId == 3).
+    // Deferred: Lighting is view 8; Transparent must be AFTER it or
+    // Lighting's clear wipes glass. Use view 9 when compositing onto
+    // lightingOutputFbo (cutsheet candidate A + bgfx view-order).
+    constexpr uint8_t kDeferredTransparentViewId = 9;
+    const bool deferredLitComposite = (ctx.lightingPass != nullptr) &&
+        bgfx::isValid(ctx.lightingPass->lightingOutputFbo());
+    const uint8_t viewId = deferredLitComposite
+                               ? kDeferredTransparentViewId
+                               : ctx.viewId;
     const auto& meshes    = ctx.meshes;
+    const auto& textures  = ctx.textures;
     auto& materials       = ctx.materials;
     const uint16_t viewportX      = ctx.viewportX;
     const uint16_t viewportY      = ctx.viewportY;
@@ -53,23 +64,24 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 
     adapter.setViewTransform(viewId, frame.view, frame.projection);
 
-    // P6.5 (2026-07-22) — preset state combination replaces the
-    // pre-P6.5 inline `BGFX_STATE_WRITE_RGB | WRITE_A | BLEND_ALPHA |
-    // DEPTH_TEST_LESS | CULL_CW`. Bit combination identical; called
-    // once per execute() because every draw in the loop below uses
-    // the same state (draw-state-0 in DrawCallContext signals
-    // "use the Adapter-set state").
-    adapter.setStateAlphaBlend();
-
-    // P2 (PR-D, 2026-07-20) — bind the shared scene FBO so transparent
-    // composite over the offscreen scene color (matches
-    // ForwardOpaquePass so the depth they wrote lines up with what
-    // PostProcessPass samples). BGFX_INVALID_HANDLE ⇒ backbuffer
-    // fallback (no-op on the headless test path / SceneRT-off hosts).
-    // View rect origin is (0,0) against the panel-sized scene FBO;
-    // panel offset is for backbuffer compositing only (see FO).
-    adapter.setViewFrameBuffer(viewId, ctx.sceneFbo);
-    if (BGFXAdapter::isValid(ctx.sceneFbo)) {
+    // P6.5 — alpha blend. On Forward (sceneFbo has depth from FO)
+    // keep DEPTH_TEST_LESS. On Deferred, LightingOutput is color-only
+    // (no depth attachment) — LESS would discard all glass; use
+    // ALWAYS so Alpha composites over lit opaques until B5.5 shares
+    // GBuffer depth with the lighting RT.
+    bgfx::FrameBufferHandle compositeFbo = ctx.sceneFbo;
+    if (deferredLitComposite) {
+        compositeFbo = ctx.lightingPass->lightingOutputFbo();
+        adapter.setState(BGFX_STATE_WRITE_RGB
+                       | BGFX_STATE_WRITE_A
+                       | BGFX_STATE_BLEND_ALPHA
+                       | BGFX_STATE_DEPTH_TEST_ALWAYS
+                       | BGFX_STATE_CULL_CW);
+    } else {
+        adapter.setStateAlphaBlend();
+    }
+    adapter.setViewFrameBuffer(viewId, compositeFbo);
+    if (BGFXAdapter::isValid(compositeFbo)) {
         adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
     } else {
         adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
@@ -157,6 +169,30 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         // ForwardOpaquePass::flushMaterial.
         tryBindShadowSampler(material.shader, adapter, ctx.shadowPass,
                           item.shadowFlags, frame.shadowBias);
+
+        // Mirror FO albedo bind — glass/simple_lit sample albedoMap.
+        // Unbound sampler often reads black → invisible cyan cube.
+        for (const GpuMaterial::TextureSlot& slot : material.textures) {
+            if (slot.name.empty() || !slot.texture.isValid()) {
+                continue;
+            }
+            if (slot.name == "shadowMap") {
+                continue;
+            }
+            const shader::BindingId binding =
+                material.shader.getTextureBinding(slot.name);
+            if (binding == shader::InvalidBinding) {
+                continue;
+            }
+            const auto texIt = textures.find(slot.texture.id);
+            if (texIt == textures.end()
+                || !BGFXAdapter::isValid(texIt->second.handle)) {
+                continue;
+            }
+            const uint8_t stage = material.shader.getTextureStage(binding);
+            material.shader.setTexture(stage, binding,
+                                       toShaderTexture(texIt->second.handle));
+        }
 
         // U1++ — color-uniform upload shared with ForwardOpaquePass
         // via RenderPass::resolveAndApplyColorUniforms.

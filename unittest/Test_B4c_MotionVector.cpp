@@ -38,7 +38,7 @@
 //      constructed GBufferPass `_prevView`/`_prevProjection` are
 //      identity. First-frame garbage motion acceptable.
 //
-//   3. Cache-key bump: literal is `gbuffer_fill_v2_b4c_motion`
+//   3. Cache-key bump: literal is `gbuffer_fill_v5_albedo_times_base`
 //      (bumped from B4b's `gbuffer_fill_v1_b4b_mrt3`). Pin via
 //      a public constexpr getter (avoids the B4b
 //      `CHECK(true); // contract: no crash` antipattern).
@@ -120,7 +120,7 @@ namespace {
 // (one side bumped, the other not) the test catches it. This is
 // the standard "golden value" pattern Test_BGFXConverter uses for
 // the builtin names.
-inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v2_b4c_motion";
+inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v5_albedo_times_base";
 inline constexpr const char* kExpectedGBufferBuildStamp = "b4a-2026-07-22";
 
 // Expected substrings the Phoskia GBufferFill source must contain.
@@ -128,11 +128,15 @@ inline constexpr const char* kExpectedGBufferBuildStamp = "b4a-2026-07-22";
 inline const char* kExpectedSourceSubstrings[] = {
     "uniform mat4 u_prevViewProj",      // HR3
     "viewProjectionMatrix",             // HR2 — builtin used (not bare)
+    "modelViewProjection * vec4(pos",  // clip = MVP (not VP*object)
     "currClip = viewProjectionMatrix", // HR2 — curr-clip uses builtin
     "prevClip = u_prevViewProj",        // HR2 + HR3 — prev-clip uses uniform
     "motionNDC = currNDC - prevNDC",   // HR formula: clip-space diff
     "motionNDC * 0.5 + 0.5",            // HR encoding: [0,1] NDC half
     "gbufferMotion = vec4(motionNDC",   // write target
+    "out gbufferAlbedo : color",        // MRT outs at fragment param head
+    "vec3(0.5, 0.5, 0.5)",              // HLSL-safe normal encode
+    "sample(albedoMap, vUv) * baseColor", // Forward albedo parity
 };
 
 // Substrings that MUST NOT appear — pins HR2 ("no bare
@@ -167,31 +171,35 @@ std::string mirrorGBufferPhoskiaSource()
     // future PR drifts the literal, the substring tests above fail.
     return std::string(R"(
 material GBufferFill {
+    texture2d albedoMap
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     uniform mat4 u_prevViewProj
 
     vertex {
         in pos : position
         in nrm : normal
+        in uv  : texcoord
         out worldNormal : normal   = (modelMatrix * vec4(nrm, 0.0)).xyz
         out worldPos    : position = (modelMatrix * vec4(pos, 1.0)).xyz
-        return viewProjectionMatrix * vec4(pos, 1.0)
+        out vUv         : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
         in worldNormal : normal
         in worldPos    : position
-        uniform mat4 u_prevViewProj
+        in vUv         : texcoord
+        out gbufferAlbedo : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferMotion : color = vec4(0.0, 0.0, 0.0, 0.0)
         let n = normalize(worldNormal)
         let currClip = viewProjectionMatrix * vec4(worldPos, 1.0)
         let prevClip = u_prevViewProj * vec4(worldPos, 1.0)
         let currNDC = currClip.xy / currClip.w
         let prevNDC = prevClip.xy / prevClip.w
         let motionNDC = currNDC - prevNDC
-        out gbufferAlbedo : color = vec4(0.0)
-        out gbufferNormal : color = vec4(0.0)
-        out gbufferMotion : color = vec4(0.0)
-        gbufferAlbedo = vec4(baseColor.rgb, baseColor.a)
-        gbufferNormal = vec4(n * 0.5 + vec3(0.5), 1.0)
+        let albedo = sample(albedoMap, vUv) * baseColor
+        gbufferAlbedo = vec4(albedo.rgb, albedo.a)
+        gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0)
         gbufferMotion = vec4(motionNDC * 0.5 + 0.5, 0.0, 0.0)
     }
 }
@@ -310,9 +318,8 @@ TEST_CASE(b4c_gbuffer_pass_default_identity_prev) {
 }
 
 TEST_CASE(b4c_gbuffer_cache_key_bumped_for_motion_cut) {
-    // HR-literal-pin: kGBufferCacheKey bumped from
-    // `gbuffer_fill_v1_b4b_mrt3` (B4b) to
-    // `gbuffer_fill_v2_b4c_motion` (B4c). The static
+    // HR-literal-pin: kGBufferCacheKey =
+    // `gbuffer_fill_v5_albedo_times_base`. The static
     // `s_acquiredCacheKey` guard inside ensureProgram uses
     // pointer-equal compare (Issue 1 fix) so any drift between
     // the source and the mirror would fail compilation or
@@ -351,7 +358,19 @@ TEST_CASE(b4c_phoskia_gbuffer_source_motion_contract) {
     CHECK(src.find("gbufferMotion = vec4(motionNDC * 0.5 + 0.5")
           != std::string::npos);
     // Vertex MUST use the builtin (HR2), not bare matrix multiply.
-    CHECK(src.find("return viewProjectionMatrix * vec4(pos, 1.0)")
+    // The GBufferFill Phoskia source (kGBufferPhoskiaSource at
+    // GBufferPass.cpp:55-89) ships `return modelViewProjection *
+    // vec4(pos, 1.0)` in the vertex stage — the canonical model*
+    // viewProjection vec4 builtin (semantically equivalent to a
+    // bare `projection * view * model * vec4(pos, 1.0)` after
+    // Phoskia lowers `modelViewProjection`).
+    //
+    // (Substring drift fix, 2026-07-22: the test originally pinned
+    // `viewProjectionMatrix` which existed in an earlier cut of
+    // the B4c source; PR-F2/PR-F3 linter changes the canonical
+    // builtin name and the test substring here was stale. Pin the
+    // literal substring the LIVE source actually ships.)
+    CHECK(src.find("return modelViewProjection * vec4(pos, 1.0)")
           != std::string::npos);
     // Fragment MUST declare the uniform at top of fragment stage.
     CHECK(src.find("fragment {") != std::string::npos);

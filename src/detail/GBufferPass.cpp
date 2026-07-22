@@ -54,46 +54,42 @@ static constexpr const char* kGBufferBuildStamp = "b4a-2026-07-22";
 // single-frame noise — TAA is a multi-frame accumulator.
 constexpr const char* kGBufferPhoskiaSource = R"(
 material GBufferFill {
+    texture2d albedoMap
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     uniform mat4 u_prevViewProj
 
     vertex {
         in pos : position
         in nrm : normal
+        in uv  : texcoord
         out worldNormal : normal   = (modelMatrix * vec4(nrm, 0.0)).xyz
         out worldPos    : position = (modelMatrix * vec4(pos, 1.0)).xyz
-        return viewProjectionMatrix * vec4(pos, 1.0)
+        out vUv         : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
         in worldNormal : normal
         in worldPos    : position
-        uniform mat4 u_prevViewProj
+        in vUv         : texcoord
+        out gbufferAlbedo : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferMotion : color = vec4(0.0, 0.0, 0.0, 0.0)
         let n = normalize(worldNormal)
         let currClip = viewProjectionMatrix * vec4(worldPos, 1.0)
         let prevClip = u_prevViewProj * vec4(worldPos, 1.0)
         let currNDC = currClip.xy / currClip.w
         let prevNDC = prevClip.xy / prevClip.w
         let motionNDC = currNDC - prevNDC
-        out gbufferAlbedo : color = vec4(0.0)
-        out gbufferNormal : color = vec4(0.0)
-        out gbufferMotion : color = vec4(0.0)
-        gbufferAlbedo = vec4(baseColor.rgb, baseColor.a)
-        gbufferNormal = vec4(n * 0.5 + vec3(0.5), 1.0)
+        let albedo = sample(albedoMap, vUv) * baseColor
+        gbufferAlbedo = vec4(albedo.rgb, albedo.a)
+        gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0)
         gbufferMotion = vec4(motionNDC * 0.5 + 0.5, 0.0, 0.0)
     }
 }
 )";
 
-// §P5 B4c (2026-07-22) — cache key literal bumped from
-// `gbuffer_fill_v1_b4b_mrt3` to `gbuffer_fill_v2_b4c_motion` because
-// the shader source changed (added `uniform mat4 u_prevViewProj` +
-// the motion formula). Pointer-equal compare (mirror ShadowCaster
-// Issue 1 fix at ShadowCaster.cpp:60-65) so cache invalidates when
-// the literal bumps — `s_acquiredCacheKey` static guard inside
-// ensureProgram() forces re-acquire. `kGBufferBuildStamp` STAYS at
-// `b4a-2026-07-22` (FBO shape unchanged — 3 color + 1 depth), so
-// the FBO is reused across the B4b → B4c bump.
-static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v2_b4c_motion";
+// Cache key bumped for albedoMap * baseColor (Forward parity).
+static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v5_albedo_times_base";
 
 GBufferPass::~GBufferPass() = default;
 
@@ -239,6 +235,13 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         if (!material.shader.isValid()) {
             continue;
         }
+        // Cutsheet deferred-pass.md §2: GBuffer receives Opaque only.
+        // Alpha glass must not write albedo/depth here — otherwise it
+        // shows as solid cyan and steals depth from real opaques.
+        // TransparentPass composites Alpha after Lighting.
+        if (material.blendMode == ayt::render::BlendMode::Alpha) {
+            continue;
+        }
 
         // §P5 B4c (2026-07-22) — PREV-FRAME VP UPLOAD. Build
         // prevViewProj = prevProj * prevView (P×V same-order as
@@ -289,6 +292,30 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
                 material.hasColorOverride ? material.colorOverride.w : 1.0f,
             };
             _program.setUniform(baseColorBinding, base, sizeof(base));
+        }
+
+        // Forward parity: sample(albedoMap)*baseColor. Bind host
+        // material texture slots onto GBufferFill's albedoMap stage
+        // (skip shadowMap — GBuffer does not consume it).
+        for (const GpuMaterial::TextureSlot& slot : material.textures) {
+            if (slot.name.empty() || !slot.texture.isValid()) {
+                continue;
+            }
+            if (slot.name == "shadowMap") {
+                continue;
+            }
+            const shader::BindingId binding = _program.getTextureBinding(slot.name);
+            if (binding == shader::InvalidBinding) {
+                continue;
+            }
+            const auto texIt = ctx.textures.find(slot.texture.id);
+            if (texIt == ctx.textures.end()
+                || !BGFXAdapter::isValid(texIt->second.handle)) {
+                continue;
+            }
+            const uint8_t stage = _program.getTextureStage(binding);
+            _program.setTexture(stage, binding,
+                                toShaderTexture(texIt->second.handle));
         }
 
         ctx.adapter.setTransform(item.world);

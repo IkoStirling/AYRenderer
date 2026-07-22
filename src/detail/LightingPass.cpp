@@ -6,6 +6,8 @@
 #include "detail/GpuResources.h"
 #include "detail/RenderPass.h"
 
+#include "AYRenderScene.h"
+
 #include <cstdio>
 
 namespace ayt::render::detail
@@ -21,7 +23,14 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
 // `kGBufferCacheKey`). Pointer-equal compare so cache invalidates
 // when the literal bumps. `s_acquiredCacheKey` static guard inside
 // ensureProgram() forces re-acquire.
-static constexpr const char* kLightingCacheKey = "lighting_v1_b5_directional_lambert";
+// §P5 B7+ (2026-07-22) — bump to v4: Phoskia source now declares a
+// `uniformblock Lights { vec4 dirs[8]; vec4 colors[8]; } binding 0`
+// and the FS unrolls 8 directional-light taps unconditionally.
+// Single-light fallback path through u_lightDirection +
+// u_lightColor still exists (no-op on the data path; both uniforms
+// still ship) so existing setDirectionalLight host code stays
+// compatible.
+static constexpr const char* kLightingCacheKey = "lighting_v4_b7_multi_light_ubo";
 
 // §P5 B5 (2026-07-22) — fullscreen-triangle vertex data, duplicated
 // from PostProcessPass.cpp:27-33 (private state there — coupling
@@ -66,27 +75,31 @@ constexpr uint16_t kLightingFullscreenIndices[3] = { 0, 1, 2 };
 //     same uniform binding without shader changes)
 //
 // Math (Lambert):
-//   N = sample(gbufferNormal).xyz * 2.0 - 1.0      // decode [0,1]→[-1,1]
+//   N = sample(gbufferNormal).xyz * 2.0 - vec3(1,1,1)  // decode [0,1]→[-1,1]
 //   L = normalize(u_lightDirection)
 //   NdotL = max(dot(N, L), 0.0)
-//   ambient = 0.1                                    // floor term
+//   ambient = vec3(0.1)                                  // floor term
 //   lit = sample(gbufferAlbedo).rgb * (ambient + NdotL * u_lightColor)
 //   return vec4(lit, sample(gbufferAlbedo).a)
 //
 // Phoskia `let` chain uses the same surface as the B4b GBufferFill
 // source (verified at PR-F2/PR-F3 ship) — `let` declarations +
-// arithmetic + texture2D() samples. B5 emits a SINGLE `return`
+// arithmetic + sample() texture lookups. B5 emits a SINGLE `return`
 // (not MRT) so no Phoskia MRT extension needed — falls back to the
 // legacy `return → gl_FragColor` path (verified at AYShader/
 // unittest/Test_MRT_Fragment.cpp::mrt_legacy_return_still_emits_fragcolor).
 constexpr const char* kLightingPhoskiaSource = R"(
 material Lighting {
-    texture2D gbufferAlbedo
-    texture2D gbufferNormal
-    texture2D gbufferMotion
+    texture2d gbufferAlbedo
+    texture2d gbufferNormal
+    texture2d gbufferMotion
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
+    uniformblock Lights {
+        vec4 dirs[8]
+        vec4 colors[8]
+    } binding 0
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -95,13 +108,35 @@ material Lighting {
     fragment {
         in vUv : texcoord
         let baseUv = vec2(vUv.x, 1.0 - vUv.y)
-        let albedo = texture2D(gbufferAlbedo, baseUv)
-        let normalSample = texture2D(gbufferNormal, baseUv)
-        let N = normalSample.xyz * 2.0 - vec3(1.0)
-        let L = normalize(u_lightDirection.xyz)
-        let NdotL = max(dot(N, L), 0.0)
-        let ambient = 0.1
-        let lit = albedo.rgb * (vec3(ambient) + NdotL * u_lightColor.xyz)
+        let albedo = sample(gbufferAlbedo, baseUv)
+        let normalSample = sample(gbufferNormal, baseUv)
+        let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
+        let ambient = vec3(0.1, 0.1, 0.1)
+        let L0 = normalize(Lights.dirs[0].xyz)
+        let L1 = normalize(Lights.dirs[1].xyz)
+        let L2 = normalize(Lights.dirs[2].xyz)
+        let L3 = normalize(Lights.dirs[3].xyz)
+        let L4 = normalize(Lights.dirs[4].xyz)
+        let L5 = normalize(Lights.dirs[5].xyz)
+        let L6 = normalize(Lights.dirs[6].xyz)
+        let L7 = normalize(Lights.dirs[7].xyz)
+        let f0 = max(dot(N, L0), 0.0)
+        let f1 = max(dot(N, L1), 0.0)
+        let f2 = max(dot(N, L2), 0.0)
+        let f3 = max(dot(N, L3), 0.0)
+        let f4 = max(dot(N, L4), 0.0)
+        let f5 = max(dot(N, L5), 0.0)
+        let f6 = max(dot(N, L6), 0.0)
+        let f7 = max(dot(N, L7), 0.0)
+        let directionalSum = f0 * Lights.colors[0].xyz
+                            + f1 * Lights.colors[1].xyz
+                            + f2 * Lights.colors[2].xyz
+                            + f3 * Lights.colors[3].xyz
+                            + f4 * Lights.colors[4].xyz
+                            + f5 * Lights.colors[5].xyz
+                            + f6 * Lights.colors[6].xyz
+                            + f7 * Lights.colors[7].xyz
+        let lit = albedo.rgb * (ambient + directionalSum)
         return vec4(lit, albedo.a)
     }
 }
@@ -378,15 +413,9 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // (cutsheet §5.3 NO new FrameContext fields — reuse
     // lightDirection/lightColor/cameraPosition already shipped).
     //
-    // lightDirection: Phoskia expects a TO-light vector, but
-    // FrameContext stores FROM-light (frame.lightDirection points
-    // from surface to light source is the conventional lighting
-    // convention; verify the actual semantic at FrameContext.h:23
-    // — currently the doc says "lightDirection" as-is). To avoid
-    // silently breaking B5 if the semantic is opposite, we just
-    // upload the raw value and document the direction convention
-    // in the Phoskia source comment. B5.5+ will verify against
-    // captured frames.
+    // lightDirection: FrameContext stores FROM-light; Phoskia NdotL
+    // expects TO-light (same as ForwardOpaquePass / TransparentPass
+    // `-frame.lightDirection`). Negate once on upload.
     //
     // Phoskia uniform ABI: vec4 uniforms are uploaded as vec4 (one
     // vec4 = bgfx Vec4 slot — see docs/pass-lessons-from-shadow.md
@@ -395,10 +424,12 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     const shader::BindingId lightDirBinding =
         _program.getUniformBinding("u_lightDirection");
     if (lightDirBinding != shader::InvalidBinding) {
+        // Match ForwardOpaquePass / TransparentPass: FrameContext stores
+        // FROM-light; Phoskia NdotL expects TO-light → negate once.
         const float lightDir[4] = {
-            frame.lightDirection.x,
-            frame.lightDirection.y,
-            frame.lightDirection.z,
+            -frame.lightDirection.x,
+            -frame.lightDirection.y,
+            -frame.lightDirection.z,
             0.0f,
         };
         _program.setUniform(lightDirBinding, lightDir, sizeof(lightDir));
@@ -426,6 +457,79 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             1.0f,  // position-like → .w = 1
         };
         _program.setUniform(cameraPosBinding, cameraPos, sizeof(cameraPos));
+    }
+
+    // §P5 B7+ (2026-07-22) — multi-light DataSource upload via the
+    // host-supplied `ctx.sceneLights` borrowed pointer. The Phoskia
+    // FS unrolls 8 directional-light taps unconditionally. We pack
+    // dir + color into the `uniformblock Lights { vec4 dirs[8];
+    // vec4 colors[8]; } binding 0` UBO every frame.
+    //
+    // Mirrors Test_ShaderResource.cpp:392 (Camera UBO upload via
+    // `setUniformBlock`) — one std140-compatible buffer, one
+    // binding, no per-light state churn on the CPU.
+    //
+    // Layout (kMaxSceneLights = 8, defined in include/AYRenderScene.h):
+    //   - bytes [0,    128): dirs[8] * vec4 = 8 * 16 = 128 bytes
+    //   - bytes [128, 256): colors[8] * vec4 = 8 * 16 = 128 bytes
+    //                     ↳ note we always upload the full
+    //                       std140-aligned block regardless of
+    //                       lights.count (Phoskia unroll uses
+    //                       unused slots as zero-vectors, so a
+    //                       count=2 light source still benefits
+    //                       from the same 256-byte layout).
+    //
+    // Negate TO-light convention is identical to the B5 single-
+    // light uniform above (FrameContext stores FROM-light; Phoskia
+    // NdotL expects TO-light).
+    //
+    // Fallback: ctx.sceneLights == nullptr or count == 0 → upload
+    // one "lights.dirs[0] = -frame.lightDirection" + "colors[0] =
+    // frame.lightColor" pair so the unrolled FS still produces a
+    // reasonable image (matches B5 behavior). This avoids the
+    // "FS unrolls 8 lights but UBO has all zero → black picture"
+    // failure mode when the host hasn't called setSceneLights yet.
+    static_assert(ayt::render::kMaxSceneLights == 8,
+                  "LightingPass B7 UBO assumes kMaxSceneLights == 8");
+
+    alignas(16) float lightsBlock[ayt::render::kMaxSceneLights * 8] = {};  // 8 vec4 dirs + 8 vec4 colors
+    const ayt::render::SceneLights* sceneLights = ctx.sceneLights;
+    const bool useMulti = (sceneLights != nullptr) && (sceneLights->count > 0u);
+
+    if (useMulti) {
+        const uint32_t n = sceneLights->count;
+        for (uint32_t i = 0; i < n && i < ayt::render::kMaxSceneLights; ++i) {
+            const ayt::render::DirectionalLight& L = sceneLights->lights[i];
+            // dirs[i] (16-byte vec4) — negate FrameContext convention
+            lightsBlock[i * 4 + 0] = -L.direction.x;
+            lightsBlock[i * 4 + 1] = -L.direction.y;
+            lightsBlock[i * 4 + 2] = -L.direction.z;
+            lightsBlock[i * 4 + 3] = 0.0f;
+            // colors[i] (16-byte vec4)
+            lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 0] = L.color.x;
+            lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 1] = L.color.y;
+            lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 2] = L.color.z;
+            lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 3] = 0.0f;
+        }
+    } else {
+        // B5 single-light fallback mirrors the FrameContext values
+        // into lights[0]. The remaining 7 slots stay zero.
+        lightsBlock[0] = -frame.lightDirection.x;
+        lightsBlock[1] = -frame.lightDirection.y;
+        lightsBlock[2] = -frame.lightDirection.z;
+        lightsBlock[3] = 0.0f;
+        lightsBlock[ayt::render::kMaxSceneLights * 4 + 0] = frame.lightColor.x;
+        lightsBlock[ayt::render::kMaxSceneLights * 4 + 1] = frame.lightColor.y;
+        lightsBlock[ayt::render::kMaxSceneLights * 4 + 2] = frame.lightColor.z;
+        lightsBlock[ayt::render::kMaxSceneLights * 4 + 3] = 0.0f;
+    }
+
+    const shader::BindingId lightsUboBinding =
+        _program.getUniformBlockBinding("Lights");
+    if (lightsUboBinding != shader::InvalidBinding) {
+        _program.setUniformBlock(lightsUboBinding,
+                                 lightsBlock,
+                                 sizeof(lightsBlock));
     }
 
     // §P5 B5 (2026-07-22) — fullscreen triangle dispatch. B5

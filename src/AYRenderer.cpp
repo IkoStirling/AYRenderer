@@ -233,6 +233,19 @@ struct Renderer::Impl {
     // existing shaders render identically without host action.
     float                          shadowBias               = 0.003f;
 
+    // §P5 B7+ (2026-07-22) — host-supplied multi-light DataSource
+    // (ayt::render::SceneLights). Borrowed pointer (host owns the
+    // storage); null = host did not call setSceneLights ⇒
+    // LightingPass falls back to the B5 single-light path
+    // (FrameContext::lightDirection / lightColor).
+    //
+    // Lifetime contract: pointer must outlive render(). Default
+    // nullptr matches existing single-light host patterns; no
+    // regression. Future Editor Play with multi-light state fills
+    // this in host app code (e.g. AppState::lights populate by
+    // editor / game logic; renderer just consumes).
+    const ayt::render::SceneLights* sceneLights = nullptr;
+
     // P0 (2026-07-20) — wall-clock origin for FrameContext.timeSeconds.
     // std::chrono::steady_clock is monotonic (immune to wall-clock
     // adjustments) which is what R5+ post-process effects (time-of-day
@@ -661,6 +674,12 @@ void Renderer::render(const RenderScene& scene)
         shadowPassPtr,
         gbufferPassPtr,
         lightingPassPtr,
+        // §P5 B7+ (2026-07-22) — host-supplied multi-light DataSource
+        // mount. Borrowed pointer from Renderer::setSceneLights.
+        // nullptr = B5 single-light path stays active (no behavior
+        // change). count == 0 falls through to B5 fallback at
+        // LightingPass::execute() side too.
+        _impl->sceneLights,
     };
 
     static uint32_t s_compositeLog = 0;
@@ -1014,6 +1033,23 @@ void Renderer::setDirectionalLight(const ayt::math::FVector3& direction,
     }
     _impl->directionalLightDir   = direction.normalize();
     _impl->directionalLightColor = color;
+}
+
+// §P5 B7+ (2026-07-22) — host-facing multi-light DataSource mount.
+// Borrowed pointer pattern; lifetime contract: the SceneLights
+// must outlive render(). Default nullptr = single-light path
+// (FrameContext::lightDirection / lightColor as set above by
+// setDirectionalLight).
+//
+// Passing a SceneLights with count == 0 has the same effect as
+// nullptr (LightingPass iterates 0 lights and the B5 fallback
+// kicks in via the existence check at execute() time).
+void Renderer::setSceneLights(const ayt::render::SceneLights* lights)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->sceneLights = lights;
 }
 
 void Renderer::setMsaaSampleCount(uint32_t samples)

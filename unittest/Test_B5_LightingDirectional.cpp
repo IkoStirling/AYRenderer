@@ -18,7 +18,7 @@
 //      (program fails to acquire). This is the B3 → B5 contract
 //      upgrade.
 //
-//   3) Cache-key bump: literal is `lighting_v1_b5_directional_lambert`
+//   3) Cache-key bump: literal is `lighting_v3_b5_hlsl_vec_ctors`
 //      — first lock. Build-stamp stays at `b5-2026-07-22`. Pin via
 //      TU-local mirror (same pattern as B4c.3 + B4c.6).
 //
@@ -95,20 +95,22 @@ namespace {
 // LightingPass.cpp's literals and these mirrors = test fails.
 // Same pattern as Test_B4c_MotionVector.cpp kExpectedGBufferCacheKey.
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v1_b5_directional_lambert";
+    "lighting_v3_b5_hlsl_vec_ctors";
 inline constexpr const char* kExpectedLightingBuildStamp =
     "b5-2026-07-22";
 
 inline const char* kExpectedSourceSubstrings[] = {
-    "texture2D gbufferAlbedo",    // sampler declaration
-    "texture2D gbufferNormal",
-    "texture2D gbufferMotion",
+    "texture2d gbufferAlbedo",    // sampler declaration (Phoskia keyword)
+    "texture2d gbufferNormal",
+    "texture2d gbufferMotion",
     "uniform vec4 u_lightDirection",
     "uniform vec4 u_lightColor",
     "uniform vec4 u_cameraPos",
-    "let N = normalSample.xyz * 2.0 - vec3(1.0)",  // N decode [0,1]→[-1,1]
+    "sample(gbufferAlbedo, baseUv)",
+    "sample(gbufferNormal, baseUv)",
+    "let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)",  // HLSL-safe
     "let NdotL = max(dot(N, L), 0.0)",            // Lambert dot
-    "let ambient = 0.1",                          // ambient floor
+    "let ambient = vec3(0.1, 0.1, 0.1)",          // HLSL-safe ambient
     "return vec4(lit, albedo.a)",                 // single-output
 };
 
@@ -126,9 +128,9 @@ std::string mirrorLightingPhoskiaSource()
 {
     return std::string(R"(
 material Lighting {
-    texture2D gbufferAlbedo
-    texture2D gbufferNormal
-    texture2D gbufferMotion
+    texture2d gbufferAlbedo
+    texture2d gbufferNormal
+    texture2d gbufferMotion
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
@@ -140,13 +142,13 @@ material Lighting {
     fragment {
         in vUv : texcoord
         let baseUv = vec2(vUv.x, 1.0 - vUv.y)
-        let albedo = texture2D(gbufferAlbedo, baseUv)
-        let normalSample = texture2D(gbufferNormal, baseUv)
-        let N = normalSample.xyz * 2.0 - vec3(1.0)
+        let albedo = sample(gbufferAlbedo, baseUv)
+        let normalSample = sample(gbufferNormal, baseUv)
+        let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
         let L = normalize(u_lightDirection.xyz)
         let NdotL = max(dot(N, L), 0.0)
-        let ambient = 0.1
-        let lit = albedo.rgb * (vec3(ambient) + NdotL * u_lightColor.xyz)
+        let ambient = vec3(0.1, 0.1, 0.1)
+        let lit = albedo.rgb * (ambient + NdotL * u_lightColor.xyz)
         return vec4(lit, albedo.a)
     }
 }
@@ -233,12 +235,12 @@ TEST_CASE(b5_lighting_pass_is_ready_requires_both_fbo_and_program) {
 
 TEST_CASE(b5_lighting_cache_key_and_build_stamp_pinned) {
     // B5.3 + B5.6 — Cache-key + build-stamp first lock.
-    //   kLightingCacheKey   = "lighting_v1_b5_directional_lambert"
+    //   kLightingCacheKey   = "lighting_v3_b5_hlsl_vec_ctors"
     //   kLightingBuildStamp = "b5-2026-07-22"
     // Drift between LightingPass.cpp literals and these mirrors =
     // test fails. Same pattern as Test_B4c_MotionVector.cpp.3/6.
     CHECK(std::string(kExpectedLightingCacheKey)
-          == std::string("lighting_v1_b5_directional_lambert"));
+          == std::string("lighting_v3_b5_hlsl_vec_ctors"));
     CHECK(std::string(kExpectedLightingBuildStamp)
           == std::string("b5-2026-07-22"));
 

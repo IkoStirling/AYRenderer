@@ -112,7 +112,12 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     const FrameContext& frame = ctx.frame;
     // Own blit view — must not reuse the scene view id (would clobber
     // scene FBO binding + camera VP for every FO submit that frame).
-    const uint8_t viewId = kBlitViewId;
+    // Deferred: Lighting=8, Transparent=9 → blit must be AFTER both
+    // or PP samples a pre-lighting / pre-glass buffer.
+    constexpr uint8_t kDeferredBlitViewId = 10;
+    const bool deferredLit = (ctx.lightingPass != nullptr) &&
+        bgfx::isValid(ctx.lightingPass->lightingOutputFbo());
+    const uint8_t viewId = deferredLit ? kDeferredBlitViewId : kBlitViewId;
     const uint16_t viewportWidth  = ctx.viewportWidth;
     const uint16_t viewportHeight = ctx.viewportHeight;
 

@@ -71,4 +71,64 @@ private:
     std::vector<DrawItem> _items;
 };
 
+// §P5 B7+ (2026-07-22) — host-facing multi-light DataSource. Drives
+// the Deferred LightingPass's accumulation loop (see
+// d:\Projects\AYRuntime\AYRenderer\src\detail\LightingPass.cpp).
+//
+// Constraints (cutsheet §5.3 red line + §5.5 cleanup notes):
+//   - ❌ NEVER reintroduce RenderScene::Light (永久退休 per §5.5).
+//   - ❌ NEVER add fields to FrameContext (FrameContext stays
+//     pure per-frame state).
+//   - ✅ Lives on the *host* side; renderer consumes a const borrowed
+//     pointer via PassExecContext::sceneLights — lifetime is the
+//     host's responsibility, exactly like PassExecContext::shadowPass
+//     / gbufferPass / lightingPass borrowed pointer pattern (cutsheet
+//     pass-lessons-from-deferred.md:329 + execution-plan.md:94-98).
+//   - ✅ POD-only (FVector3 + colors + scalars); no GPU types.
+//
+// Layout:
+//   - Each DirectionalLight has dir (FVector3) + color (FVector3) —
+//     Phoskia multi-light accumulation unrolls via the
+//     `uniformblock Lights { vec4 dirColor[N]; vec4 dirXyz[N]; ... }`
+//     pattern with N cap (see kMaxLights).
+//   - Host fills the lights vector by calling `add(...)` per
+//     directional; the renderer mirrors them into the Phoskia
+//     uniform array each frame.
+//
+// Capacity rule:
+//   - kMaxLights is the hard ceiling; add() past the cap is a
+//     silent no-op (host code that's already at the cap on
+//     Editor Play is a debug-only concern; runtime breakage
+//     avoidance is more important than loud assertion here).
+//   - Default-constructed SceneLights is a no-op DataSource
+//     (count=0) — exactly the same shape as B5's single light
+//     driven via FrameContext (cutsheet deferred-pass.md:191
+//     "1 盏方向光是 B5 ship 形态, 多光走 ctx.lights").
+constexpr uint32_t kMaxSceneLights = 8;
+
+struct DirectionalLight {
+    ayt::math::FVector3 direction = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
+    ayt::math::FVector3 color     = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
+};
+
+struct SceneLights {
+    DirectionalLight lights[kMaxSceneLights]{};
+    uint32_t         count = 0;
+
+    // Append one light. Returns the assigned slot index, or
+    // UINT32_MAX if full (host code beyond kMaxSceneLights gets a
+    // soft no-op rather than OOB — debug-only concern per the
+    // capacity rule above).
+    uint32_t add(const DirectionalLight& light) noexcept
+    {
+        if (count >= kMaxSceneLights) {
+            return UINT32_MAX;
+        }
+        lights[count] = light;
+        return count++;
+    }
+
+    bool empty() const noexcept { return count == 0; }
+};
+
 } // namespace ayt::render

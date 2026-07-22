@@ -119,6 +119,23 @@ public:
     void setDirectionalLight(const ayt::math::FVector3& direction,
                              const ayt::math::FVector3& color);
 
+    // §P5 B7+ (2026-07-22) — host-facing multi-light DataSource.
+    // Drives the Deferred LightingPass's accumulation loop.
+    // B5's single light via setDirectionalLight still works (the
+    // renderer mirrors it into SceneLights::lights[0] as a fallback
+    // when host has not called setSceneLights yet).
+    //
+    // Wiring contract: the renderer borrows the `lights` pointer
+    // for the duration of one render() call. The SceneLights
+    // instance must therefore outlive render(). Easiest lifetime
+    // is a member of the host class (e.g. AppState / EditorApp),
+    // populated by host game logic between render() calls.
+    //
+    // Passing a lights pointer with count == 0 silences the
+    // multi-light upload (LightingPass falls back to the B5 single
+    // light via FrameContext — see setDirectionalLight above).
+    void setSceneLights(const SceneLights* lights);
+
     // Quality / style knobs (safe to call after initialize).
     // msaa: 0=off, 2/4/8/16. Applies via bgfx::reset (backbuffer).
     void setMsaaSampleCount(uint32_t samples);
