@@ -32,4 +32,23 @@ TEST_CASE(public_renderer_symbols_resolve_at_runtime)
     CHECK((renderer.*fn)() == true);  // E5 default: enabled
 }
 
+TEST_CASE(public_renderer_lighting_enabled_getter_resolves)
+{
+    // §P5 B3 (2026-07-22) — pin that the new
+    // Renderer::lightingEnabled() const noexcept getter is reachable
+    // from the public ABI. Mirrors the shadowsEnabled() gate (E5).
+    // Const noexcept getter; reads pipeline.findPass("Lighting") +
+    // isEnabled() (no mirror field). Forward default ctor ⇒ no
+    // Lighting slot mounted ⇒ returns false. After
+    // configurePipeline(makeDeferred()), returns true.
+    using LightingEnabledFn = bool (ayt::render::Renderer::*)() const noexcept;
+    LightingEnabledFn fn = &ayt::render::Renderer::lightingEnabled;
+    CHECK(fn != nullptr);
+
+    ayt::render::Renderer renderer;
+    CHECK((renderer.*fn)() == false);  // B3 default Forward: no Lighting slot
+    renderer.configurePipeline(ayt::render::RenderPipelineDesc::makeDeferred());
+    CHECK((renderer.*fn)() == true);   // after Deferred config: Lighting slot mounted
+}
+
 TEST_SUITE_END

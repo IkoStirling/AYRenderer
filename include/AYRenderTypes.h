@@ -174,16 +174,28 @@ enum class RenderPassSlot : uint8_t {
     Transparent,
     PostProcess,
     UI,
+    // §P5 B3 (2026-07-22) — Deferred-only slots. GBuffer = view 7
+    // (B4 MRT fill), Lighting = view 8 (B5 fullscreen triangle).
+    // Both OMITTED from makeDefault() / Forward path (E5 "omit slot
+    // = opt out" semantics). Reserved values for ABI stability;
+    // never reorder without a cutsheet-style B0 reset.
+    GBuffer,
+    Lighting,
 };
 
-// §P5 B1 (2026-07-22) — pipeline path selection. Plumbing only at
-// this PR: RenderPipelineDesc carries a `path` field (default
-// Forward); `RenderPipelineDesc::makeDeferred()` factory exists as a
-// stub and produces the same 5-slot Forward pass list — the actual
-// Forward/Deferred branch lands in B3 (GBuffer + Lighting slots
-// swap, view-id allocation per docs/pass-lessons-from-deferred.md
-// §5.1). Deferred path remains opt-in via `configurePipeline(
-// makeDeferred())`; default Forward behavior is unchanged.
+// §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was
+// plumbing only: `RenderPipelineDesc::path` field (default Forward)
+// + `makeDeferred()` stub returning the same 5-slot Forward list.
+// §P5 B3 (2026-07-22) — `makeDeferred()` is now actual: 6-slot
+// pipeline {Shadow, GBuffer, Lighting, Trans, PP, UI} with
+// ForwardOpaque OMITTED per cutsheet §4.1 red line #4. The path
+// enum itself stays unchanged; only the slot list returned by
+// `makeDeferred()` differs from `makeDefault()`.
+//
+// Forward path remains opt-out (host passes a custom desc that
+// omits GBuffer/Lighting, or sticks with `makeDefault()`). Deferred
+// path remains opt-in via `configurePipeline(makeDeferred())`;
+// default Forward behavior is unchanged.
 enum class RenderPath : uint8_t {
     Forward  = 0,
     Deferred = 1,

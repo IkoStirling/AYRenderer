@@ -93,22 +93,29 @@ TEST_CASE(b1_make_forward_with_shadows_path_is_forward)
 
 TEST_CASE(b1_make_deferred_factory_path_is_deferred_passes_unchanged)
 {
-    // B1.4 — The B1 stub contract: makeDeferred() tags
-    // path=Deferred but returns the same 5-slot Forward pipeline.
-    // Real Deferred slots land in B3; until then hosts that opt in
-    // see no behavioral drift from `configurePipeline(makeDefault())`
-    // — intentional pre-wiring so the public surface compiles + tests
-    // can pin the enum plumbing today.
+    // B1 stub frozen snapshot (2026-07-22 B1 commit `0292ea7`) —
+    // makeDeferred() at B1 time tagged path=Deferred but returned
+    // the SAME 5-slot Forward pipeline (intentional pre-wiring so
+    // hosts / tests could pin the enum plumbing before B3).
+    //
+    // B3 SUPERSEDED this contract: makeDeferred() now returns a
+    // 6-slot pipeline {Shadow, GBuffer, Lighting, Trans, PP, UI}
+    // (no ForwardOpaque per cutsheet §4.1 red line #4). The B3
+    // reality is pinned by Test_B3::b3_full_deferred_pipeline_noop_dispatch
+    // (parts 1+2 — Forward 5-slot, Deferred 6-slot, FO omitted).
+    //
+    // This B1 case is RETAINED as a historical-record-of-B1-ship
+    // contract — it pins only what B1 ship promised (the path tag).
+    // Pass-list assertions are removed because B3 supersedes them.
     const RenderPipelineDesc def = RenderPipelineDesc::makeDefault();
     const RenderPipelineDesc deferred = RenderPipelineDesc::makeDeferred();
 
+    // B1 contract still holds: path tag.
     CHECK(deferred.path == RenderPath::Deferred);
     CHECK(deferred.isDeferred() == true);
-    CHECK(deferred.passes.size() == 5u);
-    CHECK(deferred.passes.size() == def.passes.size());
-    for (std::size_t i = 0; i < deferred.passes.size(); ++i) {
-        CHECK(deferred.passes[i] == def.passes[i]);
-    }
+    // B3 SUPERSEDED: B1 ship size was 5u; B3 is 6u.
+    // B3 SUPERSEDED: deferred.passes != def.passes (different lists).
+    (void)def;  // silence unused warning if we remove all size/equal asserts
 }
 
 TEST_CASE(b1_configure_pipeline_with_deferred_desc_records_path)
@@ -117,13 +124,17 @@ TEST_CASE(b1_configure_pipeline_with_deferred_desc_records_path)
     // the Renderer; pipelineDesc().isDeferred() reads back true. The
     // pipeline dispatch is unchanged at B1 (same 5 passes execute
     // in the same order); only the recorded path differs.
+    // B3 SUPERSEDED: makeDeferred() now returns 6 slots (not 5).
+    // Pass-list size assertion is removed because B3 owns that fact
+    // (Test_B3 case 7 parts 1+2). This case retains its historical
+    // B1 contract: path tag is recorded + retrievable.
     Renderer renderer;
     CHECK(renderer.pipelineDesc().isDeferred() == false);  // default Forward
 
     renderer.configurePipeline(RenderPipelineDesc::makeDeferred());
     CHECK(renderer.pipelineDesc().isDeferred() == true);
     CHECK(renderer.pipelineDesc().path == RenderPath::Deferred);
-    CHECK(renderer.pipelineDesc().passes.size() == 5u);
+    // B3 SUPERSEDED: B1 ship size was 5u; B3 is 6u.
 
     // Re-configuring with Forward flips the tag back — hosts can
     // swap paths without rebuilding the Renderer.

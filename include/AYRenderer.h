@@ -136,6 +136,17 @@ public:
     // findPass("Shadow").
     bool shadowsEnabled() const noexcept;
 
+    // §P5 B3 (2026-07-22) — live read of the Lighting slot's enabled
+    // flag in the current pipeline. Default ctor + configurePipeline(
+    // makeDefault()) return false (no Lighting slot mounted on
+    // Forward path). After configurePipeline(makeDeferred()), returns
+    // true (Lighting slot enabled by RenderPass base default
+    // _enabled == true). Pass a custom desc that omits
+    // RenderPassSlot::Lighting to opt out; returns false then.
+    // Const noexcept; no mirror field — reads the pass directly via
+    // findPass("Lighting").
+    bool lightingEnabled() const noexcept;
+
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias. Host
     // controls this in ndc01 units (same as the Phoskia receiver
     // shadowBias property — see AYShadowShaderSources.h:81 + the

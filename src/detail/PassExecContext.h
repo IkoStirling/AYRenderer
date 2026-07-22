@@ -64,6 +64,14 @@ class ShadowPass;
 // definition into every TU that already includes PassExecContext.h.
 class GBufferPass;
 
+// §P5 B3 (2026-07-22) — LightingPass is the B5 producer of the
+// shaded scene color (1 RGBA8 FBO, fullscreen-triangle FS that
+// samples the GBuffer MRT + shadow). Forward decl mirrors the
+// GBufferPass pattern so PassExecContext can carry the borrowed
+// pointer without dragging the full LightingPass definition into
+// every TU that already includes PassExecContext.h.
+class LightingPass;
+
 
 
 struct PassExecContext {
@@ -154,6 +162,32 @@ struct PassExecContext {
     // brace-init trailing default (C++14+ behavior, same as
     // PR-F2's shadowPass).
     const GBufferPass*        gbufferPass    = nullptr;
+
+    // §P5 B3 (2026-07-22) — borrowed, non-owning pointer to the
+    // LightingPass that consumes the GBuffer MRT + produces scene-
+    // shaded color. Mirrors gbufferPass pattern. B5's LightingPass
+    // itself doesn't read this (LightingPass *is* the dispatch
+    // endpoint); future B7+ multi-light consumers (e.g. a second
+    // lighting pass for second bounce, or post-Lighting tone mapping)
+    // can read the producer pointer here. nullptr ⇒ no LightingPass
+    // mounted (e.g. host on Forward path) — same shape as shadowPass
+    // / gbufferPass.
+    //
+    // Lifetime: pointer must remain valid for the duration of
+    // pipeline::executeAll(ctx). The LightingPass is owned by the
+    // pipeline via unique_ptr, so a pipeline-resident LightingPass
+    // is safe across dispatch (same guarantee as ShadowPass +
+    // GBufferPass).
+    //
+    // Default-init = nullptr so existing 12-/15-field brace-init
+    // test sites (Test_F2_ForwardShadow, Test_B2_GBufferPass,
+    // Test_E5_DefaultShadow, Test_ShadowPass, Test_F3_SkinnedCaster,
+    // Test_PassExecContext_P1, Test_SceneRT_P2, Test_PostProcess_R5Plus,
+    // Test_B1_RenderPath, ...) keep compiling without edits — the
+    // new field defaults at the struct's brace-init trailing default
+    // (C++14+ behavior, same as PR-F2's shadowPass + PR-B2's
+    // gbufferPass).
+    const LightingPass*       lightingPass   = nullptr;
 };
 
 } // namespace ayt::render::detail

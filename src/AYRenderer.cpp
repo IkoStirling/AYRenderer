@@ -7,6 +7,7 @@
 #include "detail/ForwardOpaquePass.h"
 #include "detail/GBufferPass.h"
 #include "detail/FrameContext.h"
+#include "detail/LightingPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPipeline.h"
@@ -69,18 +70,23 @@ RenderPipelineDesc RenderPipelineDesc::makeForwardWithShadows()
 
 RenderPipelineDesc RenderPipelineDesc::makeDeferred()
 {
-    // §P5 B1 (2026-07-22) — plumbing stub. The actual Deferred
-    // dispatch (GBuffer + Lighting slots + view 7/8 allocation +
-    // ForwardOpaque skip) lands in B3. Today this factory returns
-    // the same 5-slot Forward pipeline with `path=Deferred` tagged,
-    // so the public surface compiles + hosts can opt in via
-    // `configurePipeline(makeDeferred())` without behavioral drift
-    // between B1 and B3. Pre-wires `RenderPipelineDesc::path` so
-    // Test_B1_RenderPath can pin the enum plumbing today without
-    // B3's PR being a big-bang.
-    RenderPipelineDesc desc = makeDefault();
-    desc.path = RenderPath::Deferred;
-    return desc;
+    // §P5 B3 (2026-07-22) — actual Deferred pipeline. 6 slots
+    // (Shadow + GBuffer + Lighting + Transparent + PostProcess + UI).
+    // ForwardOpaque OMITTED from this list per cutsheet §4.1 red line
+    // #4 (no FO re-render after Lighting — Lighting owns the
+    // opaque-pass equivalent in Deferred path). Shadow + Trans +
+    // PostProcess + UI are shared with Forward. Path = Deferred
+    // tag is for hosts / observers that want to query the path.
+    // B4 wires real GBuffer MRT on view 7; B5 wires LightingPass
+    // fullscreen triangle on view 8.
+    return RenderPipelineDesc{{
+        RenderPassSlot::Shadow,
+        RenderPassSlot::GBuffer,
+        RenderPassSlot::Lighting,
+        RenderPassSlot::Transparent,
+        RenderPassSlot::PostProcess,
+        RenderPassSlot::UI,
+    }, RenderPath::Deferred};
 }
 
 bool RenderPipelineDesc::contains(RenderPassSlot slot) const noexcept
@@ -108,6 +114,17 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::PostProcessPass>();
     case RenderPassSlot::UI:
         return std::make_unique<detail::UIPass>();
+    // §P5 B3 (2026-07-22) — Deferred-only slots. Both shells are
+    // empty (B2 GBufferPass empty, B3 LightingPass empty). Real GPU
+    // work lands in B4 / B5. Until then they Noop-gate on adapter
+    // state and return 0 draws. Default `_enabled = true` from
+    // RenderPass base; `applyPipelineDesc` never `setEnabled(false)`
+    // — semantics of "Forward path doesn't see this pass" comes
+    // from the factory omitting the slot, not from a runtime gate.
+    case RenderPassSlot::GBuffer:
+        return std::make_unique<detail::GBufferPass>();
+    case RenderPassSlot::Lighting:
+        return std::make_unique<detail::LightingPass>();
     }
     return nullptr;
 }
@@ -130,6 +147,18 @@ struct Renderer::Impl {
     // BGFXAdapter::createGbufferFrameBuffer helper per docs/pass-
     // lessons-from-deferred.md §5.2); B5 LightingPass will consume
     // it via PassExecContext::gbufferPass.
+    // §P5 B3 (2026-07-22) — Forward/Deferred path selection now
+    // real (factory-layer per docs/pass-lessons-from-deferred.md
+    // §1.3 + E5 "omit slot = opt out" philosophy).
+    // `makeDefault()` still returns 5-slot Forward unchanged;
+    // `makeDeferred()` now returns 6-slot Deferred (Shadow +
+    // GBuffer + Lighting + Transparent + PostProcess + UI).
+    // ForwardOpaque is OMITTED from Deferred list per cutsheet
+    // §4.1 red line #4 — never re-rendered after Lighting.
+    // `applyPipelineDesc` for-loop 0 changes (走工厂层决策);
+    // `RenderPassSlot::GBuffer` / `::Lighting` enum values + the
+    // matching `makePassForSlot` switch cases land in this PR.
+    // B4 / B5 wire real GPU on top.
     detail::RenderPipeline        pipeline;
     RenderPipelineDesc            pipelineDesc = RenderPipelineDesc::makeDefault();
 
@@ -503,6 +532,21 @@ void Renderer::render(const RenderScene& scene)
         gbufferPassPtr = static_cast<const detail::GBufferPass*>(gbufferSlot);
     }
 
+    // §P5 B3 (2026-07-22) — when Lighting is in the configured
+    // pipeline (Deferred path), hand downstream passes (future
+    // B7+ multi-light consumers; B5's LightingPass itself is the
+    // dispatch endpoint and doesn't read this back) a non-owning
+    // pointer so they can read the lighting output FBO without
+    // FrameContext writeback (§5.3 red line). Today the LightingPass
+    // shell is empty — lightingFbo() returns BGFX_INVALID_HANDLE
+    // and the shell's execute() Noop-gates — so consumers receive
+    // a present-but-empty signal (same shape as GBufferPass /
+    // ShadowPass on Noop). Absent Lighting ⇒ nullptr.
+    const detail::LightingPass* lightingPassPtr = nullptr;
+    if (detail::RenderPass* lightingSlot = _impl->pipeline.findPass("Lighting")) {
+        lightingPassPtr = static_cast<const detail::LightingPass*>(lightingSlot);
+    }
+
     detail::PassExecContext ctx{
         _impl->adapter,
         _impl->shaderPool,
@@ -519,6 +563,7 @@ void Renderer::render(const RenderScene& scene)
         sceneFbo,
         shadowPassPtr,
         gbufferPassPtr,
+        lightingPassPtr,
     };
 
     static uint32_t s_compositeLog = 0;
@@ -936,6 +981,20 @@ bool Renderer::shadowsEnabled() const noexcept
     }
     const detail::RenderPass* shadow = _impl->pipeline.findPass("Shadow");
     return shadow != nullptr && shadow->isEnabled();
+}
+
+bool Renderer::lightingEnabled() const noexcept
+{
+    // §P5 B3 (2026-07-22) — live read of the Lighting slot's enabled
+    // flag. Mirrors shadowsEnabled() (E5 pattern). When no Lighting
+    // slot is mounted (e.g. host on Forward pipeline or passes a
+    // custom desc without it), returns false. Public surface
+    // const-noexcept; safe to call from any host observer.
+    if (!_impl) {
+        return false;
+    }
+    const detail::RenderPass* lighting = _impl->pipeline.findPass("Lighting");
+    return lighting != nullptr && lighting->isEnabled();
 }
 
 void Renderer::setPostProcessBloomStrength(float strength)
