@@ -51,6 +51,8 @@
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
 
+#include <AYShaderResource.h>
+
 #include <bgfx/bgfx.h>
 
 #include <cstdint>
@@ -121,6 +123,14 @@ public:
     void setGbufferSize(uint16_t width, uint16_t height) noexcept;
     void destroyResources(BGFXAdapter& adapter);
 
+    // §P5 B4b (2026-07-22) — lazy Phoskia GBuffer VS/FS acquire.
+    // Mirrors ShadowCaster::ensureProgram shape (public). Stamp-
+    // checked `static const char* s_acquiredCacheKey != kGBufferCacheKey`
+    // invalidates cached program when the literal bumps. Returns
+    // silently when the compile fails (sets _acquireFailed=true).
+    void ensureProgram(ayt::shader::ShaderResourcePool& pool);
+    bool isProgramReady() const noexcept;
+
 private:
     // §P5 B4a (2026-07-22) — add depth RT handle + build stamp pointer.
     // _gbufferDepthRt mirrors _gbufferAlbedoRt/_gbufferNormalRt/
@@ -141,6 +151,11 @@ private:
     // Public surface: 0 (private).
     void ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height);
     void cacheAttachments(BGFXAdapter& adapter);
+
+    // §P5 B4b (2026-07-22) — Phoskia GBuffer VS/FS program handle
+    // (mirror ShadowCaster::_program).
+    ayt::shader::ShaderResource _program;
+    bool _acquireFailed = false;
 };
 
 } // namespace ayt::render::detail

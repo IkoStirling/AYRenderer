@@ -515,6 +515,20 @@ void Renderer::render(const RenderScene& scene)
     // so Editor never saw any post filter (ripple included).
     const bgfx::FrameBufferHandle sceneFbo = _impl->ensureSceneFbo();
 
+    // §P5 B4b (2026-07-22) — broadcast viewport size to GBufferPass
+    // before dispatch so its execute() can ensure() the 4-attach
+    // MRT FBO at the correct W×H. Mirror the sceneFbo / viewportW
+    // wiring above (size is the same panel rect for the Deferred
+    // path). Skipped when GBuffer isn't in the configured pipeline
+    // (Forward path) — cutsheet §4.1 red line #4.
+    if (detail::RenderPass* gbufferSlot = _impl->pipeline.findPass("GBuffer")) {
+        if (_impl->viewportW > 0 && _impl->viewportH > 0) {
+            static_cast<detail::GBufferPass*>(gbufferSlot)
+                ->setGbufferSize(static_cast<uint16_t>(_impl->viewportW),
+                                 static_cast<uint16_t>(_impl->viewportH));
+        }
+    }
+
     // P1 (PR-C, 2026-07-20): build the PassExecContext once per frame
     // and hand it to RenderPipeline::executeAll. Every enabled pass
     // reads from the same context. Adding new per-frame state (e.g.
