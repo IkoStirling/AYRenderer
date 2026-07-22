@@ -324,6 +324,20 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
+    // §P5 B5 (2026-07-22) — LightingPass destroyResources mirror
+    // (mirror GBuffer destroy block above). LightingPass owns a
+    // 1× RGBA8 LightingOutput FBO + fullscreen triangle VB/IB +
+    // Phoskia Lighting program; all three must be released BEFORE
+    // pipeline.clear() for the same handle-rotation reason as
+    // Shadow/GBuffer. cutsheet `pass-lessons-from-deferred.md:151,
+    // 161, 169` lock the LightingOutput FBO lifetime to the
+    // LightingPass owner.
+    if (detail::RenderPass* lightingPass = pipeline.findPass("Lighting")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::LightingPass*>(lightingPass)->destroyResources(adapter);
+        }
+    }
+
     pipeline.clear();
     // E5 (§5.4, 2026-07-22): default pipeline now mounts EVERY slot
     // at its RenderPass base default (_enabled == true), Shadow
@@ -570,6 +584,20 @@ void Renderer::render(const RenderScene& scene)
         auto* gbufferTyped = static_cast<detail::GBufferPass*>(gbufferSlot);
         gbufferTyped->setPrevViewProj(_impl->prevMainView,
                                       _impl->prevMainProjection);
+    }
+
+    // §P5 B5 (2026-07-22) — broadcast viewport size to LightingPass
+    // before dispatch so its execute() can ensure() the 1× RGBA8
+    // LightingOutput FBO at the correct W×H. Mirror the GBuffer
+    // setGbufferSize block above (same viewport rect). Skipped
+    // when Lighting isn't in the configured pipeline (Forward path)
+    // — cutsheet §4.1 red line #4.
+    if (detail::RenderPass* lightingSlot = _impl->pipeline.findPass("Lighting")) {
+        if (_impl->viewportW > 0 && _impl->viewportH > 0) {
+            static_cast<detail::LightingPass*>(lightingSlot)
+                ->setOutputSize(static_cast<uint16_t>(_impl->viewportW),
+                                static_cast<uint16_t>(_impl->viewportH));
+        }
     }
 
     // P1 (PR-C, 2026-07-20): build the PassExecContext once per frame
@@ -1016,6 +1044,17 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
         if (detail::RenderPass* gbufferPass = _impl->pipeline.findPass("GBuffer")) {
             if (_impl->adapter.isInitialized()) {
                 static_cast<detail::GBufferPass*>(gbufferPass)
+                    ->destroyResources(_impl->adapter);
+            }
+        }
+        // §P5 B5 (2026-07-22) — LightingPass destroyResources mirror.
+        // LightingPass owns LightingOutput FBO + fullscreen triangle
+        // VB/IB + Phoskia Lighting program; all three must be released
+        // before bgfx::reset invalidates the attachments. Same handle-
+        // rotation reasoning as GBuffer.
+        if (detail::RenderPass* lightingPass = _impl->pipeline.findPass("Lighting")) {
+            if (_impl->adapter.isInitialized()) {
+                static_cast<detail::LightingPass*>(lightingPass)
                     ->destroyResources(_impl->adapter);
             }
         }

@@ -1,31 +1,43 @@
 #pragma once
 
 // §P5 B3 (2026-07-22) — LightingPass empty shell.
+// §P5 B5 (2026-07-22) — LightingPass fullscreen-triangle Lambert
+// directional light consumer.
 //
 // Mirrors GBufferPass's plumbing shape (PR-§P5 B2, 2026-07-22):
 // a derived RenderPass that owns its producer state (the lighting
 // output FBO + sampler bindings to the GBuffer MRT) and exposes
 // them via non-owning accessors that downstream consumers (future
-// B7+ multi-light consumers; the eventual tone-mapping pass in a
-// later lane) read through `PassExecContext::lightingPass`.
+// B7+ multi-light consumers; B6 PostProcessPass will consume via
+// `ctx.gbufferPass->lightingOutputFbo()` instead of `ctx.sceneFbo`
+// per `pass-lessons-from-deferred.md:169` "B6 must change PP source
+// priority") read through `PassExecContext::lightingPass`.
 //
-// This B3 commit ships the SHELL ONLY:
-//   - Class skeleton + RenderPass base contract (name + execute)
-//   - isReady() = false always (no FBO, no program, no allocator)
-//   - execute() Noop-gates on adapter state and returns 0 draws
-//   - Stub accessors return BGFX_INVALID_HANDLE / 0 / 0
-//   - destroyResources() is a clean no-op
+// B5 ships:
+//   - LightingOutput FBO (lightingFbo, RGBA8, viewport size — 1×
+//     color RT, NO depth attachment since this is a fullscreen
+//     post-process pass that does not read depth).
+//   - Fullscreen triangle VB/IB (mirror PostProcessPass shape, but
+//     owned privately — duplicate the kFullscreenTriangle constant
+//     rather than exposing PostProcessPass's private state).
+//   - Phoskia `material Lighting` source (Lambert directional, 3
+//     samplers: gbufferAlbedo/gbufferNormal/gbufferMotion + 3 vec4
+//     uniforms: u_lightDirection / u_lightColor / u_cameraPos).
+//   - `execute()` dispatches the fullscreen triangle on view 8
+//     (cutsheet §5.1 lock + kLightingViewId=8 already shipped in B3)
+//     bound to the LightingOutput FBO, with the 3 GBuffer samplers
+//     bound via the borrowed pointer (`ctx.gbufferPass->gbufferAlbedoRt()
+//     etc.`) and the 3 light uniforms uploaded from `ctx.frame`.
 //
-// Real GPU work lands in B5:
-//   - Lighting FBO (lightingOutputFbo, RGBA8, viewport size)
-//   - Fullscreen triangle VS using vertexLayoutPosUv (P6.5 ship)
-//   - FS that samples ctx.gbufferPass->gbufferAlbedoRt() /
-//     gbufferNormalRt() / gbufferMotionRt() + ctx.shadowPass->shadowFbo()
-//   - 1 directional light from FrameContext::lightDirection /
-//     lightColor (B5 reuses existing primitive — NO new Light struct
-//     per §5.3)
+// B5 deliberately does NOT:
+//   - Touch FrameContext (sizeof守门)
+//   - Add RenderScene::Light struct (永久退休)
+//   - Read shadowMap (B5.5 boundary — deferred to next cut)
+//   - Use motion attachment as input (motion is for B7+ TAA, B5 only
+//     samples albedo + normal)
+//   - Change RenderPass::execute signature
 //
-// §5.3 red lines we still respect:
+// Cutsheet §5.3 red lines we still respect:
 //   - No FrameContext writeback of lighting FBO
 //   - No RenderScene::Light struct added
 //   - No execute(PassExecContext&) signature change
@@ -42,6 +54,8 @@
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
 
+#include <AYShaderResource.h>
+
 #include <bgfx/bgfx.h>
 
 #include <cstdint>
@@ -52,11 +66,10 @@ namespace ayt::render::detail
 
 class LightingPass : public RenderPass {
 public:
-    // §P5 B5 (target) — LightingPass fullscreen triangle on view 8
-    // (reserved per docs/pass-lessons-from-deferred.md §5.1). Until
-    // then we use the bgfx-default invalid handle so anyone who
-    // calls `lightingFbo()` gets a safe "no Lighting output this
-    // frame" signal (same shape as GBufferPass::gbufferFbo() on Noop).
+    // §P5 B5 (2026-07-22) — LightingPass fullscreen triangle on
+    // view 8 (reserved per docs/pass-lessons-from-deferred.md §5.1).
+    // B3 already shipped kLightingViewId = 8 — the constant is the
+    // contract; B5 consumes it.
     static constexpr uint8_t  kLightingViewId      = 8;
     static constexpr uint16_t kLightingDefaultSize = 1280;
 
@@ -67,10 +80,18 @@ public:
 
     uint32_t execute(PassExecContext& ctx) override;
 
-    // B3: shell returns false unconditionally. B5 wires real FBO
-    // + program + ensure() then flips to:
-    //     return _lightingFbo.idx != UINT16_MAX && _programReady;
-    bool isReady() const noexcept { return false; }
+    // §P5 B5 (2026-07-22) — isReady() flips to true once BOTH the
+    // FBO ensure succeeded AND the Phoskia program is acquired.
+    // B3 shipped `return false` unconditionally as a placeholder;
+    // B5 wires the real expression. Mirror GBufferPass.cpp:92's
+    // `idx != UINT16_MAX` FBO-ready check, AND-gated with
+    // `_programReady` so consumers see a meaningful "can this pass
+    // actually run on the current backend" signal (cutsheet §1.7
+    // "no FBO/work" semantic — if either is missing, fall through
+    // to early-return 0 in execute()).
+    bool isReady() const noexcept {
+        return _lightingFbo.idx != UINT16_MAX && _programReady;
+    }
 
     // Stub accessors — return invalid handle / 0 until B5 wires
     // real GPU state. The output FBO is the consumer-side binding
@@ -80,17 +101,62 @@ public:
     uint16_t                lightingWidth()      const noexcept { return _lightingW; }
     uint16_t                lightingHeight()     const noexcept { return _lightingH; }
 
-    // B5 will move these into an internal `ensure()` like ShadowPass
-    // does for `_mapResources.ensure()`. B3 leaves them as public
-    // stubs so external resize code can be wired without ABI churn
-    // when B5 lands.
+    // B5 mirrors GBufferPass B4b's public plumbing shape: setOutputSize
+    // stays as a host-driven store-only call (no adapter access),
+    // and the next execute() honors the size. The actual FBO
+    // creation is deferred to ensure() (called when adapter is
+    // initialized). destroyResources() mirrors GBufferPass::destroy
+    // (GBufferPass.cpp:240-266) — drops the FBO + fullscreen VB/IB
+    // + program handle, resets all state.
     void setOutputSize(uint16_t width, uint16_t height) noexcept;
     void destroyResources(BGFXAdapter& adapter);
 
+    // §P5 B5 (2026-07-22) — lazy Phoskia Lighting VS/FS acquire.
+    // Mirrors GBufferPass::ensureProgram shape (GBufferPass.cpp:72-107)
+    // and PostProcessPass::ensureProgram shape (PostProcessPass.cpp:311+).
+    // Stamp-checked `static const char* s_acquiredCacheKey != kLightingCacheKey`
+    // invalidates the cached program when the literal bumps.
+    void ensureProgram(ayt::shader::ShaderResourcePool& pool);
+    bool isProgramReady() const noexcept { return _programReady; }
+
+    // §P5 B5 (2026-07-22) — build stamp pointer (mirror
+    // GBufferPass::buildStamp() at GBufferPass.h:117). Pointer-equal
+    // compare; default "" = never ensured.
+    const char* buildStamp() const noexcept { return _buildStamp; }
+
 private:
-    bgfx::FrameBufferHandle _lightingFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
-    uint16_t                _lightingW   = 0;
-    uint16_t                _lightingH   = 0;
+    // §P5 B5 (2026-07-22) — internal ensure path (mirror
+    // GBufferPass::ensure at GBufferPass.cpp:268-314). Called from
+    // execute() AFTER setOutputSize has stored the request. Creates
+    // the 1× RGBA8 FBO via `adapter.createFrameBuffer(w, h, RGBA8,
+    // withDepth=false)`, caches the result, and bumps buildStamp.
+    void ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height);
+
+    // §P5 B5 (2026-07-22) — internal lazy fullscreen triangle VB/IB
+    // creation (mirror PostProcessPass::ensureFullscreenQuad at
+    // PostProcessPass.cpp:280-309). We deliberately DUPLICATE the
+    // `kFullscreenTriangle` constant rather than expose
+    // PostProcessPass's private state — both passes happen to use
+    // the same 3-vert NDC oversize triangle (bgfx fullscreen-quad
+    // pattern, verified at PostProcessPass.cpp:15-33), and coupling
+    // them would either need a friend class or a public helper.
+    // Duplicate-constant is cheaper than the coupling.
+    void ensureFullscreenQuad(BGFXAdapter& adapter);
+
+    bgfx::FrameBufferHandle _lightingFbo     = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    bgfx::VertexBufferHandle _fullscreenVB   = bgfx::VertexBufferHandle{BGFX_INVALID_HANDLE};
+    bgfx::IndexBufferHandle  _fullscreenIB   = bgfx::IndexBufferHandle{BGFX_INVALID_HANDLE};
+    uint16_t                _lightingW       = 0;
+    uint16_t                _lightingH       = 0;
+    const char*             _buildStamp      = "";
+
+    // §P5 B5 (2026-07-22) — Phoskia Lighting VS/FS program (mirror
+    // GBufferPass::_program at GBufferPass.h:157). Lazy-acquired by
+    // ensureProgram(); consumed by execute() for the fullscreen
+    // triangle submit.
+    ayt::shader::ShaderResource _program;
+    bool _programReady      = false;  // mirror GBufferPass _acquireFailed semantics: _program.isValid() OR _programReady=true (set on success); failure path leaves _programReady=false
+    bool _programAcquireFailed = false;  // mirror GBufferPass _acquireFailed
 };
 
 } // namespace ayt::render::detail
