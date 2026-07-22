@@ -142,7 +142,8 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         // does not share FO's flushMaterial) keeps the helper's
         // single source-of-truth for the upload shape; mirror site is
         // ForwardOpaquePass::flushMaterial.
-        tryBindShadowSampler(material.shader, adapter, ctx.shadowPass, item.shadowFlags);
+        tryBindShadowSampler(material.shader, adapter, ctx.shadowPass,
+                          item.shadowFlags, frame.shadowBias);
 
         // U1++ — color-uniform upload shared with ForwardOpaquePass
         // via RenderPass::resolveAndApplyColorUniforms.

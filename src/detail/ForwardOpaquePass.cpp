@@ -102,7 +102,8 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
             ++s_stageLog;
         }
     }
-    tryBindShadowSampler(material.shader, adapter, shadowPass, shadowFlags);
+    tryBindShadowSampler(material.shader, adapter, shadowPass,
+                          shadowFlags, frame.shadowBias);
 
     // U1++ — color-uniform upload lifted to RenderPass helper; see
     // RenderPass.cpp::resolveAndApplyColorUniforms. Identical bytes

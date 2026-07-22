@@ -39,6 +39,21 @@ struct FrameContext {
     TonemapMode       tonemapMode      = TonemapMode::None;
 
     uint32_t          shadowMapId      = 0;
+
+    // P4.2 (§P4, 2026-07-22) — global shadow bias for receivers.
+    // Mirror of Renderer::setShadowBias(float); consumed by the
+    // forward / transparent passes when binding the shadow sampler.
+    // Units: same as the receiver Phoskia `shadowBias` property
+    // (ndc01 space; the receiver fragment does `refNdc01 + bias`
+    // before the depth comparison, see AYShadowShaderSources.h:211
+    // + the simple_lit_shadow.phoskia receiver contract). Default
+    // 0.003f matches the Phoskia property default (see
+    // AYShadowShaderSources.h:81). Host callers that want per-material
+    // control still call setMaterialVec3(material, "shadowBias", v)
+    // — the global value here is a multiplier applied during
+    // tryBindShadowSampler() AFTER the per-material uniform write,
+    // so it acts as a frame-level offset (set 0 to disable).
+    float             shadowBias       = 0.003f;
 };
 
 } // namespace ayt::render::detail

@@ -70,10 +70,19 @@ inline void trySetUniformMat4(shader::ShaderResource& shader, const char* primar
 //
 // `shadowPass == nullptr` or missing FBO/sample → lit fallback (safe).
 // Materials without `shadowMap` → no-op (pre-shadow shaders unchanged).
+//
+// P4.2 (2026-07-22) — `bias` parameter replaces the previous
+// hard-coded Contract::kDefaultBias. Pass the FrameContext::shadowBias
+// from the call site so a host Renderer::setShadowBias() call takes
+// effect for every receiver. Default 0.003f matches the Phoskia
+// receiver property default (AYShadowShaderSources.h:81 + ShadowSettings
+// ::kBiasDefault). Existing call sites pass frame.shadowBias
+// explicitly.
 void tryBindShadowSampler(shader::ShaderResource& shader,
                           BGFXAdapter& adapter,
                           const ShadowPass* shadowPass,
-                          ShadowFlags flags = kShadowCastAndReceive);
+                          ShadowFlags flags = kShadowCastAndReceive,
+                          float bias = 0.003f);
 
 // PR-F3 (2026-07-21) — bone-palette upload shared by
 // ForwardOpaquePass's draw loop AND ShadowPass's caster draw loop.

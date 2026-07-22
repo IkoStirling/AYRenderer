@@ -112,6 +112,10 @@ public:
                                         float nearZ,
                                         float farZ);
 
+    // Eye position last written by setMainCameraLookAtPerspective (default
+    // until then). Used by RenderSystem for Transparent back-to-front sortKey.
+    ayt::math::FVector3 mainCameraPosition() const noexcept;
+
     void setDirectionalLight(const ayt::math::FVector3& direction,
                              const ayt::math::FVector3& color);
 
@@ -131,6 +135,25 @@ public:
     // Const noexcept; no mirror field — reads the pass directly via
     // findPass("Shadow").
     bool shadowsEnabled() const noexcept;
+
+    // P4.2 (§P4, 2026-07-22) — global shadow receiver bias. Host
+    // controls this in ndc01 units (same as the Phoskia receiver
+    // shadowBias property — see AYShadowShaderSources.h:81 + the
+    // simple_lit_shadow.phoskia receiver contract). The renderer
+    // uploads this value into every receiver material's `shadowBias`
+    // uniform via tryBindShadowSampler; per-material
+    // setMaterialVec3(material, "shadowBias", v) still works for
+    // overrides (the global value lands AFTER per-material writes
+    // for that frame; future per-material override machinery can
+    // gate that ordering).
+    //
+    // Typical values: 0.001–0.005. Default 0.003f matches the
+    // Phoskia property default + ShadowSettings::kBiasDefault.
+    // Set 0 to disable global bias (per-material still active).
+    // Noop/headless: setter is a no-op until initialize(); getter
+    // returns the stored value.
+    void   setShadowBias(float bias);
+    float  shadowBias() const noexcept;
 
     // R5+ (Phase PostProcess) — knobs → FrameContext each frame.
     // Defaults = no visible effect (bloom=0, exposure=1, ripple=0,

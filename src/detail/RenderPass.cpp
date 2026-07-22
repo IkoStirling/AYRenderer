@@ -64,7 +64,8 @@ void RenderPass::resolveAndApplyColorUniforms(GpuMaterial& material)
 void tryBindShadowSampler(shader::ShaderResource& shader,
                           BGFXAdapter& adapter,
                           const ShadowPass* shadowPass,
-                          ShadowFlags flags)
+                          ShadowFlags flags,
+                          float bias)
 {
     using Contract = ayt::render::ShadowReceiverContract;
 
@@ -112,7 +113,13 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
         const shader::BindingId biasBinding =
             shader.getUniformBinding(Contract::kShadowBiasName.data());
         if (biasBinding != shader::InvalidBinding) {
-            const float biasPad[4] = {Contract::kDefaultBias, 0.0f, 0.0f, 0.0f};
+            // P4.2 (2026-07-22) — bias comes from the caller
+            // (FrameContext::shadowBias via Renderer::setShadowBias)
+            // instead of the hard-coded Contract::kDefaultBias.
+            // Default 0.003f matches the Phoskia property default
+            // so existing receivers render identically when the
+            // host has not called setShadowBias().
+            const float biasPad[4] = {bias, 0.0f, 0.0f, 0.0f};
             shader.setUniform(biasBinding, biasPad, sizeof(biasPad));
         }
 

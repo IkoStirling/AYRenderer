@@ -140,6 +140,15 @@ struct Renderer::Impl {
     float                          postProcessRippleSpeed    = 4.0f;
     detail::FrameContext::TonemapMode postProcessTonemapMode = detail::FrameContext::TonemapMode::None;
 
+    // P4.2 (§P4, 2026-07-22) — global shadow receiver bias in ndc01
+    // units. Mirrored into FrameContext::shadowBias each render so
+    // tryBindShadowSampler() (ForwardOpaquePass + TransparentPass
+    // call sites) uploads it into every receiver material's
+    // `shadowBias` uniform. Default 0.003f matches the Phoskia
+    // receiver property default + ShadowSettings::kBiasDefault;
+    // existing shaders render identically without host action.
+    float                          shadowBias               = 0.003f;
+
     // P0 (2026-07-20) — wall-clock origin for FrameContext.timeSeconds.
     // std::chrono::steady_clock is monotonic (immune to wall-clock
     // adjustments) which is what R5+ post-process effects (time-of-day
@@ -414,6 +423,9 @@ void Renderer::render(const RenderScene& scene)
     frame.rippleFrequency  = _impl->postProcessRippleFrequency;
     frame.rippleSpeed      = _impl->postProcessRippleSpeed;
     frame.tonemapMode      = _impl->postProcessTonemapMode;
+    // P4.2 (§P4, 2026-07-22) — global shadow receiver bias copied
+    // into FrameContext each frame; tryBindShadowSampler reads it.
+    frame.shadowBias       = _impl->shadowBias;
 
     // §5.5 cleanup (2026-07-22) — the F1-diagnostic FrameContext
     // shadow-writeback block (lastFrameShadowFbo cache → frame.shadowFboIdx
@@ -559,10 +571,8 @@ bgfx::FrameBufferHandle Renderer::Impl::ensureSceneFbo()
         adapter.destroy(sceneFbo);
         sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
-    sceneFbo = adapter.createFrameBuffer(static_cast<uint16_t>(w),
-                                         static_cast<uint16_t>(h),
-                                         bgfx::TextureFormat::RGBA8,
-                                         /*withDepth=*/true);
+    sceneFbo = adapter.createColorDepthFrameBuffer(static_cast<uint16_t>(w),
+                                                   static_cast<uint16_t>(h));
     if (detail::BGFXAdapter::isValid(sceneFbo)) {
         sceneFboW = static_cast<uint16_t>(w);
         sceneFboH = static_cast<uint16_t>(h);
@@ -854,6 +864,25 @@ bool Renderer::shadowPcfEnabled() const noexcept
     return _impl && _impl->shadowPcfEnabled;
 }
 
+void Renderer::setShadowBias(float bias)
+{
+    // P4.2 (§P4, 2026-07-22) — global shadow receiver bias knob.
+    // Range guidance: 0 (disable) to 0.01 (very strong; expect
+    // peter-panning). Negative values are accepted for completeness
+    // but produce "shadows behind the surface" artifacts in most
+    // Phoskia receivers — host responsibility. No clamping here;
+    // matches setMaterialFloat / setMaterialVec3 leniency.
+    if (!_impl) {
+        return;
+    }
+    _impl->shadowBias = bias;
+}
+
+float Renderer::shadowBias() const noexcept
+{
+    return _impl ? _impl->shadowBias : 0.003f;
+}
+
 bool Renderer::shadowsEnabled() const noexcept
 {
     // E5 (§5.4, 2026-07-22) — live read of the Shadow slot's enabled
@@ -980,6 +1009,11 @@ void Renderer::setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,
     _impl->mainCameraPosition = eye;
     setMainCamera(detail::fromBgfxColumnMajor(viewBx),
                   detail::fromBgfxColumnMajor(projBx));
+}
+
+ayt::math::FVector3 Renderer::mainCameraPosition() const noexcept
+{
+    return _impl ? _impl->mainCameraPosition : ayt::math::FVector3(0.0f, 0.0f, 4.0f);
 }
 
 void Renderer::destroyMesh(MeshHandle& mesh)

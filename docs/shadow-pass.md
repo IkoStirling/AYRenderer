@@ -115,3 +115,13 @@ ForwardOpaque / Transparent
 - FO 采样 caster color RT；blit→resolve 仅可选 readback（须独立 view）
 - 单 cascade 方向光 ortho；扩展预留见 `docs/shadow-pass-plan.md`
 - 产品默认 pipeline **可不含** Shadow；Editor / demo 用 `makeForwardWithShadows()`
+
+## Shadow Bias 控制
+
+- Phoskia receiver 侧声明 `property shadowBias = vec4(0.003, 0.0, 0.0, 0.0)`（`AYShadowShaderSources.h`）；receiver fragment 在 `refNdc01 + bias` 之后做深度比较（`AYShadowShaderSources.h:211`）。
+- **P4.2（§P4, 2026-07-22）**：新增全局 bias CPU 镜像 ── `FrameContext::shadowBias` + `Renderer::setShadowBias(float)` / `shadowBias()` getter。Host 一处控制，影响所有用 shadow 的 receiver 材质。
+- 默认 `0.003f`，匹配 Phoskia property 默认 + `ShadowSettings::kBiasDefault`。
+- `tryBindShadowSampler(shader, adapter, shadowPass, flags, bias)` 多 5 参 `bias`（默认 `0.003f`，向后兼容），`ForwardOpaquePass` + `TransparentPass` 调用点都传 `frame.shadowBias`。
+- Per-material 覆写仍可用 `setMaterialVec3(material, "shadowBias", v)`；全局值在 per-material uniform write 之后覆盖（可在将来加门控逻辑）。
+- 取值建议：`0`（关闭）→ `0.001`→ `0.005`（强）。负值技术上接受，常见接收 shader 产生「背面阴影」伪影。`peter-panning`（阴影脱离物体）通常 `bias >= 0.008` 触发。
+- 单测：`unittest/Test_P4_ShadowBias.cpp`（4 case：FrameContext 默认 / Renderer getter 默认 / set-get 往返 / tryBindShadowSampler 接受 5 参）。
