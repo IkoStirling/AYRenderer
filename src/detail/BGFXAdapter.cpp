@@ -432,9 +432,14 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
     if (!bgfx::isValid(color)) {
         return BGFX_INVALID_HANDLE;
     }
-    // Third arg is destroyTextures (not "withDepth"). PostProcess only
-    // needs color; use createColorDepthFrameBuffer when depth is required.
-    (void)withDepth;
+    // Third arg historically ignored depth (color-only RT). When the
+    // host asks for depth, build RGBA8+D24S8 so FO depth test works —
+    // color-only scene FBOs draw later meshes over earlier ones
+    // (cube "behind" ground with shadow still on the floor).
+    if (withDepth) {
+        bgfx::destroy(color);
+        return createColorDepthFrameBuffer(width, height);
+    }
     bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
         /*num=*/1, &color, /*destroyTextures=*/true);
     // color is owned by the framebuffer now — bgfx manages the
@@ -585,6 +590,95 @@ void BGFXAdapter::setState(uint64_t state)
 void BGFXAdapter::setTransformIdentity()
 {
     bgfx::setTransform(nullptr);
+}
+
+// P6.5 (§6 Pass-side backfill, 2026-07-22) — preset state
+// combinations. Each preset is a pure passthrough to bgfx::setState
+// with the same bit combination the pre-P6.5 Pass code spelled
+// inline (verified line-by-line against the inline state expressions
+// at ForwardOpaquePass.cpp:184-186 / TransparentPass.cpp:26-30 /
+// PostProcessPass.cpp:219-220 / ShadowPass casterDrawState).
+void BGFXAdapter::setStateOpaque()
+{
+    bgfx::setState(BGFX_STATE_WRITE_RGB
+                 | BGFX_STATE_WRITE_A
+                 | BGFX_STATE_WRITE_Z
+                 | BGFX_STATE_DEPTH_TEST_LESS
+                 | BGFX_STATE_CULL_CW);
+}
+
+void BGFXAdapter::setStateAlphaBlend()
+{
+    bgfx::setState(BGFX_STATE_WRITE_RGB
+                 | BGFX_STATE_WRITE_A
+                 | BGFX_STATE_BLEND_ALPHA
+                 | BGFX_STATE_DEPTH_TEST_LESS
+                 | BGFX_STATE_CULL_CW);
+}
+
+void BGFXAdapter::setStateDepthTestAlways()
+{
+    bgfx::setState(BGFX_STATE_WRITE_RGB
+                 | BGFX_STATE_WRITE_A
+                 | BGFX_STATE_DEPTH_TEST_ALWAYS);
+}
+
+void BGFXAdapter::setStateDepthOnlyWrite()
+{
+    // Shadow caster depth write — same bits as
+    // ShadowMapResources::casterDrawState() (PR-F1' shipped).
+    bgfx::setState(BGFX_STATE_WRITE_Z
+                 | BGFX_STATE_DEPTH_TEST_LESS);
+}
+
+bgfx::VertexLayout BGFXAdapter::vertexLayoutPosUv()
+{
+    // PostProcessPass fullscreen triangle — Position 2 floats +
+    // TexCoord0 2 floats (matches the FullscreenVertex POD stride
+    // and the Phoskia VS UV rebuild from pos.xy). Returning a fresh
+    // layout each call is intentional: bgfx::VertexLayout is a
+    // tiny POD (~32 bytes) and PostProcessPass caches it locally
+    // via ensureFullscreenQuad(); no leak risk.
+    bgfx::VertexLayout layout;
+    layout.begin()
+        .add(bgfx::Attrib::Position,  2, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+        .end();
+    return layout;
+}
+
+void BGFXAdapter::touch(uint8_t viewId)
+{
+    if (!_initialized) {
+        return;
+    }
+    bgfx::touch(viewId);
+}
+
+bool BGFXAdapter::capsHomogeneousDepth() const noexcept
+{
+    if (!_initialized) {
+        return false;
+    }
+    const bgfx::Caps* caps = bgfx::getCaps();
+    return caps != nullptr && caps->homogeneousDepth;
+}
+
+bool BGFXAdapter::capsTextureBlit() const noexcept
+{
+    if (!_initialized) {
+        return false;
+    }
+    const bgfx::Caps* caps = bgfx::getCaps();
+    return caps != nullptr && (caps->supported & BGFX_CAPS_TEXTURE_BLIT) != 0;
+}
+
+bool BGFXAdapter::capsTextureReadBack() const noexcept
+{
+    // Pre-existing supportsTextureReadBack() already does this — re-
+    // exported under the caps* prefix so ShadowPass's grep audit
+    // finds one consistent naming style for capability queries.
+    return supportsTextureReadBack();
 }
 
 void BGFXAdapter::setViewClearRaw(uint8_t viewId, uint16_t flags,

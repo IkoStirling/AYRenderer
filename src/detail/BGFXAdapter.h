@@ -108,8 +108,7 @@ public:
     // for caster z-test. Prefers R32F (RGBA8 is only 8-bit and causes
     // severe self-shadow acne → nearly-black lit meshes). Attachment 0
     // is the sampleable color RT.
-    // Note: createFrameBuffer(..., withDepth) does NOT add a depth
-    // attachment — its bool is bgfx destroyTextures.
+    // Also used for the Editor/scene color+depth RT (PostProcess sample).
     bgfx::FrameBufferHandle createColorDepthFrameBuffer(uint16_t width, uint16_t height);
 
     // R5+ — bind `fb` as the draw target for `viewId`. Pass
@@ -134,6 +133,49 @@ public:
     // else under src/detail/*Pass*).
     void setState(uint64_t state);
     void setTransformIdentity();
+
+    // P6.5 (§6 Pass-side backfill, 2026-07-22) — preset state
+    // combinations. These exist so the 4 Pass implementations can drop
+    // their direct use of `BGFX_STATE_*` macros and call one of these
+    // named presets instead. The state bit combinations here match the
+    // pre-P6.5 inline values byte-for-byte; this is a pure refactor.
+    //
+    // Presets:
+    //   setStateOpaque           — ForwardOpaquePass default draw.
+    //   setStateAlphaBlend       — TransparentPass (BLEND_ALPHA,
+    //                                no WRITE_Z to let the opaque
+    //                                z-buffer act as the depth test).
+    //   setStateDepthTestAlways  — PostProcessPass fullscreen blit
+    //                                (always-passes so the blit is
+    //                                never depth-tested against the
+    //                                scene FBO's leftover depth).
+    //   setStateDepthOnlyWrite   — ShadowPass caster depth write.
+    void setStateOpaque();
+    void setStateAlphaBlend();
+    void setStateDepthTestAlways();
+    void setStateDepthOnlyWrite();
+
+    // P6.5 — bgfx::VertexLayout preset for the PostProcessPass
+    // fullscreen triangle (Position 2 floats + TexCoord0 2 floats).
+    // The returned layout is a freshly-built bgfx::VertexLayout each
+    // call; PostProcessPass caches it locally. Stride must match the
+    // FullscreenVertex POD (16 bytes alignas(16)).
+    bgfx::VertexLayout vertexLayoutPosUv();
+
+    // P6.5 — bgfx::touch(viewId) wrapper. ShadowPass calls this to
+    // ensure the depth-only FBO view is included in bgfx's frame
+    // graph even when the caster draw loop produced zero draws (e.g.
+    // empty scene); without it bgfx may skip the view's clear and
+    // the next frame's reader sees stale depth.
+    void touch(uint8_t viewId);
+
+    // P6.5 — capability query wrappers so ShadowPass can stop calling
+    // bgfx::getCaps() directly. Return false when the adapter is not
+    // initialized (matches the Noop-backend "no caps" contract).
+    bool capsHomogeneousDepth() const noexcept;
+    bool capsTextureBlit() const noexcept;
+    bool capsTextureReadBack() const noexcept;
+
     void setViewClearRaw(uint8_t viewId, uint16_t flags,
                          uint32_t rgba = 0,
                          float    depth = 1.0f,

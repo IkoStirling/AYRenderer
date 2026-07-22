@@ -3,7 +3,6 @@
 #include "detail/FrameContext.h"
 #include "detail/ShadowPass.h"
 
-#include <bgfx/bgfx.h>
 #include <cstdio>
 
 namespace ayt::render::detail
@@ -181,9 +180,12 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
                                 /*stencil=*/0);
     }
 
-    const uint64_t defaultState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
-                                | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS
-                                | BGFX_STATE_CULL_CW;
+    // P6.5 (2026-07-22) — preset state combination replaces the
+    // pre-P6.5 inline `BGFX_STATE_WRITE_RGB | WRITE_A | WRITE_Z |
+    // DEPTH_TEST_LESS | CULL_CW`. Bit combination identical; called
+    // once per execute() because BGFXAdapter::setStateOpaque resets
+    // the cached state on each pass.
+    adapter.setStateOpaque();
 
     uint32_t drawCount = 0;
 
@@ -277,7 +279,10 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
 
         shader::DrawCallContext ctx;
         ctx.viewId = viewId;
-        ctx.state  = defaultState;
+        ctx.state  = 0;  // P6.5: per-draw state owned by Adapter; shader.submit
+                          // only writes viewId (state==0 means "use Adapter-
+                          // set state"). This matches the design.md §2.5
+                          // 'Adapter sets state, submit only owns viewId'.
         material.shader.submit(ctx);
         ++drawCount;
     }

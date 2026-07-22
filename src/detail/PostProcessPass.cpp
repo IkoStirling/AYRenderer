@@ -4,8 +4,6 @@
 
 #include "AYShaderResource.h"
 
-#include <bgfx/bgfx.h>
-
 #include <cstdio>
 #include <cstring>
 
@@ -38,6 +36,10 @@ constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 // Branchless (converter drops if/for). All knobs are vec4 (.x) for
 // bgfx Vec4 upload ABI — see docs/pass-lessons-from-shadow.md §3.1.
 // rippleParams.x = strength (0 = identity UV), .y = frequency, .z = speed.
+//
+// UV.y flip happens in the *fragment* (1 - vUv.y): Phoskia vertex
+// blocks reject `let` before `out` (parse → Undefined identifier: out).
+// Same D3D RT vs backbuffer convention as shadow map sampling.
 constexpr const char* kPostProcessPhoskiaSource = R"(
 material PostProcess {
     texture2d sceneColor
@@ -53,14 +55,15 @@ material PostProcess {
     }
     fragment {
         in  vUv : texcoord
+        let baseUv = vec2(vUv.x, 1.0 - vUv.y)
         let center = vec2(0.5, 0.5)
-        let d = vUv - center
+        let d = baseUv - center
         let dist = length(d)
         let invLen = 1.0 / max(dist, 0.0001)
         let dir = d * invLen
         let wave = sin(dist * rippleParams.y - uTime.x * rippleParams.z)
         let offset = dir * (wave * rippleParams.x)
-        let uv = vUv + offset
+        let uv = baseUv + offset
         let sampled = sample(sceneColor, uv)
         let raw = sampled.xyz * exposure.x
         let withBloom = raw + raw * bloomStrength.x
@@ -69,7 +72,34 @@ material PostProcess {
 }
 )";
 
-constexpr const char* kPostProcessCacheKey = "postprocess_ripple_v1_vec4";
+constexpr const char* kPostProcessCacheKey = "postprocess_ripple_v3_yflip_fs";
+
+// Identity blit — used only if the ripple program fails to acquire, so
+// Editor composite (which requires FBO→backbuffer) does not go black.
+constexpr const char* kPostProcessPassthroughSource = R"(
+material PostProcessBlit {
+    texture2d sceneColor
+    uniform vec4 bloomStrength
+    uniform vec4 exposure
+    uniform vec4 tonemapMode
+    uniform vec4 uTime
+    uniform vec4 rippleParams
+    vertex {
+        in  pos : position
+        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
+        return vec4(pos.x, pos.y, 0.0, 1.0)
+    }
+    fragment {
+        in  vUv : texcoord
+        let uv = vec2(vUv.x, 1.0 - vUv.y)
+        let sampled = sample(sceneColor, uv)
+        let raw = sampled.xyz * exposure.x
+        let withBloom = raw + raw * bloomStrength.x
+        return vec4(withBloom, sampled.w)
+    }
+}
+)";
+constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_v3_yflip_fs";
 
 } // namespace
 
@@ -114,9 +144,8 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     const uint16_t viewportY = ctx.viewportY;
 
     // P2 — only blit when a real scene FBO was filled this frame.
-    // Editor composite passes INVALID sceneFbo (3D already in the
-    // backbuffer hole); creating a local empty FBO and blitting it
-    // would paint the panel black.
+    // Without a scene RT there is nothing to sample (direct-to-
+    // backbuffer hosts skip this pass).
     const bgfx::FrameBufferHandle sceneFbo = ctx.sceneFbo;
     const bool hasSceneFbo = BGFXAdapter::isValid(sceneFbo);
     if (!hasSceneFbo) {
@@ -158,8 +187,13 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     adapter.setViewClearRaw(viewId, BGFX_CLEAR_NONE, 0, 1.0f, 0);
 
     if (!programReady) {
-        // No blit program ⇒ scene stays only in the FBO. Still restore
-        // the backbuffer binding so UIPass can composite chrome.
+        static bool s_loggedMissing = false;
+        if (!s_loggedMissing) {
+            std::fprintf(stderr,
+                "[PostProcessPass] FATAL: no blit program — scene stays in FBO "
+                "(Game View may be black). Check Phoskia acquire errors above.\n");
+            s_loggedMissing = true;
+        }
         return 0;
     }
 
@@ -186,9 +220,30 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
-    sub.state  = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
-               | BGFX_STATE_DEPTH_TEST_ALWAYS;
+    sub.state  = 0;  // P6.5: per-draw state owned by Adapter (see
+                       // setStateDepthTestAlways() called below).
+    // P6.5 (2026-07-22) — preset state replaces the inline
+    // `BGFX_STATE_WRITE_RGB | WRITE_A | DEPTH_TEST_ALWAYS`. Bit
+    // combination identical.
+    adapter.setStateDepthTestAlways();
     _program.submit(sub);
+
+    static bool s_loggedSubmit = false;
+    if (!s_loggedSubmit) {
+        std::fprintf(stderr,
+            "[PostProcessPass] blit ok view=%u rect=(%u,%u,%u,%u) "
+            "ripple=(%.3f,%.1f,%.1f) time=%.2f\n",
+            static_cast<unsigned>(viewId),
+            static_cast<unsigned>(viewportX),
+            static_cast<unsigned>(viewportY),
+            static_cast<unsigned>(viewportWidth),
+            static_cast<unsigned>(viewportHeight),
+            frame.rippleStrength,
+            frame.rippleFrequency,
+            frame.rippleSpeed,
+            frame.timeSeconds);
+        s_loggedSubmit = true;
+    }
     return 1;
 }
 
@@ -236,11 +291,13 @@ void PostProcessPass::ensureFullscreenQuad(BGFXAdapter& adapter)
     // time PostProcess runs on a real GPU backend. TexCoord0 is
     // packed for stride alignment; the Phoskia VS currently rebuilds
     // UV from pos.xy (see kPostProcessPhoskiaSource).
-    bgfx::VertexLayout layout;
-    layout.begin()
-        .add(bgfx::Attrib::Position,  2, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-        .end();
+    //
+    // P6.5 (2026-07-22) — layout construction now goes through
+    // BGFXAdapter::vertexLayoutPosUv() instead of inlining
+    // bgfx::VertexLayout::begin().add(...).end() here. The
+    // returned layout has the same byte shape (Position 2 floats +
+    // TexCoord0 2 floats).
+    const bgfx::VertexLayout layout = adapter.vertexLayoutPosUv();
 
     _fullscreenVB = adapter.createVertexBuffer(kFullscreenTriangle,
                                                 sizeof(kFullscreenTriangle),
@@ -256,18 +313,25 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
     if (_program.isValid() || _programAcquireFailed) {
         return;
     }
-    // R5.1 — pool.acquire takes the source string + a cache key.
-    // On success we resolve the 4 binding IDs once (cheaper than
-    // re-resolving every frame); on failure latch _programAcquireFailed
-    // so we do not re-invoke shaderc every frame (that stuttered the
-    // Editor when HLSL rejected the previous Phoskia body).
+    // Prefer the ripple filter; fall back to identity blit so Editor
+    // composite (FBO → backbuffer) never goes black on a bad compile.
     ayt::shader::ShaderResource acquired =
         pool.acquire(kPostProcessPhoskiaSource, kPostProcessCacheKey);
+    if (!acquired.isValid()) {
+        std::fprintf(stderr,
+                     "[PostProcessPass] ripple Phoskia acquire failed; "
+                     "trying passthrough blit\n");
+        for (const std::string& err : pool.lastCompileErrors()) {
+            std::fprintf(stderr, "[PostProcessPass]   %s\n", err.c_str());
+        }
+        acquired = pool.acquire(kPostProcessPassthroughSource,
+                                kPostProcessPassthroughCacheKey);
+    }
     if (!acquired.isValid()) {
         _programAcquireFailed = true;
         std::fprintf(stderr,
                      "[PostProcessPass] Phoskia acquire failed; "
-                     "post-process will run as R5+ no-op shader path\n");
+                     "post-process will skip blit (scene may stay offscreen)\n");
         for (const std::string& err : pool.lastCompileErrors()) {
             std::fprintf(stderr, "[PostProcessPass]   %s\n", err.c_str());
         }

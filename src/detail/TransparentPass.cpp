@@ -5,29 +5,12 @@
 #include "AYShaderResource.h"  // for ShaderResource::setUniform
 
 #include <algorithm>  // std::stable_sort
-#include <bgfx/bgfx.h>
 #include <vector>
 
 namespace ayt::render::detail
 {
 
 namespace {
-
-// BGFX state for transparent geometry. Differences from ForwardOpaquePass:
-//   * STATE_BLEND_ALPHA added (standard non-premultiplied "over" —
-//     assumes shader output is vec4(rgb, alpha), which is Phoskia default)
-//   * STATE_WRITE_Z removed — depth-write from transparent draws causes
-//     them to occlude each other when the scene isn't pre-sorted (U1.5
-//     now sorts via DrawItem::sortKey, but we still skip WRITE_Z to
-//     avoid breaking the test that all alpha fragments composite over
-//     the opaque z-buffer regardless of order). Depth TEST remains so
-//     we composite against the opaque z-buffer that ForwardOpaquePass
-//     populated first.
-const uint64_t kTransparentState = BGFX_STATE_WRITE_RGB
-                                 | BGFX_STATE_WRITE_A
-                                 | BGFX_STATE_BLEND_ALPHA
-                                 | BGFX_STATE_DEPTH_TEST_LESS
-                                 | BGFX_STATE_CULL_CW;
 
 // U1.5 — comparator: higher sortKey = drawn first (back-to-front
 // compositing). std::stable_sort + std::greater preserves insertion
@@ -56,6 +39,14 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     const RenderScene& scene = ctx.scene;
 
     adapter.setViewTransform(viewId, frame.view, frame.projection);
+
+    // P6.5 (2026-07-22) — preset state combination replaces the
+    // pre-P6.5 inline `BGFX_STATE_WRITE_RGB | WRITE_A | BLEND_ALPHA |
+    // DEPTH_TEST_LESS | CULL_CW`. Bit combination identical; called
+    // once per execute() because every draw in the loop below uses
+    // the same state (draw-state-0 in DrawCallContext signals
+    // "use the Adapter-set state").
+    adapter.setStateAlphaBlend();
 
     // P2 (PR-D, 2026-07-20) — bind the shared scene FBO so transparent
     // composite over the offscreen scene color (matches
@@ -159,7 +150,9 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 
         ayt::shader::DrawCallContext ctx;
         ctx.viewId = viewId;
-        ctx.state  = kTransparentState;
+        ctx.state  = 0;  // P6.5: per-draw state owned by Adapter (see
+                          // setStateAlphaBlend() called once at the top
+                          // of execute() below).
         material.shader.submit(ctx);
         ++drawCount;
     }

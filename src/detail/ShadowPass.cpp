@@ -5,8 +5,6 @@
 #include "detail/ShadowDiagnostics.h"
 #include "detail/ShadowMatrixBuilder.h"
 
-#include <bgfx/bgfx.h>
-
 #include <cmath>
 #include <cstdio>
 
@@ -27,11 +25,21 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
         return 0;
     }
 
+    // P6.5 (2026-07-22) — bgfx::getCaps() replaced with Adapter
+    // capability wrappers (capsTextureBlit / capsTextureReadBack).
+    // logShadowCapsIfNeeded still takes the rendererType as a uint32
+    // for stderr diagnostics; Adapter doesn't expose caps->rendererType
+    // today (only the two capability flags we need), so we keep the
+    // bgfx::getCaps() call here JUST for the rendererType number.
+    // bgfx::Caps::rendererType is not a bgfx:: handle — it's a
+    // bgfx::RendererType::Enum, used only for log; removing the
+    // include entirely would require a second Adapter getter for
+    // a single log line. Defer that to a future cleanup.
     const bgfx::Caps* caps = bgfx::getCaps();
     logShadowCapsIfNeeded(
         caps != nullptr ? static_cast<uint32_t>(caps->rendererType) : 999u,
-        caps != nullptr && (caps->supported & BGFX_CAPS_TEXTURE_BLIT) != 0,
-        caps != nullptr && (caps->supported & BGFX_CAPS_TEXTURE_READ_BACK) != 0);
+        adapter.capsTextureBlit(),
+        adapter.capsTextureReadBack());
 
     ++_frameCounter;
 
@@ -52,7 +60,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     _shadowCaster.ensureProgram(pool);
     const bool casterReady = _shadowCaster.isProgramReady();
 
-    const bool homogeneousDepth = caps != nullptr && caps->homogeneousDepth;
+    const bool homogeneousDepth = adapter.capsHomogeneousDepth();
     buildDirectionalShadowMatricesForScene(
         scene,
         meshes,
@@ -71,10 +79,20 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
 
     _mapResources.bindShadowView(adapter, viewId, _requestedSize);
     adapter.setViewTransformColumnMajor(viewId, _lightViewCol, _lightProjCol);
-    bgfx::touch(viewId);
+    // P6.5 (2026-07-22) — bgfx::touch(viewId) replaced with
+    // BGFXAdapter::touch() wrapper. Behavior identical (bgfx::touch
+    // with isInitialized()-guarded no-op semantics).
+    adapter.touch(viewId);
 
+    // P6.5 (2026-07-22) — depth-write caster state now goes through
+    // BGFXAdapter::setStateDepthOnlyWrite() preset instead of the
+    // inline BGFX_STATE_WRITE_Z|DEPTH_TEST_LESS bit combination.
+    // ShadowMapResources::casterDrawState() is kept as the
+    // canonical byte-equivalent getter for tests / external callers
+    // — we use it here because drawCasters() takes the state bits
+    // as an argument (matches the adapter-side setState bits 1:1).
     const uint64_t casterState = ShadowMapResources::casterDrawState();
-    adapter.setState(casterState);
+    adapter.setStateDepthOnlyWrite();
     if (ayt::render::ShadowDiagnostics::enabled(ayt::render::ShadowLogLevel::L1_Caps)) {
         static uint32_t s_casterStateLog = 0;
         if (s_casterStateLog < 2) {
