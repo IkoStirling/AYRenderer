@@ -34,39 +34,18 @@ constexpr FullscreenVertex kFullscreenTriangle[3] = {
 
 constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 
-// R5.1 (2026-07-20) — Phoskia source for the post-process effect.
-// Inlined as a constexpr string rather than read from disk because
-// (a) ShaderResourcePool::acquire(src, cacheKey) takes the source
-// directly (mirrors how unlit.phoskia is loaded in
-// Test_ForwardOpaque.cpp:84 + Test_TransparentPass_U1.cpp:67), and
-// (b) keeps the .phoskia artifact co-located with the only TU that
-// compiles it — no fragile "where does the file live at run-time?"
-// landmine. The shader does three things:
-//   1) Vertex: passthrough NDC position (fullscreen triangle verts
-//      are already in clip space) + emit UV varying via pos.xy * 0.5
-//      + 0.5 (NDC → texture UV).
-//   2) Fragment: sample u_sceneColor at UV, multiply by u_exposure,
-//      add bloom-style `raw * u_bloomStrength` (R5.1 ships the math
-//      path even though there's no bloom buffer yet — when the
-//      downsample/upsample pair lands in R5.1.2, the host swaps
-//      `raw` for the bloomed buffer in C++ without re-compiling).
-//   3) Tonemap dispatch via int mode: 0 = None (passthrough), 1 =
-//      Reinhard (x/(x+1)), 2 = ACES (Narkowicz fit). We use a
-//      nested `if (cond) { return ... }` shape rather than
-//      branchless `mix` because Phoskia's semantic analyzer accepts
-//      IfStmt at fragment-body top level and this keeps the math
-//      legible to anyone debugging the effect later.
-// R5.1 — Phoskia source for the post-process effect.
-// Keep branchless: BGFXConverter silently skips IfStmt, and HLSL
-// rejects GLSL-style `float3(scalar)` single-arg constructors.
-// TonemapMode uniform is still declared so binding IDs resolve; the
-// body is exposure + bloomStrength passthrough (tonemap = None).
+// Post-process: sceneColor sample with optional screen-space ripple.
+// Branchless (converter drops if/for). All knobs are vec4 (.x) for
+// bgfx Vec4 upload ABI — see docs/pass-lessons-from-shadow.md §3.1.
+// rippleParams.x = strength (0 = identity UV), .y = frequency, .z = speed.
 constexpr const char* kPostProcessPhoskiaSource = R"(
 material PostProcess {
     texture2d sceneColor
-    uniform float bloomStrength
-    uniform float exposure
-    uniform int tonemapMode
+    uniform vec4 bloomStrength
+    uniform vec4 exposure
+    uniform vec4 tonemapMode
+    uniform vec4 uTime
+    uniform vec4 rippleParams
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -74,15 +53,23 @@ material PostProcess {
     }
     fragment {
         in  vUv : texcoord
-        let sampled = sample(sceneColor, vUv)
-        let raw = sampled.xyz * exposure
-        let withBloom = raw + raw * bloomStrength
+        let center = vec2(0.5, 0.5)
+        let d = vUv - center
+        let dist = length(d)
+        let invLen = 1.0 / max(dist, 0.0001)
+        let dir = d * invLen
+        let wave = sin(dist * rippleParams.y - uTime.x * rippleParams.z)
+        let offset = dir * (wave * rippleParams.x)
+        let uv = vUv + offset
+        let sampled = sample(sceneColor, uv)
+        let raw = sampled.xyz * exposure.x
+        let withBloom = raw + raw * bloomStrength.x
         return vec4(withBloom, sampled.w)
     }
 }
 )";
 
-constexpr const char* kPostProcessCacheKey = "postprocess_blit_r51_v2";
+constexpr const char* kPostProcessCacheKey = "postprocess_ripple_v1_vec4";
 
 } // namespace
 
@@ -146,6 +133,8 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         && _uBloomStrength != ayt::shader::InvalidBinding
         && _uExposure      != ayt::shader::InvalidBinding
         && _uTonemapMode   != ayt::shader::InvalidBinding
+        && _uTime          != ayt::shader::InvalidBinding
+        && _uRippleParams  != ayt::shader::InvalidBinding
         && _tSceneColor    != ayt::shader::InvalidBinding;
 
     const bgfx::FrameBufferHandle sourceFbo = sceneFbo;
@@ -176,17 +165,24 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
 
     const ayt::shader::TextureHandle texHandle =
         ayt::render::detail::toShaderTexture(fboColor);
-    const float bloomStrength = frame.bloomStrength;
-    const float exposure      = frame.exposure;
-    const int32_t tonemapMode = static_cast<int32_t>(frame.tonemapMode);
+    // bgfx Vec4 slots — pad scalars into .x (lessons §3.1).
+    const float bloomPad[4] = {frame.bloomStrength, 0.0f, 0.0f, 0.0f};
+    const float exposurePad[4] = {frame.exposure, 0.0f, 0.0f, 0.0f};
+    const float tonemapPad[4] = {
+        static_cast<float>(static_cast<int32_t>(frame.tonemapMode)), 0.0f, 0.0f, 0.0f};
+    const float timePad[4] = {frame.timeSeconds, 0.0f, 0.0f, 0.0f};
+    const float ripplePad[4] = {
+        frame.rippleStrength, frame.rippleFrequency, frame.rippleSpeed, 0.0f};
 
     adapter.setTransformIdentity();
     adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
     adapter.setIndexBuffer(_fullscreenIB, 0, 3);
     _program.setTexture(0, _tSceneColor, texHandle);
-    _program.setUniform(_uBloomStrength, &bloomStrength, sizeof(bloomStrength));
-    _program.setUniform(_uExposure,      &exposure,      sizeof(exposure));
-    _program.setUniform(_uTonemapMode,   &tonemapMode,   sizeof(tonemapMode));
+    _program.setUniform(_uBloomStrength, bloomPad, sizeof(bloomPad));
+    _program.setUniform(_uExposure, exposurePad, sizeof(exposurePad));
+    _program.setUniform(_uTonemapMode, tonemapPad, sizeof(tonemapPad));
+    _program.setUniform(_uTime, timePad, sizeof(timePad));
+    _program.setUniform(_uRippleParams, ripplePad, sizeof(ripplePad));
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
@@ -281,6 +277,8 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
     _uBloomStrength = _program.getUniformBinding("bloomStrength");
     _uExposure      = _program.getUniformBinding("exposure");
     _uTonemapMode   = _program.getUniformBinding("tonemapMode");
+    _uTime          = _program.getUniformBinding("uTime");
+    _uRippleParams  = _program.getUniformBinding("rippleParams");
     _tSceneColor    = _program.getTextureBinding("sceneColor");
 }
 
@@ -314,6 +312,8 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
     _uBloomStrength = ayt::shader::InvalidBinding;
     _uExposure      = ayt::shader::InvalidBinding;
     _uTonemapMode   = ayt::shader::InvalidBinding;
+    _uTime          = ayt::shader::InvalidBinding;
+    _uRippleParams  = ayt::shader::InvalidBinding;
     _tSceneColor    = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
     _fboWidth = 0;

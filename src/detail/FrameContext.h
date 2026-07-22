@@ -18,6 +18,10 @@ struct FrameContext {
     float             timeSeconds      = 0.0f;
     float             bloomStrength    = 0.0f;
     float             exposure         = 1.0f;
+    // Screen-space ripple (UV warp). 0 = off (identity sampling).
+    float             rippleStrength   = 0.0f;
+    float             rippleFrequency  = 28.0f;
+    float             rippleSpeed      = 4.0f;
 
     enum class TonemapMode : uint8_t {
         None     = 0,

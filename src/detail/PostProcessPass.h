@@ -37,21 +37,17 @@ namespace ayt::render::detail
 // `docs/execution-plan.md` §附录 A for the test pin that this wire
 // works without regressions.
 //
-// Algorithm today (R5+ minimal — bloom/exposure/tonemap all wired but
-// the bundled Phoskia program is a near-identity "passthrough with
-// bloom strength + exposure + tonemap knob" composite; future
-// iterations can swap the program handle for a full downsample/upsample
-// bloom pair):
-//   1) Acquire the offscreen FBO from BGFXAdapter (create-once,
-//      resize-on-viewport-change tracked here).
-//   2) bind FBO as the view's draw target for the post-process viewId.
-//   3) Submit a fullscreen triangle (3 verts, 1 instance) reading the
-//      scene color from a sampler named "u_sceneColor" (the fragment
-//      shader is expected to declare `uniform sampler2D u_sceneColor`).
-//      The bundle program reads `u_time`, `u_bloomStrength`,
-//      `u_exposure`, `u_tonemapMode` for effect shaping.
-//   4) Bind the default backbuffer, blit FBO -> backbuffer.
-//   5) Return the draw-call count.
+// Algorithm today (2026-07-22): screen-space ripple UV warp +
+  // exposure/bloom gain. All scalar knobs are Phoskia `vec4` (.x)
+  // for bgfx Vec4 upload ABI. See docs/post-process.md.
+  //
+  // Historical note (R5.1 / P2):
+  //   1) Acquire the offscreen FBO from BGFXAdapter (create-once,
+  //      resize-on-viewport-change tracked here).
+  //   2) Prefer ctx.sceneFbo (FO+Transparent output) over self-FBO.
+  //   3) Submit fullscreen triangle sampling "sceneColor".
+  //   4) Bind default backbuffer; UIPass composites chrome after.
+  //   5) Return the draw-call count.
 //
 // Noop-backend safety: when BGFXAdapter is uninitialized or the FBO
 // create fails, the entire execute() body short-circuits to 0 draws
@@ -124,6 +120,8 @@ private:
     ayt::shader::BindingId      _uBloomStrength = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uExposure      = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uTonemapMode   = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uTime          = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uRippleParams  = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tSceneColor    = ayt::shader::InvalidBinding;
     // Latch so a failed acquire does not re-run shaderc every frame
     // (was the main stutter source when Phoskia→HLSL rejected).
