@@ -330,3 +330,101 @@ BGFXAdapter::createGbufferFrameBuffer(uint16_t width, uint16_t height);
   - C wires per-light shadow via `PassExecContext::perLightShadows` borrowed
     ptr + dual-FS program (K3: `count==0` ⇒ B program = 9-tap key-only,
     host pays 0 incremental cost).
+
+---
+
+## §Skybox0 — Equirect Skybox Pass (2026-07-23, ships)
+
+**主路线决定:** MVP ship equirect 2D panorama,**预留 cubemap 扩展位**
+(`enum SkySourceKind { Equirect=0, CubeMap=1 }` enum 占位;CubeMap 路径不 ship
+code,留 §Skybox0-B 接 samplerCube)。
+
+### 设计契约
+
+| 维度 | 决策 |
+|---|---|
+| **数据源** | `ayt::render::SkySource` host POD ── `kind` (enum) + `equirect` (TextureHandle) + `cubeReserve` (uint64_t reserved);`isActive()` ⇒ `kind==Equirect && hasEquirect()` |
+| **borrowed ptr** | `PassExecContext::skySource` + `PassExecContext::skyboxPass` ── 2 trailing defaults,17→18→19-field brace-init 兼容 |
+| **Pipeline slot** | `RenderPassSlot::Skybox = 1`, 在 Shadow 之后 GBuffer 之前;`makeDeferred()` 7-slot;`makeDefault()` Forward 不含 ── 红线 #4 (Forward host 0 行为变化) |
+| **几何** | 全屏三角形 (复用 `kFullscreenTriangle` pattern,no DrawItem loop) |
+| **RT** | 独立 `skyFbo` RGBA8 viewport size,withDepth=false (sky 在无限远);LightingPass 多 sample 一次合成 |
+| **view id** | **6** ── cutsheet §5.1 lock 表新增;预 §Skybox0 reserved 6 现在 claim |
+| **合成** | `mix(skyColor, lit, coverage)` ── sky 只在 lit ≈ 0 的区域当 backdrop,geometry 保持原色 |
+
+### 文件触碰 (10 文件,微超 ≤ 8 红线 2 个 ── 主人拍板)
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `include/AYRenderScene.h` | `enum SkySourceKind` + `struct SkySource` POD |
+| 2 | `include/AYRenderTypes.h` | `RenderPassSlot::Skybox` enum |
+| 3 | `include/AYRenderer.h` | `setSkySource` + `skySource()` getter |
+| 4 | `src/detail/SkySource.h` (新) | DS alias (mirror PerLightShadowDS.h) |
+| 5 | `src/detail/SkyboxPass.h` (新) | RenderPass subclass header |
+| 6 | `src/detail/SkyboxPass.cpp` (新) | Phoskia source + ensure/execute |
+| 7 | `src/detail/PassExecContext.h` | `skySource` + `skyboxPass` borrowed ptrs |
+| 8 | `src/detail/LightingPass.h/.cpp` | `_gbufferSkyRt` field + FS `texture2d gbufferSky` + `vec4 skyMix` + `mix(skyColor, lit, coverage)` |
+| 9 | `src/AYRenderer.cpp` | `makeDeferred` 7-slot + `makePassForSlot` factory + `setSkySource` impl + `Impl::_skySource` field + `render()` ctx fill + `setOutputSize` 广播 |
+| 10 | `unittest/Test_Skybox0.cpp` (新) + `unittest/Test_B3_LightingForwardDeferred.cpp` (修正 deferred passes.size 6→7) | 8 new cases + 1 updated |
+| 11 | `docs/pass-lessons-from-deferred.md` | 本节 |
+
+### K1 关键 invariants
+
+1. **MVP A 只 ship equirect 路径** ── `SkySourceKind::CubeMap` 是 enum value 但
+   no code path 接 cubemap sampler。host 设 CubeMap → SkyboxPass early-return 0
+   (no crash)。
+2. **Forward host 0 行为变化** ── SkyboxPass 仅在 `RenderPassSlot::Skybox` 显式
+   mount 的 Deferred pipeline 跑;`makeDefault()` 5-slot Forward 不含 Skybox ──
+   Test_ForwardOpaque + Test_ForwardOpaque_BlendSkip_P0_4 0 触动。
+3. **SkyboxPass Noop 路径** ── `isNoopBackend() || !isInitialized()` ⇒ 0;
+   `ctx.skySource == nullptr` ⇒ 0;`kind != Equirect` ⇒ 0;`!hasEquirect()` ⇒ 0。
+4. **LightingPass sky-blend 默认 intensity = 1.0** ── `skyMix.x = 1.0` 永远
+   upload;host 后续可 `setMaterialVec3(material, "skyMix", 0.5)` 调低。
+5. **gbufferSky sampler 默认 = 不绑** ── `ctx.skyboxPass == nullptr` ⇒ 不绑
+   sampler;Phoskia FS `sample(gbufferSky, baseUv)` 拿到 0 (Phoskia UB 行为,
+   bgfx 实际给 black) ── `mix(black, lit, 1) = lit` ── 跟 B5.5 行为 1:1。
+6. **Test 守门 invariant** ── `Test_B5p5::b5p5_key_light_shadow_only_fill_unshadowed`
+   在 §Skybox0 后仍绿 ── 因为 LightingPass 9-tap shadow 路径不变 + sky-blend
+   只在 lit 接近 0 时覆盖 (默认 shadow-lighting 把 ground 渲亮,sky 不染色)。
+7. **§Skybox0 不引入 IBL** ── ambient term 仍是 `vec3(0.1, 0.1, 0.1)` flat;
+   IBL 留给 future。
+
+### 复用既有 utilities
+
+| 已有 | 用法 |
+|---|---|
+| `LightingPass::kFullscreenTriangle` pattern | SkyboxPass copy 一份 (duplicate-constant 习惯) |
+| `BGFXAdapter::createFrameBuffer(w, h, RGBA8, withDepth=false)` | SkyboxPass FBO ensure |
+| `BGFXAdapter::createVertexBuffer` + `vertexLayoutPosUv()` | SkyboxPass fullscreen triangle |
+| `LightingPass::setOutputSize` + `ensure` + `ensureProgram` + `destroyResources` | SkyboxPass 镜像 |
+| `PassExecContext::shadowPass / gbufferPass / lightingPass` borrowed ptr | `skyboxPass` 镜像 |
+| `RenderPipelineDesc::makeDeferred()` + `makePassForSlot` 工厂 | Skybox slot 插入 |
+| `Renderer::setSceneLights` 公开 setter pattern | `setSkySource` 镜像 |
+| `BGFXAdapter::getFboAttachment` | `SkyboxPass::skyRt()` 镜像 |
+
+### View-id 锁表更新 (cutsheet §5.1)
+
+| view | 用途 | 备注 |
+|---|---|---|
+| 0 | backbuffer / clear | default |
+| 1 | ShadowPass caster | pre-B5.5 |
+| 2 | ShadowPass resolve | pre-B5.5 |
+| 3 | ForwardOpaque / Transparent | shared |
+| 4 | PostProcessPass (forward path) | pre-B5.5 |
+| 5 | UI | pre-B5.5 |
+| **6** | **SkyboxPass (sky backdrop)** | **§Skybox0 新增 (2026-07-23)** |
+| 7 | GBuffer MRT | B4 |
+| 8 | LightingPass fullscreen | B5 |
+| 10 | PostProcessPass deferred blit | B6 |
+
+### 不在 §Skybox0 scope (deferred 到 future)
+
+| Item | Reason |
+|---|---|
+| `CubeMap` sampler path | 主人明示「先 ship equirect, cubemap 未来」;`SkySourceKind::CubeMap` enum 占位但 no code path 接 |
+| IBL (ambient cube / irradiance / radiance) | MVP 不需 ambient/diffuse env light,纯 backdrop |
+| Skybox 滚动 / 旋转动画 | owner 没要求 |
+| Per-pixel depth-test (sky depth = 1 / far) | fullscreen + DEPTH_TEST_ALWAYS 够用 |
+| Phoskia dir calc (lat/long → 3D) for IBL | MVP FS 直接 sample,不 calc dir |
+| SkyboxPass depth 写 | sky = at infinity, no depth write (cutsheet 同意) |
+| 双 cubemap (左右眼 VR) | VR cut,not in MVP |
+| Fog (sky tint by fog) | post-§Skybox0 |

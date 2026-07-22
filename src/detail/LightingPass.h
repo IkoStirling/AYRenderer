@@ -53,6 +53,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
+#include "detail/SkyboxPass.h"
 
 #include <AYShaderResource.h>
 
@@ -142,6 +143,15 @@ private:
     // them would either need a friend class or a public helper.
     // Duplicate-constant is cheaper than the coupling.
     void ensureFullscreenQuad(BGFXAdapter& adapter);
+
+    // §Skybox0 (2026-07-23) — gbufferSkyRt cached binding (mirror
+    // gbufferAlbedoRt / gbufferNormalRt / gbufferMotionRt shape).
+    // LightingPass FS samples the sky FBO that SkyboxPass produces
+    // (via `ctx.skyboxPass->skyRt()`) to blend a backdrop into
+    // unlit areas. Stored here for symmetry with the other GBuffer
+    // RTs even though the actual handle comes from SkyboxPass — we
+    // don't own the FBO, just cache the lookup result for tests.
+    bgfx::TextureHandle     _gbufferSkyRt   = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
 
     bgfx::FrameBufferHandle _lightingFbo     = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     bgfx::VertexBufferHandle _fullscreenVB   = bgfx::VertexBufferHandle{BGFX_INVALID_HANDLE};

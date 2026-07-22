@@ -170,6 +170,14 @@ inline ShadowFlags makeShadowFlags(bool cast, bool receive) noexcept
 // makeForwardWithShadows() is now an alias for makeDefault().
 enum class RenderPassSlot : uint8_t {
     Shadow = 0,
+    // §Skybox0 (2026-07-23) — slot 1, between Shadow and GBuffer.
+    // The SkyboxPass writes an independent RGBA8 FBO (skyFbo) that
+    // LightingPass samples as a backdrop (`texture2d gbufferSky`).
+    // Default Forward pipeline (RenderPipelineDesc::makeDefault())
+    // does NOT include this slot — Skybox is opt-in via
+    // `configurePipeline(makeDeferred())` or a custom desc. Forward
+    // hosts see 0 behavior change (cutsheet §5.3 red line #4).
+    Skybox,
     ForwardOpaque,
     Transparent,
     PostProcess,

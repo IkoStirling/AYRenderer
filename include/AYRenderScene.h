@@ -166,6 +166,49 @@ static_assert(sizeof(Light) <= 64,
 // without source edits.
 using DirectionalLight = Light;
 
+// §Skybox0 (2026-07-23) — host-facing Skybox DataSource.
+// Single equirect texture (current default) OR single cube map
+// (future B cut). Lives on the host; renderer borrows via
+// PassExecContext::skySource — mirror SceneLights borrowed-ptr
+// pattern.
+//
+// Constraints (cutsheet §10 pass-lessons-from-deferred.md + §Skybox0):
+//   - ❌ NO bgfx:: types in this header (public surface; mirror Light).
+//   - ❌ NO RenderScene mutation (sky is a *scene-exterior* property,
+//     like SceneLights — RenderScene holds only DrawItems).
+//   - ✅ POD-only (enum + TextureHandle + uint64_t); no allocators,
+//     no strings, no GPU types.
+//   - ✅ Borrowed-ptr pattern: host owns the SkySource instance,
+//     passes its address into Renderer::setSkySource(); the renderer
+//     reads the pointer through PassExecContext::skySource per frame
+//     without copying. Lifetime contract: the SkySource must remain
+//     valid across any in-flight render() call (easiest lifetime =
+//     a host member, populated once at startup or per scene change).
+//
+// MVP A scope (equirect only, 2026-07-23):
+//   - `kind == Equirect` ⇒ SkyboxPass renders via `texture2d skyEquirect`.
+//   - `kind == CubeMap`  ⇒ SkyboxPass early-returns 0 today (enum
+//     placeholder; B-cut will add the samplerCube path).
+//   - `cubeReserve` is reserved for the B-cut handle. A leaves it 0.
+enum class SkySourceKind : uint8_t {
+    Equirect = 0,  // 2D panoramic sphere (current default).
+    CubeMap  = 1,  // samplerCube — reserved for §Skybox0-B cut.
+};
+
+struct SkySource {
+    SkySourceKind kind = SkySourceKind::Equirect;
+    TextureHandle equirect{};  // 2D equirect texture (kind==Equirect)
+    // Cube sampler handle reserved for future B cut; A leaves it 0
+    // (host can populate later via Renderer::setSkySourceCube() — not
+    // in A scope).
+    uint64_t cubeReserve = 0;
+
+    bool hasEquirect() const noexcept { return equirect.isValid(); }
+    bool isActive()    const noexcept {
+        return kind == SkySourceKind::Equirect && hasEquirect();
+    }
+};
+
 struct SceneLights {
     Light     lights[kMaxSceneLights]{};
     uint32_t  count = 0;

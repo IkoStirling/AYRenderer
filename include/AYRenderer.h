@@ -136,6 +136,27 @@ public:
     // light via FrameContext — see setDirectionalLight above).
     void setSceneLights(const SceneLights* lights);
 
+    // §Skybox0 (2026-07-23) — host-facing Skybox DataSource.
+    // Drives the Deferred SkyboxPass's equirect-panorama blit.
+    // Default Forward pipeline (RenderPipelineDesc::makeDefault())
+    // does NOT include the Skybox slot — Skybox is opt-in via
+    // `configurePipeline(makeDeferred())`. Forward hosts that call
+    // setSkySource() see 0 behavior change (Skybox slot absent in
+    // the pipeline ⇒ SkyboxPass not instantiated ⇒ renderer
+    // silently ignores the borrowed pointer).
+    //
+    // Lifetime contract: same shape as setSceneLights — the
+    // SkySource instance must outlive any in-flight render() call.
+    // Easiest lifetime = a host member, populated once at startup
+    // or per scene change.
+    //
+    // Passing a nullptr (or an inactive SkySource — see
+    // `SkySource::isActive()`) silences the sky blit. Hosts that
+    // want a per-frame sky swap can mutate the SkySource in
+    // place; the renderer reads the borrowed pointer each frame.
+    void setSkySource(const SkySource* sky);
+    const SkySource* skySource() const noexcept;
+
     // Quality / style knobs (safe to call after initialize).
     // msaa: 0=off, 2/4/8/16. Applies via bgfx::reset (backbuffer).
     void setMsaaSampleCount(uint32_t samples);
@@ -184,25 +205,21 @@ public:
     float  shadowBias() const noexcept;
 
     // R5+ (Phase PostProcess) — knobs → FrameContext each frame.
-    // Defaults = no visible effect (bloom=0, exposure=1, ripple=0,
-    // tonemap=None). Shader uniforms are vec4 slots (.x used); see
+    // Defaults: bloom=0, exposure=1, gamma=2.2, tonemap=None.
+    // Shader uniforms are vec4 slots (.x used); see
     // docs/pass-lessons-from-shadow.md §3.1.
     void setPostProcessBloomStrength(float strength);
     void setPostProcessExposure(float exposure);
-    // Screen ripple warp strength in UV units (typical 0.008–0.03).
-    // 0 disables the effect (passthrough sample UV).
-    void setPostProcessRippleStrength(float strength);
-    void setPostProcessRippleFrequency(float frequency);
-    void setPostProcessRippleSpeed(float speed);
-    // Freeze FrameContext.timeSeconds (post-process ripple/time). When
-    // paused, render() keeps the last sampled value so Editor Pause
-    // stops screen ripple without stopping the composite blit.
+    // Display gamma for final blit encode (pow(c, 1/gamma)). Default 2.2.
+    void setPostProcessGamma(float gamma);
+    // Freeze FrameContext.timeSeconds. When paused, render() keeps the
+    // last sampled value so Editor Pause freezes time-driven PP knobs
+    // without stopping the composite blit.
     void setPostProcessClockPaused(bool paused);
     bool isPostProcessClockPaused() const noexcept;
     // Drive FrameContext.timeSeconds from the host simulation clock
     // (typically GameLoop::getElapsedTime). When set, overrides the
-    // wall-clock path so Editor Pause freezes post-process ripple
-    // without a separate pause flag. Call once per composite frame.
+    // wall-clock path. Call once per composite frame.
     void setSimulationTimeSeconds(float seconds);
     enum class TonemapMode : uint8_t {
         None     = 0,

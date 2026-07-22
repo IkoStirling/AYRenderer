@@ -72,6 +72,13 @@ class GBufferPass;
 // every TU that already includes PassExecContext.h.
 class LightingPass;
 
+// §Skybox0 (2026-07-23) — SkyboxPass writes the equirect-panorama
+// backdrop FBO. Forward decl mirrors the LightingPass pattern so
+// PassExecContext can carry the borrowed pointer without dragging
+// the full SkyboxPass definition into every TU that already
+// includes PassExecContext.h.
+class SkyboxPass;
+
 
 
 struct PassExecContext {
@@ -210,6 +217,49 @@ struct PassExecContext {
     // Test_B6_PostProcessSourceFbo, ...) keep compiling without edits
     // via C++14 trailing-default behavior.
     const ayt::render::SceneLights* sceneLights = nullptr;
+
+    // §Skybox0 (2026-07-23) — borrowed, non-owning pointer to the
+    // host-supplied Skybox DataSource (ayt::render::SkySource).
+    // Drives the SkyboxPass's fullscreen-triangle FS (and
+    // indirectly the LightingPass's gbufferSky backdrop sampler).
+    // Mirror SceneLights / shadowPass / gbufferPass / lightingPass
+    // borrowed pointer pattern; lifetime contract: pointer must
+    // remain valid for the duration of pipeline::executeAll(ctx).
+    //
+    // Why this lives here (not on FrameContext / RenderScene): both
+    // are forbidden per cutsheet §5.3 red lines — sky is a
+    // *scene-exterior* property (like lighting), not a per-frame
+    // camera state and not a per-DrawItem attribute. The host
+    // supplies the sky via Renderer::setSkySource() and the
+    // renderer reads it via this borrowed pointer.
+    //
+    // Default-init = nullptr ⇒ SkyboxPass early-returns 0
+    // (LightingPass binds no gbufferSky sampler; final image is
+    // ambient-only when geometry is missing — byte-equivalent to
+    // pre-§Skybox0 behavior on a non-sky host). All existing
+    // 18-field brace-init test sites (Test_B7_MultiLightAccumulation
+    // ::b7_pass_exec_context_brace_init_default,
+    // Test_B5p5_LightingShadow::b5p5_full_pipeline_shadow_borrow_
+    // pointer_e2e, ...) keep compiling without edits via C++14
+    // trailing-default behavior.
+    const ayt::render::SkySource* skySource = nullptr;
+
+    // §Skybox0 (2026-07-23) — borrowed, non-owning pointer to the
+    // SkyboxPass that produced the active sky FBO this frame.
+    // LightingPass reads `ctx.skyboxPass->skyRt()` to bind the
+    // gbufferSky backdrop sampler. Mirrors the gbufferPass /
+    // lightingPass / shadowPass borrowed-pointer pattern; same
+    // lifetime contract. Forward-declared at the top of this
+    // header (mirror LightingPass forward-decl at the top of
+    // PassExecContext.h).
+    //
+    // Default-init = nullptr ⇒ LightingPass binds no gbufferSky
+    // sampler (FS `sample(gbufferSky, ...)` returns black; the
+    // `mix(black, lit, coverage)` collapses to `lit` when coverage
+    // is high; when coverage is low, the black sky contributes
+    // zero — byte-equivalent to pre-§Skybox0 dark-frame behavior
+    // on a Forward / non-sky host).
+    const SkyboxPass* skyboxPass = nullptr;
 };
 
 } // namespace ayt::render::detail

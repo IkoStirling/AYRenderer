@@ -274,13 +274,16 @@ TEST_CASE(b3_full_deferred_pipeline_noop_dispatch_with_lighting_pointer_wired) {
     CHECK(def.contains(RenderPassSlot::UI));
     CHECK(!def.contains(RenderPassSlot::GBuffer));   // B3: not in Forward
     CHECK(!def.contains(RenderPassSlot::Lighting));  // B3: not in Forward
+    CHECK(!def.contains(RenderPassSlot::Skybox));    // §Skybox0: Skybox not in Forward
 
-    // Part 2: Deferred factory — 6 slots, GBuffer + Lighting added,
-    // ForwardOpaque OMITTED.
+    // Part 2: Deferred factory — 7 slots (§Skybox0 2026-07-23 added
+    // Skybox between Shadow and GBuffer), GBuffer + Lighting +
+    // Skybox added, ForwardOpaque OMITTED.
     const RenderPipelineDesc deferred = RenderPipelineDesc::makeDeferred();
     CHECK(deferred.path == RenderPath::Deferred);
-    CHECK(deferred.passes.size() == 6u);
+    CHECK(deferred.passes.size() == 7u);
     CHECK(deferred.contains(RenderPassSlot::Shadow));
+    CHECK(deferred.contains(RenderPassSlot::Skybox));    // §Skybox0: in Deferred
     CHECK(deferred.contains(RenderPassSlot::GBuffer));   // B3: in Deferred
     CHECK(deferred.contains(RenderPassSlot::Lighting));  // B3: in Deferred
     CHECK(deferred.contains(RenderPassSlot::Transparent));

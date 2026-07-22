@@ -15,6 +15,7 @@
 #include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
 #include "detail/ShadowPass.h"
+#include "detail/SkyboxPass.h"
 #include "detail/TransparentPass.h"
 #include "detail/UiGpuContext.h"
 #include "detail/UIPass.h"
@@ -79,8 +80,18 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
     // tag is for hosts / observers that want to query the path.
     // B4 wires real GBuffer MRT on view 7; B5 wires LightingPass
     // fullscreen triangle on view 8.
+    //
+    // §Skybox0 (2026-07-23) — extended to 7 slots. Skybox added
+    // at slot 1, between Shadow and GBuffer. SkyboxPass writes an
+    // independent RGBA8 FBO (skyFbo) that LightingPass samples as
+    // a backdrop via `texture2d gbufferSky`. The Skybox slot is
+    // OPT-IN — `makeDefault()` (Forward) does NOT include it, so
+    // Forward hosts that call `setSkySource()` see 0 behavior
+    // change (cutsheet §5.3 red line #4). View-id allocation
+    // per cutsheet §5.1: SkyboxPass claims the reserved view 6.
     return RenderPipelineDesc{{
         RenderPassSlot::Shadow,
+        RenderPassSlot::Skybox,         // §Skybox0 (2026-07-23)
         RenderPassSlot::GBuffer,
         RenderPassSlot::Lighting,
         RenderPassSlot::Transparent,
@@ -121,10 +132,17 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
     // RenderPass base; `applyPipelineDesc` never `setEnabled(false)`
     // — semantics of "Forward path doesn't see this pass" comes
     // from the factory omitting the slot, not from a runtime gate.
+    //
+    // §Skybox0 (2026-07-23) — Skybox slot maps to SkyboxPass. Only
+    // mounted when `makeDeferred()` (or a custom desc) includes
+    // the Skybox slot — Forward `makeDefault()` does NOT include
+    // it, so Forward hosts see 0 behavior change.
     case RenderPassSlot::GBuffer:
         return std::make_unique<detail::GBufferPass>();
     case RenderPassSlot::Lighting:
         return std::make_unique<detail::LightingPass>();
+    case RenderPassSlot::Skybox:
+        return std::make_unique<detail::SkyboxPass>();
     }
     return nullptr;
 }
@@ -173,6 +191,13 @@ struct Renderer::Impl {
 
     ayt::math::Float4x4           mainView        = ayt::math::Float4x4::identity();
     ayt::math::Float4x4           mainProjection  = ayt::math::Float4x4::identity();
+    // §Skybox0 (2026-07-23) — host-supplied Skybox DataSource
+    // borrowed pointer. Default nullptr = no sky mounted (Forward
+    // default). When the host calls `Renderer::setSkySource(&sky)`,
+    // the renderer reads `sky.equirect` each frame via the borrowed
+    // pointer; the SkySource instance must outlive render(). Mirror
+    // `sceneLights` borrowed-ptr shape; same lifetime contract.
+    const ayt::render::SkySource*   skySource   = nullptr;
     // §P5 B4c (2026-07-22) — previous-frame view/projection cached on
     // Renderer::Impl. GBufferPass samples these for per-pixel motion
     // vectors (gl_FragData[2] = NDC half-range encoded displacement
@@ -219,9 +244,7 @@ struct Renderer::Impl {
     // Defaults = no effect (bloom=0, exposure=1, ripple=0, tonemap=None).
     float                          postProcessBloomStrength  = 0.0f;
     float                          postProcessExposure       = 1.0f;
-    float                          postProcessRippleStrength = 0.0f;
-    float                          postProcessRippleFrequency = 28.0f;
-    float                          postProcessRippleSpeed    = 4.0f;
+    float                          postProcessGamma          = 2.2f;
     detail::FrameContext::TonemapMode postProcessTonemapMode = detail::FrameContext::TonemapMode::None;
 
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias in ndc01
@@ -352,6 +375,17 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     if (detail::RenderPass* lightingPass = pipeline.findPass("Lighting")) {
         if (adapter.isInitialized()) {
             static_cast<detail::LightingPass*>(lightingPass)->destroyResources(adapter);
+        }
+    }
+
+    // §Skybox0 (2026-07-23) — SkyboxPass destroyResources mirror
+    // (mirror LightingPass destroy block above). SkyboxPass owns a
+    // 1× RGBA8 SkyOutput FBO + fullscreen triangle VB/IB + Phoskia
+    // Skybox program; all three must be released BEFORE
+    // pipeline.clear() for the same handle-rotation reason.
+    if (detail::RenderPass* skyboxPass = pipeline.findPass("Skybox")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::SkyboxPass*>(skyboxPass)->destroyResources(adapter);
         }
     }
 
@@ -554,9 +588,7 @@ void Renderer::render(const RenderScene& scene)
     // stack-local; cost is negligible (3 floats + 1 byte enum).
     frame.bloomStrength    = _impl->postProcessBloomStrength;
     frame.exposure         = _impl->postProcessExposure;
-    frame.rippleStrength   = _impl->postProcessRippleStrength;
-    frame.rippleFrequency  = _impl->postProcessRippleFrequency;
-    frame.rippleSpeed      = _impl->postProcessRippleSpeed;
+    frame.gamma            = _impl->postProcessGamma;
     frame.tonemapMode      = _impl->postProcessTonemapMode;
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias copied
     // into FrameContext each frame; tryBindShadowSampler reads it.
@@ -625,6 +657,25 @@ void Renderer::render(const RenderScene& scene)
         }
     }
 
+    // §Skybox0 (2026-07-23) — broadcast viewport size to SkyboxPass
+    // before dispatch so its execute() can ensure() the 1× RGBA8
+    // SkyOutput FBO at the correct W×H. Mirror the LightingPass
+    // setOutputSize block above (same viewport rect). Skipped
+    // when Skybox isn't in the configured pipeline (Forward
+    // default) — `makeDefault()` does not include the Skybox slot,
+    // so Forward hosts see 0 behavior change (cutsheet §5.3 red
+    // line #4). The host's `setSkySource()` call is still safe to
+    // make on Forward — the borrowed pointer is simply ignored
+    // because `ctx.skyboxPass == nullptr` and `ctx.skySource` is
+    // never read.
+    if (detail::RenderPass* skyboxSlot = _impl->pipeline.findPass("Skybox")) {
+        if (_impl->viewportW > 0 && _impl->viewportH > 0) {
+            static_cast<detail::SkyboxPass*>(skyboxSlot)
+                ->setOutputSize(static_cast<uint16_t>(_impl->viewportW),
+                                static_cast<uint16_t>(_impl->viewportH));
+        }
+    }
+
     // P1 (PR-C, 2026-07-20): build the PassExecContext once per frame
     // and hand it to RenderPipeline::executeAll. Every enabled pass
     // reads from the same context. Adding new per-frame state (e.g.
@@ -669,6 +720,14 @@ void Renderer::render(const RenderScene& scene)
         lightingPassPtr = static_cast<const detail::LightingPass*>(lightingSlot);
     }
 
+    // §Skybox0 (2026-07-23) — borrowed pointer to the SkyboxPass in
+    // the pipeline. nullptr when the host did not opt in via
+    // `configurePipeline(makeDeferred())` (Forward / no skybox path).
+    const detail::SkyboxPass* skyboxPassPtr = nullptr;
+    if (detail::RenderPass* skyboxSlot = _impl->pipeline.findPass("Skybox")) {
+        skyboxPassPtr = static_cast<const detail::SkyboxPass*>(skyboxSlot);
+    }
+
     detail::PassExecContext ctx{
         _impl->adapter,
         _impl->shaderPool,
@@ -692,6 +751,18 @@ void Renderer::render(const RenderScene& scene)
         // change). count == 0 falls through to B5 fallback at
         // LightingPass::execute() side too.
         _impl->sceneLights,
+        // §Skybox0 (2026-07-23) — host-supplied Skybox DataSource
+        // mount. Borrowed pointer from Renderer::setSkySource.
+        // nullptr = no sky mounted (Forward path / SkySource not
+        // configured). SkyboxPass early-returns 0; LightingPass
+        // binds no gbufferSky sampler — `mix(black, lit, 1) ==
+        // lit` collapses to the pre-§Skybox0 dark-frame behavior.
+        _impl->skySource,
+        // §Skybox0 (2026-07-23) — borrowed pointer to the SkyboxPass
+        // instance in the pipeline. nullptr when the Skybox slot is
+        // not mounted (Forward default). LightingPass uses this to
+        // bind the gbufferSky sampler (mirrors gbufferPassPtr).
+        skyboxPassPtr,
     };
 
     static uint32_t s_compositeLog = 0;
@@ -1077,6 +1148,30 @@ void Renderer::setSceneLights(const ayt::render::SceneLights* lights)
     _impl->sceneLights = lights;
 }
 
+// §Skybox0 (2026-07-23) — public setter for the host-supplied
+// Skybox DataSource. Borrowed pointer pattern (mirror
+// setSceneLights above): lifetime is the host's responsibility,
+// the renderer reads the pointer each frame via
+// `PassExecContext::skySource` without copying. nullptr / inactive
+// SkySource (`!isActive()`) ⇒ SkyboxPass early-returns 0;
+// LightingPass binds no gbufferSky sampler; pre-§Skybox0 dark-frame
+// behavior preserved on Forward / no-sky hosts.
+void Renderer::setSkySource(const ayt::render::SkySource* sky)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->skySource = sky;
+}
+
+const ayt::render::SkySource* Renderer::skySource() const noexcept
+{
+    if (!_impl) {
+        return nullptr;
+    }
+    return _impl->skySource;
+}
+
 void Renderer::setMsaaSampleCount(uint32_t samples)
 {
     if (!_impl) {
@@ -1213,28 +1308,12 @@ void Renderer::setPostProcessExposure(float exposure)
     _impl->postProcessExposure = exposure;
 }
 
-void Renderer::setPostProcessRippleStrength(float strength)
+void Renderer::setPostProcessGamma(float gamma)
 {
     if (!_impl) {
         return;
     }
-    _impl->postProcessRippleStrength = strength;
-}
-
-void Renderer::setPostProcessRippleFrequency(float frequency)
-{
-    if (!_impl) {
-        return;
-    }
-    _impl->postProcessRippleFrequency = frequency;
-}
-
-void Renderer::setPostProcessRippleSpeed(float speed)
-{
-    if (!_impl) {
-        return;
-    }
-    _impl->postProcessRippleSpeed = speed;
+    _impl->postProcessGamma = gamma;
 }
 
 void Renderer::setPostProcessClockPaused(bool paused)

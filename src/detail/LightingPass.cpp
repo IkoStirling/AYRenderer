@@ -50,25 +50,13 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
 // §P5 B5.5 (2026-07-22) — v16: worldPos from GBuffer RT2 as
 // RGBA16F raw xyz (no 8-bit encode). v15 RGBA8 encode caused
 // ~0.16m quantization → mosaic shadow blocks on the ground.
-// §P5.5 A (2026-07-23) — v18: UBO `vec4 dirs[8]` → `vec4 record[8]`
-// (`xyz = -direction` for Directional, `xyz = +position` for
-// Point/Spot — the post-A CPU pack fans out per `LightType`; in A
-// every Light is Directional so behavior is byte-equivalent to v16);
-// `record[i].w = float(LightType)` (today always 0.0 since A's
-// CPU pack never reaches the Point/Slot paths). Receiver math is
-// untouched — L0..L7 / f0..f7 / shadow 9-tap key-only path is the
-// same as v16. Test_B5p5 `b5p5_key_light_shadow_only_fill_unshadowed`
-// invariant still green. The host-facing `DirectionalLight` alias
-// is still source-compatible (see AYRenderScene.h:142).
-//
-// A also clears Test_B7 / Test_B5p5 mirror drift: mirror strings
-// were pinned to v10 / v14 while live cache key was v16. v18 bump
-// forces Test_B7 / Test_B5p5 cache-key pins to also bump; the
-// mirror strings themselves are replaced with live-source grep
-// (cutsheet §1 testing/lifecycle invariants — see
-// `Test_B7_MultiLightAccumulation.cpp`).
+// §P5.5 A (2026-07-23) — v19: keep UBO field name `dirs` (not `record`).
+ // `record` as a bgfx/HLSL uniform identifier was a bad rename — host
+ // upload / reflection mismatch left light vectors uninitialized
+ // (flickering cyan fill, unstable key, missing shadows) while
+ // `colors[]` still updated. `.w` still carries float(LightType).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v18_b5p5a_light_pod";
+    "lighting_v20_sky0_equirect_backdrop";
 
 // §P5 B5 (2026-07-22) — fullscreen-triangle vertex data, duplicated
 // from PostProcessPass.cpp:27-33 (private state there — coupling
@@ -128,7 +116,7 @@ constexpr uint16_t kLightingFullscreenIndices[3] = { 0, 1, 2 };
 // unittest/Test_MRT_Fragment.cpp::mrt_legacy_return_still_emits_fragcolor).
 constexpr const char* kLightingPhoskiaSource = R"(
 uniformblock Lights {
-    vec4 record[8]
+    vec4 dirs[8]
     vec4 colors[8]
 } binding 0
 material Lighting {
@@ -136,6 +124,7 @@ material Lighting {
     texture2d gbufferNormal
     texture2d gbufferMotion
     texture2d shadowMap
+    texture2d gbufferSky
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
@@ -143,6 +132,7 @@ material Lighting {
     uniform vec4 shadowBias
     uniform vec4 shadowMapTexel
     uniform vec4 shadowPcf
+    uniform vec4 skyMix
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     vertex {
         in  pos : position
@@ -156,20 +146,17 @@ material Lighting {
         let normalSample = sample(gbufferNormal, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
         let ambient = vec3(0.1, 0.1, 0.1)
-        // Empty slots are zero record — never normalize(0) (D3D hangs / NaN).
-        // §P5.5 A — `record[i].xyz` is the per-light GPU-side light
-        // vector. CPU pack writes -direction for Directional today
-        // (A only ships directional slot data). B will branch
-        // CPU-side per `LightType`: Point/Spot write `+position` so
-        // the FS computes `L = normalize(frag - lightPos)`.
-        let L0 = Lights.record[0].xyz * (1.0 / max(length(Lights.record[0].xyz), 0.0001))
-        let L1 = Lights.record[1].xyz * (1.0 / max(length(Lights.record[1].xyz), 0.0001))
-        let L2 = Lights.record[2].xyz * (1.0 / max(length(Lights.record[2].xyz), 0.0001))
-        let L3 = Lights.record[3].xyz * (1.0 / max(length(Lights.record[3].xyz), 0.0001))
-        let L4 = Lights.record[4].xyz * (1.0 / max(length(Lights.record[4].xyz), 0.0001))
-        let L5 = Lights.record[5].xyz * (1.0 / max(length(Lights.record[5].xyz), 0.0001))
-        let L6 = Lights.record[6].xyz * (1.0 / max(length(Lights.record[6].xyz), 0.0001))
-        let L7 = Lights.record[7].xyz * (1.0 / max(length(Lights.record[7].xyz), 0.0001))
+        // Empty slots are zero dirs — never normalize(0) (D3D hangs / NaN).
+        // dirs[i].xyz = TO-light (Directional) or light position (Point/Spot);
+        // dirs[i].w = float(LightType). A only ships Directional.
+        let L0 = Lights.dirs[0].xyz * (1.0 / max(length(Lights.dirs[0].xyz), 0.0001))
+        let L1 = Lights.dirs[1].xyz * (1.0 / max(length(Lights.dirs[1].xyz), 0.0001))
+        let L2 = Lights.dirs[2].xyz * (1.0 / max(length(Lights.dirs[2].xyz), 0.0001))
+        let L3 = Lights.dirs[3].xyz * (1.0 / max(length(Lights.dirs[3].xyz), 0.0001))
+        let L4 = Lights.dirs[4].xyz * (1.0 / max(length(Lights.dirs[4].xyz), 0.0001))
+        let L5 = Lights.dirs[5].xyz * (1.0 / max(length(Lights.dirs[5].xyz), 0.0001))
+        let L6 = Lights.dirs[6].xyz * (1.0 / max(length(Lights.dirs[6].xyz), 0.0001))
+        let L7 = Lights.dirs[7].xyz * (1.0 / max(length(Lights.dirs[7].xyz), 0.0001))
         let f0 = max(dot(N, L0), 0.0)
         let f1 = max(dot(N, L1), 0.0)
         let f2 = max(dot(N, L2), 0.0)
@@ -243,7 +230,17 @@ material Lighting {
                             + f7 * Lights.colors[7].xyz
         let directionalSum = keyContribution + fillContribution
         let lit = albedo.rgb * (ambient + directionalSum)
-        return vec4(lit, albedo.a)
+        // §Skybox0 (2026-07-23) — backdrop blend: sky only shows
+        // where lit is near zero (so geometry keeps its color;
+        // sky fills gaps in scene coverage). When
+        // `ctx.skyboxPass == nullptr` the gbufferSky sampler stays
+        // unbound and `sample(gbufferSky, baseUv)` returns black;
+        // `mix(black, lit, 1) == lit` collapses to the pre-§Skybox0
+        // dark-frame behavior on a Forward / non-sky host.
+        let skyColor = sample(gbufferSky, baseUv).xyz * skyMix.x
+        let coverage = step(0.001, max(max(lit.r, lit.g), lit.b))
+        let finalColor = mix(skyColor, lit, coverage)
+        return vec4(finalColor, albedo.a)
     }
 }
 )";
@@ -528,6 +525,44 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                                     toShaderTexture(motionHandle));
             }
         }
+        // §Skybox0 (2026-07-23) — gbufferSky backdrop sampler.
+        // Mirror gbufferAlbedoRt / gbufferNormalRt / gbufferMotionRt
+        // shape: lazy-resolve binding, bind from ctx.skyboxPass
+        // (SkyboxPass-borrowed-pointer mirror), cache the handle in
+        // `_gbufferSkyRt` for symmetry with the other GBuffer RTs.
+        // When ctx.skyboxPass == nullptr (Forward path / no sky
+        // mounted) the sampler stays unbound and
+        // `sample(gbufferSky, baseUv)` returns black, collapsing
+        // the backdrop blend to `lit` (pre-§Skybox0 behavior).
+        const shader::BindingId skyBinding =
+            _program.getTextureBinding("gbufferSky");
+        if (skyBinding != shader::InvalidBinding
+            && ctx.skyboxPass != nullptr) {
+            bgfx::TextureHandle skyHandle = ctx.skyboxPass->skyRt();
+            if (bgfx::isValid(skyHandle)) {
+                const uint8_t stage = _program.getTextureStage(skyBinding);
+                _program.setTexture(stage, skyBinding,
+                                    toShaderTexture(skyHandle));
+                _gbufferSkyRt = skyHandle;
+            } else {
+                _gbufferSkyRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+            }
+        }
+    }
+
+    // §Skybox0 (2026-07-23) — upload `skyMix` uniform. Default =
+    // 1.0 (full intensity). Host can override per-material via
+    // `Renderer::setMaterialVec3(material, "skyMix", v)`. Phoskia
+    // Vec4 ABI (bgfx Vec4 slot, see docs/pass-lessons-from-shadow.md
+    // §3.1) — scalar in .x, pad .yzw = 0. Bound unconditionally —
+    // when the gbufferSky sampler is unbound the skyMix value has
+    // no observable effect (the `sample` returns black regardless),
+    // so this upload is safe on both Forward and Deferred paths.
+    const shader::BindingId skyMixBinding =
+        _program.getUniformBinding("skyMix");
+    if (skyMixBinding != shader::InvalidBinding) {
+        const float skyMixPad[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+        _program.setUniform(skyMixBinding, skyMixPad, sizeof(skyMixPad));
     }
 
     // §P5 B5 (2026-07-22) — upload 3 light uniforms from FrameContext
@@ -647,7 +682,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         const uint32_t n = sceneLights->count;
         for (uint32_t i = 0; i < n && i < ayt::render::kMaxSceneLights; ++i) {
             const ayt::render::Light& L = sceneLights->lights[i];
-            // record[i] (16-byte vec4) — per LightType CPU-side split.
+            // dirs[i] (16-byte vec4) — per LightType CPU-side split.
             // A: only Directional reaches here; the Point/Spot
             // branches land at zero CPU cost (the conditionals are
             // mapped by the compiler to the right branch since `type`
@@ -697,25 +732,21 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         lightsBlock[ayt::render::kMaxSceneLights * 4 + 3] = 0.0f;
     }
 
-    // §P5.5 A — `dirs` field name has been renamed `record` to
-    // accommodate the per-type CPU-side split (record holds
-    // -direction / +position / float(type), colors is still vec4).
-    // Hosts that ship their own Phoskia receivers and look up
-    // `dirs` will silently fall through to the GLSL std140 UBO
-    // path (rendering unchanged for non-A receivers).
-    const shader::BindingId recordBinding = _program.getUniformBinding("record");
+    // §P5.5 A — field name stays `dirs` (xyz = light vector, w = type).
+    // Do NOT rename to `record` — that broke HLSL/bgfx uniform wiring.
+    const shader::BindingId dirsBinding = _program.getUniformBinding("dirs");
     const shader::BindingId colorsBinding = _program.getUniformBinding("colors");
-    if (recordBinding != shader::InvalidBinding
+    if (dirsBinding != shader::InvalidBinding
         && colorsBinding != shader::InvalidBinding) {
-        // HLSL field-split path: `uniform vec4 record[8]` + `colors[8]`.
+        // HLSL field-split path: `uniform vec4 dirs[8]` + `colors[8]`.
         static bool s_loggedSplit = false;
         if (!s_loggedSplit) {
             s_loggedSplit = true;
             std::fprintf(stderr,
                          "[LightingPass] lights via field uniforms "
-                         "record+colors (HLSL/bgfx)\n");
+                         "dirs+colors (HLSL/bgfx)\n");
         }
-        _program.setUniform(recordBinding, lightsBlock,
+        _program.setUniform(dirsBinding, lightsBlock,
                             ayt::render::kMaxSceneLights * 4u * sizeof(float));
         _program.setUniform(colorsBinding,
                             lightsBlock + ayt::render::kMaxSceneLights * 4u,
@@ -732,7 +763,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             if (!s_loggedMissing) {
                 s_loggedMissing = true;
                 std::fprintf(stderr,
-                             "[LightingPass] WARNING: no record/colors uniforms "
+                             "[LightingPass] WARNING: no dirs/colors uniforms "
                              "and no Lights UBO — directional lighting skipped\n");
             }
         }
