@@ -174,11 +174,13 @@ struct Renderer::Impl {
     // Rebuild pipeline.passes from pipelineDesc. Preserves UI backend.
     void applyPipelineDesc(const RenderPipelineDesc& desc);
 
-#if AY_F1_DIAG_FRAME_SHADOW
-    // F1 diag — cache written into FrameContext each render().
-    bgfx::FrameBufferHandle lastFrameShadowFbo =
-        bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
-#endif
+    // §5.5 cleanup (2026-07-22) — `lastFrameShadowFbo` cache removed.
+    // It lived under #if AY_F1_DIAG_FRAME_SHADOW and was used only by
+    // the now-retired F1 diagnostic path. E5 ships default-on Shadow
+    // without that diagnostic; consumers that want the active shadow
+    // FBO should ask the ShadowPass producer directly via
+    // PassExecContext::shadowPass->shadowFbo() (or skip the cache
+    // entirely since the per-frame FBO lookup is already O(1)).
 
     Impl()
         : resources(adapter, shaderPool)
@@ -413,17 +415,13 @@ void Renderer::render(const RenderScene& scene)
     frame.rippleSpeed      = _impl->postProcessRippleSpeed;
     frame.tonemapMode      = _impl->postProcessTonemapMode;
 
-#if AY_F1_DIAG_FRAME_SHADOW
-    frame.shadowFboIdx  = _impl->lastFrameShadowFbo.idx;
-    frame.lightViewProj = ayt::math::Float4x4::identity();
-    frame.lightIndex    = 0;
-#if AY_F1_DIAG_LIGHT
-    if (!scene.lights().empty()) {
-        frame.lightDirection = scene.lights()[0].direction;
-        frame.lightColor     = scene.lights()[0].color;
-    }
-#endif
-#endif
+    // §5.5 cleanup (2026-07-22) — the F1-diagnostic FrameContext
+    // shadow-writeback block (lastFrameShadowFbo cache → frame.shadowFboIdx
+    // / lightViewProj / lightIndex) is removed. That path was the §5.5
+    // PR-F1' C' forbidden combo (FrameContext shadow writeback + default-on
+    // Shadow). E5 ships default-on Shadow without the writeback, and the
+    // hosts consume the producer's FBO + light-view-proj via the bypass
+    // getter on PassExecContext::shadowPass (see PR-F2 / shadow-pass.md).
 
     const uint8_t viewId = _impl->compositeSceneViewId >= 0
                                ? static_cast<uint8_t>(_impl->compositeSceneViewId)
@@ -431,16 +429,13 @@ void Renderer::render(const RenderScene& scene)
 
     _impl->lastDrawCalls = 0;
 
-    // P2 scene FBO — used by fullscreen / non-composite hosts so
-    // PostProcess can sample the scene. Editor composite mode draws
-    // 3D straight into the backbuffer panel hole instead: the
-    // FBO→blit path was leaving the Game View black (view-id / blit
-    // coupling). INVALID ⇒ FO/Transparent use (vx,vy,vw,vh) on the
-    // default backbuffer (pre-P2 editor behavior).
-    const bgfx::FrameBufferHandle sceneFbo =
-        (_impl->compositeSceneViewId >= 0)
-            ? bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE}
-            : _impl->ensureSceneFbo();
+    // Scene FBO for FO/Transparent → PostProcess sample → backbuffer blit.
+    // Editor composite also uses this path: FO draws into a panel-sized
+    // offscreen RT (rect 0,0,w,h); PostProcessPass blits to the Game View
+    // hole (vx,vy,w,h) on view 4. Previously composite forced INVALID
+    // FBO (3D direct to backbuffer) which made PostProcess early-out —
+    // so Editor never saw any post filter (ripple included).
+    const bgfx::FrameBufferHandle sceneFbo = _impl->ensureSceneFbo();
 
     // P1 (PR-C, 2026-07-20): build the PassExecContext once per frame
     // and hand it to RenderPipeline::executeAll. Every enabled pass
@@ -515,15 +510,10 @@ void Renderer::render(const RenderScene& scene)
     // cleanly when the adapter is uninitialized or Noop.
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
 
-#if AY_F1_DIAG_FRAME_SHADOW
-    for (auto& pass : _impl->pipeline.passes()) {
-        if (pass && pass->name() == "Shadow") {
-            auto* shadow = static_cast<detail::ShadowPass*>(pass.get());
-            _impl->lastFrameShadowFbo = shadow->shadowFbo();
-            break;
-        }
-    }
-#endif
+    // §5.5 cleanup (2026-07-22) — the F1-diagnostic lastFrameShadowFbo
+    // cache update is removed. Consumers that need the current shadow
+    // FBO call `ctx.shadowPass->shadowFbo()` directly; we no longer
+    // mirror it through FrameContext (PR-F1' forbidden combo).
 }
 
 void Renderer::resize(uint32_t width, uint32_t height)

@@ -2,6 +2,15 @@
 //
 // Purpose: distinguish "EventBus bug" vs "RendererSubSystem sizeof mismatch
 // across TUs (incremental build / ODR)" vs "heap corruption from diag flags".
+//
+// §5.5 cleanup (2026-07-22): the F1-diag compile flags
+// (AY_F1_DIAG_LIGHT, AY_F1_DIAG_FRAME_SHADOW) are now permanently 0 —
+// the diagnostic code paths they gated are gone (RenderScene::Light,
+// FrameContext shadow writeback, lastFrameShadowFbo cache). This suite
+// is now a plain "ABI / ODR / sticky-Noop" anchor with no diagnostic
+// toggles left to flip. The companion doc f1-sigsegv-repro.md is kept
+// as a historical record of the F1 SIGSEGV bisect that motivated these
+// guards in the first place.
 
 #include "AYF1DiagFlags.h"
 #include "AYRenderer.h"
@@ -25,14 +34,18 @@ int g_sentinelWindowHandle = 0;
 
 void printDiagBanner()
 {
+    // §5.5: diag-flag printout replaced with a "retired flags" stamp.
+    // The sizeof checks below remain because they are still the primary
+    // ODR / layout-drift guard for this TU pair (any future change to
+    // RenderScene / RendererSubSystem / FrameContext would re-introduce
+    // the same class of EventBus _Orphan_all bug if lib and test TUs
+    // drifted).
     std::fprintf(stderr,
-                 "[F1 DIAG] flags light=%d frameShadow=%d "
-                 "(AY_F1_DIAG_DEFAULT_SHADOW retired in E4 §5.4 2026-07-22)\n"
+                 "[F1 DIAG] flags retired (AY_F1_DIAG_LIGHT=0, "
+                 "AY_F1_DIAG_FRAME_SHADOW=0) — §5.5 cleanup 2026-07-22\n"
                  "[F1 DIAG] sizeof RenderScene     test=%zu lib=%zu\n"
                  "[F1 DIAG] sizeof SubSystem       test=%zu lib=%zu\n"
                  "[F1 DIAG] sizeof FrameContext    test=%zu lib=%zu\n",
-                 AY_F1_DIAG_LIGHT,
-                 AY_F1_DIAG_FRAME_SHADOW,
                  sizeof(ayt::render::RenderScene),
                  RendererSubSystem::diagSizeofRenderScene(),
                  sizeof(RendererSubSystem),
@@ -58,11 +71,18 @@ TEST_CASE(f1_diag_sizeof_matches_between_test_tu_and_lib)
     CHECK(sizeof(ayt::render::detail::FrameContext) ==
           RendererSubSystem::diagSizeofFrameContext());
 
-    CHECK_INT_EQ(RendererSubSystem::diagFlagLight(), AY_F1_DIAG_LIGHT);
-    CHECK_INT_EQ(RendererSubSystem::diagFlagFrameShadow(), AY_F1_DIAG_FRAME_SHADOW);
-    // diagFlagDefaultShadow() retired in E4 (§5.4, 2026-07-22).
-    // The remaining two flags + sizeof checks still cover the ODR /
-    // layout-drift concerns that motivated the original suite.
+    // §5.5: the diagFlagLight/diagFlagFrameShadow runtime checks are
+    // gone (the compile flags are unconditionally 0 now). We pin the
+    // "always-0" contract at compile time instead so a future
+    // contributor who tries to re-introduce one of the flags sees a
+    // build break here instead of a silent ABI mismatch.
+    static_assert(AY_F1_DIAG_LIGHT == 0,
+                  "AY_F1_DIAG_LIGHT is retired (§5.5 cleanup 2026-07-22); "
+                  "do not re-introduce the diagnostic compile flag.");
+    static_assert(AY_F1_DIAG_FRAME_SHADOW == 0,
+                  "AY_F1_DIAG_FRAME_SHADOW is retired (§5.5 cleanup 2026-07-22); "
+                  "do not re-introduce the diagnostic compile flag.");
+    CHECK(true);  // placate some test runners that need an executable CHECK.
 }
 
 TEST_CASE(f1_diag_eventbridge_subscribe_after_noop_init)
@@ -105,10 +125,13 @@ TEST_CASE(f1_diag_dual_renderer_then_eventbridge)
         d.width = 64;
         d.height = 64;
         CHECK(r.initialize(d));
+        // §5.5: scene.addLight(Light{}) removed (Light struct retired).
+        // The render() call now exercises the post-cleanup scene
+        // shape — RenderScene has no _lights vector and the FO/Trans
+        // passes no longer reference one. This case catches a
+        // regression where a host TU still holds a stale sizeof
+        // expectation for RenderScene.
         ayt::render::RenderScene scene;
-#if AY_F1_DIAG_LIGHT
-        scene.addLight(ayt::render::Light{});
-#endif
         r.beginFrame({});
         r.render(scene);
         r.endFrame();

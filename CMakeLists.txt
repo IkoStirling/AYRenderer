@@ -112,23 +112,18 @@ target_compile_definitions(AYRenderer PRIVATE
     AY_BGFX_SHADER_INCLUDE_HINT="${AY_BGFX_SHADER_INCLUDE_DIR}"
 )
 
-# F1 SIGSEGV diagnosis toggles (docs/f1-sigsegv-repro.md).
-# Defaults OFF = product-safe tree. Turn ON one-at-a-time, then
-# Clean rebuild AYRenderer + AYRenderer_Test (never incremental-only).
-option(AY_F1_DIAG_LIGHT "F1 diag: RenderScene::Light storage" OFF)
-option(AY_F1_DIAG_FRAME_SHADOW "F1 diag: FrameContext shadowFbo/lightViewProj + lastFrameShadowFbo" OFF)
-# E4 (§5.4, 2026-07-22) removed AY_F1_DIAG_DEFAULT_SHADOW — see
-# include/AYF1DiagFlags.h for the retirement note.
-
-foreach(_f1_flag AY_F1_DIAG_LIGHT AY_F1_DIAG_FRAME_SHADOW)
-    if(${_f1_flag})
-        set(_f1_val 1)
-    else()
-        set(_f1_val 0)
-    endif()
-    # PUBLIC so every consumer TU (tests, demos) sees the same layout.
-    target_compile_definitions(AYRenderer PUBLIC ${_f1_flag}=${_f1_val})
-endforeach()
+# §5.5 cleanup (2026-07-22): the two F1-diag CMake options
+# (AY_F1_DIAG_LIGHT, AY_F1_DIAG_FRAME_SHADOW) and their foreach
+# target_compile_definitions block are removed. The diagnostic code
+# paths those flags gated are permanently retired (RenderScene::Light,
+# FrameContext shadow writeback, lastFrameShadowFbo cache). The
+# corresponding include/AYF1DiagFlags.h still defines both macros to
+# 0 unconditionally so any stale `#if AY_F1_DIAG_*` block in a TU
+# that hasn't been edited yet still compiles with the diagnostic-off
+# branch selected. See docs/f1-sigsegv-repro.md for the historical
+# F1 SIGSEGV bisect that motivated these guards.
+#
+# AY_F1_DIAG_DEFAULT_SHADOW was retired in E4 (§5.4, 2026-07-22).
 
 enable_testing()
 add_subdirectory(unittest)

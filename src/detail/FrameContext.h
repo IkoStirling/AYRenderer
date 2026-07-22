@@ -1,6 +1,5 @@
 #pragma once
 
-#include "AYF1DiagFlags.h"
 #include "aymath/MathTypes.h"
 
 #include <cstdint>
@@ -8,6 +7,15 @@
 namespace ayt::render::detail
 {
 
+// §5.5 cleanup (2026-07-22) — FrameContext no longer holds F1-diagnostic
+// shadow fields (shadowFboIdx / lightViewProj / lightIndex). Those were
+// the §5.5 PR-F1' C' forbidden combos (FrameContext shadow writeback
+// combined with default-on Shadow). E5 ships default-on Shadow WITHOUT
+// that writeback path, and the diagnostic code-path is now permanently
+// retired. The only shadow-related state remaining in FrameContext is
+// `shadowMapId` (an E1-shipped POD tail — semantic-free, kept so we
+// have a stable place to bind an optional per-frame shadow index
+// without growing the layout again).
 struct FrameContext {
     ayt::math::Float4x4 view            = ayt::math::Float4x4::identity();
     ayt::math::Float4x4 projection     = ayt::math::Float4x4::identity();
@@ -31,18 +39,6 @@ struct FrameContext {
     TonemapMode       tonemapMode      = TonemapMode::None;
 
     uint32_t          shadowMapId      = 0;
-
-#if AY_F1_DIAG_FRAME_SHADOW
-    // F1 diag — DO NOT store bgfx::FrameBufferHandle here.
-    // Including <bgfx/bgfx.h> from FrameContext.h pulls bgfx into TUs that
-    // also see ayt::memory::MemorySystem and breaks on bgfx::Memory /
-    // MemorySystem::instance name collisions (seen in AYRendererSubSystem.cpp).
-    // Store the raw handle index only (bgfx invalid = kInvalidHandle).
-    static constexpr uint16_t kInvalidShadowFbo = UINT16_MAX;
-    uint16_t                shadowFboIdx  = kInvalidShadowFbo;
-    ayt::math::Float4x4     lightViewProj = ayt::math::Float4x4::identity();
-    uint32_t                lightIndex    = 0;
-#endif
 };
 
 } // namespace ayt::render::detail

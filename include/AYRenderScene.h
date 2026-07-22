@@ -1,7 +1,6 @@
 #pragma once
 // AYRenderScene.h — frame draw list (engine-facing, no GPU types)
 
-#include "AYF1DiagFlags.h"
 #include "AYRenderTypes.h"
 
 #include <vector>
@@ -9,6 +8,15 @@
 namespace ayt::render
 {
 
+// §5.5 cleanup (2026-07-22) — RenderScene no longer holds an F1-diagnostic
+// Light struct / _lights vector / addLight() API. That storage was the
+// §5.5 PR-F1' C' forbidden combo (RenderScene::Light combined with
+// default-on Shadow and FrameContext shadow writeback). E5 ships
+// default-on Shadow WITHOUT a Light struct or writeback; the storage
+// is permanently retired. Hosts that want to drive directional light
+// state still call Renderer::setDirectionalLight(dir, color) which
+// feeds FrameContext::lightDirection (the existing primitive) — no
+// Light struct ever needed on the render path.
 struct DrawItem {
     MeshHandle     mesh;
     MaterialHandle material;
@@ -19,30 +27,10 @@ struct DrawItem {
     ShadowFlags                shadowFlags  = kShadowCastAndReceive;
 };
 
-#if AY_F1_DIAG_LIGHT
-// F1 diag — enabling this grows sizeof(RenderScene) and therefore
-// sizeof(RendererSubSystem) (member _scene sits before _events).
-// Mismatched TU sizes → EventBusHostScope::subscribe vector crash.
-struct Light {
-    enum class Type : uint8_t {
-        Directional = 0,
-        Point       = 1,
-        Spot        = 2,
-    };
-    Type                  type      = Type::Directional;
-    ayt::math::FVector3   direction = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
-    ayt::math::FVector3   color     = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
-    float                 intensity = 1.0f;
-};
-#endif
-
 class RenderScene {
 public:
     void clear() {
         _items.clear();
-#if AY_F1_DIAG_LIGHT
-        _lights.clear();
-#endif
     }
 
     void add(const DrawItem& item) { _items.push_back(item); }
@@ -76,19 +64,11 @@ public:
         _items.push_back(item);
     }
 
-#if AY_F1_DIAG_LIGHT
-    void addLight(const Light& light) { _lights.push_back(light); }
-    const std::vector<Light>& lights() const noexcept { return _lights; }
-#endif
-
     const std::vector<DrawItem>& items() const noexcept { return _items; }
     bool empty() const noexcept { return _items.empty(); }
 
 private:
     std::vector<DrawItem> _items;
-#if AY_F1_DIAG_LIGHT
-    std::vector<Light>    _lights;
-#endif
 };
 
 } // namespace ayt::render

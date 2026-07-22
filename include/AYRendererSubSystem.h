@@ -85,13 +85,15 @@ public:
     // F1 diag — sizeof as seen by the AYRenderer static lib TU.
     // Test binary compares against its own sizeof(); mismatch ⇒ ODR /
     // incremental-build layout bug (not an EventBus logic bug).
+    //
+    // §5.5 cleanup (2026-07-22): diagFlagLight() / diagFlagFrameShadow()
+    // removed — the diagnostic compile flags are permanently 0 now
+    // (see include/AYF1DiagFlags.h). Callers should compare against the
+    // AY_F1_DIAG_* macros directly. diagFlagDefaultShadow() was retired
+    // in E4.
     static std::size_t diagSizeofRenderScene();
     static std::size_t diagSizeofRendererSubSystem();
     static std::size_t diagSizeofFrameContext();
-    static int diagFlagLight();
-    static int diagFlagFrameShadow();
-    // diagFlagDefaultShadow() was retired in E4 (§5.4, 2026-07-22).
-    // See include/AYF1DiagFlags.h for the retirement note.
 
 private:
     void renderFrame();

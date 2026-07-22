@@ -605,17 +605,13 @@ std::size_t RendererSubSystem::diagSizeofFrameContext()
     return ayt::render::detailDiagSizeofFrameContext();
 }
 
-int RendererSubSystem::diagFlagLight()
-{
-    return AY_F1_DIAG_LIGHT;
-}
-
-int RendererSubSystem::diagFlagFrameShadow()
-{
-    return AY_F1_DIAG_FRAME_SHADOW;
-}
-
-// diagFlagDefaultShadow() was retired in E4 (§5.4, 2026-07-22).
+// §5.5 cleanup (2026-07-22) — diagFlagLight() / diagFlagFrameShadow()
+// removed. The diagnostic compile flags they returned are now permanently
+// 0 (see include/AYF1DiagFlags.h). Keeping the functions around as
+// "always-0" stubs would add surface for no gain — callers (notably
+// Test_F1_LayoutDiag) now assert directly against the AY_F1_DIAG_*
+// header macros at compile time. diagFlagDefaultShadow() was already
+// retired in E4.
 
 } // namespace ayt::render
 
