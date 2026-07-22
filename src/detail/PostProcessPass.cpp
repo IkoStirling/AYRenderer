@@ -1,6 +1,8 @@
 #include "detail/PostProcessPass.h"
 
 #include "detail/GpuResources.h"
+#include "detail/GBufferPass.h"
+#include "detail/LightingPass.h"
 
 #include "AYShaderResource.h"
 
@@ -143,12 +145,19 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     const uint16_t viewportX = ctx.viewportX;
     const uint16_t viewportY = ctx.viewportY;
 
-    // P2 — only blit when a real scene FBO was filled this frame.
-    // Without a scene RT there is nothing to sample (direct-to-
-    // backbuffer hosts skip this pass).
-    const bgfx::FrameBufferHandle sceneFbo = ctx.sceneFbo;
-    const bool hasSceneFbo = BGFXAdapter::isValid(sceneFbo);
-    if (!hasSceneFbo) {
+    // §P5 B6 (2026-07-22) — source-FBO priority helper. Collapses
+    // the cutsheet closure (pass-lessons-from-deferred.md:169)
+    // and the P2 default into a single static. Priority:
+    //   1. deferred path: ctx.gbufferPass->lightingOutputFbo()
+    //      (only when LightingPass is mounted AND its FBO ensured)
+    //   2. forward path: ctx.sceneFbo (P2 default)
+    //   3. invalid → return 0 (no-op)
+    //
+    // Helper does NOT branch in execute() — same single linear flow
+    // as before; only the sourceFbo value flips. No new view, no
+    // new shader, no new uniform path.
+    const bgfx::FrameBufferHandle sourceFbo = selectSourceFbo(ctx);
+    if (!BGFXAdapter::isValid(sourceFbo)) {
         return 0;
     }
 
@@ -166,7 +175,6 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         && _uRippleParams  != ayt::shader::InvalidBinding
         && _tSceneColor    != ayt::shader::InvalidBinding;
 
-    const bgfx::FrameBufferHandle sourceFbo = sceneFbo;
     const bgfx::TextureHandle fboColor = adapter.getFboAttachment(sourceFbo, 0);
     if (!BGFXAdapter::isValid(fboColor)) {
         return 0;
@@ -382,6 +390,39 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
     _programAcquireFailed = false;
     _fboWidth = 0;
     _fboHeight = 0;
+}
+
+// §P5 B6 (2026-07-22) — source-FBO priority helper. See
+// PostProcessPass.h for the priority ordering. Static, not a
+// member of PostProcessPass, so tests can call it directly
+// without spinning up execute() / ensure path.
+bgfx::FrameBufferHandle PostProcessPass::selectSourceFbo(
+    const PassExecContext& ctx) noexcept
+{
+    // 1) Deferred path — LightingPass is mounted AND its
+    //    `lightingOutputFbo()` is valid (B5 ensure ran this frame).
+    //    cutsheet pass-lessons-from-deferred.md:169 anchor.
+    //    Returned through ctx.gbufferPass's borrowed pointer so
+    //    PostProcessPass never owns the FBO (mirror FO/Trans
+    //    ownership discipline).
+    if (ctx.gbufferPass != nullptr && ctx.lightingPass != nullptr) {
+        const bgfx::FrameBufferHandle lightingFbo =
+            ctx.lightingPass->lightingOutputFbo();
+        if (bgfx::isValid(lightingFbo)) {
+            return lightingFbo;
+        }
+    }
+
+    // 2) Forward path / fallback — P2 default (PR-D, 2026-07-20).
+    //    Renderer-owned color+depth FBO that FO + Transparent wrote
+    //    into. Validated by BGFXAdapter::isValid (cutsheet §1.7
+    //    "no FBO/work" signal).
+    if (BGFXAdapter::isValid(ctx.sceneFbo)) {
+        return ctx.sceneFbo;
+    }
+
+    // 3) Neither valid → caller (execute) early-returns 0.
+    return BGFX_INVALID_HANDLE;
 }
 
 } // namespace ayt::render::detail

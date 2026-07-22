@@ -37,14 +37,36 @@ namespace ayt::render::detail
 // `docs/execution-plan.md` §附录 A for the test pin that this wire
 // works without regressions.
 //
+// §P5 B6 (2026-07-22) — Deferred-path closure. When the active
+// pipeline is Deferred (GBuffer + Lighting mount a LightingOutput
+// FBO that holds the LIT scene color), PostProcessPass MUST sample
+// `ctx.gbufferPass->lightingOutputFbo()` (= the B5 LightingPass
+// output RT) instead of `ctx.sceneFbo` (= Renderer-owned FO+Trans
+// shared RT, which on Deferred path is empty because FO is skipped
+// at cutsheet §5.3 red line). Without this priority flip,
+// PostProcessPass on a Deferred pipeline would blit an empty
+// sceneFbo — visible blackness on Editor Play.
+//
+// Source-FBO priority order (B6 lock):
+//   1. `ctx.gbufferPass != nullptr && ctx.lightingPass != nullptr
+//       && bgfx::isValid(ctx.lightingPass->lightingOutputFbo())`
+//       → use `ctx.gbufferPass->lightingOutputFbo()`
+//         (deferred path; cutsheet pass-lessons-from-deferred.md:169)
+//   2. `BGFXAdapter::isValid(ctx.sceneFbo)`
+//       → use `ctx.sceneFbo` (P2 default; forward path + hosts
+//         that opt into non-deferred post-process).
+//   3. neither valid → return 0 (no-op; matches existing P2 shape).
+//
 // Algorithm today (2026-07-22): screen-space ripple UV warp +
   // exposure/bloom gain. All scalar knobs are Phoskia `vec4` (.x)
   // for bgfx Vec4 upload ABI. See docs/post-process.md.
   //
-  // Historical note (R5.1 / P2):
+  // Historical note (R5.1 / P2 / B6):
   //   1) Acquire the offscreen FBO from BGFXAdapter (create-once,
   //      resize-on-viewport-change tracked here).
-  //   2) Prefer ctx.sceneFbo (FO+Transparent output) over self-FBO.
+  //   2) Source-FBO priority: LightingOutputFbo (deferred, B6) >
+  //      sceneFbo (forward, P2). Same-`sceneColor` Phoskia sampler;
+  //      no shader changes.
   //   3) Submit fullscreen triangle sampling "sceneColor".
   //   4) Bind default backbuffer; UIPass composites chrome after.
   //   5) Return the draw-call count.
@@ -81,6 +103,23 @@ public:
     std::string_view name() const override { return "PostProcess"; }
 
     uint32_t execute(PassExecContext& ctx) override;
+
+    // §P5 B6 (2026-07-22) — source-FBO priority helper. Single
+    // point of truth for the B6 cutsheet closure
+    // (`docs/pass-lessons-from-deferred.md:169`):
+    //
+    //   1. deferred-path LIT color via ctx.gbufferPass->lightingOutputFbo()
+    //   2. forward-path shared scene color via ctx.sceneFbo (P2)
+    //   3. invalid → caller early-returns 0 (no-op)
+    //
+    // Static on PassExecContext (not member on PostProcessPass) so
+    // tests can pin the priority pin without spinning up
+    // PostProcessPass state.
+    //
+    // No new branch outside this helper: execute() collapses to a
+    // single `sourceFbo = selectSourceFbo(ctx)` then an early-out
+    // on `!BGFXAdapter::isValid(sourceFbo)`.
+    static bgfx::FrameBufferHandle selectSourceFbo(const PassExecContext& ctx) noexcept;
 
     // R5+ — query whether the pass has a real FBO + program wired.
     // Useful for hosts that want to skip the slot via setEnabled(false)
