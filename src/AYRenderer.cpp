@@ -5,6 +5,7 @@
 #include "detail/BgfxMatrix.h"
 #include "detail/DebugOverlay.h"
 #include "detail/ForwardOpaquePass.h"
+#include "detail/GBufferPass.h"
 #include "detail/FrameContext.h"
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
@@ -124,6 +125,11 @@ struct Renderer::Impl {
     // §P5 B1 (2026-07-22) — `path` field plumbing only: Forward
     // default, Deferred opt-in via `makeDeferred()`. Actual
     // Deferred dispatch lands in B3.
+    // §P5 B2 (2026-07-22) — `GBufferPass` empty shell wired into
+    // the pipeline plumbing. Real MRT GPU work lands in B4 (new
+    // BGFXAdapter::createGbufferFrameBuffer helper per docs/pass-
+    // lessons-from-deferred.md §5.2); B5 LightingPass will consume
+    // it via PassExecContext::gbufferPass.
     detail::RenderPipeline        pipeline;
     RenderPipelineDesc            pipelineDesc = RenderPipelineDesc::makeDefault();
 
@@ -483,6 +489,20 @@ void Renderer::render(const RenderScene& scene)
         shadowPassPtr = static_cast<const detail::ShadowPass*>(shadowSlot);
     }
 
+    // §P5 B2 (2026-07-22) — when GBuffer is in the configured
+    // pipeline, hand downstream passes (B5 LightingPass, future
+    // B7+ multi-light consumers) a non-owning pointer so they can
+    // read the GBuffer MRT attachments without FrameContext
+    // writeback (§5.3 red line). Today the GBufferPass shell is
+    // empty — gbufferFbo() returns BGFX_INVALID_HANDLE and the
+    // shell's execute() Noop-gates — so consumers receive a
+    // present-but-empty signal (same shape as ShadowPass on
+    // Noop). Absent GBuffer ⇒ nullptr.
+    const detail::GBufferPass* gbufferPassPtr = nullptr;
+    if (detail::RenderPass* gbufferSlot = _impl->pipeline.findPass("GBuffer")) {
+        gbufferPassPtr = static_cast<const detail::GBufferPass*>(gbufferSlot);
+    }
+
     detail::PassExecContext ctx{
         _impl->adapter,
         _impl->shaderPool,
@@ -498,6 +518,7 @@ void Renderer::render(const RenderScene& scene)
         viewId,
         sceneFbo,
         shadowPassPtr,
+        gbufferPassPtr,
     };
 
     static uint32_t s_compositeLog = 0;

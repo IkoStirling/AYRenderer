@@ -1,0 +1,117 @@
+#pragma once
+
+// §P5 B2 (2026-07-22) — GBufferPass empty shell.
+//
+// Mirrors ShadowPass's plumbing shape (PR-F2, 2026-07-21): a derived
+// RenderPass that owns its producer state (the GBuffer MRT attachments)
+// and exposes them via non-owning pointers / accessors that downstream
+// consumers (the B5 LightingPass, then B7+ multi-light consumers)
+// read through `PassExecContext::gbufferPass`.
+//
+// This B2 commit ships the SHELL ONLY:
+//   - Class skeleton + RenderPass base contract (name + execute)
+//   - `isReady() = false` always (no FBO, no program, no allocator)
+//   - `execute()` Noop-gates on adapter state and returns 0 draws
+//   - Stub accessors return BGFX_INVALID_HANDLE / 0 / 0 so consumers
+//     that *compile-link* against this header can still call them
+//     and see the expected "no work" shape.
+//   - `destroyResources()` is a clean no-op (mirrors ShadowPass shape)
+//
+// Real GPU MRT + Phoskia GBuffer VS/FS + view-id 7 + R8G8B8A8 +
+// D24S8 depth attachment land in B4. Shadowing of the BGFXAdapter
+// `createGbufferFrameBuffer` MRT helper also lands in B4 (per
+// docs/pass-lessons-from-deferred.md §5.2). Real LightingPass that
+// binds the GBuffer as its input lands in B5.
+//
+// §5.3 red lines we still respect:
+//   - No FrameContext writeback of gbuffer RTs (would force const→
+//     non-const and re-trigger the §5.5 PR-F1' FrameContext ABI
+//     accident). Consumers read via PassExecContext::gbufferPass.
+//   - No RenderScene::Light struct added.
+//   - No execute(PassExecContext&) signature change on RenderPass
+//     base (1 borrowed pointer field, default-init null, fully
+//     additive — same shape as PR-F2's shadowPass field).
+//
+// Why empty shell ships first:
+//   B0 / B0.5 docs proved the cutsheet boundary. B1 wired the
+//   RenderPath enum + `RenderPipelineDesc::path` plumbing (808/808
+//   stable). B2 wires the GBufferPass *plumbing* without GPU so
+//   B4 / B5 can land as small, bisectable cuts instead of one
+//   big-bang PR. The shadow path was done identically (PR-F1'
+//   plumbing-only ShadowPass commit → PR-F2 shadowPass pointer
+//   commit → PR-F3 caster state commit → live shadow ship later).
+//
+// Lifetime: GBufferPass instances are owned by RenderPipeline via
+// unique_ptr (same as ShadowPass). The borrowed pointer in
+// PassExecContext stays valid for the duration of executeAll().
+// Across frames, the pointer remains valid because the pipeline
+// outlives every render() call.
+
+#include "detail/BGFXAdapter.h"
+#include "detail/PassExecContext.h"
+#include "detail/RenderPass.h"
+
+#include <bgfx/bgfx.h>
+
+#include <cstdint>
+#include <string_view>
+
+namespace ayt::render::detail
+{
+
+class GBufferPass : public RenderPass {
+public:
+    // §P5 B4 lands real MRT — RT0 albedo RGBA8, RT1 normal RGBA8,
+    // RT2 motion RGBA8, depth D24S8 hardware. Until then we use the
+    // bgfx-default invalid handle so anyone who calls `gbufferFbo()`
+    // gets a safe "no GBuffer RT this frame" signal (same shape as
+    // ShadowPass::shadowFbo() on Noop).
+    //
+    // View-id allocation: lock plan per docs/pass-lessons-from-
+    // deferred.md §5.1 — view 0..6 unchanged (Forward/Transparent/
+    // PostProcess/UI), B4 reserves view 7 for GBuffer MRT, B5 reserves
+    // view 8 for LightingPass. B2 only pins the symbolic constants
+    // (do not use them yet — no GPU work).
+    static constexpr uint8_t  kGBufferViewId   = 7;
+    static constexpr uint8_t  kGBufferAttachmentCount = 3; // RT0..RT2; depth is RT3 (separate attachment)
+    static constexpr uint16_t kGBufferDefaultSize = 1280;
+
+    GBufferPass() = default;
+    ~GBufferPass() override;
+
+    std::string_view name() const override { return "GBuffer"; }
+
+    uint32_t execute(PassExecContext& ctx) override;
+
+    // B2: shell returns false unconditionally. B4 will flip this
+    // once `ensure()` produces a valid FBO on a live adapter.
+    bool isReady() const noexcept { return _gbufferFbo.idx != UINT16_MAX && false; }
+
+    // Stub accessors — return invalid handles / identity until B4
+    // wires real GPU state. These exist so B5 LightingPass + B7+
+    // multi-light consumer code can compile-link against the shell
+    // header and run with the expected "no work yet" semantics.
+    bgfx::FrameBufferHandle gbufferFbo() const noexcept { return _gbufferFbo; }
+    bgfx::TextureHandle     gbufferAlbedoRt() const noexcept { return _gbufferAlbedoRt; }
+    bgfx::TextureHandle     gbufferNormalRt() const noexcept { return _gbufferNormalRt; }
+    bgfx::TextureHandle     gbufferMotionRt() const noexcept { return _gbufferMotionRt; }
+    uint16_t                gbufferWidth() const noexcept { return _gbufferW; }
+    uint16_t                gbufferHeight() const noexcept { return _gbufferH; }
+
+    // B4 will move these into an internal `ensure()` like ShadowPass
+    // does for `_mapResources.ensure()`. B2 leaves them as public
+    // stubs so external resizing code can be wired without an ABI
+    // churn when B4 lands.
+    void setGbufferSize(uint16_t width, uint16_t height) noexcept;
+    void destroyResources(BGFXAdapter& adapter);
+
+private:
+    bgfx::FrameBufferHandle _gbufferFbo       = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle     _gbufferAlbedoRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle     _gbufferNormalRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle     _gbufferMotionRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    uint16_t                _gbufferW         = 0;
+    uint16_t                _gbufferH         = 0;
+};
+
+} // namespace ayt::render::detail

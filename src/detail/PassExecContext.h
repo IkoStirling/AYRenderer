@@ -55,6 +55,15 @@ namespace ayt::render::detail
 // mutability (per docs/execution-plan.md §5.3 + §5.4 E6).
 class ShadowPass;
 
+// §P5 B2 (2026-07-22) — GBufferPass is the future B4 producer of the
+// GBuffer MRT (RT0 albedo + RT1 normal + RT2 motion + depth). The
+// B5 LightingPass consumes these attachments as its scene-color /
+// scene-normal / scene-motion inputs. Until then the shell class
+// is empty; this forward decl lets us carry the borrowed pointer on
+// PassExecContext in B2 without dragging the full GBufferPass
+// definition into every TU that already includes PassExecContext.h.
+class GBufferPass;
+
 
 
 struct PassExecContext {
@@ -123,6 +132,28 @@ struct PassExecContext {
     // invariant) while still letting forward passes read the
     // shadow producer.
     const ShadowPass*         shadowPass     = nullptr;
+
+    // §P5 B2 (2026-07-22) — borrowed, non-owning pointer to the
+    // GBufferPass that fills the GBuffer MRT this frame. Mirrors
+    // the shadowPass pattern above: Forward / Deferred-light passes
+    // (B5 LightingPass, future B7+ multi-light consumers) read the
+    // gbufferFbo / RT0..RT2 / depth attachments through this
+    // pointer instead of writing them through FrameContext (§5.3
+    // red line: no FrameContext ABI churn).
+    //
+    // Lifetime: pointer must remain valid for the duration of
+    // pipeline::executeAll(ctx). The GBufferPass is owned by the
+    // pipeline via unique_ptr, so a pipeline-resident GBufferPass
+    // is safe across dispatch (same guarantee as ShadowPass).
+    //
+    // Default-init = nullptr so existing 12-field brace-init
+    // test sites (Test_F2_ForwardShadow, Test_E5_DefaultShadow,
+    // Test_ShadowPass, Test_F3_SkinnedCaster, Test_PassExecContext_P1,
+    // Test_SceneRT_P2, Test_PostProcess_R5Plus, ...) keep compiling
+    // without edits — the new field defaults at the struct's
+    // brace-init trailing default (C++14+ behavior, same as
+    // PR-F2's shadowPass).
+    const GBufferPass*        gbufferPass    = nullptr;
 };
 
 } // namespace ayt::render::detail
