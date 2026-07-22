@@ -83,9 +83,11 @@ public:
 
     uint32_t execute(PassExecContext& ctx) override;
 
-    // B2: shell returns false unconditionally. B4 will flip this
-    // once `ensure()` produces a valid FBO on a live adapter.
-    bool isReady() const noexcept { return _gbufferFbo.idx != UINT16_MAX && false; }
+    // §P5 B4a (2026-07-22) — fix B2 known-bug `&& false`. Now reads:
+    // "FBO handle index is valid (≠ UINT16_MAX)". Default-constructed
+    // passes return false (BGFX_INVALID_HANDLE = UINT16_MAX), so this
+    // is the correct inverse of `_gbufferFbo.isValid()` semantics.
+    bool isReady() const noexcept { return _gbufferFbo.idx != UINT16_MAX; }
 
     // Stub accessors — return invalid handles / identity until B4
     // wires real GPU state. These exist so B5 LightingPass + B7+
@@ -95,8 +97,22 @@ public:
     bgfx::TextureHandle     gbufferAlbedoRt() const noexcept { return _gbufferAlbedoRt; }
     bgfx::TextureHandle     gbufferNormalRt() const noexcept { return _gbufferNormalRt; }
     bgfx::TextureHandle     gbufferMotionRt() const noexcept { return _gbufferMotionRt; }
+    // §P5 B4a (2026-07-22) — depth attachment accessor. B5 LightingPass
+    // doesn't sample depth (samples albedo/normal/motion only) but
+    // future B7+ multi-light chain / DebugOverlay GBuffer visualization
+    // (cutsheet §6.2) may need linearized depth. Mirror the 3 color
+    // accessors' shape — BGFX_INVALID_HANDLE until B4 ensure wires the
+    // 4-attach MRT.
+    bgfx::TextureHandle     gbufferDepthRt()  const noexcept { return _gbufferDepthRt; }
     uint16_t                gbufferWidth() const noexcept { return _gbufferW; }
     uint16_t                gbufferHeight() const noexcept { return _gbufferH; }
+
+    // §P5 B4a (2026-07-22) — build stamp pointer (mirror
+    // ShadowMapResources.h:55 `const char* _buildStamp` shape).
+    // Comparison via pointer equality (NOT string compare) — callers
+    // MUST pass a string literal with stable lifetime. Default `""`
+    // means "never ensured"; first ensure() pins the literal.
+    const char*             buildStamp()      const noexcept { return _buildStamp; }
 
     // B4 will move these into an internal `ensure()` like ShadowPass
     // does for `_mapResources.ensure()`. B2 leaves them as public
@@ -106,12 +122,25 @@ public:
     void destroyResources(BGFXAdapter& adapter);
 
 private:
+    // §P5 B4a (2026-07-22) — add depth RT handle + build stamp pointer.
+    // _gbufferDepthRt mirrors _gbufferAlbedoRt/_gbufferNormalRt/
+    // _gbufferMotionRt shape (BGFX_INVALID_HANDLE default).
+    bgfx::TextureHandle _gbufferDepthRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    const char*         _buildStamp      = "";
+
     bgfx::FrameBufferHandle _gbufferFbo       = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     bgfx::TextureHandle     _gbufferAlbedoRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     bgfx::TextureHandle     _gbufferNormalRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     bgfx::TextureHandle     _gbufferMotionRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     uint16_t                _gbufferW         = 0;
     uint16_t                _gbufferH         = 0;
+
+    // §P5 B4a (2026-07-22) — internal ensure (mirror
+    // ShadowMapResources::ensure shape). Calls
+    // adapter.createGbufferFrameBuffer + caches 4 attachments.
+    // Public surface: 0 (private).
+    void ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height);
+    void cacheAttachments(BGFXAdapter& adapter);
 };
 
 } // namespace ayt::render::detail

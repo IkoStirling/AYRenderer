@@ -282,6 +282,18 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
+    // §P5 B4a (2026-07-22) — GBuffer destroyResources mirror (mirror
+    // Shadow destroy block above). Cutsheet §5.2 + P2 sceneFbo closure
+    // pattern. Runs BEFORE pipeline.clear() so the FBO handle survives
+    // the rebuild (matches Shadow mirror — bgfx handle table rotates
+    // between pipeline rebuilds, post-clear destroy would race with
+    // new-pass FBO allocation).
+    if (detail::RenderPass* gbufferPass = pipeline.findPass("GBuffer")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::GBufferPass*>(gbufferPass)->destroyResources(adapter);
+        }
+    }
+
     pipeline.clear();
     // E5 (§5.4, 2026-07-22): default pipeline now mounts EVERY slot
     // at its RenderPass base default (_enabled == true), Shadow
@@ -923,6 +935,18 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
         if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
             if (_impl->adapter.isInitialized()) {
                 static_cast<detail::ShadowPass*>(shadowPass)
+                    ->destroyResources(_impl->adapter);
+            }
+        }
+        // §P5 B4a (2026-07-22) — GBuffer destroyResources mirror.
+        // `bgfx::reset` (triggered by msaa change at the `before != new`
+        // branch) drops view attachments, so the GBuffer FBO must
+        // rebuild on next execute(). Matches Shadow destroy mirror
+        // above — Shadow re-ensures via _mapResources.ensure(); GBuffer
+        // re-ensures via this class's `ensure()` in execute().
+        if (detail::RenderPass* gbufferPass = _impl->pipeline.findPass("GBuffer")) {
+            if (_impl->adapter.isInitialized()) {
+                static_cast<detail::GBufferPass*>(gbufferPass)
                     ->destroyResources(_impl->adapter);
             }
         }

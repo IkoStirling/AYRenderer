@@ -111,6 +111,29 @@ public:
     // Also used for the Editor/scene color+depth RT (PostProcess sample).
     bgfx::FrameBufferHandle createColorDepthFrameBuffer(uint16_t width, uint16_t height);
 
+    // §P5 B4a (2026-07-22) — GBuffer MRT helper. Cutsheet §5.2 locks
+    // 4-attach: RT0 albedo RGBA8 / RT1 normal RGBA8 / RT2 motion RGBA8
+    // / RT3 depth D24S8 hardware. Adapter wraps `bgfx::createFrameBuffer`
+    // num=4 form (bgfx.h:3393-3397) so Pass files never see raw bgfx
+    // (cutsheet §6 red line — passes go through adapter only).
+    //
+    // bgfx 约定 depth attachment 末位(bgfx docs + verified at
+    // `createColorDepthFrameBuffer` 2-attach pattern in this header).
+    // `destroyTextures=true` 让 FBO 拥有 attachments,匹配
+    // `ShadowMapResources::destroy` 的"勿 double-free"约定。
+    //
+    // Noop backend → BGFX_INVALID_HANDLE(cutsheet §1.7 adapter Noop gate,
+    // 镜像 `createColorDepthFrameBuffer` 的 `_initialized` 闸)。
+    //
+    // Failure modes: returns BGFX_INVALID_HANDLE. Caller treats that as
+    // "no GBuffer RT this frame → consumers gate on isReady()" cutsheet
+    // §1.7 模式。
+    //
+    // Reused by: detail/GBufferPass::ensure (B4a Plumbing)。
+    // Public API: NO ── adapter header is src/detail/ (not in include/),
+    // 不算 cutsheet §8 public-API 扩面。
+    bgfx::FrameBufferHandle createGbufferFrameBuffer(uint16_t width, uint16_t height);
+
     // R5+ — bind `fb` as the draw target for `viewId`. Pass
     // bgfx::kInvalidFrameBufferHandle to revert to the default
     // backbuffer (called by PostProcessPass::execute after blitting

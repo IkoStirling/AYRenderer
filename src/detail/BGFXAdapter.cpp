@@ -510,6 +510,93 @@ bgfx::FrameBufferHandle BGFXAdapter::createColorDepthFrameBuffer(uint16_t width,
     return BGFX_INVALID_HANDLE;
 }
 
+bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, uint16_t height)
+{
+    // §P5 B4a (2026-07-22) — 4-attach GBuffer MRT.
+    // Mirror `createColorDepthFrameBuffer` shape (uninit guard +
+    // format probe + cleanup-on-failure). depth 末位 is bgfx 约定
+    // (verified at the 2-attach `createColorDepthFrameBuffer` site
+    // above; same convention extends to num=4).
+    //
+    // B4a ships ONLY the MRT allocation path — actual draw dispatch
+    // (iterate RenderScene, bind shader, submit) lands in B4c.
+    // Tests (Test_B4_GBufferMRT) exercise this helper + the
+    // GBufferPass::ensure plumbing, NOT any GPU draw.
+    if (!_initialized || isNoopBackend() || width == 0 || height == 0) {
+        return BGFX_INVALID_HANDLE;
+    }
+
+    constexpr uint8_t kNumColor = 3;
+    const uint64_t colorFlags = BGFX_TEXTURE_RT
+                              | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
+                              | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+    const uint64_t depthFlags = colorFlags;  // D24S8 same flags
+
+    bgfx::TextureHandle colors[kNumColor] = {
+        bgfx::TextureHandle{BGFX_INVALID_HANDLE},
+        bgfx::TextureHandle{BGFX_INVALID_HANDLE},
+        bgfx::TextureHandle{BGFX_INVALID_HANDLE},
+    };
+    bool ok = true;
+    for (uint8_t i = 0; i < kNumColor; ++i) {
+        if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA8, colorFlags)) {
+            ok = false;
+            break;
+        }
+        colors[i] = bgfx::createTexture2D(width, height, false, 1,
+                                          bgfx::TextureFormat::RGBA8, colorFlags, nullptr);
+        if (!bgfx::isValid(colors[i])) {
+            ok = false;
+            break;
+        }
+    }
+
+    bgfx::TextureHandle depth = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    if (ok) {
+        if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D24S8, depthFlags)) {
+            ok = false;
+        } else {
+            depth = bgfx::createTexture2D(width, height, false, 1,
+                                          bgfx::TextureFormat::D24S8, depthFlags, nullptr);
+            if (!bgfx::isValid(depth)) {
+                ok = false;
+            }
+        }
+    }
+
+    if (!ok) {
+        // Cleanup partial creation (strictly better than the existing
+        // `createColorDepthFrameBuffer` which only destroys color on
+        // failure — see BGFXAdapter.cpp:506). Mirror
+        // ShadowMapResources::destroy cleanup discipline.
+        for (uint8_t i = 0; i < kNumColor; ++i) {
+            if (bgfx::isValid(colors[i])) {
+                bgfx::destroy(colors[i]);
+            }
+        }
+        if (bgfx::isValid(depth)) {
+            bgfx::destroy(depth);
+        }
+        return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    }
+
+    // 4-attach order: [albedo, normal, motion, depth]
+    const bgfx::TextureHandle attachments[4] = {
+        colors[0], colors[1], colors[2], depth
+    };
+    bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
+        /*num=*/4, attachments, /*destroyTextures=*/true);
+
+    if (!bgfx::isValid(fb)) {
+        // FBO creation failed — textures are owned by bgfx when
+        // destroyTextures=true was honored upstream. Caller treats
+        // invalid handle as "skip GBuffer this frame".
+        return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    }
+
+    return fb;
+}
+
 void BGFXAdapter::setViewFrameBuffer(uint8_t viewId, bgfx::FrameBufferHandle fb)
 {
     if (!_initialized) {
