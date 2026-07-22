@@ -173,6 +173,36 @@ struct Renderer::Impl {
 
     ayt::math::Float4x4           mainView        = ayt::math::Float4x4::identity();
     ayt::math::Float4x4           mainProjection  = ayt::math::Float4x4::identity();
+    // §P5 B4c (2026-07-22) — previous-frame view/projection cached on
+    // Renderer::Impl. GBufferPass samples these for per-pixel motion
+    // vectors (gl_FragData[2] = NDC half-range encoded displacement
+    // between current-frame clipPos and previous-frame clipPos, scaled
+    // by 0.5 + 0.5 into RGBA8 [0,1]).
+    //
+    // Lifecycle: end-of-frame commit in `Renderer::render()` — AFTER
+    // executeAll(). Beginning-of-render swap would alias prev with
+    // the brand-new mainView (host calls setMainCamera(...) BEFORE
+    // render(), see setMainCamera at line 916), making every pixel's
+    // motion vector collapse to the constant 0.5 vec2 — the host's
+    // "I've moved the camera" signal would be invisible. End-of-frame
+    // commit means the next render() reads this frame's mainView as
+    // prev, which is the correct temporal-sampling window.
+    //
+    // First frame: prev = identity (never updated). B4c documents
+    // this as "garbage motion on frame 0, acceptable for B7+ TAA
+    // consumer because TAA is a multi-frame accumulator and one
+    // noisy seed fades into the history". Future cuts (B7+ TAA)
+    // can substitute a sane prev (e.g., identity-encoded freeze)
+    // if they need deterministic frame-0 output.
+    //
+    // Cutsheet §5.3 red-line compliance: FrameContext is NOT touched
+    // (sizeof(FrameContext) invariant). PassExecContext is NOT
+    // touched (≤1 borrowed-ptr field per cut budget not consumed).
+    // The data flows strictly one-way: render() writes prev*, GBufferPass
+    // reads via `setPrevViewProj()` push from render() then read inside
+    // execute(). No consumer mutates back.
+    ayt::math::Float4x4           prevMainView       = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4           prevMainProjection = ayt::math::Float4x4::identity();
     ayt::math::FVector3           mainCameraPosition = ayt::math::FVector3(0.0f, 0.0f, 4.0f);
     ayt::math::FVector3           directionalLightDir = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
     ayt::math::FVector3           directionalLightColor = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
@@ -527,6 +557,19 @@ void Renderer::render(const RenderScene& scene)
                 ->setGbufferSize(static_cast<uint16_t>(_impl->viewportW),
                                  static_cast<uint16_t>(_impl->viewportH));
         }
+        // §P5 B4c (2026-07-22) — push previous-frame view/projection
+        // into GBufferPass so execute() can build prevViewProj =
+        // prevProj * prevView (P×V same-order as `setViewTransform`
+        // + `viewProjectionMatrix` builtin ordering, mirror docs/
+        // pass-lessons-from-shadow.md §3.1 "CPU 也要 P×V 与
+        // setViewTransform 同序") and upload it as `u_prevViewProj`.
+        // First frame: prev = identity ⇒ garbage motion ⇒ B7+ TAA
+        // consumer tolerates (B4c cutsheet decision). Repeated
+        // calls per frame are idempotent — GBufferPass stores
+        // locally, no GPU work until execute() runs.
+        auto* gbufferTyped = static_cast<detail::GBufferPass*>(gbufferSlot);
+        gbufferTyped->setPrevViewProj(_impl->prevMainView,
+                                      _impl->prevMainProjection);
     }
 
     // P1 (PR-C, 2026-07-20): build the PassExecContext once per frame
@@ -637,6 +680,18 @@ void Renderer::render(const RenderScene& scene)
     // cache update is removed. Consumers that need the current shadow
     // FBO call `ctx.shadowPass->shadowFbo()` directly; we no longer
     // mirror it through FrameContext (PR-F1' forbidden combo).
+
+    // §P5 B4c (2026-07-22) — END-OF-FRAME commit prev ← main (NOT
+    // beginning-of-render swap — see `Impl::prevMainView` doc-block
+    // for why begin-swap would alias prev with the brand-new main
+    // and collapse all motion vectors to vec2(0.5, 0.5)).
+    //
+    // This is the one and only site where the prevMain* cache
+    // advances. Next render() reads these as the previous frame's
+    // matrices; GBufferPass executes its motion-vector formula
+    // against this stored state.
+    _impl->prevMainView       = _impl->mainView;
+    _impl->prevMainProjection = _impl->mainProjection;
 }
 
 void Renderer::resize(uint32_t width, uint32_t height)

@@ -131,6 +131,33 @@ public:
     void ensureProgram(ayt::shader::ShaderResourcePool& pool);
     bool isProgramReady() const noexcept;
 
+    // §P5 B4c (2026-07-22) — host pushes previous-frame view +
+    // projection matrices so the GBuffer FS can compute per-pixel
+    // motion vectors against `u_prevViewProj`. Renderer::render()
+    // calls this once per frame from the GBuffer slot block (right
+    // next to `setGbufferSize`), AFTER `Impl::prevMainView` has
+    // been advanced by the previous frame's end-of-frame commit.
+    //
+    // CPU-side: execute() builds `prevViewProj = projection * view`
+    // (P×V same-order as `setViewTransform` + `viewProjectionMatrix`
+    // builtin ordering — mirror `docs/pass-lessons-from-shadow.md`
+    // §3.1 warning). The host just hands the raw pieces.
+    //
+    // Identity default: first frame, prev is identity (set by Impl
+    // default-init). B4c documents garbage motion on frame 0 as
+    // acceptable — B7+ TAA consumer must tolerate one-frame seed
+    // noise (TAA is a multi-frame accumulator).
+    void setPrevViewProj(const ayt::math::Float4x4& view,
+                         const ayt::math::Float4x4& projection) noexcept;
+
+    // §P5 B4c (2026-07-22) — read-only accessors for tests (mirror
+    // the read-back shape Test_B2_GBufferPass uses for FBO handles).
+    // The matrices the host pushed, NOT the multiplied prevViewProj
+    // — tests can verify the round-trip without depending on
+    // execute() running.
+    ayt::math::Float4x4 prevView()       const noexcept { return _prevView; }
+    ayt::math::Float4x4 prevProjection() const noexcept { return _prevProjection; }
+
 private:
     // §P5 B4a (2026-07-22) — add depth RT handle + build stamp pointer.
     // _gbufferDepthRt mirrors _gbufferAlbedoRt/_gbufferNormalRt/
@@ -156,6 +183,15 @@ private:
     // (mirror ShadowCaster::_program).
     ayt::shader::ShaderResource _program;
     bool _acquireFailed = false;
+
+    // §P5 B4c (2026-07-22) — previous-frame view/projection cache
+    // (mirror ShadowPass's `_lightView/_lightProj` private shape).
+    // Default = identity (B4c documented first-frame garbage motion
+    // acceptable for B7+ TAA consumer). Host pushes via
+    // setPrevViewProj(); execute() multiplies to `_prevViewProj` for
+    // uniform upload.
+    ayt::math::Float4x4 _prevView       = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 _prevProjection = ayt::math::Float4x4::identity();
 };
 
 } // namespace ayt::render::detail

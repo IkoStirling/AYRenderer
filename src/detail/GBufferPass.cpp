@@ -1,5 +1,6 @@
 #include "detail/GBufferPass.h"
 
+#include "detail/BgfxMatrix.h"
 #include "detail/FrameContext.h"
 #include "detail/RenderPass.h"
 
@@ -14,58 +15,85 @@ namespace ayt::render::detail
 // a re-ensure (next execute() will rebuild the FBO).
 static constexpr const char* kGBufferBuildStamp = "b4a-2026-07-22";
 
-// §P5 B4b (2026-07-22) — Phoskia GBuffer VS/FS source.
+// §P5 B4c (2026-07-22) — Phoskia GBuffer VS/FS source evolved:
+//   - `gl_FragData[2] = gbufferMotion` is now a real per-pixel motion
+//     vector (RGBA8 xy = NDC half-range encoded displacement;
+//     zw = (0,0) per cutsheet `pass-lessons-from-deferred.md:177`
+//     "RT2 RGBA8 motion vector (xy, zw reserved)" lock).
+//   - `uniform mat4 u_prevViewProj` declared as the previous-frame
+//     view-projection. CPU uploads `prevProj * prevView` per
+//     `pass-lessons-from-shadow.md` §3.1 "CPU 也要 P×V 与
+//     setViewTransform 同序" matrix-order convention.
+//   - Uses Phoskia builtin `viewProjectionMatrix` (verified at
+//     `AYShader/include/detail/AYPhoskiaFrameBuiltins.h:33-37` —
+//     `viewMatrix` → `u_view`, `projectionMatrix` → `u_proj`,
+//     `viewProjectionMatrix` → `u_viewProj`; tested at
+//     `AYShader/unittest/Test_BGFXConverter.cpp:335-337`).
+//     NOT a hand-written `projection * view` — that's a cutsheet
+//     veto per B4c hard-rule #2 (no bare projection/view in shader
+//     source; use the builtin the converter already wires).
 //
 // Three `out color` slots map to gl_FragData[0..2] in declaration
 // order (Phoskia Phase 6 #6, AYShader/src/AYBGFXConverter.cpp:1604-1625):
 //   gl_FragData[0] = gbufferAlbedo  (RGB = baseColor, A = opacity)
 //   gl_FragData[1] = gbufferNormal  (RGB = world-space normal, A unused)
-//   gl_FragData[2] = gbufferMotion  (placeholder: RGBA8 zero — full
-//                                   per-pixel motion vectors land in
-//                                   a separate PR; B7+ TAA consumer
-//                                   must tolerate motion=0 this frame)
+//   gl_FragData[2] = gbufferMotion  (xy = (currNDC - prevNDC)*0.5+0.5,
+//                                   zw = (0,0))
 //
 // Depth goes into the FBO's depth attachment (D24S8) via gl_Position.w,
-// not into a color slot. Background matching ForwardOpaquePass
-// (baseColor override): when a host material has a colorOverride,
-// GBufferPass reads it via the property `baseColor` (mirror FO's
-// colorBinding).
+// not into a color slot.
 //
-// The `let o11 = ...` assignment chain uses the same Phoskia
-// surface as simple_lit_shadow.phoskia (verified at PR-F3
-// PR-F2 ship). Vertex varyings (worldNormal / worldPos) feed
-// LightingPass in B5 (which samples gl_FragData[0..2] as inputs).
+// Background matching ForwardOpaquePass (baseColor override): when a
+// host material has a colorOverride, GBufferPass reads it via the
+// property `baseColor` (mirror FO's colorBinding).
+//
+// First-frame prevViewProj semantics: when `u_prevViewProj` is
+// identity (no host commit yet — see Impl::prevMainView default
+// doc-block), the FS produces currNDC - 0/1 = currNDC, encoded to
+// `(currNDC*0.5+0.5, 0, 0)`. B7+ TAA consumer must tolerate this
+// single-frame noise — TAA is a multi-frame accumulator.
 constexpr const char* kGBufferPhoskiaSource = R"(
 material GBufferFill {
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
+    uniform mat4 u_prevViewProj
 
     vertex {
         in pos : position
         in nrm : normal
         out worldNormal : normal   = (modelMatrix * vec4(nrm, 0.0)).xyz
         out worldPos    : position = (modelMatrix * vec4(pos, 1.0)).xyz
-        return modelViewProjection * vec4(pos, 1.0)
+        return viewProjectionMatrix * vec4(pos, 1.0)
     }
     fragment {
         in worldNormal : normal
         in worldPos    : position
+        uniform mat4 u_prevViewProj
         let n = normalize(worldNormal)
+        let currClip = viewProjectionMatrix * vec4(worldPos, 1.0)
+        let prevClip = u_prevViewProj * vec4(worldPos, 1.0)
+        let currNDC = currClip.xy / currClip.w
+        let prevNDC = prevClip.xy / prevClip.w
+        let motionNDC = currNDC - prevNDC
         out gbufferAlbedo : color = vec4(0.0)
         out gbufferNormal : color = vec4(0.0)
         out gbufferMotion : color = vec4(0.0)
         gbufferAlbedo = vec4(baseColor.rgb, baseColor.a)
         gbufferNormal = vec4(n * 0.5 + vec3(0.5), 1.0)
-        gbufferMotion = vec4(0.0, 0.0, 0.0, 0.0)
+        gbufferMotion = vec4(motionNDC * 0.5 + 0.5, 0.0, 0.0)
     }
 }
 )";
 
-// §P5 B4b (2026-07-22) — cache key literal. Pointer-equal compare
-// (mirror ShadowCaster Issue 1 fix at ShadowCaster.cpp:60-65) so
-// cache hits when the literal hasn't bumped. Bump the trailing
-// tag when shader source changes — `s_acquiredCacheKey` static
-// guard inside ensureProgram() will then force re-acquire.
-static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v1_b4b_mrt3";
+// §P5 B4c (2026-07-22) — cache key literal bumped from
+// `gbuffer_fill_v1_b4b_mrt3` to `gbuffer_fill_v2_b4c_motion` because
+// the shader source changed (added `uniform mat4 u_prevViewProj` +
+// the motion formula). Pointer-equal compare (mirror ShadowCaster
+// Issue 1 fix at ShadowCaster.cpp:60-65) so cache invalidates when
+// the literal bumps — `s_acquiredCacheKey` static guard inside
+// ensureProgram() forces re-acquire. `kGBufferBuildStamp` STAYS at
+// `b4a-2026-07-22` (FBO shape unchanged — 3 color + 1 depth), so
+// the FBO is reused across the B4b → B4c bump.
+static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v2_b4c_motion";
 
 GBufferPass::~GBufferPass() = default;
 
@@ -109,6 +137,23 @@ void GBufferPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
 bool GBufferPass::isProgramReady() const noexcept
 {
     return _program.isValid();
+}
+
+void GBufferPass::setPrevViewProj(const ayt::math::Float4x4& view,
+                                  const ayt::math::Float4x4& projection) noexcept
+{
+    // §P5 B4c (2026-07-22) — host pushes prev view/projection. Stored
+    // as-is; execute() builds prevViewProj = proj * view per
+    // pass-lessons-from-shadow.md §3.1 P×V ordering.
+    //
+    // Idempotent: Renderer::render() calls this every frame inside
+    // the GBuffer slot block. Re-pushing the same matrices is free
+    // (4×4 copy = 64 bytes, negligible).
+    //
+    // No GPU work here. The actual upload happens inside execute()
+    // once the program is ready + we have a valid scene to draw.
+    _prevView       = view;
+    _prevProjection = projection;
 }
 
 uint32_t GBufferPass::execute(PassExecContext& ctx)
@@ -195,14 +240,47 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             continue;
         }
 
+        // §P5 B4c (2026-07-22) — PREV-FRAME VP UPLOAD. Build
+        // prevViewProj = prevProj * prevView (P×V same-order as
+        // `setViewTransform` + `viewProjectionMatrix` builtin —
+        // mirror pass-lessons-from-shadow.md §3.1 warning). On real
+        // backend this triggers `bgfx::setUniform(handle, ptr, 64)`
+        // for `u_prevViewProj`; on Noop the upload is a no-op
+        // (ShaderResource::setUniform short-circuits).
+        //
+        // First frame: prevViewProj = identity (default) ⇒
+        // currClip - 0/1 = currClip ⇒ motion = currNDC*0.5+0.5 —
+        // B7+ TAA consumer tolerates this single-frame noise.
+        {
+            const shader::BindingId prevVpBinding =
+                _program.getUniformBinding("u_prevViewProj");
+            if (prevVpBinding != shader::InvalidBinding) {
+                const ayt::math::Float4x4 prevViewProj =
+                    _prevProjection * _prevView;
+                float prevVpCol[16];
+                toBgfxColumnMajor(prevViewProj, prevVpCol);
+                _program.setUniform(prevVpBinding, prevVpCol, sizeof(prevVpCol));
+            }
+        }
+
         // baseColor upload (mirror ForwardOpaquePass baseColor slot,
         // AYRenderer/src/detail/ForwardOpaquePass.cpp:42, applied via
         // the Phoskia `property baseColor` declared on GBufferFill).
         // Resolution policy identical to FO: prefer host override if
         // set, else use a neutral white tint so the GBuffer survives
         // a missing material baseColor.
+        //
+        // §P5 B4c (2026-07-22) — FIXED B4b bug: baseColor binding is
+        // now read from `_program` (the GBufferFill Phoskia program
+        // that owns the `baseColor` property uniform), NOT from
+        // `material.shader` (the host material's own program). On
+        // a real backend the B4b code path was uploading uniforms
+        // into a different program than the one actually drawing,
+        // silently dropping baseColor overrides from the GBuffer
+        // fill. Read from `_program` so the binding matches the
+        // submitting program below.
         const shader::BindingId baseColorBinding =
-            material.shader.getUniformBinding("baseColor");
+            _program.getUniformBinding("baseColor");
         if (baseColorBinding != shader::InvalidBinding) {
             const float base[4] = {
                 material.hasColorOverride ? material.colorOverride.x : 1.0f,
@@ -210,7 +288,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
                 material.hasColorOverride ? material.colorOverride.z : 1.0f,
                 material.hasColorOverride ? material.colorOverride.w : 1.0f,
             };
-            material.shader.setUniform(baseColorBinding, base, sizeof(base));
+            _program.setUniform(baseColorBinding, base, sizeof(base));
         }
 
         ctx.adapter.setTransform(item.world);
@@ -221,7 +299,17 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         submitCtx.viewId = viewId;
         submitCtx.state  = 0;  // state owned by Adapter; shader.submit
                                 // only writes viewId (matches FO shape).
-        material.shader.submit(submitCtx);
+        // §P5 B4c (2026-07-22) — FIXED B4b bug: submit uses `_program`
+        // (the Phoskia GBufferFill program), NOT `material.shader`
+        // (the host material's program). On a real backend the B4b
+        // path was submitting the host material's draws into view
+        // 7, which is wrong: the GBufferFill VS/FS (which writes
+        // albedo/normal/motion to gl_FragData[0..2]) is the program
+        // that MUST bind view 7, otherwise the MRT attachments stay
+        // untouched. Fix: bind `_program` (GBufferFill), use the
+        // host material only for per-draw state (VB/IB/world) and
+        // for colorOverride fallback above.
+        _program.submit(submitCtx);
         ++drawCount;
     }
 
