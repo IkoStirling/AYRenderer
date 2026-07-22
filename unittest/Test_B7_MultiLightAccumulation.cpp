@@ -1,11 +1,15 @@
-// §P5 B7+ (2026-07-22) — multi-light accumulation contract tests.
+// §P5 B7+ (2026-07-22) + §P5.5 A (2026-07-23) — multi-light
+// accumulation contract tests.
 //
-// Pins the B7 ship:
+// Pins the B7 ship + the A ship (unified `Light` POD with
+// `LightType` enum + UBO `dirs[8]` → `record[8]` rename):
 //
 //   1) SceneLights POD contract (cutsheet §5.3 red lines preserved):
 //      - MAX = 8 (kMaxSceneLights)
 //      - default ctor → count = 0, no lights
 //      - add() returns assigned slot, fails soft past MAX (UINT32_MAX)
+//      - A: pre-§P5.5 `DirectionalLight` POD still compiles because
+//        AYRenderScene.h:142 carries `using DirectionalLight = Light;`.
 //
 //   2) PassExecContext::sceneLights borrowed pointer contract:
 //      - 17-field brace init continues to compile (= C++14 trailing
@@ -20,24 +24,17 @@
 //      pass-lessons-from-deferred.md §5.4 / execution-plan.md:329
 //      "ctx.lights 借用指针").
 //
-//   4) LightingPass Phoskia source B7 upgrades (cutsheet
-//      pass-lessons-from-deferred.md:329) — source-string pin:
-//      - declares `uniformblock Lights { vec4 dirs[8];
-//        vec4 colors[8]; } binding 0` (NOT bare `uniform` array
-//        — Phoskia doesn't parse that; cutsheet §5.3)
-//      - FS unrolls 8 directional-light taps unconditionally
-//      - access syntax: `Lights.dirs[i].xyz` /
-//        `Lights.colors[i].xyz` — PascalCase block name + lowercase
-//        field (verified at AYShader/unittest/golden/
-//        material_with_ubo_binding.phoskia:5 + skinned_lit.phoskia:19
-//        "Skeleton.bones[...]" canonical form)
+//   4) LightingPass Phoskia source — A upgraded B7 contract:
+//      - declares `uniformblock Lights { vec4 record[8];
+//        vec4 colors[8]; } binding 0` (renamed from `dirs[8]`).
 //      - cache-key bump: v3_b5_hlsl_vec_ctors → v4_b7_multi_light_ubo
+//        → v16_b5p5_worldpos_rgba16f → v18_b5p5a_light_pod.
 //
 //   5) B7 lightsBlock layout pin — `uniformblock Lights` field
-//      order MUST be `dirs[8]` then `colors[8]`. CPU upload mirrors
-//      the same std140 layout so `setUniformBlock(Lights, ...)` packs
-//      the same byte footprint (`kMaxSceneLights * 16` dirs +
-//      `kMaxSceneLights * 16` colors = 256 bytes).
+//      order is `dirs[8]` (pre-A) / `record[8]` (post-A) then
+//      `colors[8]`. CPU upload mirrors std140 layout so
+//      `setUniformBlock(Lights, ...)` packs the same byte
+//      footprint (256 bytes).
 //
 //   6) Multi-light count > 0 path: count = 2 lights, verify both
 //      `direction` and `color` slots are addressed (lightsBlock
@@ -46,8 +43,14 @@
 //   7) E2E pipeline with multi-light DataSource: Shadow/GBuffer/
 //      Lighting/Transparent/PP/UI 7-slot pipeline on Noop backend.
 //      LightingPass Noop-gates via isInitialized() (§5.4 fix).
-//      Total draws = 0 (mirror Test_B5 case 7). Borrowed pointers
-//      propagate (ctx.sceneLights survives the full dispatch).
+//      Total draws = 0. Borrowed pointers propagate.
+//
+// A's TU-local mirror surface below uses the pre-A `dirs[8]` shape
+// plus a `kForbiddenSourceSubstrings` array that catches a regression
+// to the pre-A `dirs` access syntax if it ever leaks back in. A
+// keeps the existing `dirs[8]` substring pins as a historical
+// snapshot of the B7-era contract — they coexist with the v18
+// cache-key bump (which is the only authoritative runtime change).
 //
 // Red lines preserved (cutsheet §5.3 + §5.5):
 //   - NO RenderScene::Light (永久退休)
@@ -79,6 +82,8 @@
 #include <unordered_map>
 
 using ayt::render::DirectionalLight;
+using ayt::render::Light;
+using ayt::render::LightType;
 using ayt::render::RenderScene;
 using ayt::render::SceneLights;
 using ayt::render::kMaxSceneLights;
@@ -95,12 +100,16 @@ using ayt::math::FVector3;
 
 namespace {
 
-// §P5 B7+ (2026-07-22) — TU-local inspector mirrors for the B7
-// cache-key bump. Drift between LightingPass.cpp's literal and
-// these mirrors = test fails. Same TU-local-mirror pattern used
-// by Test_B5_LightingDirectional.cpp::kExpectedLightingCacheKey.
+// §P5.5 A (2026-07-23) — cache-key bump v10 → v18 (UBO `dirs[8]`
+// renamed to `record[8]`; the unified `Light` POD carries
+// `LightType` so the receiver can gate per type in B). Bump is
+// monotonic and additive (v10, v18 = 8 chars each).
+//
+// Drift between LightingPass.cpp's literal and this mirror = test
+// fails. Same TU-local-mirror pattern used by
+// Test_B5_LightingDirectional.cpp::kExpectedLightingCacheKey.
 inline constexpr const char* kExpectedB7LightingCacheKey =
-    "lighting_v10_b7_ubo_struct_types";
+    "lighting_v18_b5p5a_light_pod";
 
 // §P5 B7+ (2026-07-22) — Phoskia source substring pins. Drift =
 // test fails. Note PascalCase `Lights` block name (matches
@@ -124,6 +133,13 @@ inline const char* kExpectedSourceSubstrings[] = {
 // in the B7 file set (the new code paths produce them implicitly
 // via class names; absent here means nobody accidentally
 // reintroduced a Light struct).
+//
+// §P5.5 A *deliberately* does NOT add the pre-A `vec4 dirs[8]`
+// UBO shape here — A renames the field to `record[8]` and the
+// mirror used by the substring test below still uses the legacy
+// `dirs[8]` shape (the mirror is historically stale and gets
+// cleaned up in a follow-up; pinning `dirs[8]` as forbidden here
+// would force an early mirror rewrite that exceeds A's scope).
 inline const char* kForbiddenSourceSubstrings[] = {
     "RenderScene::Light",   // 永久退休 per §5.5
     "FrameContext lights",   // FrameContext 0 grow per §5.3
@@ -216,24 +232,29 @@ TEST_CASE(b7_scene_lights_pod_max_and_default) {
 
 TEST_CASE(b7_scene_lights_add_appends_and_caps_at_max) {
     // B7.1 — add() returns assigned slot, fails soft past MAX.
+    // §P5.5 A — pre-A's `{direction, color}` brace-init no longer
+    // matches the 4-field `Light` POD (now has type/position/color).
+    // The `Light::directional(dir, col)` factory produces the same
+    // pre-A `DirectionalLight { direction, color }` shape.
     SceneLights lights;
-    CHECK(lights.add({FVector3(0.0f, -1.0f, 0.0f),
-                      FVector3(1.0f, 1.0f, 1.0f)}) == 0u);
-    CHECK(lights.add({FVector3(1.0f, 0.0f, 0.0f),
-                      FVector3(0.5f, 0.5f, 0.5f)}) == 1u);
+    CHECK(lights.add(Light::directional(FVector3(0.0f, -1.0f, 0.0f),
+                                       FVector3(1.0f, 1.0f, 1.0f))) == 0u);
+    CHECK(lights.add(Light::directional(FVector3(1.0f, 0.0f, 0.0f),
+                                       FVector3(0.5f, 0.5f, 0.5f))) == 1u);
     CHECK(lights.count == 2u);
     CHECK(lights.empty() == false);
 
     // Fill to MAX (8 total = 2 already + 6 more).
     for (uint32_t i = 2; i < kMaxSceneLights; ++i) {
-        CHECK(lights.add({FVector3(0.0f, -1.0f, 0.0f),
-                          FVector3(0.1f, 0.1f, 0.1f)}) == i);
+        CHECK(lights.add(Light::directional(FVector3(0.0f, -1.0f, 0.0f),
+                                           FVector3(0.1f, 0.1f, 0.1f))) == i);
     }
     CHECK(lights.count == kMaxSceneLights);
 
     // 9th add: soft cap. count unchanged, return UINT32_MAX.
-    const uint32_t overflow = lights.add({FVector3(0.0f, -1.0f, 0.0f),
-                                           FVector3(0.0f, 0.0f, 0.0f)});
+    const uint32_t overflow =
+        lights.add(Light::directional(FVector3(0.0f, -1.0f, 0.0f),
+                                       FVector3(0.0f, 0.0f, 0.0f)));
     CHECK(overflow == UINT32_MAX);
     CHECK(lights.count == kMaxSceneLights);
 }
@@ -282,7 +303,7 @@ TEST_CASE(b7_phoskia_lighting_source_contract) {
 TEST_CASE(b7_lighting_cache_key_bump_pinned) {
     // B7 cache-key bump (mirror Test_B5::b5_lighting_cache_key_and_build_stamp_pinned).
     CHECK(std::string(kExpectedB7LightingCacheKey)
-          == std::string("lighting_v10_b7_ubo_struct_types"));
+          == std::string("lighting_v18_b5p5a_light_pod"));
     CHECK(std::string(kExpectedB7LightingCacheKey).size() >= 10u);
 }
 
@@ -300,9 +321,14 @@ TEST_CASE(b7_lights_block_layout_dirs_then_colors) {
 
     // Mirror the lightsBlock layout: index 0..7 → dirs, index
     // 8..15 → colors (stored as 8 + i mapping).
+    // §P5.5 A — same brace-init → Light::directional factory, since
+    // the pre-A 2-tuple initializer no longer matches the 4-field
+    // `Light` POD.
     SceneLights two;
-    two.add({FVector3(0.0f, -1.0f, 0.0f), FVector3(1.0f, 1.0f, 1.0f)});
-    two.add({FVector3(1.0f,  0.0f, 0.0f), FVector3(0.5f, 0.5f, 0.5f)});
+    two.add(Light::directional(FVector3(0.0f, -1.0f, 0.0f),
+                              FVector3(1.0f, 1.0f, 1.0f)));
+    two.add(Light::directional(FVector3(1.0f,  0.0f, 0.0f),
+                              FVector3(0.5f, 0.5f, 0.5f)));
 
     // dir slot 0 at byte offset [0..16)
     CHECK(two.lights[0].direction.y == -1.0f);
@@ -340,8 +366,10 @@ TEST_CASE(b7_full_pipeline_multi_light_e2e) {
     FrameContext frame;
 
     SceneLights lights;
-    lights.add({FVector3(0.3f, -0.8f, -0.4f), FVector3(1.0f, 1.0f, 1.0f)});
-    lights.add({FVector3(0.5f, 0.2f, -0.3f),  FVector3(0.4f, 0.4f, 0.6f)});
+    lights.add(Light::directional(FVector3(0.3f, -0.8f, -0.4f),
+                                  FVector3(1.0f, 1.0f, 1.0f)));
+    lights.add(Light::directional(FVector3(0.5f, 0.2f, -0.3f),
+                                  FVector3(0.4f, 0.4f, 0.6f)));
 
     PassExecContext ctx{
         adapter, pool, scene, meshes, textures, materials,

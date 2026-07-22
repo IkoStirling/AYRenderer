@@ -81,8 +81,11 @@ namespace {
 // fails. Same TU-local-mirror pattern used by Test_B5,
 // Test_B4c, Test_B7.
 
+// §P5.5 A (2026-07-23) — cache-key bump v16 → v18 (unified `Light`
+// POD + `LightType` enum + UBO `Lights.dirs[8]` → `Lights.record[8]`
+// rename; receiver math byte-equivalent).
 inline constexpr const char* kExpectedB5p5CacheKey =
-    "lighting_v11_b7_ubo_struct_types_b5p5_worldpos_pcf_key_only";
+    "lighting_v18_b5p5a_light_pod";
 
 // Mirror of LightingPass.cpp kLightingPhoskiaSource (the B5.5
 // variant). Kept in sync by code review + this substring test.
@@ -156,6 +159,14 @@ material Lighting {
 }
 
 // Expected source substrings — pins B5.5 contract.
+//
+// §P5.5 A only bumps the cache-key on this TU (no
+// mirror-string shape change) because the master mirror predates
+// the cache-key letter rename from `lighting_v11_...` to
+// `lighting_v18_...`. A future cut should migrate this mirror to
+// live-source grep alongside Test_B7's cleanup (cutsheet §1 testing
+// lifecycle invariants); for A we keep the existing pin set
+// untouched and rely on the cache-key bump alone to detect drift.
 inline const char* kExpectedSourceSubstrings[] = {
     "texture2d shadowMap",
     "texture2d gbufferDepth",
@@ -258,10 +269,9 @@ TEST_CASE(b5p5_worldpos_reconstruction_chain_present) {
 TEST_CASE(b5p5_cache_key_bump_pinned) {
     // B5.5 — cache-key bump: stays in v11 family (mirror of
     // Test_B7's `lighting_v10_b7_ubo_struct_types` post-linter
-    // state which linter bumped to v11). B5.5 keeps the v11
-    // base + `_b5p5_worldpos_pcf_key_only` suffix.
+    // state. §P5.5 A bumps to v18 (`lighting_v18_b5p5a_light_pod`).
     CHECK(std::string(kExpectedB5p5CacheKey)
-          == std::string("lighting_v11_b7_ubo_struct_types_b5p5_worldpos_pcf_key_only"));
+          == std::string("lighting_v18_b5p5a_light_pod"));
     CHECK(std::string(kExpectedB5p5CacheKey).size() >= 10u);
 }
 

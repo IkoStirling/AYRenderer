@@ -304,3 +304,29 @@ BGFXAdapter::createGbufferFrameBuffer(uint16_t width, uint16_t height);
 - **未**默认挂 GBuffer + 启用（红线 #4;默认 Forward,Deferred opt-in 走 path enum）。
 - **未**让 LightingPass 跑完后还跑一遍 ForwardOpaque（§5.3 §P5.4 强禁;FO/Trans 在 Deferred path 直接 skip）。
 - **未**跨 backend IBL / SSR / SSAO 等高级光照（独立 roadmap,不是 Deferred Pass 自身的事）。
+
+---
+
+## §P5.5 — 光类型补全 (A → B → C) cutsheet
+
+### A — Unified `Light` POD + `LightType` enum (2026-07-23, ships)
+- Replaces pre-A `DirectionalLight` POD with a tagged-union `Light` POD
+  carrying `LightType { Directional=0, Point=1, Spot=2 }`. `DirectionalLight`
+  retained as a `using DirectionalLight = Light;` alias for source-compat.
+- UBO field rename: `Lights.dirs[8]` → `Lights.record[8]` (`xyz = vector`,
+  `w = float(LightType)`). CPU-side pack fans out per `LightType` so the
+  receiver math stays byte-equivalent for Directional-only hosts.
+- A ships the cut-shape: **receiver path unchanged, 9-tap key-shadow
+  unchanged, host behaviour 0 diff** — every default-constructed `Light`
+  is `type=Directional` so the change is naming-cleanup only.
+- cache-key: `lighting_v16_b5p5_worldpos_rgba16f` → `lighting_v18_b5p5a_light_pod`.
+- Test_B7 + Test_B5p5 mirror drift fixed at the same time (v10 / v16 → v18).
+- 红线全守: `RenderScene::Light` 永退 / FrameContext 0 grow / `RenderPass::execute`
+  签名 0 改 / Forward host 0 行为变化 / 公开头 0 加 `bgfx::` / 文件 ≤ 8。
+- Future B/C budget:
+  - B widens UBO with `vec4 params[8]` + `vec4 spotDir[8]` and adds Phoskia
+    attenuation + spot cone math (`Lights.record[i].w = float(type)` already
+    ship-side from A — no FS rewrite needed for the gate).
+  - C wires per-light shadow via `PassExecContext::perLightShadows` borrowed
+    ptr + dual-FS program (K3: `count==0` ⇒ B program = 9-tap key-only,
+    host pays 0 incremental cost).
