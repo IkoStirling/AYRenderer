@@ -194,6 +194,16 @@ public:
     void setPostProcessRippleStrength(float strength);
     void setPostProcessRippleFrequency(float frequency);
     void setPostProcessRippleSpeed(float speed);
+    // Freeze FrameContext.timeSeconds (post-process ripple/time). When
+    // paused, render() keeps the last sampled value so Editor Pause
+    // stops screen ripple without stopping the composite blit.
+    void setPostProcessClockPaused(bool paused);
+    bool isPostProcessClockPaused() const noexcept;
+    // Drive FrameContext.timeSeconds from the host simulation clock
+    // (typically GameLoop::getElapsedTime). When set, overrides the
+    // wall-clock path so Editor Pause freezes post-process ripple
+    // without a separate pause flag. Call once per composite frame.
+    void setSimulationTimeSeconds(float seconds);
     enum class TonemapMode : uint8_t {
         None     = 0,
         Reinhard = 1,

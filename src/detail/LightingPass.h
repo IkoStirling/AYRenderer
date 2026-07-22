@@ -146,8 +146,13 @@ private:
     bgfx::FrameBufferHandle _lightingFbo     = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     bgfx::VertexBufferHandle _fullscreenVB   = bgfx::VertexBufferHandle{BGFX_INVALID_HANDLE};
     bgfx::IndexBufferHandle  _fullscreenIB   = bgfx::IndexBufferHandle{BGFX_INVALID_HANDLE};
+    // Requested size (setOutputSize). ensure() caches against
+    // _allocatedW/H — same deferred-resize bug as GBufferPass if
+    // request and allocated share one pair of fields.
     uint16_t                _lightingW       = 0;
     uint16_t                _lightingH       = 0;
+    uint16_t                _allocatedW      = 0;
+    uint16_t                _allocatedH      = 0;
     const char*             _buildStamp      = "";
 
     // §P5 B5 (2026-07-22) — Phoskia Lighting VS/FS program (mirror

@@ -556,9 +556,21 @@ void RendererSubSystem::renderCompositeFrame(bool renderScene3D, UIRenderBackend
     }
 
     if (renderScene3D && _viewportW >= 32 && _viewportH >= 32) {
+        // Post-process (ripple) must track GameLoop elapsed time so
+        // Pause freezes the effect. Wall-clock in Renderer::render
+        // keeps advancing while the Editor still composites frames.
+        _renderer.setSimulationTimeSeconds(
+            ayt::game::GameLoop::instance().getElapsedTime());
         _renderer.setViewportRect(_viewportX, _viewportY, _viewportW, _viewportH);
         renderScenePass();  // dispatches [ForwardOpaque, Transparent, UIPass];
                             // UIPass::execute now flushes pending text
+    }
+
+    // Restore full-window NDC before overlay flush — UIPass used to
+    // poison this to the Game View size (menus mapped into the panel).
+    if (uiBackend != nullptr) {
+        uiBackend->setFramebufferSize(static_cast<uint16_t>(_width),
+                                      static_cast<uint16_t>(_height));
     }
 
     // Flush half — close the IRenderBackend lifecycle (endCanvas +

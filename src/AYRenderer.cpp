@@ -252,6 +252,10 @@ struct Renderer::Impl {
     // color grading, bloom pulse) need. Set on the first successful
     // initialize(); consumed by Renderer::render into frame.timeSeconds.
     std::chrono::steady_clock::time_point renderClockOrigin{};
+    bool  renderClockPaused = false;
+    float renderClockFrozenSeconds = 0.0f;
+    bool  hasSimulationTime = false;
+    float simulationTimeSeconds = 0.0f;
 
     uint16_t                      viewportX = 0;
     uint16_t                      viewportY = 0;
@@ -532,10 +536,18 @@ void Renderer::render(const RenderScene& scene)
     // built FrameContext manually and checked field-by-field still
     // see 0.0f. R5+ post-process will read this into a `u_time`
     // uniform.
-    if (_impl->renderClockOrigin.time_since_epoch().count() != 0) {
-        const auto now = std::chrono::steady_clock::now();
-        const std::chrono::duration<float> elapsed = now - _impl->renderClockOrigin;
-        frame.timeSeconds = elapsed.count();
+    if (_impl->hasSimulationTime) {
+        frame.timeSeconds = _impl->simulationTimeSeconds;
+        _impl->renderClockFrozenSeconds = frame.timeSeconds;
+    } else if (_impl->renderClockOrigin.time_since_epoch().count() != 0) {
+        if (_impl->renderClockPaused) {
+            frame.timeSeconds = _impl->renderClockFrozenSeconds;
+        } else {
+            const auto now = std::chrono::steady_clock::now();
+            const std::chrono::duration<float> elapsed = now - _impl->renderClockOrigin;
+            frame.timeSeconds = elapsed.count();
+            _impl->renderClockFrozenSeconds = frame.timeSeconds;
+        }
     }
     // R5+ — host-configured post-process knobs. Rendered every frame
     // even when the value hasn't changed because the FrameContext is
@@ -747,20 +759,33 @@ void Renderer::resize(uint32_t width, uint32_t height)
         return;
     }
 
+    // Destroy offscreen RTs before bgfx::reset. Orphaning handles
+    // (INVALID without destroy) leaks memory; deferred GBuffer/Lighting
+    // also need a forced rebuild (see ensure() allocated-size fix).
+    if (detail::BGFXAdapter::isValid(_impl->sceneFbo)) {
+        _impl->adapter.destroy(_impl->sceneFbo);
+        _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    }
+    _impl->sceneFboW = 0;
+    _impl->sceneFboH = 0;
+    // Full destroyResources also drops Phoskia programs — fine on
+    // rare window resize; MSAA change already does the same.
+    if (detail::RenderPass* gbufferPass = _impl->pipeline.findPass("GBuffer")) {
+        static_cast<detail::GBufferPass*>(gbufferPass)
+            ->destroyResources(_impl->adapter);
+    }
+    if (detail::RenderPass* lightingPass = _impl->pipeline.findPass("Lighting")) {
+        static_cast<detail::LightingPass*>(lightingPass)
+            ->destroyResources(_impl->adapter);
+    }
+    if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
+        static_cast<detail::ShadowPass*>(shadowPass)
+            ->destroyResources(_impl->adapter);
+    }
+
     _impl->initDesc.width  = width;
     _impl->initDesc.height = height;
     _impl->adapter.resetResolution(width, height, _impl->initDesc.vsync);
-
-    // P2 (PR-D) — invalidate the scene FBO so render()'s ensureSceneFbo
-    // path rebuilds it at the new size on the next frame. We don't
-    // destroy eagerly here because:
-    //   (a) bgfx::reset may transiently drop view attachments; the FBO
-    //       handle table gets re-validated on the next bgfx::frame().
-    //   (b) ensureSceneFbo is gated on isInitialized() and will detect
-    //       that _sceneFboW != width and recycle.
-    _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
-    _impl->sceneFboW = 0;
-    _impl->sceneFboH = 0;
 }
 
 bgfx::FrameBufferHandle Renderer::Impl::ensureSceneFbo()
@@ -1062,7 +1087,10 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
     _impl->initDesc.msaa = _impl->adapter.msaaSampleCount();
     // bgfx::reset drops view attachments; recycle scene RT like resize().
     if (before != _impl->initDesc.msaa) {
-        _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+        if (detail::BGFXAdapter::isValid(_impl->sceneFbo)) {
+            _impl->adapter.destroy(_impl->sceneFbo);
+            _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+        }
         _impl->sceneFboW = 0;
         _impl->sceneFboH = 0;
         if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
@@ -1207,6 +1235,34 @@ void Renderer::setPostProcessRippleSpeed(float speed)
         return;
     }
     _impl->postProcessRippleSpeed = speed;
+}
+
+void Renderer::setPostProcessClockPaused(bool paused)
+{
+    if (!_impl) {
+        return;
+    }
+    if (paused && !_impl->renderClockPaused
+        && _impl->renderClockOrigin.time_since_epoch().count() != 0) {
+        const auto now = std::chrono::steady_clock::now();
+        const std::chrono::duration<float> elapsed = now - _impl->renderClockOrigin;
+        _impl->renderClockFrozenSeconds = elapsed.count();
+    }
+    _impl->renderClockPaused = paused;
+}
+
+bool Renderer::isPostProcessClockPaused() const noexcept
+{
+    return _impl != nullptr && _impl->renderClockPaused;
+}
+
+void Renderer::setSimulationTimeSeconds(float seconds)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->hasSimulationTime = true;
+    _impl->simulationTimeSeconds = seconds;
 }
 
 void Renderer::setPostProcessTonemapMode(TonemapMode mode)

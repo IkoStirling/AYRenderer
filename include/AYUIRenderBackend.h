@@ -34,10 +34,14 @@ public:
     //   0 = full-window clear
     //   1 = ShadowPass caster → shadow FBO
     //   2 = ShadowPass resolve blit (color RT → sampleable tex)
-    //   3 = ForwardOpaque + Transparent → scene / panel
-    //   4 = PostProcess blit → backbuffer panel
-    //   5 = UI chrome
-    static constexpr uint8_t kViewId = 5;
+    //   3 = ForwardOpaque / deferred composite hole → scene / panel
+    //   4 = PostProcess blit (Forward) → backbuffer panel
+    //   7 = GBuffer, 8 = Lighting, 9 = Transparent (Deferred)
+    //  10 = PostProcess blit (Deferred) → backbuffer panel
+    //  11 = UI chrome / menus (must be AFTER all 3D blits)
+    // Pre-B6 UI was view 5 (above Forward blit 4). Deferred blit is
+    // view 10, so UI at 5 drew under the Game View and clipped menus.
+    static constexpr uint8_t kViewId = 11;
 
     UIRenderBackend();
     ~UIRenderBackend() override;

@@ -100,7 +100,7 @@ namespace {
 // these mirrors = test fails. Same TU-local-mirror pattern used
 // by Test_B5_LightingDirectional.cpp::kExpectedLightingCacheKey.
 inline constexpr const char* kExpectedB7LightingCacheKey =
-    "lighting_v4_b7_multi_light_ubo";
+    "lighting_v10_b7_ubo_struct_types";
 
 // §P5 B7+ (2026-07-22) — Phoskia source substring pins. Drift =
 // test fails. Note PascalCase `Lights` block name (matches
@@ -115,6 +115,7 @@ inline const char* kExpectedSourceSubstrings[] = {
     "Lights.colors[0].xyz",
     "Lights.dirs[7].xyz",
     "Lights.colors[7].xyz",
+    "max(length(Lights.dirs[0].xyz), 0.0001)",  // safe empty-slot normalize
 };
 
 // Forbidden substrings — pins "no RenderScene::Light" + "no
@@ -133,7 +134,13 @@ inline const char* kForbiddenSourceSubstrings[] = {
 // contract pinned by the substring tests above).
 std::string mirrorLightingPhoskiaSourceB7()
 {
+    // Top-level Lights UBO (same as LightingPass.cpp) — nested inside
+    // material never emits a cbuffer on the D3D path.
     return std::string(R"(
+uniformblock Lights {
+    vec4 dirs[8]
+    vec4 colors[8]
+} binding 0
 material Lighting {
     texture2d gbufferAlbedo
     texture2d gbufferNormal
@@ -141,10 +148,6 @@ material Lighting {
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
-    uniformblock Lights {
-        vec4 dirs[8]
-        vec4 colors[8]
-    } binding 0
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -157,8 +160,8 @@ material Lighting {
         let normalSample = sample(gbufferNormal, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
         let ambient = vec3(0.1, 0.1, 0.1)
-        let L0 = normalize(Lights.dirs[0].xyz)
-        let L7 = normalize(Lights.dirs[7].xyz)
+        let L0 = Lights.dirs[0].xyz * (1.0 / max(length(Lights.dirs[0].xyz), 0.0001))
+        let L7 = Lights.dirs[7].xyz * (1.0 / max(length(Lights.dirs[7].xyz), 0.0001))
         let f0 = max(dot(N, L0), 0.0)
         let f7 = max(dot(N, L7), 0.0)
         let directionalSum = f0 * Lights.colors[0].xyz + f7 * Lights.colors[7].xyz
@@ -279,7 +282,7 @@ TEST_CASE(b7_phoskia_lighting_source_contract) {
 TEST_CASE(b7_lighting_cache_key_bump_pinned) {
     // B7 cache-key bump (mirror Test_B5::b5_lighting_cache_key_and_build_stamp_pinned).
     CHECK(std::string(kExpectedB7LightingCacheKey)
-          == std::string("lighting_v4_b7_multi_light_ubo"));
+          == std::string("lighting_v10_b7_ubo_struct_types"));
     CHECK(std::string(kExpectedB7LightingCacheKey).size() >= 10u);
 }
 

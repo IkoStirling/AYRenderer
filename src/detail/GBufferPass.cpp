@@ -373,6 +373,8 @@ void GBufferPass::destroyResources(BGFXAdapter& adapter)
     _gbufferMotionRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferW = 0;
     _gbufferH = 0;
+    _allocatedW = 0;
+    _allocatedH = 0;
     _buildStamp = "";
     if (bgfx::isValid(_gbufferFbo)) {
         adapter.destroy(_gbufferFbo);
@@ -397,11 +399,11 @@ void GBufferPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
         _buildStamp = kGBufferBuildStamp;
     }
 
-    // Fast path: same FBO, same size, same stamp — just re-cache
-    // attachments if any went stale (e.g., post `bgfx::reset`).
+    // Fast path: allocated FBO size matches request (NOT _gbufferW —
+    // setGbufferSize already wrote the request into those fields).
     if (bgfx::isValid(_gbufferFbo)
-        && _gbufferW == width
-        && _gbufferH == height
+        && _allocatedW == width
+        && _allocatedH == height
         && !stampChanged) {
         if (!bgfx::isValid(_gbufferAlbedoRt)) {
             cacheAttachments(adapter);
@@ -417,11 +419,13 @@ void GBufferPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
         _gbufferNormalRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
         _gbufferMotionRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
         _gbufferDepthRt   = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
-        _gbufferW = _gbufferH = 0;
+        _allocatedW = _allocatedH = 0;
     }
 
     _gbufferFbo = adapter.createGbufferFrameBuffer(width, height);
     if (bgfx::isValid(_gbufferFbo)) {
+        _allocatedW = width;
+        _allocatedH = height;
         _gbufferW = width;
         _gbufferH = height;
         cacheAttachments(adapter);

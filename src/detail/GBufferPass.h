@@ -169,8 +169,14 @@ private:
     bgfx::TextureHandle     _gbufferAlbedoRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     bgfx::TextureHandle     _gbufferNormalRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     bgfx::TextureHandle     _gbufferMotionRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    // Requested panel size (setGbufferSize). Compared against
+    // _allocatedW/H in ensure() — must NOT reuse the request fields
+    // for the cache check or a resize that only updates the request
+    // will skip FBO rebuild (deferred viewport tears / jagged edges).
     uint16_t                _gbufferW         = 0;
     uint16_t                _gbufferH         = 0;
+    uint16_t                _allocatedW       = 0;
+    uint16_t                _allocatedH       = 0;
 
     // §P5 B4a (2026-07-22) — internal ensure (mirror
     // ShadowMapResources::ensure shape). Calls

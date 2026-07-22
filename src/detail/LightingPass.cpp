@@ -5,6 +5,7 @@
 #include "detail/GBufferPass.h"
 #include "detail/GpuResources.h"
 #include "detail/RenderPass.h"
+#include "detail/ShadowPass.h"
 
 #include "AYRenderScene.h"
 
@@ -30,7 +31,26 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
 // u_lightColor still exists (no-op on the data path; both uniforms
 // still ship) so existing setDirectionalLight host code stays
 // compatible.
-static constexpr const char* kLightingCacheKey = "lighting_v4_b7_multi_light_ubo";
+// §P5 B7+ (2026-07-22) — v6: Lights UBO must be program-top-level.
+// AYBGFXConverter only emits cbuffer from IRProgram::uniformBlocks;
+// nested material uniformblocks never reach the HLSL preamble
+// (`undeclared identifier 'Lights'` / D3D X3004).
+// §P5 B5.5 (2026-07-22) — bump on top of v11:
+//   + `texture2d gbufferDepth` (sampled into the FS for worldPos
+//     reconstruction)
+//   + `texture2d shadowMap` + 4 shadow uniforms (u_lightViewProj,
+//     shadowBias, shadowMapTexel, shadowPcf) plus two inverse-view
+//     uniforms (u_invView, u_invProjection) for worldPos
+//     reconstruction
+//   + FS key-light only PCF (9 taps) — fill / rim lights
+//     (lights[1..7]) stay unshadowed.
+//
+// Single shared shadow map for the key light (cutsheet §10
+// pass-lessons-from-deferred.md:300 — "LightingPass 共用
+// ShadowPass 只读借用"). Per-light shadow maps is a separate
+// future cut. v0 keeps the existing `lighting_v11_b7_ubo_struct_
+// types` base + suffix `+b5p5_worldpos_pcf_key_only`.
+static constexpr const char* kLightingCacheKey = "lighting_v11_b7_ubo_struct_types_b5p5_worldpos_pcf_key_only";
 
 // §P5 B5 (2026-07-22) — fullscreen-triangle vertex data, duplicated
 // from PostProcessPass.cpp:27-33 (private state there — coupling
@@ -89,17 +109,26 @@ constexpr uint16_t kLightingFullscreenIndices[3] = { 0, 1, 2 };
 // legacy `return → gl_FragColor` path (verified at AYShader/
 // unittest/Test_MRT_Fragment.cpp::mrt_legacy_return_still_emits_fragcolor).
 constexpr const char* kLightingPhoskiaSource = R"(
+uniformblock Lights {
+    vec4 dirs[8]
+    vec4 colors[8]
+} binding 0
 material Lighting {
     texture2d gbufferAlbedo
     texture2d gbufferNormal
     texture2d gbufferMotion
+    texture2d gbufferDepth
+    texture2d shadowMap
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
-    uniformblock Lights {
-        vec4 dirs[8]
-        vec4 colors[8]
-    } binding 0
+    uniform mat4 u_invView
+    uniform mat4 u_invProjection
+    uniform mat4 u_lightViewProj
+    uniform vec4 shadowBias
+    uniform vec4 shadowMapTexel
+    uniform vec4 shadowPcf
+    property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -112,14 +141,15 @@ material Lighting {
         let normalSample = sample(gbufferNormal, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
         let ambient = vec3(0.1, 0.1, 0.1)
-        let L0 = normalize(Lights.dirs[0].xyz)
-        let L1 = normalize(Lights.dirs[1].xyz)
-        let L2 = normalize(Lights.dirs[2].xyz)
-        let L3 = normalize(Lights.dirs[3].xyz)
-        let L4 = normalize(Lights.dirs[4].xyz)
-        let L5 = normalize(Lights.dirs[5].xyz)
-        let L6 = normalize(Lights.dirs[6].xyz)
-        let L7 = normalize(Lights.dirs[7].xyz)
+        // Empty slots are zero dirs — never normalize(0) (D3D hangs / NaN).
+        let L0 = Lights.dirs[0].xyz * (1.0 / max(length(Lights.dirs[0].xyz), 0.0001))
+        let L1 = Lights.dirs[1].xyz * (1.0 / max(length(Lights.dirs[1].xyz), 0.0001))
+        let L2 = Lights.dirs[2].xyz * (1.0 / max(length(Lights.dirs[2].xyz), 0.0001))
+        let L3 = Lights.dirs[3].xyz * (1.0 / max(length(Lights.dirs[3].xyz), 0.0001))
+        let L4 = Lights.dirs[4].xyz * (1.0 / max(length(Lights.dirs[4].xyz), 0.0001))
+        let L5 = Lights.dirs[5].xyz * (1.0 / max(length(Lights.dirs[5].xyz), 0.0001))
+        let L6 = Lights.dirs[6].xyz * (1.0 / max(length(Lights.dirs[6].xyz), 0.0001))
+        let L7 = Lights.dirs[7].xyz * (1.0 / max(length(Lights.dirs[7].xyz), 0.0001))
         let f0 = max(dot(N, L0), 0.0)
         let f1 = max(dot(N, L1), 0.0)
         let f2 = max(dot(N, L2), 0.0)
@@ -128,14 +158,89 @@ material Lighting {
         let f5 = max(dot(N, L5), 0.0)
         let f6 = max(dot(N, L6), 0.0)
         let f7 = max(dot(N, L7), 0.0)
-        let directionalSum = f0 * Lights.colors[0].xyz
-                            + f1 * Lights.colors[1].xyz
+        // §P5 B5.5 (2026-07-22) — Shadow attenuation for the **key
+        // light** only (Lights.dirs[0] / colors[0], shared with the
+        // single ShadowPass producer — cutsheet pass-lessons-from-
+        // deferred.md:300 "LightingPass 共用 ShadowPass 只读借用").
+        // Fill / rim lights (Lights.dirs[1..7]) get NO shadow
+        // attenuation — they don't carry their own shadow map in
+        // v0. Per-light shadow maps is a separate cut.
+        //
+        // Wire (mirrors AYShadowShaderSources.h simple_lit_shadow
+        // PCF contract):
+        //   1. Sample gbufferDepth at baseUv → linearized ndcZ
+        //      ∈ [0, 1]. tex = sample(gbufferDepth, baseUv).x.
+        //      (GBufferPass RT3 is D24S8 hw depth; bgfx exposes it
+        //      as a depth texture that shaders can sample as
+        //      `.x`-linearized in [0,1] convention. We keep this
+        //      simple by treating .x as a direct ndc01 read; the
+        //      exact half-range decode is host-tunable once VSM
+        //      lands.)
+        //   2. Reconstruct world position via inverse-projection →
+        //      inverse-view chain (MathInput `u_invProjection` /
+        //      `u_invView` uniforms; both derived per-frame in
+        //      execute() via Float4x4::inverse — FrameContext 0
+        //      changed, inverse lives on the pass only).
+        //   3. Project worldPos through u_lightViewProj → ndc01.
+        //      9-tap PCF compare against gbufferDepth-derived
+        //      refNdc01; the 3×3 kernel + 1/9 mixer + step(0.999,
+        //      o) sky-bypass matches simple_lit_shadow.phoskia.
+        let texDepth = sample(gbufferDepth, baseUv).x
+        // Inverse projection: clip → view. ndc = (x, y, ndcZ*2-1,
+        // 1). Split-half v0: ndcY flip already done in baseUv.
+        let ndc01 = vec3(baseUv.x * 2.0 - 1.0, baseUv.y * 2.0 - 1.0, texDepth * 2.0 - 1.0)
+        let viewPos4 = u_invProjection * vec4(ndc01, 1.0)
+        let viewPos = viewPos4.xyz / max(viewPos4.w, 0.0001)
+        let worldPos4 = u_invView * vec4(viewPos, 1.0)
+        let worldPos = worldPos4.xyz
+        // Project into shadow space.
+        let clipPos = u_lightViewProj * vec4(worldPos, 1.0)
+        let invW = 1.0 / max(clipPos.w, 0.0001)
+        let ndcX = clipPos.x * invW
+        let ndcY = clipPos.y * invW
+        let refNdc01 = clipPos.z * invW
+        let uy = ndcY * 0.5 + 0.5
+        let shadowUv = vec2(ndcX * 0.5 + 0.5, 1.0 - uy)
+        let inMap = step(0.0, shadowUv.x) * step(shadowUv.x, 1.0)
+                   * step(0.0, shadowUv.y) * step(shadowUv.y, 1.0)
+        let tx = shadowMapTexel.x
+        let ty = shadowMapTexel.y
+        let biasVal = shadowBias.x
+        let o00 = sample(shadowMap, shadowUv + vec2(-tx, -ty)).x
+        let o10 = sample(shadowMap, shadowUv + vec2(0.0, -ty)).x
+        let o20 = sample(shadowMap, shadowUv + vec2(tx, -ty)).x
+        let o01 = sample(shadowMap, shadowUv + vec2(-tx, 0.0)).x
+        let o11 = sample(shadowMap, shadowUv + vec2(0.0, 0.0)).x
+        let o21 = sample(shadowMap, shadowUv + vec2(tx, 0.0)).x
+        let o02 = sample(shadowMap, shadowUv + vec2(-tx, ty)).x
+        let o12 = sample(shadowMap, shadowUv + vec2(0.0, ty)).x
+        let o22 = sample(shadowMap, shadowUv + vec2(tx, ty)).x
+        let s00 = max(1.0 - step(o00 + biasVal, refNdc01), step(0.999, o00))
+        let s10 = max(1.0 - step(o10 + biasVal, refNdc01), step(0.999, o10))
+        let s20 = max(1.0 - step(o20 + biasVal, refNdc01), step(0.999, o20))
+        let s01 = max(1.0 - step(o01 + biasVal, refNdc01), step(0.999, o01))
+        let s11 = max(1.0 - step(o11 + biasVal, refNdc01), step(0.999, o11))
+        let s21 = max(1.0 - step(o21 + biasVal, refNdc01), step(0.999, o21))
+        let s02 = max(1.0 - step(o02 + biasVal, refNdc01), step(0.999, o02))
+        let s12 = max(1.0 - step(o12 + biasVal, refNdc01), step(0.999, o12))
+        let s22 = max(1.0 - step(o22 + biasVal, refNdc01), step(0.999, o22))
+        let shadowSoft = (s00 + s10 + s20
+                        + s01 + s11 + s21
+                        + s02 + s12 + s22) * (1.0 / 9.0)
+        let shadowHard = s11
+        let shadowFilt = mix(shadowHard, shadowSoft, shadowPcf.x)
+        let shadowKey = mix(1.0, shadowFilt, inMap)
+        // Key-light multiplication: only lights[0] gets the shadow
+        // attenuation. Fill / rim lights (1..7) stay unshadowed.
+        let keyContribution = f0 * shadowKey * Lights.colors[0].xyz
+        let fillContribution = f1 * Lights.colors[1].xyz
                             + f2 * Lights.colors[2].xyz
                             + f3 * Lights.colors[3].xyz
                             + f4 * Lights.colors[4].xyz
                             + f5 * Lights.colors[5].xyz
                             + f6 * Lights.colors[6].xyz
                             + f7 * Lights.colors[7].xyz
+        let directionalSum = keyContribution + fillContribution
         let lit = albedo.rgb * (ambient + directionalSum)
         return vec4(lit, albedo.a)
     }
@@ -177,6 +282,8 @@ void LightingPass::destroyResources(BGFXAdapter& adapter)
     }
     _lightingW  = 0;
     _lightingH  = 0;
+    _allocatedW = 0;
+    _allocatedH = 0;
     _buildStamp = "";
     _program.reset();
     _programReady = false;
@@ -198,8 +305,8 @@ void LightingPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
     }
 
     if (bgfx::isValid(_lightingFbo)
-        && _lightingW == width
-        && _lightingH == height
+        && _allocatedW == width
+        && _allocatedH == height
         && !stampChanged) {
         return;  // FBO cached
     }
@@ -208,7 +315,7 @@ void LightingPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
     if (bgfx::isValid(_lightingFbo)) {
         adapter.destroy(_lightingFbo);
         _lightingFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
-        _lightingW = _lightingH = 0;
+        _allocatedW = _allocatedH = 0;
     }
 
     // §P5 B5 (2026-07-22) — 1× RGBA8 LightingOutput FBO. NO depth
@@ -221,6 +328,8 @@ void LightingPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
                                               bgfx::TextureFormat::RGBA8,
                                               /*withDepth=*/false);
     if (bgfx::isValid(_lightingFbo)) {
+        _allocatedW = width;
+        _allocatedH = height;
         _lightingW = width;
         _lightingH = height;
     }
@@ -295,10 +404,21 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // light (1 direction from FrameContext::lightDirection, 1 color
     // from FrameContext::lightColor).
     //
-    // B5.5+ boundary: NOT consuming shadow map (B5 keeps Lambert
-    // flat, no shadow attenuation). NOT consuming gbufferMotion
-    // (binding present for B7+ TAA consumer symmetry, but FS does
-    // not read it — see cutsheet B5 boundary doc).
+    // B5.5 (2026-07-22) — consumes `ctx.shadowPass->shadowMap()` via
+    // the shared tryBindShadowSampler helper (mirror FO / Trans
+    // call sites at ForwardOpaquePass.cpp:105-106 + TransparentPass:
+    // 170-171). helper uploads `u_lightViewProj` +
+    // `shadowBias` + `shadowMapTexel` + `shadowPcf` uniforms + binds
+    // the shadowMap sampler on stage 1 (ShadowReceiverContract
+    // kShadowMapName / kLightViewProjName / kShadowBiasName /
+    // kShadowMapTexelName / kShadowPcfName). When ctx.shadowPass
+    // is null or hasSampleableShadow()==false, helper falls back
+    // to a fully-lit white texture + identity LVP so the FS
+    // reads stay valid without UB.
+    //
+    // B7+ TAA boundary (unchanged): NOT consuming gbufferMotion
+    // (binding present for TAA consumer symmetry, FS does not
+    // read it — see cutsheet B5 boundary doc).
     //
     // §5.4 (2026-07-22, FO/Trans PR) — `isInitialized()` guard only,
     // NOT `|| isNoopBackend()`. Noop short-circuits inside
@@ -524,12 +644,121 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         lightsBlock[ayt::render::kMaxSceneLights * 4 + 3] = 0.0f;
     }
 
-    const shader::BindingId lightsUboBinding =
-        _program.getUniformBlockBinding("Lights");
-    if (lightsUboBinding != shader::InvalidBinding) {
-        _program.setUniformBlock(lightsUboBinding,
-                                 lightsBlock,
-                                 sizeof(lightsBlock));
+    const shader::BindingId dirsBinding = _program.getUniformBinding("dirs");
+    const shader::BindingId colorsBinding = _program.getUniformBinding("colors");
+    if (dirsBinding != shader::InvalidBinding
+        && colorsBinding != shader::InvalidBinding) {
+        // HLSL field-split path: `uniform vec4 dirs[8]` + `colors[8]`.
+        static bool s_loggedSplit = false;
+        if (!s_loggedSplit) {
+            s_loggedSplit = true;
+            std::fprintf(stderr,
+                         "[LightingPass] lights via field uniforms "
+                         "dirs+colors (HLSL/bgfx)\n");
+        }
+        _program.setUniform(dirsBinding, lightsBlock,
+                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
+        _program.setUniform(colorsBinding,
+                            lightsBlock + ayt::render::kMaxSceneLights * 4u,
+                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
+    } else {
+        const shader::BindingId lightsUboBinding =
+            _program.getUniformBlockBinding("Lights");
+        if (lightsUboBinding != shader::InvalidBinding) {
+            _program.setUniformBlock(lightsUboBinding,
+                                     lightsBlock,
+                                     sizeof(lightsBlock));
+        } else {
+            static bool s_loggedMissing = false;
+            if (!s_loggedMissing) {
+                s_loggedMissing = true;
+                std::fprintf(stderr,
+                             "[LightingPass] WARNING: no dirs/colors uniforms "
+                             "and no Lights UBO — directional lighting skipped\n");
+            }
+        }
+    }
+
+    // §P5 B5.5 (2026-07-22) — consume ctx.shadowPass->shadowMap
+    // via the shared `tryBindShadowSampler` helper (mirror the
+    // FO / Trans call sites at ForwardOpaquePass.cpp:105-106 +
+    // TransparentPass.cpp:170-171). The helper uploads 4 shadow
+    // uniforms (`u_lightViewProj`, `shadowBias`, `shadowMapTexel`,
+    // `shadowPcf`) and binds the shadowMap sampler on stage 1
+    // (per ShadowReceiverContract::kShadowSamplerStage).
+    //
+    // Note on `flags`: LightingPass is a fullscreen post-process
+    // (not a per-DrawItem receiver) so its shadow attenuation is
+    // key-light only and we don't branch on per-mesh flags. The
+    // helper's internal `wantSample = shouldSampleShadowMap(flags)`
+    // short-circuits to `false` only when `ctx.shadowPass ==
+    // nullptr` or `!hasSampleableShadow()` — both equal `false`
+    // here. So the helper always uploads uniforms + binds the
+    // sampler on stage 1 (or, on the Noop path, falls back to the
+    // adapter's lit-white texture + identity LVP so the FS reads
+    // still sample valid data without UB).
+    //
+    // Same shared-shadow contract for all 8 lights (cutsheet §10
+    // pass-lessons-from-deferred.md:300 — "LightingPass 共用
+    // ShadowPass 只读借用"): only lights[0] gets the shadow
+    // attenuation. Fill / rim lights (1..7) stay unshadowed —
+    // they don't have their own shadow map in v0. Per-light CSM
+    // is a separate future cut.
+    tryBindShadowSampler(_program, ctx.adapter, ctx.shadowPass,
+                         kShadowCastAndReceive, frame.shadowBias);
+
+    // §P5 B5.5 (2026-07-22) — worldPos reconstruction uniforms
+    // (`u_invView`, `u_invProjection`). Computed per-frame as
+    // inverses of frame.view / frame.projection in CPU (no new
+    // FrameContext fields per cutsheet §5.3 — inverse lives on
+    // the pass only). When `frame.view` / `frame.projection`
+    // remain identity (test path, Noop un-init adapter), the
+    // inverse is also identity, so worldPos = (ndc01.x, ndc01.y,
+    // texDepth) — coarse but well-defined (the FS still has a
+    // valid reconstruction; the key-light shadow attenuation
+    // boils down to the Noop fallback fully-lit texture, which
+    // yields shadowKey ≈ 1.0).
+    {
+        const ayt::math::Float4x4 invView = frame.view.inverse();
+        const ayt::math::Float4x4 invProj = frame.projection.inverse();
+        float colMajor[16];
+        ayt::render::detail::toBgfxColumnMajor(invView, colMajor);
+        const shader::BindingId invViewBinding =
+            _program.getUniformBinding("u_invView");
+        if (invViewBinding != shader::InvalidBinding) {
+            _program.setUniform(invViewBinding, colMajor, sizeof(colMajor));
+        }
+        ayt::render::detail::toBgfxColumnMajor(invProj, colMajor);
+        const shader::BindingId invProjBinding =
+            _program.getUniformBinding("u_invProjection");
+        if (invProjBinding != shader::InvalidBinding) {
+            _program.setUniform(invProjBinding, colMajor, sizeof(colMajor));
+        }
+    }
+
+    // §P5 B5.5 (2026-07-22) — bind the gbufferDepth D24S8 sampler
+    // so the FS can reconstruct worldPos. Mirror FO / Trans
+    // sampler-bind pattern at LightingPass.cpp:425-451 above.
+    // When the GBufferPass has been ensured (B4a ship, runtime),
+    // `gbufferDepthRt()` returns the cached D24S8 attachment
+    // handle. When it hasn't, the sampler is unmapped and the
+    // helper / Noop path falls through (the shadow reconstruction
+    // is well-defined even without depth, but the bias term
+    // becomes huge so we'd see "everything in shadow"); the
+    // deferred-path guarantee is that GBufferPass::execute()
+    // runs before LightingPass::execute() in `executeAll()`,
+    // so on a real backend this is always populated.
+    if (ctx.gbufferPass != nullptr) {
+        const bgfx::TextureHandle depthHandle = ctx.gbufferPass->gbufferDepthRt();
+        if (bgfx::isValid(depthHandle)) {
+            const shader::BindingId depthBinding =
+                _program.getTextureBinding("gbufferDepth");
+            if (depthBinding != shader::InvalidBinding) {
+                const uint8_t stage = _program.getTextureStage(depthBinding);
+                _program.setTexture(stage, depthBinding,
+                                    toShaderTexture(depthHandle));
+            }
+        }
     }
 
     // §P5 B5 (2026-07-22) — fullscreen triangle dispatch. B5
