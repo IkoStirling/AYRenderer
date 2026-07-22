@@ -305,16 +305,57 @@ Light struct + FrameContext shadow 槽（`shadowFbo` / `lightViewProj` 等）+ �
 
 ---
 
-### P5 — Deferred 最小闭环（可选大项）
+### P5 — Deferred 最小闭环（B0 docs 已 ship 2026-07-22，B1–B6 待开）
 
-**仅当** P4 稳定且产品确认需要多光 / 复杂不透明 shading。
+**前提**（继承 P4 ship 后形态 + §5 红线 + Shadow F1 教训）：
+- 默认 Forward 5-pass 不变；Deferred 是 host opt-in。
+- §5.3 红线 #1–#4 全部沿用：RenderScene 不加 Light struct / FrameContext 不加 GBuffer 槽 / execute 不改非 const / 默认管线不改 Deferred。
+- 红线决策详见 [`pass-lessons-from-deferred.md`](pass-lessons-from-deferred.md) §4 ── 任一 PR 同时引入 RenderScene Light + FrameContext GBufferFbo + 默认 enabled + 真 GPU 多光 = **SIGSEGV at `textured_material_draw_one_frame`**（§5.5 F1 镜像）。
+- B0 已 ship ── `docs/pass-lessons-from-deferred.md` (本日新增) + `docs/deferred-pass.md` (本日新增) + 本 §P5 重写 + `docs/renderer-pass-roadmap.md` Priority 升级。
 
-| 项 | 动作 | 退出门 |
-|----|------|--------|
-| P5.1 | `GBufferPass` MRT（albedo/normal/motion 等最小集） | Noop 短道路径；真 GPU 可视化 GBuffer |
-| P5.2 | `LightingPass` 读 GBuffer + 共享 Shadow | 一盏方向光 parity ≈ Forward |
-| P5.3 | `RenderPath` 枚举：`Forward` / `Deferred`；透明始终走 TransparentPass | 切换路径不崩；Forward fallback 保留 |
-| P5.4 | **禁止** Lighting 后再用 ForwardOpaque 画全部不透明 | code review 检查清单 |
+**B 刀位（每刀 ≤ 8 文件，3 跑稳通过再下一刀）**：
+
+| B | 标题 | 文件预算 | 触碰 | 退出门 |
+|---|------|----------|------|--------|
+| **B0** ✅ | **现场重置（docs only）** | 4 docs (本 §P5 重写 + roadmap 升级 + 两新页) | `docs/*` | 0 ABI 漂移 / 3 跑稳 |
+| B1 | `enum class RenderPath { Forward, Deferred }` + `RenderPipelineDesc::path = Forward` 默认 + RenderPipeline 仍 Forward 路径 | 2–3 (`AYRenderTypes.h` / `RenderPipeline.{h,cpp}` / test) | 加 enum + 字段默认值；Pipeline 仍 Forward | 3 跑稳；默认零变更 |
+| B2 | `GBufferPass` 空壳 / Noop 0-draw + `PassExecContext::gbufferPass = const GBufferPass*` 借用指针（**镜像 `shadowPass`**） | 5–7 (`detail/GBufferPass.{h,cpp}` / `PassExecContext.h` / `AYRenderer.cpp` / `RenderPipeline.{h,cpp}` / 2 tests) | PassExecContext 加 1 借用指针；FrameContext **0 改**；RenderScene **0 改**；Impl ctor 加 pass 不挂 | 3 跑稳；sizeof(FrameContext) 不变 |
+| B3 | `LightingPass` 空壳 + Forward/Deferred path 显式切换（`Pipeline::executeAll` 看 `desc.path`） | 4–6 (`detail/LightingPass.{h,cpp}` / `RenderPipeline.*` / `AYRenderer.cpp` / tests) | host `configurePipeline(makeDeferred())` 切路径 | 3 跑稳；默认 Forward 无视觉差 |
+| B4 | GBuffer 真 MRT（NOOP 0-draw,真 GPU 真画）── RT0 albedo / RT1 normal / RT2 motion / RT3 depth；BGFXAdapter::createFrameBuffer 复用 | 6–8 (`GBufferResources.{h,cpp}` + `GBufferPass.cpp` 拆分 `B4a attachments` + Phoskia `B4b receiver` + `B4c Phoskia↔.sc 对齐` + tests + docs delta) | 4 attachment + depth + ensure/destroy/resize 模式 | 真 GPU Editor 截图：GBuffer 可视化（debug overlay） |
+| B5 | LightingPass 真光（NOOP 仍 0-draw）── 1 盏方向光（复用 `FrameContext::lightDirection`） + 全屏三角形（复用 PostProcessPass::vertexLayoutPosUv） | 6–8 (`LightingPass.cpp` 拆分 `B5a tri plumbing` + `B5b sample` + `B5c shadow reuse` + tests + docs) | 共享 Shadow 借用句柄；不进 FrameContext | 真 GPU Editor 截图：1 盏方向光 parity vs Forward |
+| B6 | `RenderPipelineDesc::makeDeferred()` factory + 默认 Forward 不变 + PostProcess source-FBO 选择优先级 (Deferred 走 `ctx.gbufferPass->lightingOutputFbo()`) | 3–5 (`AYRenderTypes.h` / `RenderPipeline.*` / `PostProcessPass.cpp` / docs) | 默认 Forward 零回归；Deferred opt-in 路径稳定 | 3 跑稳；附录 A 加 B0–B6 行 |
+
+**显式推迟**（不在 B0–B6）：
+- 多光源 DataSource ── **B7+**。DataSource 走 `PassExecContext::lights = const LightsArray*` 借用指针（**镜像 `shadowPass` 模式**），严守 §5.3 红线 #1── **不进 RenderScene::Light struct**。
+- 皮肤 / 特殊材质 Forward sub-pass 在 Deferred 时仍走小段 Forward ── v1 不实现。
+- VSM / ESM / IBL / SSR / SSAO ── 独立 roadmap，与 Deferred Pass 自身正交。
+- GBuffer MRT alias（spec / sssMask / velocity 等）── v1 锁死 albedo + normal + motion + depth 四 slot。
+- Per-material GBuffer layout ── v1 锁死单一 layout。
+- Deferred MSAA resolve ── Forward 走 MSAA；Deferred RT 已是 viewport 大小，主 RT 不绑 MSAA。
+- `setDeferredEnabled(bool)` setter ── 不加，host opt-in 走 configurePipeline（跟 Shadow E5 教训一致）。
+
+**§P5.4 强禁条款（写入 doc review checklist）**：
+- Lighting 后禁止跑 ForwardOpaque 重新画所有不透明 ── Deferred path 时 FO/Trans skip，由 Pipeline 显式不挂。
+- 公开 API ≤ 3 项：`RenderPath` / `makeDeferred()` / `pipelineDesc().isDeferred()` getter。**无 setter**。
+- 公开头文件（`include/AY*.h`）无 `<bgfx/bgfx.h>` ── `Test_PublicHeaderSurface` 守门。
+- `PassExecContext` 每刀 **加 ≤ 1 借用指针字段**，不加 GPU handle；sizeof(FrameContext) 不变。
+- `RenderPass::execute(PassExecContext&)` 签名 0 改。
+- `RenderScene::Light` struct **永不**引入（§5.3 红线 #1）。
+
+**复用既有 utilities（直接用，不重造）**：
+- `BGFXAdapter::createFrameBuffer(w,h,RGBA8,withDepth)` / `createDepthOnlyFrameBuffer`
+- `BGFXAdapter::setViewFrameBuffer` / `setViewClearRaw` / `setViewTransform*`
+- `BGFXAdapter::setStateOpaque` / `setStateAlphaBlend` / `setStateDepthOnlyWrite` / `setStateDepthTestAlways`（P6.5 ship）
+- `BGFXAdapter::vertexLayoutPosUv()`（P6.5 ship，PostProcess 全屏三角形 layout）
+- `BGFXAdapter::capsTextureBlit/ReadBack/HomogeneousDepth`（P6.5 ship）
+- `PassExecContext::shadowPass = const ShadowPass*`（借用指针模式模板，**镜像 -> `gbufferPass`**）
+- `FrameContext::lightDirection` / `lightColor`（B5 1 盏方向光来源）
+- `RenderPipeline::executeAll` isEnabled 闸（默认 disabled 的新 pass plumbing）
+- `ShadowMapResources` 私有 FBO 模式 ── `GBufferResources` 镜像
+- `ShadowDepthCodec` ndc01 / pack / compare ── 深度编码沿用 R8 复刻（lessons §3.6 + shadow-pass.md L113）
+- `Test_PublicHeaderSurface` / `Test_F1_LayoutDiag` ── ABI 守门
+
+**当前 pipeline 真值（ship 后再 update）**：默认 Forward 5-pass = Shadow(enabled E5) → FO → Trans → PP → UI；Deferred = Shadow → GBuffer → Lighting → PP → UI（B6 opt-in）。
 
 ---
 
