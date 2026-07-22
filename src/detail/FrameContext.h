@@ -26,10 +26,8 @@ struct FrameContext {
     float             timeSeconds      = 0.0f;
     float             bloomStrength    = 0.0f;
     float             exposure         = 1.0f;
-    // Screen-space ripple (UV warp). 0 = off (identity sampling).
-    float             rippleStrength   = 0.0f;
-    float             rippleFrequency  = 28.0f;
-    float             rippleSpeed      = 4.0f;
+    // Display gamma encode (pow(c, 1/gamma)). 2.2 ≈ sRGB OETF.
+    float             gamma            = 2.2f;
 
     enum class TonemapMode : uint8_t {
         None     = 0,

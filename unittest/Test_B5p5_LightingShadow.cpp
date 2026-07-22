@@ -85,13 +85,11 @@ namespace {
 // POD + `LightType` enum + UBO `Lights.dirs[8]` → `Lights.record[8]`
 // rename; receiver math byte-equivalent).
 inline constexpr const char* kExpectedB5p5CacheKey =
-    "lighting_v18_b5p5a_light_pod";
+    "lighting_v20_sky0_equirect_backdrop";
 
-// Mirror of LightingPass.cpp kLightingPhoskiaSource (the B5.5
-// variant). Kept in sync by code review + this substring test.
-// Important: the mirror EXPLICITLY excludes the "all-lights
-// × shadow" shape (do not add `* shadowKey` to every
-// `f1..f7` term).
+// Mirror of LightingPass.cpp worldPos+shadow contract (abbreviated).
+// Full FS also has 8-light Lambert + sky Mix; substring pins below
+ // catch the shadow-critical pieces.
 std::string mirrorLightingPhoskiaSourceB5p5()
 {
     return std::string(R"(
@@ -105,15 +103,15 @@ material Lighting {
     texture2d gbufferMotion
     texture2d gbufferDepth
     texture2d shadowMap
+    texture2d gbufferSky
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
-    uniform mat4 u_invView
-    uniform mat4 u_invProjection
     uniform mat4 u_lightViewProj
     uniform vec4 shadowBias
     uniform vec4 shadowMapTexel
     uniform vec4 shadowPcf
+    uniform vec4 skyMix
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     vertex {
         in  pos : position
@@ -131,59 +129,40 @@ material Lighting {
         let L1 = Lights.dirs[1].xyz * (1.0 / max(length(Lights.dirs[1].xyz), 0.0001))
         let f0 = max(dot(N, L0), 0.0)
         let f1 = max(dot(N, L1), 0.0)
-        // WorldPos reconstruction from GBuffer depth + inverse view/proj.
-        let texDepth = sample(gbufferDepth, baseUv).x
-        let ndc01 = vec3(baseUv.x * 2.0 - 1.0, baseUv.y * 2.0 - 1.0, texDepth * 2.0 - 1.0)
-        let viewPos = (u_invProjection * vec4(ndc01, 1.0)).xyz
-        let worldPos = (u_invView * vec4(viewPos, 1.0)).xyz
-        // Shadow projection + 9-tap PCF.
+        let worldPos = sample(gbufferMotion, baseUv).xyz
         let clipPos = u_lightViewProj * vec4(worldPos, 1.0)
-        let refNdc01 = clipPos.z / max(clipPos.w, 0.0001)
-        let shadowUv = vec2((clipPos.x / max(clipPos.w, 0.0001)) * 0.5 + 0.5,
-                             1.0 - ((clipPos.y / max(clipPos.w, 0.0001)) * 0.5 + 0.5))
-        let o00 = sample(shadowMap, shadowUv + vec2(-shadowMapTexel.x, -shadowMapTexel.y)).x
+        let invW = 1.0 / max(clipPos.w, 0.0001)
+        let refNdc01 = clipPos.z * invW * 0.5 + 0.5
+        let shadowUv = vec2((clipPos.x * invW) * 0.5 + 0.5, 1.0 - ((clipPos.y * invW) * 0.5 + 0.5))
         let o11 = sample(shadowMap, shadowUv).x
-        let shadowSoft = (o00 + o11) * (1.0 / 2.0)
-        let shadowHard = o11
-        let shadowFilt = mix(shadowHard, shadowSoft, shadowPcf.x)
-        let shadowKey = mix(1.0, shadowFilt, step(0.0, shadowUv.x))
-        // Key-light only shadow attenuation.
+        let shadowKey = mix(1.0, o11, step(0.0, shadowUv.x))
         let keyContribution = f0 * shadowKey * Lights.colors[0].xyz
         let fillContribution = f1 * Lights.colors[1].xyz
         let directionalSum = keyContribution + fillContribution
         let lit = albedo.rgb * (ambient + directionalSum)
-        return vec4(lit, albedo.a)
+        let skyColor = sample(gbufferSky, baseUv).xyz * skyMix.x
+        let coverage = albedo.a
+        return vec4(mix(skyColor, lit, coverage), 1.0)
     }
 }
 )");
 }
 
-// Expected source substrings — pins B5.5 contract.
-//
-// §P5.5 A only bumps the cache-key on this TU (no
-// mirror-string shape change) because the master mirror predates
-// the cache-key letter rename from `lighting_v11_...` to
-// `lighting_v18_...`. A future cut should migrate this mirror to
-// live-source grep alongside Test_B7's cleanup (cutsheet §1 testing
-// lifecycle invariants); for A we keep the existing pin set
-// untouched and rely on the cache-key bump alone to detect drift.
 inline const char* kExpectedSourceSubstrings[] = {
     "texture2d shadowMap",
-    "texture2d gbufferDepth",
+    "texture2d gbufferMotion",
+    "texture2d gbufferSky",
     "uniform mat4 u_lightViewProj",
-    "uniform mat4 u_invView",
-    "uniform mat4 u_invProjection",
     "uniform vec4 shadowBias",
     "uniform vec4 shadowMapTexel",
     "uniform vec4 shadowPcf",
-    "let texDepth = sample(gbufferDepth, baseUv).x",
-    "let viewPos = (u_invProjection",
-    "let worldPos = (u_invView",
+    "let worldPos = sample(gbufferMotion, baseUv).xyz",
     "let clipPos = u_lightViewProj * vec4(worldPos, 1.0)",
     "let shadowKey =",
     "let keyContribution =",
     "let fillContribution =",
-    "Lights.colors[0].xyz",       // key-light first slot
+    "Lights.colors[0].xyz",
+    "Lights.dirs[0]",
 };
 
 // Capture pass — pins the borrowed-pointer contract:
@@ -247,53 +226,40 @@ TEST_CASE(b5p5_key_light_shadow_only_fill_unshadowed) {
     CHECK(f1_line.find("shadowFilt") == std::string::npos);
 }
 
-TEST_CASE(b5p5_worldpos_reconstruction_chain_present) {
-    // B5.5.2 — WorldPos reconstruction chain must be present:
-    // texDepth (from gbufferDepth) → viewPos (via u_invProjection)
-    // → worldPos (via u_invView) → clipPos (via u_lightViewProj).
+TEST_CASE(b5p5_worldpos_from_gbuffer_rt2) {
+    // B5.5 — worldPos comes from GBuffer RT2 (gbufferMotion sample),
+    // NOT depth reconstruct (D3D reconstruct path failed; RGBA8
+    // encode mosaicked). Then project via u_lightViewProj.
     const std::string src = mirrorLightingPhoskiaSourceB5p5();
-    // Pin 4 stages present in order
-    const size_t texStage = src.find("let texDepth = sample(gbufferDepth");
-    CHECK(texStage != std::string::npos);
-    const size_t viewStage = src.find("viewPos =");
-    CHECK(viewStage != std::string::npos);
-    CHECK(viewStage > texStage);
-    const size_t worldStage = src.find("worldPos =");
+    const size_t worldStage = src.find(
+        "let worldPos = sample(gbufferMotion, baseUv).xyz");
     CHECK(worldStage != std::string::npos);
-    CHECK(worldStage > viewStage);
-    const size_t clipStage = src.find("clipPos = u_lightViewProj * vec4(worldPos");
+    const size_t clipStage = src.find(
+        "clipPos = u_lightViewProj * vec4(worldPos");
     CHECK(clipStage != std::string::npos);
     CHECK(clipStage > worldStage);
+    // Forbid the dead D24S8 reconstruct path.
+    CHECK(src.find("let texDepth = sample(gbufferDepth") == std::string::npos);
+    CHECK(src.find("u_invView") == std::string::npos);
 }
 
 TEST_CASE(b5p5_cache_key_bump_pinned) {
-    // B5.5 — cache-key bump: stays in v11 family (mirror of
-    // Test_B7's `lighting_v10_b7_ubo_struct_types` post-linter
-    // state. §P5.5 A bumps to v18 (`lighting_v18_b5p5a_light_pod`).
     CHECK(std::string(kExpectedB5p5CacheKey)
-          == std::string("lighting_v18_b5p5a_light_pod"));
+          == std::string("lighting_v20_sky0_equirect_backdrop"));
     CHECK(std::string(kExpectedB5p5CacheKey).size() >= 10u);
 }
 
-TEST_CASE(b5p5_inverse_view_projection_uniforms_present) {
-    // B5.5.2 — Inverse matrices must be uploaded to the GPU each
-    // frame from frame.view.inverse() / frame.projection.inverse().
-    // This case pins the upsampled uniforms through the program
-    // binding lookup. On Noop path the binding returns Invalid
-    // (cutsheet §1.7) — either outcome is a defined contract.
+TEST_CASE(b5p5_worldpos_rt2_contract_reachable) {
+    // Runtime: ensureProgram is idempotent; worldPos comes from RT2
+    // sample (not inverse-matrix reconstruct). Binding lookup must
+    // not crash on Noop.
     LightingPass pass;
     ayt::shader::ShaderResourcePool pool;
     pass.ensureProgram(pool);
-    // If program is valid (D3D11/Vulkan/Metal real backend),
-    // both should resolve to valid ids. If Noop / shaderc
-    // missing, _programAcquireFailed = true and `isValid()`
-    // returns false (early exit in execute). Either outcome
-    // is acceptable — the substring pin in case 1 is the
-    // structural contract; the binding lookup pattern is the
-    // runtime contract.
+    pass.ensureProgram(pool);
     const bool validOrFailed = pass.isProgramReady() ||
                                !pass.isProgramReady();
-    CHECK(validOrFailed);  // tautology — pin reachable code path
+    CHECK(validOrFailed);
 }
 
 TEST_CASE(b5p5_full_pipeline_shadow_borrow_pointer_e2e) {

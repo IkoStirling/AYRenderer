@@ -34,14 +34,14 @@ constexpr FullscreenVertex kFullscreenTriangle[3] = {
 
 constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 
-// Post-process: sceneColor sample with optional screen-space ripple.
-// Branchless (converter drops if/for). All knobs are vec4 (.x) for
-// bgfx Vec4 upload ABI — see docs/pass-lessons-from-shadow.md §3.1.
-// rippleParams.x = strength (0 = identity UV), .y = frequency, .z = speed.
+// Post-process: sample sceneColor → exposure → optional bloom tint →
+// display gamma (sRGB approx pow 1/2.2). Ripple UV warp removed.
 //
-// UV.y flip happens in the *fragment* (1 - vUv.y): Phoskia vertex
-// blocks reject `let` before `out` (parse → Undefined identifier: out).
-// Same D3D RT vs backbuffer convention as shadow map sampling.
+// Branchless (converter drops if/for). Knobs are vec4 (.x) for bgfx
+// Vec4 upload ABI — see docs/pass-lessons-from-shadow.md §3.1.
+//
+// UV.y flip in fragment (1 - vUv.y): Phoskia vertex blocks reject
+// `let` before `out`. Same D3D RT vs backbuffer convention as shadows.
 constexpr const char* kPostProcessPhoskiaSource = R"(
 material PostProcess {
     texture2d sceneColor
@@ -49,43 +49,7 @@ material PostProcess {
     uniform vec4 exposure
     uniform vec4 tonemapMode
     uniform vec4 uTime
-    uniform vec4 rippleParams
-    vertex {
-        in  pos : position
-        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
-        return vec4(pos.x, pos.y, 0.0, 1.0)
-    }
-    fragment {
-        in  vUv : texcoord
-        let baseUv = vec2(vUv.x, 1.0 - vUv.y)
-        let center = vec2(0.5, 0.5)
-        let d = baseUv - center
-        let dist = length(d)
-        let invLen = 1.0 / max(dist, 0.0001)
-        let dir = d * invLen
-        let wave = sin(dist * rippleParams.y - uTime.x * rippleParams.z)
-        let offset = dir * (wave * rippleParams.x)
-        let uv = baseUv + offset
-        let sampled = sample(sceneColor, uv)
-        let raw = sampled.xyz * exposure.x
-        let withBloom = raw + raw * bloomStrength.x
-        return vec4(withBloom, sampled.w)
-    }
-}
-)";
-
-constexpr const char* kPostProcessCacheKey = "postprocess_ripple_v3_yflip_fs";
-
-// Identity blit — used only if the ripple program fails to acquire, so
-// Editor composite (which requires FBO→backbuffer) does not go black.
-constexpr const char* kPostProcessPassthroughSource = R"(
-material PostProcessBlit {
-    texture2d sceneColor
-    uniform vec4 bloomStrength
-    uniform vec4 exposure
-    uniform vec4 tonemapMode
-    uniform vec4 uTime
-    uniform vec4 rippleParams
+    uniform vec4 gammaParams
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -97,11 +61,49 @@ material PostProcessBlit {
         let sampled = sample(sceneColor, uv)
         let raw = sampled.xyz * exposure.x
         let withBloom = raw + raw * bloomStrength.x
-        return vec4(withBloom, sampled.w)
+        let cx = max(withBloom.x, 0.0)
+        let cy = max(withBloom.y, 0.0)
+        let cz = max(withBloom.z, 0.0)
+        let invG = 1.0 / max(gammaParams.x, 0.0001)
+        let encoded = vec3(pow(cx, invG), pow(cy, invG), pow(cz, invG))
+        return vec4(encoded, sampled.w)
     }
 }
 )";
-constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_v3_yflip_fs";
+
+constexpr const char* kPostProcessCacheKey = "postprocess_gamma_v1_yflip_fs";
+
+// Fallback if gamma program fails to acquire — still gamma-encodes so
+// Editor composite does not go black / linear-washed.
+constexpr const char* kPostProcessPassthroughSource = R"(
+material PostProcessBlit {
+    texture2d sceneColor
+    uniform vec4 bloomStrength
+    uniform vec4 exposure
+    uniform vec4 tonemapMode
+    uniform vec4 uTime
+    uniform vec4 gammaParams
+    vertex {
+        in  pos : position
+        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
+        return vec4(pos.x, pos.y, 0.0, 1.0)
+    }
+    fragment {
+        in  vUv : texcoord
+        let uv = vec2(vUv.x, 1.0 - vUv.y)
+        let sampled = sample(sceneColor, uv)
+        let raw = sampled.xyz * exposure.x
+        let withBloom = raw + raw * bloomStrength.x
+        let cx = max(withBloom.x, 0.0)
+        let cy = max(withBloom.y, 0.0)
+        let cz = max(withBloom.z, 0.0)
+        let invG = 1.0 / max(gammaParams.x, 0.0001)
+        let encoded = vec3(pow(cx, invG), pow(cy, invG), pow(cz, invG))
+        return vec4(encoded, sampled.w)
+    }
+}
+)";
+constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_gamma_v1_yflip_fs";
 
 } // namespace
 
@@ -177,7 +179,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         && _uExposure      != ayt::shader::InvalidBinding
         && _uTonemapMode   != ayt::shader::InvalidBinding
         && _uTime          != ayt::shader::InvalidBinding
-        && _uRippleParams  != ayt::shader::InvalidBinding
+        && _uGammaParams   != ayt::shader::InvalidBinding
         && _tSceneColor    != ayt::shader::InvalidBinding;
 
     const bgfx::TextureHandle fboColor = adapter.getFboAttachment(sourceFbo, 0);
@@ -218,8 +220,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     const float tonemapPad[4] = {
         static_cast<float>(static_cast<int32_t>(frame.tonemapMode)), 0.0f, 0.0f, 0.0f};
     const float timePad[4] = {frame.timeSeconds, 0.0f, 0.0f, 0.0f};
-    const float ripplePad[4] = {
-        frame.rippleStrength, frame.rippleFrequency, frame.rippleSpeed, 0.0f};
+    const float gammaPad[4] = {frame.gamma, 0.0f, 0.0f, 0.0f};
 
     adapter.setTransformIdentity();
     adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
@@ -229,7 +230,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     _program.setUniform(_uExposure, exposurePad, sizeof(exposurePad));
     _program.setUniform(_uTonemapMode, tonemapPad, sizeof(tonemapPad));
     _program.setUniform(_uTime, timePad, sizeof(timePad));
-    _program.setUniform(_uRippleParams, ripplePad, sizeof(ripplePad));
+    _program.setUniform(_uGammaParams, gammaPad, sizeof(gammaPad));
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
@@ -245,15 +246,14 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     if (!s_loggedSubmit) {
         std::fprintf(stderr,
             "[PostProcessPass] blit ok view=%u rect=(%u,%u,%u,%u) "
-            "ripple=(%.3f,%.1f,%.1f) time=%.2f\n",
+            "gamma=%.1f exposure=%.2f time=%.2f\n",
             static_cast<unsigned>(viewId),
             static_cast<unsigned>(viewportX),
             static_cast<unsigned>(viewportY),
             static_cast<unsigned>(viewportWidth),
             static_cast<unsigned>(viewportHeight),
-            frame.rippleStrength,
-            frame.rippleFrequency,
-            frame.rippleSpeed,
+            gammaPad[0],
+            frame.exposure,
             frame.timeSeconds);
         s_loggedSubmit = true;
     }
@@ -326,13 +326,13 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
     if (_program.isValid() || _programAcquireFailed) {
         return;
     }
-    // Prefer the ripple filter; fall back to identity blit so Editor
+    // Prefer the gamma blit; fall back to passthrough gamma so Editor
     // composite (FBO → backbuffer) never goes black on a bad compile.
     ayt::shader::ShaderResource acquired =
         pool.acquire(kPostProcessPhoskiaSource, kPostProcessCacheKey);
     if (!acquired.isValid()) {
         std::fprintf(stderr,
-                     "[PostProcessPass] ripple Phoskia acquire failed; "
+                     "[PostProcessPass] gamma Phoskia acquire failed; "
                      "trying passthrough blit\n");
         for (const std::string& err : pool.lastCompileErrors()) {
             std::fprintf(stderr, "[PostProcessPass]   %s\n", err.c_str());
@@ -355,7 +355,7 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
     _uExposure      = _program.getUniformBinding("exposure");
     _uTonemapMode   = _program.getUniformBinding("tonemapMode");
     _uTime          = _program.getUniformBinding("uTime");
-    _uRippleParams  = _program.getUniformBinding("rippleParams");
+    _uGammaParams   = _program.getUniformBinding("gammaParams");
     _tSceneColor    = _program.getTextureBinding("sceneColor");
 }
 
@@ -390,7 +390,7 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
     _uExposure      = ayt::shader::InvalidBinding;
     _uTonemapMode   = ayt::shader::InvalidBinding;
     _uTime          = ayt::shader::InvalidBinding;
-    _uRippleParams  = ayt::shader::InvalidBinding;
+    _uGammaParams   = ayt::shader::InvalidBinding;
     _tSceneColor    = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
     _fboWidth = 0;

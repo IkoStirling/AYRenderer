@@ -13,45 +13,25 @@ namespace ayt::render::detail
 // ShadowMapResources.h:55). Pointer-equal comparison; callers MUST
 // pass this exact literal. Bumping requires a string change here AND
 // a re-ensure (next execute() will rebuild the FBO).
-static constexpr const char* kGBufferBuildStamp = "b4a-2026-07-22";
+// Stamp bump forces GBuffer FBO rebuild after RT2 format changes
+// (RGBA8 motion → RGBA16F worldPos). Pointer-equal compare in ensure().
+static constexpr const char* kGBufferBuildStamp = "b5p5-2026-07-23-rgba16f-rt2";
 
-// §P5 B4c (2026-07-22) — Phoskia GBuffer VS/FS source evolved:
-//   - `gl_FragData[2] = gbufferMotion` is now a real per-pixel motion
-//     vector (RGBA8 xy = NDC half-range encoded displacement;
-//     zw = (0,0) per cutsheet `pass-lessons-from-deferred.md:177`
-//     "RT2 RGBA8 motion vector (xy, zw reserved)" lock).
-//   - `uniform mat4 u_prevViewProj` declared as the previous-frame
-//     view-projection. CPU uploads `prevProj * prevView` per
-//     `pass-lessons-from-shadow.md` §3.1 "CPU 也要 P×V 与
-//     setViewTransform 同序" matrix-order convention.
-//   - Uses Phoskia builtin `viewProjectionMatrix` (verified at
-//     `AYShader/include/detail/AYPhoskiaFrameBuiltins.h:33-37` —
-//     `viewMatrix` → `u_view`, `projectionMatrix` → `u_proj`,
-//     `viewProjectionMatrix` → `u_viewProj`; tested at
-//     `AYShader/unittest/Test_BGFXConverter.cpp:335-337`).
-//     NOT a hand-written `projection * view` — that's a cutsheet
-//     veto per B4c hard-rule #2 (no bare projection/view in shader
-//     source; use the builtin the converter already wires).
+// §P5 B5.5 / deferred-shadow contract (2026-07-23):
+//   RT0 albedo RGBA8 / RT1 normal RGBA8 / RT2 worldPos RGBA16F /
+//   depth D24S8. Slot is still named `gbufferMotion` (MRT name lock)
+//   but stores raw worldPos xyz for LightingPass key-only PCF.
+//   Motion NDC encoding is deferred until a dedicated RT exists —
+//   writing motion into RGBA8 RT2 previously broke shadows (Lighting
+//   projected [0,1] junk as worldPos).
 //
-// Three `out color` slots map to gl_FragData[0..2] in declaration
-// order (Phoskia Phase 6 #6, AYShader/src/AYBGFXConverter.cpp:1604-1625):
-//   gl_FragData[0] = gbufferAlbedo  (RGB = baseColor, A = opacity)
-//   gl_FragData[1] = gbufferNormal  (RGB = world-space normal, A unused)
-//   gl_FragData[2] = gbufferMotion  (xy = (currNDC - prevNDC)*0.5+0.5,
-//                                   zw = (0,0))
+// `u_prevViewProj` stays declared + uploaded so B7+ TAA can reclaim
+// the slot without another host wire; FS does not write motion today.
 //
-// Depth goes into the FBO's depth attachment (D24S8) via gl_Position.w,
-// not into a color slot.
-//
-// Background matching ForwardOpaquePass (baseColor override): when a
-// host material has a colorOverride, GBufferPass reads it via the
-// property `baseColor` (mirror FO's colorBinding).
-//
-// First-frame prevViewProj semantics: when `u_prevViewProj` is
-// identity (no host commit yet — see Impl::prevMainView default
-// doc-block), the FS produces currNDC - 0/1 = currNDC, encoded to
-// `(currNDC*0.5+0.5, 0, 0)`. B7+ TAA consumer must tolerate this
-// single-frame noise — TAA is a multi-frame accumulator.
+// Three `out color` slots map to gl_FragData[0..2]:
+//   gl_FragData[0] = gbufferAlbedo
+//   gl_FragData[1] = gbufferNormal
+//   gl_FragData[2] = gbufferMotion  (xyz = worldPos, w = 1)
 constexpr const char* kGBufferPhoskiaSource = R"(
 material GBufferFill {
     texture2d albedoMap
@@ -75,21 +55,16 @@ material GBufferFill {
         out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferMotion : color = vec4(0.0, 0.0, 0.0, 0.0)
         let n = normalize(worldNormal)
-        let currClip = viewProjectionMatrix * vec4(worldPos, 1.0)
-        let prevClip = u_prevViewProj * vec4(worldPos, 1.0)
-        let currNDC = currClip.xy / currClip.w
-        let prevNDC = prevClip.xy / prevClip.w
-        let motionNDC = currNDC - prevNDC
         let albedo = sample(albedoMap, vUv) * baseColor
         gbufferAlbedo = vec4(albedo.rgb, albedo.a)
         gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0)
-        gbufferMotion = vec4(motionNDC * 0.5 + 0.5, 0.0, 0.0)
+        gbufferMotion = vec4(worldPos, 1.0)
     }
 }
 )";
 
-// Cache key bumped for albedoMap * baseColor (Forward parity).
-static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v5_albedo_times_base";
+// Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
+static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v7_worldpos_rgba16f";
 
 GBufferPass::~GBufferPass() = default;
 

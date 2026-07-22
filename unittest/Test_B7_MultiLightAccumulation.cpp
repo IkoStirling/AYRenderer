@@ -109,7 +109,7 @@ namespace {
 // fails. Same TU-local-mirror pattern used by
 // Test_B5_LightingDirectional.cpp::kExpectedLightingCacheKey.
 inline constexpr const char* kExpectedB7LightingCacheKey =
-    "lighting_v18_b5p5a_light_pod";
+    "lighting_v20_sky0_equirect_backdrop";
 
 // §P5 B7+ (2026-07-22) — Phoskia source substring pins. Drift =
 // test fails. Note PascalCase `Lights` block name (matches
@@ -303,7 +303,7 @@ TEST_CASE(b7_phoskia_lighting_source_contract) {
 TEST_CASE(b7_lighting_cache_key_bump_pinned) {
     // B7 cache-key bump (mirror Test_B5::b5_lighting_cache_key_and_build_stamp_pinned).
     CHECK(std::string(kExpectedB7LightingCacheKey)
-          == std::string("lighting_v18_b5p5a_light_pod"));
+          == std::string("lighting_v20_sky0_equirect_backdrop"));
     CHECK(std::string(kExpectedB7LightingCacheKey).size() >= 10u);
 }
 

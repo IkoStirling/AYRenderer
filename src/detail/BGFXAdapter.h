@@ -111,8 +111,8 @@ public:
     // Also used for the Editor/scene color+depth RT (PostProcess sample).
     bgfx::FrameBufferHandle createColorDepthFrameBuffer(uint16_t width, uint16_t height);
 
-    // §P5 B4a (2026-07-22) — GBuffer MRT helper. Cutsheet §5.2 locks
-    // 4-attach: RT0 albedo RGBA8 / RT1 normal RGBA8 / RT2 motion RGBA8
+    // §P5 B5.5 (2026-07-23) — GBuffer MRT helper. 4-attach:
+    // RT0 albedo RGBA8 / RT1 normal RGBA8 / RT2 worldPos RGBA16F
     // / RT3 depth D24S8 hardware. Adapter wraps `bgfx::createFrameBuffer`
     // num=4 form (bgfx.h:3393-3397) so Pass files never see raw bgfx
     // (cutsheet §6 red line — passes go through adapter only).

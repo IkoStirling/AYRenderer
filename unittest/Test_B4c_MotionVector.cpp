@@ -120,30 +120,25 @@ namespace {
 // (one side bumped, the other not) the test catches it. This is
 // the standard "golden value" pattern Test_BGFXConverter uses for
 // the builtin names.
-inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v5_albedo_times_base";
-inline constexpr const char* kExpectedGBufferBuildStamp = "b4a-2026-07-22";
+inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v7_worldpos_rgba16f";
+inline constexpr const char* kExpectedGBufferBuildStamp = "b5p5-2026-07-23-rgba16f-rt2";
 
-// Expected substrings the Phoskia GBufferFill source must contain.
-// Drift = the test fails. This is HR2 + HR3 + HR4 in one net.
+// Expected substrings — deferred-shadow contract writes worldPos to
+// RT2 (still named gbufferMotion). Motion NDC encoding deferred.
 inline const char* kExpectedSourceSubstrings[] = {
-    "uniform mat4 u_prevViewProj",      // HR3
-    "viewProjectionMatrix",             // HR2 — builtin used (not bare)
-    "modelViewProjection * vec4(pos",  // clip = MVP (not VP*object)
-    "currClip = viewProjectionMatrix", // HR2 — curr-clip uses builtin
-    "prevClip = u_prevViewProj",        // HR2 + HR3 — prev-clip uses uniform
-    "motionNDC = currNDC - prevNDC",   // HR formula: clip-space diff
-    "motionNDC * 0.5 + 0.5",            // HR encoding: [0,1] NDC half
-    "gbufferMotion = vec4(motionNDC",   // write target
-    "out gbufferAlbedo : color",        // MRT outs at fragment param head
+    "uniform mat4 u_prevViewProj",      // retained for B7+ TAA host wire
+    "modelViewProjection * vec4(pos",  // clip = MVP
+    "gbufferMotion = vec4(worldPos, 1.0)", // RT2 = worldPos (shadow PCF)
+    "out gbufferAlbedo : color",
     "vec3(0.5, 0.5, 0.5)",              // HLSL-safe normal encode
     "sample(albedoMap, vUv) * baseColor", // Forward albedo parity
 };
 
-// Substrings that MUST NOT appear — pins HR2 ("no bare
-// projection * view") and HR3 ("no property initial").
+// Substrings that MUST NOT appear.
 inline const char* kForbiddenSourceSubstrings[] = {
     "projection * view",      // HR2 veto — bare matrix multiply
     "property prevViewProj",  // HR3 veto — Phoskia property initial
+    "gbufferMotion = vec4(motionNDC", // do not regress to motion-in-RT2
 };
 
 // Helper: read GBufferPass::kGBufferCacheKey via a friend-declared
@@ -192,15 +187,10 @@ material GBufferFill {
         out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferMotion : color = vec4(0.0, 0.0, 0.0, 0.0)
         let n = normalize(worldNormal)
-        let currClip = viewProjectionMatrix * vec4(worldPos, 1.0)
-        let prevClip = u_prevViewProj * vec4(worldPos, 1.0)
-        let currNDC = currClip.xy / currClip.w
-        let prevNDC = prevClip.xy / prevClip.w
-        let motionNDC = currNDC - prevNDC
         let albedo = sample(albedoMap, vUv) * baseColor
         gbufferAlbedo = vec4(albedo.rgb, albedo.a)
         gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0)
-        gbufferMotion = vec4(motionNDC * 0.5 + 0.5, 0.0, 0.0)
+        gbufferMotion = vec4(worldPos, 1.0)
     }
 }
 )");
@@ -352,11 +342,13 @@ TEST_CASE(b4c_phoskia_gbuffer_source_motion_contract) {
     for (const char* needle : kForbiddenSourceSubstrings) {
         CHECK(src.find(needle) == std::string::npos);
     }
-    // The fragment stage MUST write to gbufferMotion using the
-    // motion formula. (HR encoding pin: 0.5 + 0.5 maps NDC half-
-    // range into [0,1] RGBA8.)
-    CHECK(src.find("gbufferMotion = vec4(motionNDC * 0.5 + 0.5")
+    // The fragment stage MUST write worldPos into gbufferMotion
+    // (deferred-shadow / B5.5 RT2 contract). Motion NDC encoding is
+    // forbidden here — it breaks Lighting PCF.
+    CHECK(src.find("gbufferMotion = vec4(worldPos, 1.0)")
           != std::string::npos);
+    CHECK(src.find("gbufferMotion = vec4(motionNDC")
+          == std::string::npos);
     // Vertex MUST use the builtin (HR2), not bare matrix multiply.
     // The GBufferFill Phoskia source (kGBufferPhoskiaSource at
     // GBufferPass.cpp:55-89) ships `return modelViewProjection *
@@ -414,22 +406,14 @@ TEST_CASE(b4c_shader_resource_program_uniform_path) {
     (void)adapter;
 }
 
-TEST_CASE(b4c_gbuffer_build_stamp_unchanged) {
-    // B4c does NOT change FBO shape (still 4-attach: 3× RGBA8 +
-    // 1× D24S8). `kGBufferBuildStamp` stays at `b4a-2026-07-22`
-    // (mirrored in this TU). If a future PR bumps the stamp
-    // AND changes the cache key simultaneously, the FBO rebuild
-    // triggers on next execute — and that's OK, but B4c
-    // specifically does NOT bump the stamp.
-    //
-    // We pin the literal. GBufferPass exposes `buildStamp()` which
-    // returns "" until first ensure(); we can't read the
-    // kGBufferBuildStamp directly (TU-scope), so we mirror it.
+TEST_CASE(b4c_gbuffer_build_stamp_worldpos_rgba16f) {
+    // Deferred-shadow cut bumps the stamp so createGbufferFrameBuffer
+    // rebuilds with RT2 = RGBA16F (was RGBA8 motion).
     CHECK(std::string(kExpectedGBufferBuildStamp)
-          == std::string("b4a-2026-07-22"));
+          == std::string("b5p5-2026-07-23-rgba16f-rt2"));
+    CHECK(std::string(kExpectedGBufferCacheKey)
+          == std::string("gbuffer_fill_v7_worldpos_rgba16f"));
 
-    // Confirm default-constructed GBufferPass is still in the
-    // B4a "never ensured" state (buildStamp == "").
     GBufferPass pass;
     CHECK(pass.buildStamp()[0] == '\0');
     CHECK(pass.isReady() == false);  // FBO not allocated

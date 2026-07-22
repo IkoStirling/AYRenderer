@@ -527,6 +527,13 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
     }
 
     constexpr uint8_t kNumColor = 3;
+    // RT0 albedo RGBA8 / RT1 normal RGBA8 / RT2 worldPos RGBA16F.
+    // RGBA8 on RT2 quantized worldPos (~0.16m) → mosaic shadow UVs.
+    const bgfx::TextureFormat::Enum colorFmts[kNumColor] = {
+        bgfx::TextureFormat::RGBA8,
+        bgfx::TextureFormat::RGBA8,
+        bgfx::TextureFormat::RGBA16F,
+    };
     const uint64_t colorFlags = BGFX_TEXTURE_RT
                               | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
                               | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
@@ -539,12 +546,12 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
     };
     bool ok = true;
     for (uint8_t i = 0; i < kNumColor; ++i) {
-        if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA8, colorFlags)) {
+        if (!bgfx::isTextureValid(0, false, 1, colorFmts[i], colorFlags)) {
             ok = false;
             break;
         }
         colors[i] = bgfx::createTexture2D(width, height, false, 1,
-                                          bgfx::TextureFormat::RGBA8, colorFlags, nullptr);
+                                          colorFmts[i], colorFlags, nullptr);
         if (!bgfx::isValid(colors[i])) {
             ok = false;
             break;
@@ -580,7 +587,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
 
-    // 4-attach order: [albedo, normal, motion, depth]
+    // 4-attach order: [albedo, normal, worldPos, depth]
     const bgfx::TextureHandle attachments[4] = {
         colors[0], colors[1], colors[2], depth
     };

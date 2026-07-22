@@ -103,8 +103,8 @@ constexpr const char* kExpectedPhoskiaSourceContains[] = {
     "uniform vec4 bloomStrength",
     "uniform vec4 exposure",
     "uniform vec4 uTime",
-    "uniform vec4 rippleParams",
-    "sin(",
+    "uniform vec4 gammaParams",
+    "pow(",
     "sample(sceneColor, uv)",
 };
 
@@ -194,7 +194,7 @@ TEST_CASE(r51_inlined_source_string_has_canonical_substrings) {
     // expected surface as a list of substrings. The PostProcessPass
     // author is responsible for keeping them in sync — a deliberate
     // tight coupling since the .phoskia source is part of the
-    // Public post-process contract: vec4 knobs + ripple UV warp.
+    // Public post-process contract: vec4 knobs + display gamma encode.
     constexpr const char* kLiveSource = R"(
 material PostProcess {
     texture2d sceneColor
@@ -202,7 +202,7 @@ material PostProcess {
     uniform vec4 exposure
     uniform vec4 tonemapMode
     uniform vec4 uTime
-    uniform vec4 rippleParams
+    uniform vec4 gammaParams
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -210,18 +210,16 @@ material PostProcess {
     }
     fragment {
         in  vUv : texcoord
-        let center = vec2(0.5, 0.5)
-        let d = vUv - center
-        let dist = length(d)
-        let invLen = 1.0 / max(dist, 0.0001)
-        let dir = d * invLen
-        let wave = sin(dist * rippleParams.y - uTime.x * rippleParams.z)
-        let offset = dir * (wave * rippleParams.x)
-        let uv = vUv + offset
+        let uv = vec2(vUv.x, 1.0 - vUv.y)
         let sampled = sample(sceneColor, uv)
         let raw = sampled.xyz * exposure.x
         let withBloom = raw + raw * bloomStrength.x
-        return vec4(withBloom, sampled.w)
+        let cx = max(withBloom.x, 0.0)
+        let cy = max(withBloom.y, 0.0)
+        let cz = max(withBloom.z, 0.0)
+        let invG = 1.0 / max(gammaParams.x, 0.0001)
+        let encoded = vec3(pow(cx, invG), pow(cy, invG), pow(cz, invG))
+        return vec4(encoded, sampled.w)
     }
 }
 )";
@@ -236,7 +234,7 @@ TEST_CASE(r51_uniform_binding_names_match_phoskia_decl) {
     // R5.1 — when shaderc is available, the post-process source
     // compiles to a real program whose uniform names match the
     // host-side binding lookup keys
-    // (bloomStrength/exposure/tonemapMode/uTime/rippleParams/sceneColor).
+    // (bloomStrength/exposure/tonemapMode/uTime/gammaParams/sceneColor).
     // We verify by running pool.compile on the source above, then
     // checking the resulting CompiledShaderProgram's `uniforms` and
     // `textures` vectors contain entries with the expected names.
@@ -256,7 +254,7 @@ material PostProcess {
     uniform vec4 exposure
     uniform vec4 tonemapMode
     uniform vec4 uTime
-    uniform vec4 rippleParams
+    uniform vec4 gammaParams
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -264,18 +262,16 @@ material PostProcess {
     }
     fragment {
         in  vUv : texcoord
-        let center = vec2(0.5, 0.5)
-        let d = vUv - center
-        let dist = length(d)
-        let invLen = 1.0 / max(dist, 0.0001)
-        let dir = d * invLen
-        let wave = sin(dist * rippleParams.y - uTime.x * rippleParams.z)
-        let offset = dir * (wave * rippleParams.x)
-        let uv = vUv + offset
+        let uv = vec2(vUv.x, 1.0 - vUv.y)
         let sampled = sample(sceneColor, uv)
         let raw = sampled.xyz * exposure.x
         let withBloom = raw + raw * bloomStrength.x
-        return vec4(withBloom, sampled.w)
+        let cx = max(withBloom.x, 0.0)
+        let cy = max(withBloom.y, 0.0)
+        let cz = max(withBloom.z, 0.0)
+        let invG = 1.0 / max(gammaParams.x, 0.0001)
+        let encoded = vec3(pow(cx, invG), pow(cy, invG), pow(cz, invG))
+        return vec4(encoded, sampled.w)
     }
 }
 )";
@@ -292,7 +288,7 @@ material PostProcess {
     CHECK(res.getUniformBinding("exposure")      != ayt::shader::InvalidBinding);
     CHECK(res.getUniformBinding("tonemapMode")   != ayt::shader::InvalidBinding);
     CHECK(res.getUniformBinding("uTime")         != ayt::shader::InvalidBinding);
-    CHECK(res.getUniformBinding("rippleParams")  != ayt::shader::InvalidBinding);
+    CHECK(res.getUniformBinding("gammaParams")   != ayt::shader::InvalidBinding);
     CHECK(res.getTextureBinding("sceneColor")    != ayt::shader::InvalidBinding);
 }
 
@@ -319,9 +315,7 @@ TEST_CASE(r51_renderer_setters_roundtrip_through_framecontext) {
 
     renderer.setPostProcessBloomStrength(0.42f);
     renderer.setPostProcessExposure(2.5f);
-    renderer.setPostProcessRippleStrength(0.012f);
-    renderer.setPostProcessRippleFrequency(28.0f);
-    renderer.setPostProcessRippleSpeed(4.0f);
+    renderer.setPostProcessGamma(2.2f);
     renderer.setPostProcessTonemapMode(Renderer::TonemapMode::ACES);
 
     // Read back via Impl — we can't easily (private fields), so

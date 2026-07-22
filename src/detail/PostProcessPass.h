@@ -57,9 +57,9 @@ namespace ayt::render::detail
 //         that opt into non-deferred post-process).
 //   3. neither valid → return 0 (no-op; matches existing P2 shape).
 //
-// Algorithm today (2026-07-22): screen-space ripple UV warp +
-  // exposure/bloom gain. All scalar knobs are Phoskia `vec4` (.x)
-  // for bgfx Vec4 upload ABI. See docs/post-process.md.
+// Algorithm today (2026-07-23): sample sceneColor → exposure/bloom
+  // gain → display gamma encode (pow 1/gamma). All scalar knobs are
+  // Phoskia `vec4` (.x) for bgfx Vec4 upload ABI. See docs/post-process.md.
   //
   // Historical note (R5.1 / P2 / B6):
   //   1) Acquire the offscreen FBO from BGFXAdapter (create-once,
@@ -160,7 +160,7 @@ private:
     ayt::shader::BindingId      _uExposure      = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uTonemapMode   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uTime          = ayt::shader::InvalidBinding;
-    ayt::shader::BindingId      _uRippleParams  = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uGammaParams   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tSceneColor    = ayt::shader::InvalidBinding;
     // Latch so a failed acquire does not re-run shaderc every frame
     // (was the main stutter source when Phoskia→HLSL rejected).
