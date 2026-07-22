@@ -4,6 +4,7 @@
 #include "detail/VertexLayoutBridge.h"
 
 #include "AYAssetPath.h"
+#include "AYShadowShaderSources.h"
 #include "assetsImpl/AYMaterial.h"
 
 #include <bgfx/bgfx.h>
@@ -424,10 +425,64 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
 
     const std::string shaderPath =
         ayt::resource::resolveAssetPath(materialPath, shaderRef);
-    MaterialHandle handle = mgr.createMaterialFromFile(shaderPath);
+
+    // Default: Phoskia file path. Force hand .sc with AY_SHADOW_USE_SC=1
+    // (PowerShell: $env:AY_SHADOW_USE_SC="1").
+    MaterialHandle handle{};
+    const char* useScEnv = std::getenv("AY_SHADOW_USE_SC");
+    const bool forceSc =
+        useScEnv != nullptr
+        && useScEnv[0] != '\0'
+        && useScEnv[0] != '0';
+    // Legacy: AY_SHADOW_USE_PHOSKIA=0 also forces .sc (compat with old docs).
+    const char* usePhoskiaEnv = std::getenv("AY_SHADOW_USE_PHOSKIA");
+    const bool forcePhoskiaOff =
+        usePhoskiaEnv != nullptr
+        && usePhoskiaEnv[0] == '0'
+        && usePhoskiaEnv[1] == '\0';
+    const bool preferSc =
+        (std::strstr(shaderRef, "simple_lit_shadow") != nullptr)
+        && (forceSc || forcePhoskiaOff);
+    {
+        static bool s_loggedOnce = false;
+        if (!s_loggedOnce && std::strstr(shaderRef, "simple_lit_shadow") != nullptr) {
+            std::fprintf(stderr,
+                         "[RenderAssetBridge] simple_lit_shadow path=%s "
+                         "(AY_SHADOW_USE_SC=%s AY_SHADOW_USE_PHOSKIA=%s)\n",
+                         preferSc ? "bgfx .sc" : "Phoskia file",
+                         useScEnv ? useScEnv : "(unset)",
+                         usePhoskiaEnv ? usePhoskiaEnv : "(unset)");
+            s_loggedOnce = true;
+        }
+    }
+    if (preferSc) {
+        handle = mgr.createMaterialFromBgfxSc(
+            ayt::render::kSimpleLitShadowVertexSc,
+            ayt::render::kSimpleLitShadowFragmentSc,
+            ayt::render::kSimpleLitShadowVaryingSc,
+            ayt::render::kSimpleLitShadowScCacheKey);
+        if (handle.isValid()) {
+            std::fprintf(stderr,
+                         "[RenderAssetBridge] simple_lit_shadow via bgfx .sc "
+                         "(cacheKey=%s matId=%llu path=%s)\n",
+                         ayt::render::kSimpleLitShadowScCacheKey,
+                         static_cast<unsigned long long>(handle.id),
+                         materialPath.c_str());
+        }
+    }
+    if (!handle.isValid()) {
+        handle = mgr.createMaterialFromFile(shaderPath);
+        if (handle.isValid() && !preferSc) {
+            std::fprintf(stderr,
+                         "[RenderAssetBridge] simple_lit_shadow via Phoskia "
+                         "file='%s' matId=%llu\n",
+                         shaderPath.c_str(),
+                         static_cast<unsigned long long>(handle.id));
+        }
+    }
     if (!handle.isValid()) {
         std::fprintf(stderr,
-                     "[RenderAssetBridge] createMaterialFromFile failed (mat='%s' shader='%s')\n",
+                     "[RenderAssetBridge] createMaterial failed (mat='%s' shader='%s')\n",
                      materialPath.c_str(), shaderPath.c_str());
         return {};
     }

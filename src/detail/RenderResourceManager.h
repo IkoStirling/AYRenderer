@@ -52,6 +52,10 @@ public:
     // Re-compile materials whose ShaderResource was invalidated by pool hot-reload.
     void refreshMaterialsAfterHotReload();
 
+    // Re-compile every loaded material that was built from `shaderPath`
+    // (normalized path compare). Returns the number of materials updated.
+    uint32_t reloadMaterialsForShaderFile(const std::string& shaderPath);
+
     void setMaterialColor(MaterialHandle material, const char* propertyName,
                           float r, float g, float b, float a);
     void setMaterialFloat(MaterialHandle material, const char* uniformName, float value);

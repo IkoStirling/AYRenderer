@@ -35,7 +35,8 @@ private:
                               const FrameContext& frame,
                               const ayt::math::Float4x4& world,
                               BGFXAdapter& adapter,
-                              const ShadowPass* shadowPass);
+                              const ShadowPass* shadowPass,
+                              ShadowFlags shadowFlags = kShadowCastAndReceive);
 
 public:
     static constexpr uint8_t kMainViewId = 0;

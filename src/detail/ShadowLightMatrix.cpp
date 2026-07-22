@@ -1,9 +1,11 @@
 #include "detail/ShadowLightMatrix.h"
+#include "detail/BgfxMatrix.h"
+
+#include "AYShadowConfig.h"
 
 #include <bx/math.h>
 
 #include <cmath>
-#include <cstring>
 
 namespace ayt::render::detail
 {
@@ -12,6 +14,10 @@ void buildDirectionalShadowMatrices(
     const ayt::math::FVector3& lightDirection,
     ayt::math::Float4x4& outView,
     ayt::math::Float4x4& outProj,
+    ayt::math::Float4x4& outViewProj,
+    float outViewColMajor[16],
+    float outProjColMajor[16],
+    float outViewProjColMajor[16],
     ayt::math::FVector3 focus,
     float radius,
     bool homogeneousDepth)
@@ -27,7 +33,6 @@ void buildDirectionalShadowMatrices(
     }
     dir = dir.normalize();
 
-    // Eye sits opposite the travel direction so the light looks toward focus.
     const ayt::math::FVector3 eye(
         focus.x - dir.x * radius,
         focus.y - dir.y * radius,
@@ -48,12 +53,18 @@ void buildDirectionalShadowMatrices(
     bx::mtxOrtho(projBx,
                  -radius, radius,
                  -radius, radius,
-                 0.1f, radius * 2.0f,
+                 ayt::render::kShadowNearPlane, ayt::render::kShadowFarPlane,
                  0.0f,
                  homogeneousDepth);
 
-    std::memcpy(outView.ptr(), viewBx, sizeof(viewBx));
-    std::memcpy(outProj.ptr(), projBx, sizeof(projBx));
+    outView = fromBgfxColumnMajor(viewBx);
+    outProj = fromBgfxColumnMajor(projBx);
+    bx::memCopy(outViewColMajor, viewBx, sizeof(viewBx));
+    bx::memCopy(outProjColMajor, projBx, sizeof(projBx));
+    // Exact P*V bytes matching setViewTransform(view, proj).
+    // bx::mtxMul(result, a, b) = b * a — pass (view, proj) for P * V.
+    bx::mtxMul(outViewProjColMajor, viewBx, projBx);
+    outViewProj = fromBgfxColumnMajor(outViewProjColMajor);
 }
 
 } // namespace ayt::render::detail

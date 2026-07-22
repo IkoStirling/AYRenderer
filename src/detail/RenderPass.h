@@ -3,6 +3,7 @@
 #include "AYRenderScene.h"
 #include "AYShaderResourcePool.h"
 #include "detail/BGFXAdapter.h"
+#include "detail/BgfxMatrix.h"
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
@@ -56,32 +57,23 @@ inline void trySetUniformMat4(shader::ShaderResource& shader, const char* primar
     if (binding == shader::InvalidBinding) {
         return;
     }
-    shader.setUniform(binding, matrix.ptr(), sizeof(float) * 16);
+    float colMajor[16];
+    toBgfxColumnMajor(matrix, colMajor);
+    shader.setUniform(binding, colMajor, sizeof(colMajor));
 }
 
-// PR-F2 (2026-07-21) — uploads the light-space VP and binds the
-// shadow FBO's depth attachment as a sampler2D named `shadowMap`.
-// Pure helper. ForwardOpaquePass / TransparentPass both call this
-// immediately after the standard light uniforms so the bytes stay
-// identical between sites (the U1.5 invariant for MVP/light
-// uploads extends to the shadow path).
+// PR-F2 / Phase 5 — bind shadowMap + upload light-space VP for receivers.
+// See AYShadowReceiverContract.h for the material contract.
 //
-// Body lives in RenderPass.cpp because `ShadowPass*` requires the
-// full class definition to call `.lightViewProj()` etc. (a forward
-// declaration here is fine for the parameter type but not for
-// member access). Using a free fn keeps the U1.5 invariant that
-// FO/Transparent upload semantics are byte-for-byte identical
-// (both sites call this same function).
+// `flags` gates Receive: Cast-only / None items get the lit fallback so
+// meshes without Receive stay fully lit even if the shader declares shadowMap.
 //
-// `shadowPass == nullptr` ⇔ no producer this frame ⇒ no-op.
-// `bgfx::isValid(shadowPass->shadowFbo()) == false` (Noop backend
-// or first-frame pre-FBO) ⇒ no-op. Likewise for binding lookups —
-// a material that doesn't declare `u_lightViewProj` / `shadowMap`
-// silently continues to render as if shadow wasn't enabled, so
-// pre-F2 shaders stay byte-identical.
+// `shadowPass == nullptr` or missing FBO/sample → lit fallback (safe).
+// Materials without `shadowMap` → no-op (pre-shadow shaders unchanged).
 void tryBindShadowSampler(shader::ShaderResource& shader,
                           BGFXAdapter& adapter,
-                          const ShadowPass* shadowPass);
+                          const ShadowPass* shadowPass,
+                          ShadowFlags flags = kShadowCastAndReceive);
 
 // PR-F3 (2026-07-21) — bone-palette upload shared by
 // ForwardOpaquePass's draw loop AND ShadowPass's caster draw loop.

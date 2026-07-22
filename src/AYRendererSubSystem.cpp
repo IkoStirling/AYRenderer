@@ -278,7 +278,7 @@ bool RendererSubSystem::initialize()
 
     _renderer.setDirectionalLight(ayt::math::FVector3(0.35f, -0.85f, -0.4f),
 
-                                  ayt::math::FVector3(1.0f, 0.96f, 0.88f));
+                                  ayt::math::FVector3(1.35f, 1.28f, 1.15f));
 
 
 
@@ -458,11 +458,14 @@ void RendererSubSystem::renderScenePass()
 {
     const float aspect = static_cast<float>(_viewportW) / static_cast<float>(_viewportH);
 
+    // Elevated 3/4 view so the ground plane reads as a square and the
+    // cube sits on top (eye at y=0 made the ground a thin diamond and
+    // put the near ground edge in front of the cube).
     _renderer.setMainCameraLookAtPerspective(
-        ayt::math::FVector3(0.0f, 0.0f, 4.0f),
+        ayt::math::FVector3(4.0f, 3.0f, 5.0f),
         ayt::math::FVector3(0.0f, 0.0f, 0.0f),
         ayt::math::FVector3(0.0f, 1.0f, 0.0f),
-        60.0f, aspect, 0.1f, 100.0f);
+        50.0f, aspect, 0.1f, 100.0f);
 
     _scene.clear();
     if (_sceneBuilder) {

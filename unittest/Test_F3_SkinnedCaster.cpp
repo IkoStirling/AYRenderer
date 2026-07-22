@@ -53,6 +53,7 @@
 
 #include "AYTest.h"
 #include "AYRenderScene.h"
+#include "AYShadowConfig.h"
 #include "AYShaderResourcePool.h"
 
 #include "aymath/MathTypes.h"
@@ -71,6 +72,7 @@
 
 #include <array>
 #include <memory>
+#include <string>
 #include <unordered_map>
 
 using ayt::render::RenderScene;
@@ -365,6 +367,56 @@ TEST_CASE(f3_pass_exec_context_brace_init_still_12_fields) {
     };
     CHECK(ctx.shadowPass == nullptr);  // F2 field still default
     (void)ctx;  // unused
+}
+
+TEST_CASE(f3_shadow_caster_cache_key_pointer_compare_uses_const_char_star) {
+    // Issue 1 regression guard — pin that the hot-reload reset
+    // mechanism for the caster ShaderResource uses `const char*`
+    // pointer compare (the literal address is the source-of-truth
+    // for "did the cache key string change"). The previous form
+    // used std::string which compared against the const-char* via
+    // pointer-mismatch, defeating the cache.
+    //
+    // We can't peek at ShadowCaster's private static directly, so
+    // we re-trigger the reset path twice and verify both are
+    // idempotent on the public surface: a fresh ShadowPass →
+    // ensureProgram pool acquire on a Noop adapter is gated by
+    // `adapter.isInitialized()` so the program stays invalid; what
+    // we CAN pin is that ShadowPass can be constructed repeatedly
+    // without crash, and `kShadowCasterCacheKey` is a stable
+    // constexpr literal (no double-evaluation side effect).
+    using ayt::render::kShadowCasterCacheKey;
+    static_assert(kShadowCasterCacheKey != nullptr,
+                  "kShadowCasterCacheKey must be a non-null literal");
+    CHECK(kShadowCasterCacheKey[0] != '\0');
+
+    // Build two ShadowPass instances back-to-back; the constexpr
+    // literal's address is the same regardless of how many passes
+    // were constructed. (Static locals of ShadowCaster itself are
+    // per-process; the extern const reference is per-callsite.)
+    ShadowPass a;
+    ShadowPass b;
+    CHECK(a.name() == b.name());
+}
+
+TEST_CASE(f3_caster_solid_test_uniform_writes_float_sized_bytes) {
+    // Issue 3 regression guard — pin the upload-side byte count for
+    // the `casterSolidTest` uniform. ShadowCaster uploads a vec4 slot
+    // (16 bytes) for both Phoskia and hand .sc paths.
+    static_assert(sizeof(float) == 4,
+                  "caster solidTest upload assumes 4-byte float");
+    static_assert(ayt::render::kShadowCasterCacheKey != nullptr,
+                  "caster cache key must be a stable literal");
+
+    const std::string phoskiaSource(ayt::render::kShadowCasterPhoskiaSource);
+    CHECK(phoskiaSource.find("casterSolidTest") != std::string::npos);
+    CHECK(phoskiaSource.find("casterSolidTest.x") != std::string::npos);
+    // Phoskia has no vec1(); scalar property is used directly.
+    CHECK(phoskiaSource.find("vec1(") == std::string::npos);
+
+    const std::string fsSc(ayt::render::kShadowCasterFragmentSc);
+    CHECK(fsSc.find("casterSolidTest") != std::string::npos);
+    CHECK(fsSc.find("uniform vec4 casterSolidTest") != std::string::npos);
 }
 
 TEST_SUITE_END

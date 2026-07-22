@@ -55,15 +55,21 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     const uint16_t viewportHeight = ctx.viewportHeight;
     const RenderScene& scene = ctx.scene;
 
-    adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
-    adapter.setViewTransform(viewId, frame.view.ptr(), frame.projection.ptr());
+    adapter.setViewTransform(viewId, frame.view, frame.projection);
 
     // P2 (PR-D, 2026-07-20) — bind the shared scene FBO so transparent
     // composite over the offscreen scene color (matches
     // ForwardOpaquePass so the depth they wrote lines up with what
     // PostProcessPass samples). BGFX_INVALID_HANDLE ⇒ backbuffer
     // fallback (no-op on the headless test path / SceneRT-off hosts).
+    // View rect origin is (0,0) against the panel-sized scene FBO;
+    // panel offset is for backbuffer compositing only (see FO).
     adapter.setViewFrameBuffer(viewId, ctx.sceneFbo);
+    if (BGFXAdapter::isValid(ctx.sceneFbo)) {
+        adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
+    } else {
+        adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
+    }
 
     // U1.5 — back-to-front sort via DrawItem::sortKey. We don't
     // mutate the scene's _items vector; instead we build a transient
@@ -126,8 +132,8 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         // MVP/light upload — helpers live as inline free fns in
         // detail/RenderPass.h so they stay byte-for-byte identical
         // across both passes (no risk of drift).
-        const ayt::math::Float4x4 modelViewProj = frame.projection * frame.view * item.world;
-        trySetUniformMat4(material.shader, "u_modelViewProj", "modelViewProj", modelViewProj);
+        // MVP comes from setViewTransform + setTransform (bgfx builtin).
+        // Do not manually overwrite u_modelViewProj.
 
         trySetUniformVec3(material.shader, "cameraPos", frame.cameraPosition.ptr());
 
@@ -145,7 +151,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         // does not share FO's flushMaterial) keeps the helper's
         // single source-of-truth for the upload shape; mirror site is
         // ForwardOpaquePass::flushMaterial.
-        tryBindShadowSampler(material.shader, adapter, ctx.shadowPass);
+        tryBindShadowSampler(material.shader, adapter, ctx.shadowPass, item.shadowFlags);
 
         // U1++ — color-uniform upload shared with ForwardOpaquePass
         // via RenderPass::resolveAndApplyColorUniforms.

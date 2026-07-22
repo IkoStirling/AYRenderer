@@ -4,6 +4,7 @@
 #include "detail/ShadowPass.h"
 
 #include <bgfx/bgfx.h>
+#include <cstdio>
 
 namespace ayt::render::detail
 {
@@ -13,8 +14,10 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
                                       const FrameContext& frame,
                                       const ayt::math::Float4x4& world,
                                       BGFXAdapter& adapter,
-                                      const ShadowPass* shadowPass)
+                                      const ShadowPass* shadowPass,
+                                      ShadowFlags shadowFlags)
 {
+    (void)world;
     if (!material.shader.isValid()) {
         return;
     }
@@ -27,9 +30,9 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
             material.shader.getUniformBlockBinding("Skeleton");
     }
 
-    const ayt::math::Float4x4 modelViewProj = frame.projection * frame.view * world;
-    trySetUniformMat4(material.shader, "u_modelViewProj", "modelViewProj", modelViewProj);
-
+    // Do NOT upload u_modelViewProj manually — Phoskia maps
+    // modelViewProjection → bgfx builtin filled by setViewTransform+setTransform.
+    // A second upload was a regression risk (bad MVP → silhouette-only / black).
     trySetUniformVec3(material.shader, "cameraPos", frame.cameraPosition.ptr());
 
     const ayt::math::FVector3 toLight(
@@ -38,20 +41,69 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     trySetUniformVec3(material.shader, "lightDir", toLightDir.ptr());
     trySetUniformVec3(material.shader, "lightDirection", toLightDir.ptr());
     trySetUniformVec3(material.shader, "lightColor", frame.lightColor.ptr());
-
-    // PR-F2 (2026-07-21) — when a ShadowPass produced a shadow map
-    // this frame, upload the light-space VP and bind the depth
-    // attachment as sampler `shadowMap`. The Phoskia compare is done
-    // by hand (the .r channel of a D24S8 texture sampled as a plain
-    // sampler2D — see docs/execution-plan.md P4.1 + README "产品定位"
-    // note about hard-edge shadow with possible acne). No shadow
-    // producer ⇒ no upload / no bind ⇒ shaders without
-    // `u_lightViewProj` / `shadowMap` continue working (the helper
-    // no-ops on missing binding or invalid FBO).
-    //
-    // Helper shared with TransparentPass so the upload semantics are
-    // byte-for-byte identical.
-    tryBindShadowSampler(material.shader, adapter, shadowPass);
+    {
+        static uint32_t s_lightLog = 0;
+        if (s_lightLog < 2) {
+            std::fprintf(stderr,
+                         "[FOLight] dir=(%.2f,%.2f,%.2f) color=(%.2f,%.2f,%.2f)\n",
+                         toLightDir.x, toLightDir.y, toLightDir.z,
+                         frame.lightColor.x, frame.lightColor.y, frame.lightColor.z);
+            ++s_lightLog;
+        }
+    }
+    // Bind material albedo FIRST, then shadow — and log stages once so a
+    // unit collision (both on 0 ⇒ R32F depth as "albedo" ⇒ gray) is obvious.
+    uint32_t albedoBinds = 0;
+    for (const GpuMaterial::TextureSlot& slot : material.textures) {
+        if (slot.name.empty() || !slot.texture.isValid()) {
+            continue;
+        }
+        if (slot.name == "shadowMap") {
+            continue;
+        }
+        const shader::BindingId binding = material.shader.getTextureBinding(slot.name);
+        if (binding == shader::InvalidBinding) {
+            continue;
+        }
+        const auto texIt = textures.find(slot.texture.id);
+        if (texIt == textures.end() || !BGFXAdapter::isValid(texIt->second.handle)) {
+            continue;
+        }
+        const uint8_t stage = material.shader.getTextureStage(binding);
+        material.shader.setTexture(stage, binding, toShaderTexture(texIt->second.handle));
+        ++albedoBinds;
+        static uint32_t s_albedoLog = 0;
+        if (s_albedoLog < 4) {
+            std::fprintf(stderr,
+                         "[AlbedoBind] name=%s stage=%u tex.idx=%u "
+                         "colorOverride=%d base=(%.2f,%.2f,%.2f)\n",
+                         slot.name.c_str(),
+                         static_cast<unsigned>(stage),
+                         static_cast<unsigned>(texIt->second.handle.idx),
+                         material.hasColorOverride ? 1 : 0,
+                         material.colorOverride.x,
+                         material.colorOverride.y,
+                         material.colorOverride.z);
+            ++s_albedoLog;
+        }
+    }
+    {
+        const shader::BindingId shadowBinding =
+            material.shader.getTextureBinding("shadowMap");
+        static uint32_t s_stageLog = 0;
+        if (s_stageLog < 2 && shadowBinding != shader::InvalidBinding) {
+            std::fprintf(stderr,
+                         "[TexStages] albedoBinds=%u albedoStage=%u shadowStage=%u\n",
+                         albedoBinds,
+                         static_cast<unsigned>(
+                             material.shader.getTextureStage(
+                                 material.shader.getTextureBinding("albedoMap"))),
+                         static_cast<unsigned>(
+                             material.shader.getTextureStage(shadowBinding)));
+            ++s_stageLog;
+        }
+    }
+    tryBindShadowSampler(material.shader, adapter, shadowPass, shadowFlags);
 
     // U1++ — color-uniform upload lifted to RenderPass helper; see
     // RenderPass.cpp::resolveAndApplyColorUniforms. Identical bytes
@@ -59,8 +111,9 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     RenderPass::resolveAndApplyColorUniforms(material);
     if (material.mat4Binding != shader::InvalidBinding && material.hasMat4Override) {
         if (material.shader.hasUniformBinding(material.mat4Binding)) {
-            material.shader.setUniform(material.mat4Binding, material.mat4Override.ptr(),
-                                       sizeof(float) * 16);
+            float colMajor[16];
+            toBgfxColumnMajor(material.mat4Override, colMajor);
+            material.shader.setUniform(material.mat4Binding, colMajor, sizeof(colMajor));
         } else {
             material.mat4Binding = shader::InvalidBinding;
         }
@@ -75,21 +128,6 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
             continue;
         }
         material.shader.setUniform(binding, slot.data, slot.size);
-    }
-
-    for (const GpuMaterial::TextureSlot& slot : material.textures) {
-        if (slot.name.empty() || !slot.texture.isValid()) {
-            continue;
-        }
-        const shader::BindingId binding = material.shader.getTextureBinding(slot.name);
-        if (binding == shader::InvalidBinding) {
-            continue;
-        }
-        const auto texIt = textures.find(slot.texture.id);
-        if (texIt == textures.end() || !BGFXAdapter::isValid(texIt->second.handle)) {
-            continue;
-        }
-        material.shader.setTexture(0, slot.binding, toShaderTexture(texIt->second.handle));
     }
 }
 
@@ -107,8 +145,7 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     const uint16_t viewportHeight = ctx.viewportHeight;
     const RenderScene& scene = ctx.scene;
 
-    adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
-    adapter.setViewTransform(viewId, frame.view.ptr(), frame.projection.ptr());
+    adapter.setViewTransform(viewId, frame.view, frame.projection);
 
     // P2 (PR-D, 2026-07-20) — bind the shared scene FBO so this pass's
     // depth+color output is captured for PostProcessPass to sample
@@ -116,7 +153,33 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     // offscreen depth). BGFX_INVALID_HANDLE ⇒ fall back to the
     // default backbuffer (matches pre-PR-D behavior on headless
     // test paths / SceneRT-off hosts).
+    //
+    // View rect: the scene FBO is sized exactly to (viewportW ×
+    // viewportH). When bound, use origin (0,0). The editor panel
+    // offset (viewportX, viewportY) only applies when drawing into
+    // the full-window backbuffer hole — using the offset against an
+    // FBO of panel size clips the scene to black / shifts it.
     adapter.setViewFrameBuffer(viewId, ctx.sceneFbo);
+    if (BGFXAdapter::isValid(ctx.sceneFbo)) {
+        adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
+        // Scene FBO is offscreen — clear it each frame (backbuffer clear
+        // on view 0 does not touch this target).
+        adapter.setViewClearRaw(viewId,
+                                BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                                /*rgba=*/0x191a1cff,
+                                /*depth=*/1.0f,
+                                /*stencil=*/0);
+    } else {
+        // Composite Game View hole: clear this view's rect so the panel
+        // never inherits a stale/white backbuffer after UI hides the
+        // placeholder Image. Matches RendererSubSystem composite clear.
+        adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
+        adapter.setViewClearRaw(viewId,
+                                BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                                /*rgba=*/0x191a1cff,
+                                /*depth=*/1.0f,
+                                /*stencil=*/0);
+    }
 
     const uint64_t defaultState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
                                 | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS
@@ -174,7 +237,27 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         // the active shadow producer has a ready FBO, the helper
         // uploads `u_lightViewProj` and binds `shadowMap`; otherwise
         // the shader binding misses are no-ops.
-        flushMaterial(material, textures, frame, item.world, adapter, ctx.shadowPass);
+        flushMaterial(material, textures, frame, item.world, adapter,
+                      ctx.shadowPass, item.shadowFlags);
+
+        static uint32_t s_foDrawLog = 0;
+        if (s_foDrawLog < 4) {
+            const float* m = item.world.ptr();
+            const shader::BindingId shadowBinding =
+                material.shader.getTextureBinding("shadowMap");
+            const shader::BindingId lvpBinding =
+                material.shader.getUniformBinding("u_lightViewProj");
+            std::fprintf(stderr,
+                         "[ShadowDbg] FO draw#%u worldT=(%.2f,%.2f,%.2f) "
+                         "shadowPass=%p hasShadowMap=%d hasLvp=%d flags=0x%02x\n",
+                         s_foDrawLog,
+                         m[3], m[7], m[11],
+                         static_cast<const void*>(ctx.shadowPass),
+                         shadowBinding != shader::InvalidBinding ? 1 : 0,
+                         lvpBinding != shader::InvalidBinding ? 1 : 0,
+                         static_cast<unsigned>(item.shadowFlags));
+            ++s_foDrawLog;
+        }
 
         // PR-F3 (2026-07-21) — bone-palette upload lifted to the
         // shared helper. The helper is byte-for-byte identical to

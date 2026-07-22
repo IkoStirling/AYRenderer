@@ -66,6 +66,11 @@ namespace ayt::render::detail
 // (destroy on shutdown / resize / adapter-reinit).
 class PostProcessPass : public RenderPass {
 public:
+    // Blit to backbuffer on its own view so it cannot overwrite the
+    // scene view's FBO / camera transform (bgfx keeps one FBO+VP per
+    // Composite map: 4 = post blit (after FO on 3; shadow resolve uses 2).
+    static constexpr uint8_t kBlitViewId = 4;
+
     PostProcessPass() = default;
     // R5+ — destructor intentionally does NOT touch bgfx handles.
     // RenderPass base has no BGFXAdapter reference (passes are
@@ -120,6 +125,9 @@ private:
     ayt::shader::BindingId      _uExposure      = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uTonemapMode   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tSceneColor    = ayt::shader::InvalidBinding;
+    // Latch so a failed acquire does not re-run shaderc every frame
+    // (was the main stutter source when Phoskia→HLSL rejected).
+    bool                        _programAcquireFailed = false;
 
     // R5+ — helpers. Both are no-ops on the Noop backend (BGFXAdapter
     // gates on isInitialized()), so the headless test path runs clean.

@@ -22,6 +22,10 @@ void buildDirectionalShadowMatrices(
     const ayt::math::FVector3& lightDirection,
     ayt::math::Float4x4& outView,
     ayt::math::Float4x4& outProj,
+    ayt::math::Float4x4& outViewProj,
+    float outViewColMajor[16],
+    float outProjColMajor[16],
+    float outViewProjColMajor[16],
     ayt::math::FVector3 focus = ayt::math::FVector3(0.0f, 0.0f, 0.0f),
     float radius = 50.0f,
     bool homogeneousDepth = false);

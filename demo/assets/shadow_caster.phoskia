@@ -1,55 +1,18 @@
-// PR-F3 (2026-07-21) — shadow caster (depth-only) with conditional
-// VS segment for skinned vs static geometry. ShadowPass acquires
-// this material via inline Phoskia source (mirror of
-// postprocess.phoskia + simple_lit_shadow.phoskia co-located
-// pattern). The `Skeleton` UBO + `boneindices/boneweights` vertex
-// semantics are exact mirrors of AYShader/unittest/golden/
-// skinned_lit.phoskia — the SAME bone palette goes to whatever
-// GpuMaterial is also drawing the model on the FO pass, and the
-// caster reads it from this program the same way.
-//
-// Why double-segment VS:
-//   - Static meshes may not have a Skeleton UBO or bone index/weight
-//     channels in their vertex layout. A single-segment VS that
-//     always calls `skinningMatrix(...)` would crash Phoskia
-//     analysis when the host feeds a GpuMesh without those vertex
-//     inputs (currently a re-layout landmine in Test_SkinWeightUpload).
-//   - Per-mesh code paths in Phoskia are not available (no `var
-//     hasBones` runtime dispatch). Conditional `if (jointCount > 0)`
-//     in the fragment does not see vertex-shader output, so the
-//     branch has to live inside `vertex { ... }`.
-//
-//   Currently the conditional is a Phoskia property
-//   `castSkinned` that the host (`ShadowPass::execute`) writes via
-//   shader.setUniform — `castSkinned` == 0 → static path, `==`1 →
-//   skinned path. Per-draw `if` on a uniform is the cheapest
-//   branch + aligns with our "every material has uniform space"
-//   convention.
-//
-// Fragment body: bgfx depth-only FBO has no color attachment;
-// the fragment output is discarded by the hardware. We still must
-// emit a `vec4(0.0, ...)` to satisfy Phoskia's "fragment must
-// return a value" analyzer. The actual color value doesn't
-// propagate.
 material ShadowCaster {
-    uniformblock Skeleton {
-        mat4 bones[128]
-    }
-    property castSkinned = 0
-
+    property casterSolidTest = vec4(0.0, 0.0, 0.0, 0.0)
     vertex {
-        in pos    : position
-        in boneId : boneindices
-        in boneWt : boneweights
-
-        if (castSkinned == 1) {
-            let skinned = skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(pos, 1.0))
-            return modelViewProjection * skinned
-        } else {
-            return modelViewProjection * vec4(pos, 1.0)
-        }
+        in pos : position
+        out clipZw : texcoord = vec2(
+            (modelViewProjection * vec4(pos, 1.0)).z,
+            (modelViewProjection * vec4(pos, 1.0)).w)
+        return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
-        return vec4(0.0, 0.0, 0.0, 1.0)
+        in clipZw : texcoord
+        let zw = clipZw.x * (1.0 / clipZw.y)
+        let ndc01 = zw * 0.5 + 0.5
+        let t = step(0.5, casterSolidTest.x)
+        let ndOut = ndc01 * (1.0 - t) + 0.5 * t
+        return vec4(ndOut, ndOut, ndOut, 1.0)
     }
 }

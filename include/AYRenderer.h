@@ -115,6 +115,14 @@ public:
     void setDirectionalLight(const ayt::math::FVector3& direction,
                              const ayt::math::FVector3& color);
 
+    // Quality / style knobs (safe to call after initialize).
+    // msaa: 0=off, 2/4/8/16. Applies via bgfx::reset (backbuffer).
+    void setMsaaSampleCount(uint32_t samples);
+    uint32_t msaaSampleCount() const noexcept;
+    // Soft shadow PCF (3x3). false → hard 1-tap (stylized edges).
+    void setShadowPcfEnabled(bool enabled);
+    bool shadowPcfEnabled() const noexcept;
+
     // R5+ (Phase PostProcess, 2026-07-20) — knobs consumed by
     // PostProcessPass::execute via FrameContext. Defaults = no effect
     // (bloomStrength=0, exposure=1.0, tonemap=None) so legacy hosts
@@ -131,11 +139,25 @@ public:
     };
     void setPostProcessTonemapMode(TonemapMode mode);
 
+    // Rebuild the RenderPipeline from an ordered pass-slot list.
+    // Default ctor builds makeDefault() (no Shadow). Hosts that want
+    // shadows call configurePipeline(makeForwardWithShadows()) once
+    // after initialize (or at any quiet frame). Preserves any UI
+    // backend previously injected via setUiBackend. Empty `passes`
+    // falls back to makeDefault().
+    void configurePipeline(const RenderPipelineDesc& desc);
+    const RenderPipelineDesc& pipelineDesc() const noexcept;
+
     void destroyMesh(MeshHandle& mesh);
     void destroyMaterial(MaterialHandle& material);
     void destroyTexture(TextureHandle& texture);
 
     void pollShaderHotReload();
+
+    // Re-compile materials already loaded from `shaderPath` (e.g. after
+    // EditorPlayRuntime rewrites a .phoskia on disk). No-op when renderer
+    // is not initialized or no matching materials are loaded yet.
+    uint32_t reloadMaterialsForShaderFile(const std::string& shaderPath);
 
     void setDebugOverlayEnabled(bool enabled);
     bool isDebugOverlayEnabled() const noexcept;

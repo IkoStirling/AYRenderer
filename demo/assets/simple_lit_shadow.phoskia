@@ -1,48 +1,68 @@
+// ABI-matched to verified hand .sc: lighting/bias as vec4 + .xyz/.x swizzles.
 material SimpleLitShadow {
     texture2d albedoMap
     texture2d shadowMap
     uniform mat4 u_lightViewProj
-    uniform vec3 lightDir
-    uniform vec3 lightColor
-    property baseColor  = vec4(1.0, 1.0, 1.0, 1.0)
-    property shadowBias = 0.005
+    uniform vec4 lightDir
+    uniform vec4 lightColor
+    uniform vec4 shadowMapTexel
+    property baseColor      = vec4(1.0, 1.0, 1.0, 1.0)
+    property shadowBias     = vec4(0.003, 0.0, 0.0, 0.0)
+    property shadowDebugVis = vec4(0.0, 0.0, 0.0, 0.0)
+    property shadowPcf      = vec4(1.0, 0.0, 0.0, 0.0)
 
     vertex {
         in pos : position
         in nrm : normal
         in uv  : texcoord
-        out worldNormal : normal    = vec3(0.0, 0.0, 1.0)
-        out uvOut       : texcoord  = vec2(0.0, 0.0)
-        // PR-F2 (2026-07-21) — export world position so the fragment
-        // can project it into shadow-map clip space for the manual
-        // depth compare. The BGFX converter emits this as
-        // vec3 v_worldPosition : TEXCOORDn (it auto-routes any
-        // `out : position` to the next free TEXCOORD slot, leaving
-        // POSITION free for `in pos : position`).
-        out worldPos    : position  = (modelMatrix * vec4(pos, 1.0)).xyz
+        out worldNormal : normal   = (modelMatrix * vec4(nrm, 0.0)).xyz
+        out uvOut       : texcoord = uv
+        out worldPos    : position = (modelMatrix * vec4(pos, 1.0)).xyz
         return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
         in worldNormal : normal
         in uvOut       : texcoord
         in worldPos    : position
-        let albedo    = sample(albedoMap, uvOut) * baseColor
-
-        // Manual shadow compare — F2 deliberately avoids growing
-        // AYShader's sampler kind enum to add `sampler2DShadow`
-        // (cross-module change beyond PR scope). We project the
-        // world position into the shadow producer's clip space,
-        // divide by w, and compare the per-fragment depth against
-        // the depth-attach `.r` sampled as a regular texture2D.
-        // Depth-only FBOs return the depth value in the red channel
-        // when sampled as a non-compare sampler in bgfx.
+        let albedo   = sample(albedoMap, uvOut) * baseColor
         let clipPos  = u_lightViewProj * vec4(worldPos, 1.0)
-        let refDepth = clipPos.z / clipPos.w
-        let occluder = sample(shadowMap, clipPos.xy).r
-        let shadow   = if(refDepth - shadowBias > occluder, 0.0, 1.0)
-
-        let ndotl   = max(dot(normalize(worldNormal), normalize(lightDir)), 0.05)
-        let lit     = albedo.rgb * lightColor * ndotl * shadow
+        let invW     = 1.0 / clipPos.w
+        let ndcX     = clipPos.x * invW
+        let ndcY     = clipPos.y * invW
+        let refNdc01 = clipPos.z * invW * 0.5 + 0.5
+        let uy       = ndcY * 0.5 + 0.5
+        let shadowUv = vec2(ndcX * 0.5 + 0.5, 1.0 - uy)
+        let inMap    = step(0.0, shadowUv.x) * step(shadowUv.x, 1.0)
+                     * step(0.0, shadowUv.y) * step(shadowUv.y, 1.0)
+        let tx = shadowMapTexel.x
+        let ty = shadowMapTexel.y
+        let bias = shadowBias.x
+        let o00 = sample(shadowMap, shadowUv + vec2(-tx, -ty)).x
+        let o10 = sample(shadowMap, shadowUv + vec2(0.0, -ty)).x
+        let o20 = sample(shadowMap, shadowUv + vec2(tx, -ty)).x
+        let o01 = sample(shadowMap, shadowUv + vec2(-tx, 0.0)).x
+        let o11 = sample(shadowMap, shadowUv + vec2(0.0, 0.0)).x
+        let o21 = sample(shadowMap, shadowUv + vec2(tx, 0.0)).x
+        let o02 = sample(shadowMap, shadowUv + vec2(-tx, ty)).x
+        let o12 = sample(shadowMap, shadowUv + vec2(0.0, ty)).x
+        let o22 = sample(shadowMap, shadowUv + vec2(tx, ty)).x
+        let s00 = max(1.0 - step(o00 + bias, refNdc01), step(0.999, o00))
+        let s10 = max(1.0 - step(o10 + bias, refNdc01), step(0.999, o10))
+        let s20 = max(1.0 - step(o20 + bias, refNdc01), step(0.999, o20))
+        let s01 = max(1.0 - step(o01 + bias, refNdc01), step(0.999, o01))
+        let s11 = max(1.0 - step(o11 + bias, refNdc01), step(0.999, o11))
+        let s21 = max(1.0 - step(o21 + bias, refNdc01), step(0.999, o21))
+        let s02 = max(1.0 - step(o02 + bias, refNdc01), step(0.999, o02))
+        let s12 = max(1.0 - step(o12 + bias, refNdc01), step(0.999, o12))
+        let s22 = max(1.0 - step(o22 + bias, refNdc01), step(0.999, o22))
+        let shadowSoft = (s00 + s10 + s20 + s01 + s11 + s21 + s02 + s12 + s22) * (1.0 / 9.0)
+        let shadowHard = s11
+        let shadowFilt = mix(shadowHard, shadowSoft, shadowPcf.x)
+        let shadow = mix(1.0, shadowFilt, inMap)
+        let ndotl    = max(dot(normalize(worldNormal), normalize(lightDir.xyz)), 0.25)
+        let litColor = albedo.rgb * lightColor.xyz * (ndotl * shadow * 0.65 + 0.20)
+        let debugRgb = vec3(o11, o11, o11)
+        let lit      = mix(litColor, debugRgb, shadowDebugVis.x)
         return vec4(lit, albedo.a)
     }
 }

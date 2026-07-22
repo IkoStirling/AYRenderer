@@ -76,9 +76,10 @@ struct PassExecContext {
     // POD fields, not state mutations.
     const FrameContext&     frame;
 
-    // bgfx view id this pass should bind / submit into. Composite
-    // mode hands 1 to the scene passes; non-composite hands 0. UIPass
-    // ignores it (UIRenderBackend hard-codes kViewId = 2 today).
+    // bgfx view id for scene passes (FO / Transparent). Composite
+    // mode hands 3; non-composite hands 0. ShadowPass uses 1 (caster)
+    // + 2 (resolve blit); PostProcessPass / UIPass use 4 / 5 — bgfx
+    // keeps one FBO+VP per view for the whole frame, so they must not share.
     uint8_t                 viewId         = 0;
 
     // P2 (PR-D, 2026-07-20) — shared scene color/depth FBO owned by

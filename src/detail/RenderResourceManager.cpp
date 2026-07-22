@@ -428,14 +428,10 @@ MaterialHandle RenderResourceManager::createMaterialFromBgfxSc(const std::string
         return out;
     }
 
-    if (!cacheKey.empty()) {
-        const auto cached = _materialCacheByKey.find(cacheKey);
-        if (cached != _materialCacheByKey.end()) {
-            out.id = cached->second;
-            return out;
-        }
-    }
-
+    // Always allocate a NEW GpuMaterial instance. The shader pool still
+    // dedupes compile artifacts via cacheKey+source; material instances
+    // must stay unique so cube/ground (same .sc program, different
+    // baseColor/albedo) cannot overwrite each other.
     std::fprintf(stderr, "[RenderResourceManager] compiling bgfx .sc material '%s'\n",
                  cacheKey.empty() ? "(anonymous)" : cacheKey.c_str());
     std::fflush(stderr);
@@ -456,12 +452,11 @@ MaterialHandle RenderResourceManager::createMaterialFromBgfxSc(const std::string
     const uint64_t id = _nextMaterialId++;
     GpuMaterial& mat = _materials.emplace(id, GpuMaterial{}).first->second;
     mat.shader = shader;
-    if (!cacheKey.empty()) {
-        _materialCacheByKey.emplace(cacheKey, id);
-    }
     out.id = id;
-    std::fprintf(stderr, "[RenderResourceManager] bgfx .sc material ready '%s'\n",
-                 cacheKey.c_str());
+    std::fprintf(stderr,
+                 "[RenderResourceManager] bgfx .sc material ready '%s' id=%llu\n",
+                 cacheKey.c_str(),
+                 static_cast<unsigned long long>(id));
     std::fflush(stderr);
     return out;
 }
@@ -505,17 +500,11 @@ MaterialHandle RenderResourceManager::createMaterialFromFile(const std::string& 
         return MaterialHandle{};
     }
 
-    const std::string key = normalizeAssetPathKey(path);
-    if (!key.empty()) {
-        const auto cached = _materialCacheByKey.find(key);
-        if (cached != _materialCacheByKey.end()) {
-            MaterialHandle out;
-            out.id = cached->second;
-            return out;
-        }
-    }
-
-    // compileFromFile registers a hot-reload watch on `path` (acquire(source) does not).
+    // Always create a NEW GpuMaterial instance. Many .aymat files share one
+    // .phoskia; caching materials by shader path made the second aymat
+    // overwrite the first (cube + ground both became ground's gray-green,
+    // same tex.idx, no distinct colors / broken shadow readback).
+    // The ShaderResourcePool still shares the compiled GPU program.
     shader::ShaderResource shader = _shaderPool.compileFromFile(path);
     if (!shader.isValid()) {
         for (const std::string& err : _shaderPool.lastCompileErrors()) {
@@ -530,9 +519,6 @@ MaterialHandle RenderResourceManager::createMaterialFromFile(const std::string& 
 
     const uint64_t id = _nextMaterialId++;
     _materials.emplace(id, std::move(material));
-    if (!key.empty()) {
-        _materialCacheByKey.emplace(key, id);
-    }
 
     MaterialHandle out;
     out.id = id;
@@ -563,6 +549,43 @@ void RenderResourceManager::refreshMaterialsAfterHotReload()
         material.shader = fresh;
         rebindMaterialAfterShaderSwap(material);
     }
+}
+
+uint32_t RenderResourceManager::reloadMaterialsForShaderFile(const std::string& shaderPath)
+{
+    if (shaderPath.empty()) {
+        return 0;
+    }
+
+    const std::string key = normalizeAssetPathKey(shaderPath);
+    uint32_t updated = 0;
+    for (auto& [materialId, material] : _materials) {
+        (void)materialId;
+        if (material.shaderSourcePath.empty()) {
+            continue;
+        }
+        if (normalizeAssetPathKey(material.shaderSourcePath) != key) {
+            continue;
+        }
+
+        std::fprintf(stderr,
+                     "[RenderResourceManager] reload shader '%s' for material id=%llu\n",
+                     shaderPath.c_str(),
+                     static_cast<unsigned long long>(materialId));
+
+        shader::ShaderResource fresh = _shaderPool.compileFromFile(shaderPath);
+        if (!fresh.isValid()) {
+            for (const std::string& err : _shaderPool.lastCompileErrors()) {
+                std::fprintf(stderr, "  shader reload: %s\n", err.c_str());
+            }
+            continue;
+        }
+
+        material.shader = fresh;
+        rebindMaterialAfterShaderSwap(material);
+        ++updated;
+    }
+    return updated;
 }
 
 MaterialHandle RenderResourceManager::loadMaterial(const std::string& path)

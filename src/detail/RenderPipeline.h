@@ -3,6 +3,7 @@
 #include "detail/RenderPass.h"
 
 #include <memory>
+#include <string_view>
 #include <vector>
 
 namespace ayt::render::detail
@@ -38,10 +39,18 @@ class RenderPipeline {
 public:
     // Take ownership. Order of calls determines dispatch order; later
     // insert points (R5+) should be appended in the same order
-    // design.md prescribes.
+    // design.md / RenderPipelineDesc prescribe.
     void addPass(std::unique_ptr<RenderPass> pass);
 
-    // Non-owning access; valid until next addPass or destruction.
+    // Drop all owned passes. Callers that hold ShadowPass GPU resources
+    // must destroyResources() first when the adapter is live.
+    void clear();
+
+    // Name lookup (O(N), N typically ≤ 7). Returns nullptr when absent.
+    RenderPass*       findPass(std::string_view name) noexcept;
+    const RenderPass* findPass(std::string_view name) const noexcept;
+
+    // Non-owning access; valid until next addPass/clear or destruction.
     const std::vector<std::unique_ptr<RenderPass>>& passes() const noexcept { return _passes; }
     std::vector<std::unique_ptr<RenderPass>>&       passes()       noexcept { return _passes; }
 

@@ -101,14 +101,14 @@ TEST_CASE(r5plus_shadow_pass_name_and_initial_state) {
     CHECK(pass.isReady() == false);
     CHECK(pass.isEnabled() == true);
     CHECK(pass.shadowMapSize() == ShadowPass::kDefaultShadowMapSize);
-    CHECK(pass.shadowMapSize() == 1024);
+    CHECK(pass.shadowMapSize() == 2048);
 }
 
 TEST_CASE(r5plus_shadow_pass_shadow_size_override) {
     ShadowPass pass;
-    CHECK(pass.shadowMapSize() == 1024);
-    pass.setShadowMapSize(2048);
     CHECK(pass.shadowMapSize() == 2048);
+    pass.setShadowMapSize(1024);
+    CHECK(pass.shadowMapSize() == 1024);
     pass.setShadowMapSize(512);
     CHECK(pass.shadowMapSize() == 512);
 }
@@ -236,17 +236,31 @@ TEST_CASE(r5plus_shadow_pass_destroy_resources_is_noop_when_uninitialized) {
 TEST_CASE(f1_safe_light_space_matrices_non_identity_and_direction_sensitive) {
     ayt::math::Float4x4 viewA = ayt::math::Float4x4::identity();
     ayt::math::Float4x4 projA = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 viewProjA = ayt::math::Float4x4::identity();
     ayt::math::Float4x4 viewB = ayt::math::Float4x4::identity();
     ayt::math::Float4x4 projB = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 viewProjB = ayt::math::Float4x4::identity();
+    float viewColA[16] = {};
+    float projColA[16] = {};
+    float colA[16] = {};
+    float viewColB[16] = {};
+    float projColB[16] = {};
+    float colB[16] = {};
 
     buildDirectionalShadowMatrices(
-        ayt::math::FVector3(0.3f, -0.8f, -0.4f), viewA, projA);
+        ayt::math::FVector3(0.3f, -0.8f, -0.4f),
+        viewA, projA, viewProjA, viewColA, projColA, colA);
     buildDirectionalShadowMatrices(
-        ayt::math::FVector3(-0.3f, -0.8f, 0.4f), viewB, projB);
+        ayt::math::FVector3(-0.3f, -0.8f, 0.4f),
+        viewB, projB, viewProjB, viewColB, projColB, colB);
 
     CHECK(matricesEqual(viewA, ayt::math::Float4x4::identity()) == false);
     CHECK(matricesEqual(projA, ayt::math::Float4x4::identity()) == false);
+    CHECK(matricesEqual(viewProjA, ayt::math::Float4x4::identity()) == false);
     CHECK(matricesEqual(viewA, viewB) == false);
+    CHECK(matricesEqual(viewProjA, viewProjB) == false);
+    CHECK(colA[15] != 0.0f);
+    CHECK(colB[15] != 0.0f);
 
     ShadowPass pass;
     CHECK(matricesEqual(pass.lightView(), ayt::math::Float4x4::identity()) == true);

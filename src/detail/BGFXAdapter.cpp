@@ -1,7 +1,9 @@
 #include "detail/BGFXAdapter.h"
+#include "detail/BgfxMatrix.h"
 
 #include "aymath/MathTypes.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <mutex>
 
@@ -95,6 +97,19 @@ bgfx::RendererType::Enum BGFXAdapter::mapBackend(Backend backend)
     }
 }
 
+uint32_t bgfxResetFlags(bool vsync, uint32_t msaa) noexcept
+{
+    uint32_t reset = vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+    switch (msaa) {
+    case 2:  reset |= BGFX_RESET_MSAA_X2;  break;
+    case 4:  reset |= BGFX_RESET_MSAA_X4;  break;
+    case 8:  reset |= BGFX_RESET_MSAA_X8;  break;
+    case 16: reset |= BGFX_RESET_MSAA_X16; break;
+    default: break;
+    }
+    return reset;
+}
+
 bool BGFXAdapter::isProcessBgfxAlive() noexcept
 {
     std::lock_guard<std::mutex> lock(bgfx_life::mutex());
@@ -112,6 +127,10 @@ bool BGFXAdapter::initialize(const BGFXInitParams& params)
     const bgfx::RendererType::Enum requested = mapBackend(params.backend);
     const bool bgfxAlreadyUp =
         (bgfx_life::refCount() > 0) || bgfx_life::noopSticky();
+    _msaa = params.msaa;
+    _backbufferW = params.width;
+    _backbufferH = params.height;
+    _vsync = params.vsync;
 
     if (bgfxAlreadyUp) {
         // Reject hard backend switches while a context is sticky/live
@@ -122,8 +141,7 @@ bool BGFXAdapter::initialize(const BGFXInitParams& params)
             return false;
         }
 
-        const uint32_t reset = params.vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
-        bgfx::reset(params.width, params.height, reset);
+        bgfx::reset(params.width, params.height, bgfxResetFlags(params.vsync, _msaa));
 
         ++bgfx_life::refCount();
         bgfx_life::noopSticky() = false;
@@ -142,7 +160,7 @@ bool BGFXAdapter::initialize(const BGFXInitParams& params)
 
     init.resolution.width  = params.width;
     init.resolution.height = params.height;
-    init.resolution.reset  = params.vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+    init.resolution.reset  = bgfxResetFlags(params.vsync, _msaa);
     init.callback          = nullptr;
 
     if (!bgfx::init(init)) {
@@ -167,6 +185,11 @@ void BGFXAdapter::shutdown()
     }
 
     std::lock_guard<std::mutex> lock(bgfx_life::mutex());
+
+    if (bgfx::isValid(_litShadowFallback)) {
+        bgfx::destroy(_litShadowFallback);
+        _litShadowFallback = BGFX_INVALID_HANDLE;
+    }
 
     // Drain pending submits before dropping our claim (or tearing down).
     bgfx::frame();
@@ -201,7 +224,12 @@ void BGFXAdapter::beginFrame()
 
 void BGFXAdapter::endFrame()
 {
-    bgfx::frame();
+    _gpuFrameNum = bgfx::frame();
+}
+
+uint32_t BGFXAdapter::gpuFrameCounter() const noexcept
+{
+    return _gpuFrameNum;
 }
 
 bool BGFXAdapter::isNoopBackend() const noexcept
@@ -251,9 +279,22 @@ void BGFXAdapter::setViewClearNone(uint8_t viewId)
     bgfx::setViewClear(viewId, BGFX_CLEAR_NONE, 0, 1.0f, 0);
 }
 
-void BGFXAdapter::setViewTransform(uint8_t viewId, const float* view, const float* proj)
+void BGFXAdapter::setViewTransform(uint8_t viewId,
+                                   const ayt::math::Float4x4& view,
+                                   const ayt::math::Float4x4& proj)
 {
-    bgfx::setViewTransform(viewId, view, proj);
+    float viewCol[16];
+    float projCol[16];
+    toBgfxColumnMajor(view, viewCol);
+    toBgfxColumnMajor(proj, projCol);
+    bgfx::setViewTransform(viewId, viewCol, projCol);
+}
+
+void BGFXAdapter::setViewTransformColumnMajor(uint8_t viewId,
+                                              const float viewColMajor[16],
+                                              const float projColMajor[16])
+{
+    bgfx::setViewTransform(viewId, viewColMajor, projColMajor);
 }
 
 void BGFXAdapter::resetResolution(uint32_t width, uint32_t height, bool vsync)
@@ -261,13 +302,39 @@ void BGFXAdapter::resetResolution(uint32_t width, uint32_t height, bool vsync)
     if (!_initialized) {
         return;
     }
-    const uint32_t reset = vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
-    bgfx::reset(width, height, reset);
+    _backbufferW = width;
+    _backbufferH = height;
+    _vsync = vsync;
+    bgfx::reset(width, height, bgfxResetFlags(vsync, _msaa));
+}
+
+void BGFXAdapter::setMsaaSampleCount(uint32_t samples)
+{
+    uint32_t msaa = 0;
+    switch (samples) {
+    case 2: case 4: case 8: case 16: msaa = samples; break;
+    default: msaa = 0; break;
+    }
+    if (!_initialized) {
+        _msaa = msaa;
+        return;
+    }
+    if (_msaa == msaa) {
+        return;
+    }
+    _msaa = msaa;
+    if (_backbufferW == 0 || _backbufferH == 0) {
+        return;
+    }
+    bgfx::reset(_backbufferW, _backbufferH, bgfxResetFlags(_vsync, _msaa));
+    std::fprintf(stderr, "[BGFXAdapter] MSAA samples=%u\n", static_cast<unsigned>(_msaa));
 }
 
 void BGFXAdapter::setTransform(const ayt::math::Float4x4& world)
 {
-    bgfx::setTransform(world.ptr());
+    float colMajor[16];
+    toBgfxColumnMajor(world, colMajor);
+    bgfx::setTransform(colMajor);
 }
 
 void BGFXAdapter::setVertexBuffer(bgfx::VertexBufferHandle vb, uint32_t start, uint32_t count)
@@ -365,8 +432,11 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
     if (!bgfx::isValid(color)) {
         return BGFX_INVALID_HANDLE;
     }
+    // Third arg is destroyTextures (not "withDepth"). PostProcess only
+    // needs color; use createColorDepthFrameBuffer when depth is required.
+    (void)withDepth;
     bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
-        /*num=*/1, &color, /*depth=*/withDepth);
+        /*num=*/1, &color, /*destroyTextures=*/true);
     // color is owned by the framebuffer now — bgfx manages the
     // attachment's lifetime once it's attached, so we do NOT destroy
     // `color` separately (would double-free).
@@ -374,6 +444,65 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
         return fb;
     }
     return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+}
+
+bgfx::FrameBufferHandle BGFXAdapter::createColorDepthFrameBuffer(uint16_t width,
+                                                                  uint16_t height)
+{
+    if (!_initialized || width == 0 || height == 0) {
+        return BGFX_INVALID_HANDLE;
+    }
+
+    const uint64_t colorFlags = BGFX_TEXTURE_RT
+                              | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
+                              | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+    const uint64_t depthFlags = BGFX_TEXTURE_RT
+                              | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
+                              | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+
+    // Prefer RGBA8: R32F often plain-samples as 0 on D3D when used as a
+    // color RT, which makes step() mark every fragment shadowed (dark
+    // silhouettes, no contact blob). 8-bit is fine once large ground
+    // planes are excluded from casting.
+    bgfx::TextureFormat::Enum colorFormats[] = {
+        bgfx::TextureFormat::RGBA8,
+        bgfx::TextureFormat::RGBA32F,
+        bgfx::TextureFormat::R32F,
+    };
+    bgfx::TextureFormat::Enum depthFormats[] = {
+        bgfx::TextureFormat::D24S8,
+        bgfx::TextureFormat::D32F,
+    };
+
+    for (bgfx::TextureFormat::Enum colorFmt : colorFormats) {
+        if (!bgfx::isTextureValid(0, false, 1, colorFmt, colorFlags)) {
+            continue;
+        }
+        bgfx::TextureHandle color = bgfx::createTexture2D(
+            width, height, false, 1, colorFmt, colorFlags, nullptr);
+        if (!bgfx::isValid(color)) {
+            continue;
+        }
+        for (bgfx::TextureFormat::Enum depthFmt : depthFormats) {
+            if (!bgfx::isTextureValid(0, false, 1, depthFmt, depthFlags)) {
+                continue;
+            }
+            bgfx::TextureHandle depth = bgfx::createTexture2D(
+                width, height, false, 1, depthFmt, depthFlags, nullptr);
+            if (!bgfx::isValid(depth)) {
+                continue;
+            }
+            const bgfx::TextureHandle attachments[2] = {color, depth};
+            bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
+                2, attachments, /*destroyTextures=*/true);
+            if (bgfx::isValid(fb)) {
+                return fb;
+            }
+            bgfx::destroy(depth);
+        }
+        bgfx::destroy(color);
+    }
+    return BGFX_INVALID_HANDLE;
 }
 
 void BGFXAdapter::setViewFrameBuffer(uint8_t viewId, bgfx::FrameBufferHandle fb)
@@ -386,35 +515,48 @@ void BGFXAdapter::setViewFrameBuffer(uint8_t viewId, bgfx::FrameBufferHandle fb)
 
 bgfx::FrameBufferHandle BGFXAdapter::createDepthOnlyFrameBuffer(uint16_t width, uint16_t height)
 {
-    // R5+ (Phase Shadow) — see header. Single D24S8 attachment via
-    // bgfx::Attachment::init(depth, Access::Write) + createFrameBuffer
-    // (uint8_t num, const Attachment*, bool destroyTextures). The
-    // depth texture's lifetime is handed to the FBO via
-    // destroyTextures=true so the existing destroy(fb) path in this
-    // adapter cleans up the depth attachment automatically.
+    // R5+ (Phase Shadow) — single depth RT for the shadow map.
+    // Prefer the TextureHandle* createFrameBuffer overload (same path
+    // as createFrameBuffer color RT and bgfx examples/16-shadowmaps):
+    // it Attachment::init's with resolve=NONE for depth. The previous
+    // hand-rolled Attachment{handle, access} left mip/layer/numLayers
+    // uninitialized → bgfx isFrameBufferValid ErrorAssert / debugBreak
+    // on first ShadowPass::execute under a Debug build.
     if (!_initialized || width == 0 || height == 0) {
         return BGFX_INVALID_HANDLE;
     }
+
     const uint64_t textureFlags = BGFX_TEXTURE_RT
-                                | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
-    bgfx::TextureHandle depth = bgfx::createTexture2D(
-        width, height, /*hasMips=*/false, /*numLayers=*/1,
-        bgfx::TextureFormat::D24S8, textureFlags, /*mem=*/nullptr);
-    if (!bgfx::isValid(depth)) {
-        return BGFX_INVALID_HANDLE;
+                                | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
+                                | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+
+    // Try D24S8 first (matches F2 sampling of .r); fall back to D32F
+    // when the backend reports the format unsupported as an RT.
+    bgfx::TextureFormat::Enum formats[] = {
+        bgfx::TextureFormat::D24S8,
+        bgfx::TextureFormat::D32F,
+    };
+
+    for (bgfx::TextureFormat::Enum fmt : formats) {
+        if (!bgfx::isTextureValid(0, false, 1, fmt, textureFlags)) {
+            continue;
+        }
+        bgfx::TextureHandle depth = bgfx::createTexture2D(
+            width, height, /*hasMips=*/false, /*numLayers=*/1,
+            fmt, textureFlags, /*mem=*/nullptr);
+        if (!bgfx::isValid(depth)) {
+            continue;
+        }
+        bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
+            /*num=*/1, &depth, /*destroyTextures=*/true);
+        if (bgfx::isValid(fb)) {
+            return fb;
+        }
+        // FBO create failed — TextureHandle* overload with
+        // destroyTextures=true still owns `depth` only when the FBO
+        // handle is valid. On failure the texture is ours to free.
+        bgfx::destroy(depth);
     }
-    bgfx::Attachment depthAtt;
-    depthAtt.handle = depth;
-    depthAtt.access = bgfx::Access::Write;
-    bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
-        /*num=*/1, &depthAtt, /*destroyTextures=*/true);
-    if (bgfx::isValid(fb)) {
-        return fb;
-    }
-    // FBO creation failed — free the depth texture manually since
-    // destroyTextures=false in this branch means the FBO doesn't own
-    // it.
-    bgfx::destroy(depth);
     return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
 }
 
@@ -449,6 +591,28 @@ void BGFXAdapter::setViewClearRaw(uint8_t viewId, uint16_t flags,
                                   uint32_t rgba, float depth, uint8_t stencil)
 {
     bgfx::setViewClear(viewId, flags, rgba, depth, stencil);
+}
+
+void BGFXAdapter::setPaletteColor(uint8_t index, float r, float g, float b, float a)
+{
+    if (!_initialized) {
+        return;
+    }
+    bgfx::setPaletteColor(index, r, g, b, a);
+}
+
+void BGFXAdapter::setViewClearPalette(uint8_t viewId, uint16_t flags,
+                                      uint8_t paletteIndex, float depth,
+                                      uint8_t stencil)
+{
+    if (!_initialized) {
+        return;
+    }
+    // Palette overload sets BGFX_CLEAR_COLOR_USE_PALETTE internally when
+    // attachment indices are not UINT8_MAX (see bgfx_p.h Clear ctor).
+    bgfx::setViewClear(viewId, flags, depth, stencil,
+                       paletteIndex, paletteIndex, paletteIndex, paletteIndex,
+                       paletteIndex, paletteIndex, paletteIndex, paletteIndex);
 }
 
 void BGFXAdapter::setViewClearDepthOnly(uint8_t viewId, float depth)
@@ -493,6 +657,100 @@ bgfx::TextureHandle BGFXAdapter::getFboAttachment(bgfx::FrameBufferHandle fb,
         return BGFX_INVALID_HANDLE;
     }
     return bgfx::getTexture(fb, attachment);
+}
+
+bool BGFXAdapter::blitTexture(uint8_t viewId,
+                              bgfx::TextureHandle dst,
+                              bgfx::TextureHandle src,
+                              uint16_t width,
+                              uint16_t height)
+{
+    if (!_initialized || !bgfx::isValid(dst) || !bgfx::isValid(src)) {
+        return false;
+    }
+    const bgfx::Caps* caps = bgfx::getCaps();
+    if (caps == nullptr || (caps->supported & BGFX_CAPS_TEXTURE_BLIT) == 0) {
+        return false;
+    }
+    bgfx::blit(viewId, dst, 0, 0, src, 0, 0, width, height);
+    return true;
+}
+
+bool BGFXAdapter::blitTextureRegion(uint8_t viewId,
+                                      bgfx::TextureHandle dst,
+                                      uint16_t dstX,
+                                      uint16_t dstY,
+                                      bgfx::TextureHandle src,
+                                      uint16_t srcX,
+                                      uint16_t srcY,
+                                      uint16_t width,
+                                      uint16_t height)
+{
+    if (!_initialized || !bgfx::isValid(dst) || !bgfx::isValid(src)) {
+        return false;
+    }
+    const bgfx::Caps* caps = bgfx::getCaps();
+    if (caps == nullptr || (caps->supported & BGFX_CAPS_TEXTURE_BLIT) == 0) {
+        return false;
+    }
+    bgfx::blit(viewId, dst, dstX, dstY, src, srcX, srcY, width, height);
+    return true;
+}
+
+bgfx::TextureHandle BGFXAdapter::createBlitDstTexture2D(uint16_t width, uint16_t height)
+{
+    if (!_initialized || width == 0 || height == 0) {
+        return BGFX_INVALID_HANDLE;
+    }
+    const uint64_t flags = BGFX_TEXTURE_BLIT_DST
+                         | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
+                         | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+    if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA8, flags)) {
+        return BGFX_INVALID_HANDLE;
+    }
+    return bgfx::createTexture2D(width, height, false, 1,
+                                 bgfx::TextureFormat::RGBA8, flags, nullptr);
+}
+
+bool BGFXAdapter::supportsTextureReadBack() const noexcept
+{
+    if (!_initialized) {
+        return false;
+    }
+    const bgfx::Caps* caps = bgfx::getCaps();
+    return caps != nullptr && (caps->supported & BGFX_CAPS_TEXTURE_READ_BACK) != 0;
+}
+
+bool BGFXAdapter::requestTextureReadback(bgfx::TextureHandle tex,
+                                         void* rgba8Out,
+                                         uint32_t& outReadyFrame) const
+{
+    if (!_initialized || rgba8Out == nullptr || !supportsTextureReadBack()
+        || !bgfx::isValid(tex)) {
+        return false;
+    }
+    outReadyFrame = bgfx::readTexture(tex, rgba8Out, 0);
+    return true;
+}
+
+bgfx::TextureHandle BGFXAdapter::getLitShadowFallbackTexture()
+{
+    if (!_initialized) {
+        return BGFX_INVALID_HANDLE;
+    }
+    if (bgfx::isValid(_litShadowFallback)) {
+        return _litShadowFallback;
+    }
+    // R=1 so step(refDepth - bias, occluder) → 1 (fully lit) for any
+    // reasonable refDepth in [0,1].
+    const uint8_t pixel[4] = {255, 255, 255, 255};
+    const bgfx::Memory* mem = bgfx::copy(pixel, sizeof(pixel));
+    _litShadowFallback = bgfx::createTexture2D(
+        1, 1, false, 1, bgfx::TextureFormat::RGBA8,
+        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
+            | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
+        mem);
+    return _litShadowFallback;
 }
 
 } // namespace ayt::render::detail

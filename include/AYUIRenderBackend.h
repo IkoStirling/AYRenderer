@@ -30,8 +30,14 @@ class UiGpuContext;
 // incrementally rebuilt with mismatched layouts.
 class UIRenderBackend : public ayt::ui::IRenderBackend {
 public:
-    // View 0 = full-window clear, view 1 = 3D scene (composite), view 2 = UI.
-    static constexpr uint8_t kViewId = 2;
+    // Composite view map (ascending bgfx order):
+    //   0 = full-window clear
+    //   1 = ShadowPass caster → shadow FBO
+    //   2 = ShadowPass resolve blit (color RT → sampleable tex)
+    //   3 = ForwardOpaque + Transparent → scene / panel
+    //   4 = PostProcess blit → backbuffer panel
+    //   5 = UI chrome
+    static constexpr uint8_t kViewId = 5;
 
     UIRenderBackend();
     ~UIRenderBackend() override;

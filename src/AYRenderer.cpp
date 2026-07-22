@@ -2,6 +2,7 @@
 
 #include "AYF1DiagFlags.h"
 #include "detail/BGFXAdapter.h"
+#include "detail/BgfxMatrix.h"
 #include "detail/DebugOverlay.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FrameContext.h"
@@ -11,9 +12,7 @@
 #include "detail/RenderResourceManager.h"
 #include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
-#if AY_F1_DIAG_DEFAULT_SHADOW
-#  include "detail/ShadowPass.h"
-#endif
+#include "detail/ShadowPass.h"
 #include "detail/TransparentPass.h"
 #include "detail/UiGpuContext.h"
 #include "detail/UIPass.h"
@@ -25,7 +24,10 @@
 #include <bx/math.h>
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <utility>
 
 namespace ayt::render
 {
@@ -35,29 +37,69 @@ std::size_t detailDiagSizeofFrameContext()
     return sizeof(detail::FrameContext);
 }
 
+RenderPipelineDesc RenderPipelineDesc::makeDefault()
+{
+    return RenderPipelineDesc{{
+        RenderPassSlot::ForwardOpaque,
+        RenderPassSlot::Transparent,
+        RenderPassSlot::PostProcess,
+        RenderPassSlot::UI,
+    }};
+}
+
+RenderPipelineDesc RenderPipelineDesc::makeForwardWithShadows()
+{
+    return RenderPipelineDesc{{
+        RenderPassSlot::Shadow,
+        RenderPassSlot::ForwardOpaque,
+        RenderPassSlot::Transparent,
+        RenderPassSlot::PostProcess,
+        RenderPassSlot::UI,
+    }};
+}
+
+bool RenderPipelineDesc::contains(RenderPassSlot slot) const noexcept
+{
+    for (const RenderPassSlot s : passes) {
+        if (s == slot) {
+            return true;
+        }
+    }
+    return false;
+}
+
+namespace {
+
+std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
+{
+    switch (slot) {
+    case RenderPassSlot::Shadow:
+        return std::make_unique<detail::ShadowPass>();
+    case RenderPassSlot::ForwardOpaque:
+        return std::make_unique<detail::ForwardOpaquePass>();
+    case RenderPassSlot::Transparent:
+        return std::make_unique<detail::TransparentPass>();
+    case RenderPassSlot::PostProcess:
+        return std::make_unique<detail::PostProcessPass>();
+    case RenderPassSlot::UI:
+        return std::make_unique<detail::UIPass>();
+    }
+    return nullptr;
+}
+
+} // namespace
+
 struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
     ayt::shader::ShaderResourcePool    shaderPool;
-    // R0–R4 (2026-07-20 reality) — RenderPipeline owns 4 default
-    // passes in registration order:
-    //   [0] ForwardOpaque   (depth-test LESS, RGB+A+Z write, cull CW)
-    //   [1] Transparent     (BLEND_ALPHA, depth test only, sortKey desc)
-    //   [2] PostProcess     (R5.1: Phoskia program + uniforms + real
-    //                        blit-back to default backbuffer; still
-    //                        samples its OWN empty FBO, not the scene
-    //                        color — see docs/execution-plan.md P2)
-    //   [3] UIPass          (composite chrome into bgfx view 2)
-    // R5+ deferred slots (Shadow / GBuffer / Lighting) are intentionally
-    // absent from the default pipeline:
-    //   - ShadowPass cut-1 stub exists but default-on is forbidden by
-    //     `docs/execution-plan.md` §5.3 (segfault constraint).
-    //   - GBufferPass / LightingPass do not exist yet.
-    // see `docs/execution-plan.md` §1.1 / §附录 B for the canonical
-    // default-pipeline index.
-    //
-    // The pipeline's lifetime is tied to Impl; addPass() is called
-    // once in the Impl ctor.
+    // Product default = RenderPipelineDesc::makeDefault()
+    // (FO → Transparent → PostProcess → UI). Shadow is opt-in via
+    // Renderer::configurePipeline(makeForwardWithShadows()) — hosts
+    // such as AYEditor assemble the ordered slot list; the Renderer
+    // rebuilds unique_ptr passes from that desc. GBuffer / Lighting
+    // slots are not implemented yet.
     detail::RenderPipeline        pipeline;
+    RenderPipelineDesc            pipelineDesc = RenderPipelineDesc::makeDefault();
 
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
@@ -73,6 +115,14 @@ struct Renderer::Impl {
     ayt::math::FVector3           mainCameraPosition = ayt::math::FVector3(0.0f, 0.0f, 4.0f);
     ayt::math::FVector3           directionalLightDir = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
     ayt::math::FVector3           directionalLightColor = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
+    bool                          shadowPcfEnabled = true;
+
+    void applyShadowQualityKnobs()
+    {
+        if (detail::RenderPass* shadowPass = pipeline.findPass("Shadow")) {
+            static_cast<detail::ShadowPass*>(shadowPass)->setPcfEnabled(shadowPcfEnabled);
+        }
+    }
 
     // R5+ (Phase PostProcess, 2026-07-20) — per-host post-process knobs.
     // Defaults = no effect (bloomStrength=0 disables bloom; exposure=1
@@ -114,6 +164,9 @@ struct Renderer::Impl {
     // (so callers can no-op cleanly).
     bgfx::FrameBufferHandle ensureSceneFbo();
 
+    // Rebuild pipeline.passes from pipelineDesc. Preserves UI backend.
+    void applyPipelineDesc(const RenderPipelineDesc& desc);
+
 #if AY_F1_DIAG_FRAME_SHADOW
     // F1 diag — cache written into FrameContext each render().
     bgfx::FrameBufferHandle lastFrameShadowFbo =
@@ -124,14 +177,47 @@ struct Renderer::Impl {
         : resources(adapter, shaderPool)
     {
 #if AY_F1_DIAG_DEFAULT_SHADOW
-        pipeline.addPass(std::make_unique<detail::ShadowPass>());
+        applyPipelineDesc(RenderPipelineDesc::makeForwardWithShadows());
+#else
+        applyPipelineDesc(RenderPipelineDesc::makeDefault());
 #endif
-        pipeline.addPass(std::make_unique<detail::ForwardOpaquePass>());
-        pipeline.addPass(std::make_unique<detail::TransparentPass>());
-        pipeline.addPass(std::make_unique<detail::PostProcessPass>());
-        pipeline.addPass(std::make_unique<detail::UIPass>());
     }
 };
+
+void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
+{
+    RenderPipelineDesc resolved = desc.passes.empty()
+                                      ? RenderPipelineDesc::makeDefault()
+                                      : desc;
+
+    UIRenderBackend* retainedUi = nullptr;
+    if (detail::RenderPass* uiPass = pipeline.findPass("UI")) {
+        retainedUi = static_cast<detail::UIPass*>(uiPass)->backend();
+    }
+
+    if (detail::RenderPass* shadowPass = pipeline.findPass("Shadow")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::ShadowPass*>(shadowPass)
+                ->destroyResources(adapter);
+        }
+    }
+
+    pipeline.clear();
+    for (const RenderPassSlot slot : resolved.passes) {
+        if (auto pass = makePassForSlot(slot)) {
+            pipeline.addPass(std::move(pass));
+        }
+    }
+    pipelineDesc = std::move(resolved);
+
+    if (retainedUi != nullptr) {
+        if (detail::RenderPass* uiPass = pipeline.findPass("UI")) {
+            static_cast<detail::UIPass*>(uiPass)->setBackend(retainedUi);
+        }
+    }
+
+    applyShadowQualityKnobs();
+}
 
 Renderer::Renderer() : _impl(std::make_unique<Impl>())
 {
@@ -161,12 +247,28 @@ bool Renderer::initialize(const InitDesc& desc)
     bgfxParams.height             = desc.height;
     bgfxParams.vsync              = desc.vsync;
     bgfxParams.backend            = desc.backend;
+    bgfxParams.msaa               = desc.msaa;
+    if (const char* msaaEnv = std::getenv("AY_MSAA")) {
+        bgfxParams.msaa = static_cast<uint32_t>(std::atoi(msaaEnv));
+    }
 
     if (!_impl->adapter.initialize(bgfxParams)) {
         return false;
     }
 
     _impl->initDesc        = desc;
+    _impl->initDesc.msaa   = bgfxParams.msaa;
+    _impl->shadowPcfEnabled = desc.shadowPcf;
+    if (const char* pcfEnv = std::getenv("AY_SHADOW_PCF")) {
+        _impl->shadowPcfEnabled = !(pcfEnv[0] == '\0' || pcfEnv[0] == '0');
+    }
+    _impl->initDesc.shadowPcf = _impl->shadowPcfEnabled;
+    _impl->applyShadowQualityKnobs();
+    std::fprintf(stderr,
+                 "[Renderer] quality msaa=%u shadowPcf=%d "
+                 "(override via AY_MSAA / AY_SHADOW_PCF, or Renderer setters)\n",
+                 static_cast<unsigned>(_impl->adapter.msaaSampleCount()),
+                 _impl->shadowPcfEnabled ? 1 : 0);
     _impl->viewportW       = static_cast<uint16_t>(desc.width);
     _impl->viewportH       = static_cast<uint16_t>(desc.height);
     _impl->viewportX       = 0;
@@ -240,9 +342,12 @@ void Renderer::beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uin
     _impl->adapter.setViewClear(0, clear);
     _impl->adapter.beginFrame(); // touch(0) so the clear runs
 
-    // View 1: 3D into the editor viewport; must not clear (would wipe chrome).
-    _impl->compositeSceneViewId = 1;
-    _impl->adapter.setViewClearNone(1);
+    // View 3: 3D into the scene FBO / panel hole (see UIRenderBackend::kViewId map).
+    // Must not clear the backbuffer here (would wipe chrome); FO clears
+    // the offscreen scene FBO itself when binding it.
+    // View 2 is reserved for ShadowPass resolve blit.
+    _impl->compositeSceneViewId = 3;
+    _impl->adapter.setViewClearNone(3);
 }
 
 void Renderer::render(const RenderScene& scene)
@@ -299,18 +404,32 @@ void Renderer::render(const RenderScene& scene)
 
     _impl->lastDrawCalls = 0;
 
-    // P2 (PR-D, 2026-07-20) — ensure the shared scene FBO matches the
-    // current viewport. ensureSceneFbo() is idempotent and rebuilds
-    // when the size changes or when the previous build failed
-    // (adapter uninitialized ⇒ INVALID, which is the off-switch path
-    // the Passes use to fall back to backbuffer).
-    const bgfx::FrameBufferHandle sceneFbo = _impl->ensureSceneFbo();
+    // P2 scene FBO — used by fullscreen / non-composite hosts so
+    // PostProcess can sample the scene. Editor composite mode draws
+    // 3D straight into the backbuffer panel hole instead: the
+    // FBO→blit path was leaving the Game View black (view-id / blit
+    // coupling). INVALID ⇒ FO/Transparent use (vx,vy,vw,vh) on the
+    // default backbuffer (pre-P2 editor behavior).
+    const bgfx::FrameBufferHandle sceneFbo =
+        (_impl->compositeSceneViewId >= 0)
+            ? bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE}
+            : _impl->ensureSceneFbo();
 
     // P1 (PR-C, 2026-07-20): build the PassExecContext once per frame
     // and hand it to RenderPipeline::executeAll. Every enabled pass
     // reads from the same context. Adding new per-frame state (e.g.
     // a ShadowMap slot in P3, scene-RT handles in P2) means adding a
     // field to PassExecContext, NOT a new execute() arg.
+    //
+    // PR-F2 / pipeline config — when Shadow is in the configured
+    // pipeline, hand FO/Transparent a non-owning pointer so
+    // tryBindShadowSampler can upload u_lightViewProj + bind
+    // shadowMap. Absent Shadow ⇒ nullptr (no upload, no sampler).
+    const detail::ShadowPass* shadowPassPtr = nullptr;
+    if (detail::RenderPass* shadowSlot = _impl->pipeline.findPass("Shadow")) {
+        shadowPassPtr = static_cast<const detail::ShadowPass*>(shadowSlot);
+    }
+
     detail::PassExecContext ctx{
         _impl->adapter,
         _impl->shaderPool,
@@ -325,16 +444,27 @@ void Renderer::render(const RenderScene& scene)
         frame,
         viewId,
         sceneFbo,
-        // PR-F2 (2026-07-21) — wire the shadow producer pointer. The
-        // Renderer default pipeline does NOT register ShadowPass;
-        // pinging the pipeline is the most natural host-side spot.
-        // nullptr here ⇔ no shadow this frame (no upload, no sampler
-        // bind) — matches current default. Hosts that DO add ShadowPass
-        // manually can override ctx.shadowPass before executeAll, or
-        // we can flip this to a non-null lookup when §5.4 E4 alone is
-        // recorded 3/3 PASS.
-        nullptr,
+        shadowPassPtr,
     };
+
+    static uint32_t s_compositeLog = 0;
+    if (s_compositeLog < 3) {
+        std::fprintf(stderr,
+                     "[ShadowDbg] composite frame=%u viewId=%u viewport=(%u,%u,%u,%u) "
+                     "sceneFboValid=%d shadowPass=%p lightDir=(%.2f,%.2f,%.2f)\n",
+                     s_compositeLog,
+                     static_cast<unsigned>(viewId),
+                     static_cast<unsigned>(_impl->viewportX),
+                     static_cast<unsigned>(_impl->viewportY),
+                     static_cast<unsigned>(_impl->viewportW),
+                     static_cast<unsigned>(_impl->viewportH),
+                     bgfx::isValid(sceneFbo) ? 1 : 0,
+                     static_cast<const void*>(shadowPassPtr),
+                     frame.lightDirection.x,
+                     frame.lightDirection.y,
+                     frame.lightDirection.z);
+        ++s_compositeLog;
+    }
 
     // Dispatched via RenderPipeline::executeAll in registration order
     // [ForwardOpaque, Transparent, PostProcess, UI]. ForwardOpaquePass
@@ -659,6 +789,48 @@ void Renderer::setDirectionalLight(const ayt::math::FVector3& direction,
     _impl->directionalLightColor = color;
 }
 
+void Renderer::setMsaaSampleCount(uint32_t samples)
+{
+    if (!_impl) {
+        return;
+    }
+    const uint32_t before = _impl->adapter.msaaSampleCount();
+    _impl->adapter.setMsaaSampleCount(samples);
+    _impl->initDesc.msaa = _impl->adapter.msaaSampleCount();
+    // bgfx::reset drops view attachments; recycle scene RT like resize().
+    if (before != _impl->initDesc.msaa) {
+        _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+        _impl->sceneFboW = 0;
+        _impl->sceneFboH = 0;
+        if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
+            if (_impl->adapter.isInitialized()) {
+                static_cast<detail::ShadowPass*>(shadowPass)
+                    ->destroyResources(_impl->adapter);
+            }
+        }
+    }
+}
+
+uint32_t Renderer::msaaSampleCount() const noexcept
+{
+    return _impl ? _impl->adapter.msaaSampleCount() : 0u;
+}
+
+void Renderer::setShadowPcfEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->shadowPcfEnabled = enabled;
+    _impl->initDesc.shadowPcf = enabled;
+    _impl->applyShadowQualityKnobs();
+}
+
+bool Renderer::shadowPcfEnabled() const noexcept
+{
+    return _impl && _impl->shadowPcfEnabled;
+}
+
 void Renderer::setPostProcessBloomStrength(float strength)
 {
     if (!_impl) {
@@ -703,6 +875,23 @@ void Renderer::setPostProcessTonemapMode(TonemapMode mode)
     }
 }
 
+void Renderer::configurePipeline(const RenderPipelineDesc& desc)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->applyPipelineDesc(desc);
+}
+
+const RenderPipelineDesc& Renderer::pipelineDesc() const noexcept
+{
+    static const RenderPipelineDesc kEmpty = RenderPipelineDesc::makeDefault();
+    if (!_impl) {
+        return kEmpty;
+    }
+    return _impl->pipelineDesc;
+}
+
 void Renderer::setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,
                                               const ayt::math::FVector3& at,
                                               const ayt::math::FVector3& up,
@@ -715,6 +904,8 @@ void Renderer::setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,
         return;
     }
 
+    // bx for lookAt/proj (homogeneousDepth for D3D). Store as true AYMath
+    // via fromBgfxColumnMajor — never memcpy column-major bytes into Float4x4.
     float viewBx[16];
     float projBx[16];
     const bx::Vec3 eyeBx = {eye.x, eye.y, eye.z};
@@ -724,12 +915,9 @@ void Renderer::setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,
     bx::mtxProj(projBx, fovYDegrees, aspect, nearZ, farZ,
                 bgfx::getCaps()->homogeneousDepth);
 
-    ayt::math::Float4x4 view;
-    ayt::math::Float4x4 proj;
-    std::memcpy(view.ptr(), viewBx, sizeof(viewBx));
-    std::memcpy(proj.ptr(), projBx, sizeof(projBx));
     _impl->mainCameraPosition = eye;
-    setMainCamera(view, proj);
+    setMainCamera(detail::fromBgfxColumnMajor(viewBx),
+                  detail::fromBgfxColumnMajor(projBx));
 }
 
 void Renderer::destroyMesh(MeshHandle& mesh)
@@ -765,6 +953,14 @@ void Renderer::pollShaderHotReload()
         _impl->shaderPool.pollHotReload();
         _impl->resources.refreshMaterialsAfterHotReload();
     }
+}
+
+uint32_t Renderer::reloadMaterialsForShaderFile(const std::string& shaderPath)
+{
+    if (!_impl || !_impl->shaderPoolReady || shaderPath.empty()) {
+        return 0;
+    }
+    return _impl->resources.reloadMaterialsForShaderFile(shaderPath);
 }
 
 void Renderer::setDebugOverlayEnabled(bool enabled)
@@ -907,11 +1103,8 @@ void Renderer::setUiBackend(UIRenderBackend* backend)
     if (!_impl) {
         return;
     }
-    for (auto& pass : _impl->pipeline.passes()) {
-        if (pass && pass->name() == "UI") {
-            static_cast<detail::UIPass*>(pass.get())->setBackend(backend);
-            return;
-        }
+    if (detail::RenderPass* uiPass = _impl->pipeline.findPass("UI")) {
+        static_cast<detail::UIPass*>(uiPass)->setBackend(backend);
     }
 }
 

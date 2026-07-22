@@ -8,6 +8,31 @@ void RenderPipeline::addPass(std::unique_ptr<RenderPass> pass)
     _passes.push_back(std::move(pass));
 }
 
+void RenderPipeline::clear()
+{
+    _passes.clear();
+}
+
+RenderPass* RenderPipeline::findPass(std::string_view name) noexcept
+{
+    for (auto& pass : _passes) {
+        if (pass && pass->name() == name) {
+            return pass.get();
+        }
+    }
+    return nullptr;
+}
+
+const RenderPass* RenderPipeline::findPass(std::string_view name) const noexcept
+{
+    for (const auto& pass : _passes) {
+        if (pass && pass->name() == name) {
+            return pass.get();
+        }
+    }
+    return nullptr;
+}
+
 uint32_t RenderPipeline::executeAll(PassExecContext& ctx)
 {
     uint32_t total = 0;

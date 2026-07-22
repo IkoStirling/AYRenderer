@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace ayt::render
 {
@@ -36,6 +37,11 @@ struct InitDesc {
     bool     vsync        = true;
     Backend  backend      = Backend::Auto;
     bool     enableDebugOverlay = false;
+    // Backbuffer MSAA sample count: 0 (off), 2, 4, 8, or 16.
+    // Style tip: set 0 for crisp/stylized silhouettes.
+    uint32_t msaa = 4;
+    // Soft shadow filter (3x3 PCF). Style tip: false → hard 1-tap edges.
+    bool     shadowPcf = true;
 };
 
 struct RenderFrameStats {
@@ -112,6 +118,70 @@ struct MaterialHandle {
 struct TextureHandle {
     uint64_t id = 0;
     bool isValid() const noexcept { return id != 0; }
+};
+
+// Phase 4 — per-draw shadow participation (caster pass + receiver compare).
+enum class ShadowFlags : uint8_t {
+    None    = 0,
+    Cast    = 1u << 0,
+    Receive = 1u << 1,
+};
+
+inline constexpr ShadowFlags operator|(ShadowFlags a, ShadowFlags b) noexcept
+{
+    return static_cast<ShadowFlags>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+}
+
+inline constexpr ShadowFlags operator&(ShadowFlags a, ShadowFlags b) noexcept
+{
+    return static_cast<ShadowFlags>(static_cast<uint8_t>(a) & static_cast<uint8_t>(b));
+}
+
+inline constexpr ShadowFlags kShadowCastAndReceive =
+    ShadowFlags::Cast | ShadowFlags::Receive;
+
+inline bool castsShadow(ShadowFlags flags) noexcept
+{
+    return (static_cast<uint8_t>(flags) & static_cast<uint8_t>(ShadowFlags::Cast)) != 0;
+}
+
+inline bool receivesShadow(ShadowFlags flags) noexcept
+{
+    return (static_cast<uint8_t>(flags) & static_cast<uint8_t>(ShadowFlags::Receive)) != 0;
+}
+
+inline ShadowFlags makeShadowFlags(bool cast, bool receive) noexcept
+{
+    ShadowFlags flags = ShadowFlags::None;
+    if (cast) {
+        flags = flags | ShadowFlags::Cast;
+    }
+    if (receive) {
+        flags = flags | ShadowFlags::Receive;
+    }
+    return flags;
+}
+
+// Host-facing pass slots for RenderPipelineDesc. Order in
+// `RenderPipelineDesc::passes` is the dispatch order used by
+// Renderer::configurePipeline. Default product pipeline omits Shadow
+// (see RenderPipelineDesc::makeDefault); Editor / demos that want
+// visible shadows assemble makeForwardWithShadows() or a custom list.
+enum class RenderPassSlot : uint8_t {
+    Shadow = 0,
+    ForwardOpaque,
+    Transparent,
+    PostProcess,
+    UI,
+};
+
+struct RenderPipelineDesc {
+    std::vector<RenderPassSlot> passes;
+
+    static RenderPipelineDesc makeDefault();
+    static RenderPipelineDesc makeForwardWithShadows();
+
+    bool contains(RenderPassSlot slot) const noexcept;
 };
 
 } // namespace ayt::render

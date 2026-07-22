@@ -16,6 +16,7 @@ struct DrawItem {
     const ayt::math::Float4x4* boneMatrices = nullptr;
     uint32_t                   jointCount   = 0;
     int32_t                    sortKey      = 0;
+    ShadowFlags                shadowFlags  = kShadowCastAndReceive;
 };
 
 #if AY_F1_DIAG_LIGHT
@@ -56,6 +57,7 @@ public:
         item.boneMatrices = nullptr;
         item.jointCount   = 0;
         item.sortKey      = 0;
+        item.shadowFlags  = kShadowCastAndReceive;
         _items.push_back(item);
     }
 
@@ -70,6 +72,7 @@ public:
         item.world = world;
         item.boneMatrices = boneMatrices;
         item.jointCount = (boneMatrices != nullptr) ? jointCount : 0;
+        item.shadowFlags = kShadowCastAndReceive;
         _items.push_back(item);
     }
 
