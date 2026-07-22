@@ -17,4 +17,19 @@ TEST_CASE(public_headers_compile_without_bgfx)
     (void)desc;
 }
 
+TEST_CASE(public_renderer_symbols_resolve_at_runtime)
+{
+    // E5 (§5.4, 2026-07-22) — pin that the new
+    // Renderer::shadowsEnabled() const noexcept getter is reachable
+    // from the public ABI (not stripped by an inline-only path or
+    // hidden behind a non-public include). Taking the address of
+    // a member function forces a real out-of-line reference; if
+    // the symbol ever disappears from the lib, this fails to link.
+    using ShadowsEnabledFn = bool (ayt::render::Renderer::*)() const noexcept;
+    ShadowsEnabledFn fn = &ayt::render::Renderer::shadowsEnabled;
+    CHECK(fn != nullptr);
+    ayt::render::Renderer renderer;
+    CHECK((renderer.*fn)() == true);  // E5 default: enabled
+}
+
 TEST_SUITE_END

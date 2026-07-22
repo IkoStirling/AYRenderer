@@ -1,5 +1,12 @@
 // PR-F2 (2026-07-21) — forward-pass shadow sampling smoke tests.
 //
+// E5 (§5.4, 2026-07-22) update: the default pipeline now mounts
+// Shadow *enabled* (no opt-in needed). This suite still pins the
+// same plumbing invariants on Noop — Shadow's Noop guard keeps the
+// visible-shadow behavior unchanged from E4 / pre-E5 — so no
+// assertion changes are required here. The E5 default is verified
+// in Test_E5_DefaultShadow.cpp via Renderer::shadowsEnabled().
+//
 // Background:
 //   The ShadowPass depth-only FBO is consumed by Forward / Transparent
 //   via a non-owning pointer (`PassExecContext::shadowPass`). The actual

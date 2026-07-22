@@ -40,12 +40,14 @@ std::size_t detailDiagSizeofFrameContext()
 
 RenderPipelineDesc RenderPipelineDesc::makeDefault()
 {
-    // E4 (§5.4, 2026-07-22): default pipeline now mounts Shadow at
-    // slot 0, but disabled (setEnabled(false) in applyPipelineDesc).
-    // This is the post-PR-F1' baseline: hosts that want shadows
-    // call findPass("Shadow")->setEnabled(true) or rebuild via
-    // configurePipeline(makeForwardWithShadows()). The dispatch
-    // order of the remaining enabled passes is unchanged.
+    // E5 (§5.4, 2026-07-22): default pipeline now mounts Shadow at
+    // slot 0 *enabled* (RenderPass base default _enabled == true).
+    // Hosts that want shadows get them out of the box; hosts that
+    // want to opt out pass a custom desc that omits the Shadow slot.
+    // E4's "canonical default ⇒ Shadow disabled" override is removed
+    // — its std::equal detection was a no-op distinction anyway
+    // (makeDefault() and makeForwardWithShadows() were byte-identical)
+    // and the resulting behavior contradicted the test comments.
     return RenderPipelineDesc{{
         RenderPassSlot::Shadow,
         RenderPassSlot::ForwardOpaque,
@@ -57,13 +59,11 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
 
 RenderPipelineDesc RenderPipelineDesc::makeForwardWithShadows()
 {
-    return RenderPipelineDesc{{
-        RenderPassSlot::Shadow,
-        RenderPassSlot::ForwardOpaque,
-        RenderPassSlot::Transparent,
-        RenderPassSlot::PostProcess,
-        RenderPassSlot::UI,
-    }};
+    // E5: alias for makeDefault() — both expose Shadow enabled. Kept
+    // for source compatibility with hosts / Editor that explicitly
+    // assemble the shadow-forward pipeline (see
+    // AYEditorPlayRuntime.cpp:applyEditorRenderPipeline).
+    return makeDefault();
 }
 
 bool RenderPipelineDesc::contains(RenderPassSlot slot) const noexcept
@@ -101,11 +101,10 @@ struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
     ayt::shader::ShaderResourcePool    shaderPool;
     // Product default = RenderPipelineDesc::makeDefault()
-    // (FO → Transparent → PostProcess → UI). Shadow is opt-in via
-    // Renderer::configurePipeline(makeForwardWithShadows()) — hosts
-    // such as AYEditor assemble the ordered slot list; the Renderer
-    // rebuilds unique_ptr passes from that desc. GBuffer / Lighting
-    // slots are not implemented yet.
+    // (Shadow → FO → Transparent → PostProcess → UI), Shadow enabled
+    // by default (E5 §5.4, 2026-07-22). Hosts that want to opt out
+    // pass a custom desc that omits the Shadow slot. GBuffer /
+    // Lighting slots are not implemented yet.
     detail::RenderPipeline        pipeline;
     RenderPipelineDesc            pipelineDesc = RenderPipelineDesc::makeDefault();
 
@@ -132,13 +131,13 @@ struct Renderer::Impl {
         }
     }
 
-    // R5+ (Phase PostProcess, 2026-07-20) — per-host post-process knobs.
-    // Defaults = no effect (bloomStrength=0 disables bloom; exposure=1
-    // is neutral; tonemap=None passes through). Renderer::render()
-    // copies these into FrameContext before dispatching the pipeline
-    // so PostProcessPass::execute sees them in `frame.*`.
-    float                          postProcessBloomStrength = 0.0f;
-    float                          postProcessExposure      = 1.0f;
+    // R5+ (Phase PostProcess) — per-host post-process knobs.
+    // Defaults = no effect (bloom=0, exposure=1, ripple=0, tonemap=None).
+    float                          postProcessBloomStrength  = 0.0f;
+    float                          postProcessExposure       = 1.0f;
+    float                          postProcessRippleStrength = 0.0f;
+    float                          postProcessRippleFrequency = 28.0f;
+    float                          postProcessRippleSpeed    = 4.0f;
     detail::FrameContext::TonemapMode postProcessTonemapMode = detail::FrameContext::TonemapMode::None;
 
     // P0 (2026-07-20) — wall-clock origin for FrameContext.timeSeconds.
@@ -184,12 +183,18 @@ struct Renderer::Impl {
     Impl()
         : resources(adapter, shaderPool)
     {
-        // E4 (§5.4, 2026-07-22): makeDefault() now mounts Shadow
-        // disabled (not gone). Pre-E4 this branch alternatively
-        // mounted enable-or-disabled based on the AY_F1_DIAG_DEFAULT_SHADOW
-        // CMake flag — that flag is removed in E4 because the
-        // canonical default + setEnabled(false) gives the same
-        // 0-behavior-change baseline uniformly.
+        // E5 (§5.4, 2026-07-22): makeDefault() mounts Shadow
+        // enabled (not disabled) — pre-E4 the canonical default
+        // disabled Shadow to keep the 0-behavior-change baseline,
+        // pre-E5 the canonical default disabled Shadow under the
+        // E4 std::equal override. E5 ships "default-on Shadow"
+        // because (a) ShadowPass::execute Noop-gates cleanly
+        // (early-return 0 draw on Noop / uninitialized adapters),
+        // (b) tryBindShadowSampler already no-ops when the shadow
+        // FBO is invalid or the shader binding is missing, and
+        // (c) §5.3 still forbids default-on Shadow *combined with*
+        // a Light struct or FrameContext shadow writeback — both
+        // DIAG flags remain OFF.
         applyPipelineDesc(RenderPipelineDesc::makeDefault());
     }
 };
@@ -213,25 +218,17 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     }
 
     pipeline.clear();
-    // E4 (§5.4, 2026-07-22): detect whether this desc is the
-    // canonical makeDefault() (which mounts Shadow disabled) vs a
-    // custom desc (which leaves every pass at RenderPass base default
-    // _enabled = true). The detection is intentional — only the
-    // product default ever mounts Shadow in the disabled state;
-    // every other entry point (makeForwardWithShadows, hand-built
-    // desc with Shadow slot) is the "I want shadows" path.
-    const RenderPipelineDesc kCanonicalDefault =
-        RenderPipelineDesc::makeDefault();
-    const bool isCanonicalDefault =
-        resolved.passes.size() == kCanonicalDefault.passes.size()
-        && std::equal(resolved.passes.begin(),
-                      resolved.passes.end(),
-                      kCanonicalDefault.passes.begin());
+    // E5 (§5.4, 2026-07-22): default pipeline now mounts EVERY slot
+    // at its RenderPass base default (_enabled == true), Shadow
+    // included. The E4 "canonical-default ⇒ Shadow disabled" override
+    // is removed — that std::equal detection was a no-op distinction
+    // (makeDefault() and makeForwardWithShadows() were byte-identical)
+    // and the resulting behavior contradicted the E4.4 test comment.
+    // No FrameContext shadow slot / Light struct is introduced
+    // (§5.3 red lines): Shadow runs, but writes nothing back through
+    // FrameContext.
     for (const RenderPassSlot slot : resolved.passes) {
         if (auto pass = makePassForSlot(slot)) {
-            if (isCanonicalDefault && slot == RenderPassSlot::Shadow) {
-                pass->setEnabled(false);
-            }
             pipeline.addPass(std::move(pass));
         }
     }
@@ -409,9 +406,12 @@ void Renderer::render(const RenderScene& scene)
     // R5+ — host-configured post-process knobs. Rendered every frame
     // even when the value hasn't changed because the FrameContext is
     // stack-local; cost is negligible (3 floats + 1 byte enum).
-    frame.bloomStrength = _impl->postProcessBloomStrength;
-    frame.exposure      = _impl->postProcessExposure;
-    frame.tonemapMode   = _impl->postProcessTonemapMode;
+    frame.bloomStrength    = _impl->postProcessBloomStrength;
+    frame.exposure         = _impl->postProcessExposure;
+    frame.rippleStrength   = _impl->postProcessRippleStrength;
+    frame.rippleFrequency  = _impl->postProcessRippleFrequency;
+    frame.rippleSpeed      = _impl->postProcessRippleSpeed;
+    frame.tonemapMode      = _impl->postProcessTonemapMode;
 
 #if AY_F1_DIAG_FRAME_SHADOW
     frame.shadowFboIdx  = _impl->lastFrameShadowFbo.idx;
@@ -506,10 +506,13 @@ void Renderer::render(const RenderScene& scene)
     // beginFrame/endFrame stay on the host's UIManager::render lambda).
     //
     // Per-pass isEnabled() guards are honored by the pipeline. As of
-    // E4 (§5.4, 2026-07-22) the canonical default mounts Shadow at
-    // slot 0 but disabled (setEnabled(false)); hosts enable it on
-    // demand via findPass("Shadow")->setEnabled(true) or via
-    // configurePipeline(makeForwardWithShadows()).
+    // E5 (§5.4, 2026-07-22) the canonical default mounts Shadow at
+    // slot 0 *enabled* (no opt-in required). Hosts that want to opt
+    // out pass a custom desc that omits the Shadow slot — there is no
+    // public setShadowsEnabled setter yet (deliberately deferred;
+    // Editor / demo / unittest have no consumer). The shadow FBO is
+    // a depth-only offscreen target; ShadowPass::execute Noop-gates
+    // cleanly when the adapter is uninitialized or Noop.
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
 
 #if AY_F1_DIAG_FRAME_SHADOW
@@ -861,6 +864,21 @@ bool Renderer::shadowPcfEnabled() const noexcept
     return _impl && _impl->shadowPcfEnabled;
 }
 
+bool Renderer::shadowsEnabled() const noexcept
+{
+    // E5 (§5.4, 2026-07-22) — live read of the Shadow slot's enabled
+    // flag. Mirrors shadowPcfEnabled() but reads the pipeline directly
+    // (no Impl mirror) because the flag is owned by the pass itself.
+    // When no Shadow slot is mounted (e.g. host passed a desc without
+    // it), returns false. Public surface const-noexcept; safe to call
+    // from any host observer.
+    if (!_impl) {
+        return false;
+    }
+    const detail::RenderPass* shadow = _impl->pipeline.findPass("Shadow");
+    return shadow != nullptr && shadow->isEnabled();
+}
+
 void Renderer::setPostProcessBloomStrength(float strength)
 {
     if (!_impl) {
@@ -879,6 +897,30 @@ void Renderer::setPostProcessExposure(float exposure)
         return;
     }
     _impl->postProcessExposure = exposure;
+}
+
+void Renderer::setPostProcessRippleStrength(float strength)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->postProcessRippleStrength = strength;
+}
+
+void Renderer::setPostProcessRippleFrequency(float frequency)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->postProcessRippleFrequency = frequency;
+}
+
+void Renderer::setPostProcessRippleSpeed(float speed)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->postProcessRippleSpeed = speed;
 }
 
 void Renderer::setPostProcessTonemapMode(TonemapMode mode)

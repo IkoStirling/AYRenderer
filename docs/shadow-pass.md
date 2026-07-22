@@ -2,7 +2,9 @@
 
 > 工业级 shadow 子系统。对齐 bgfx `examples/16-shadowmaps` 深度语义，  
 > 接入 AY `RenderPipeline`：`Shadow → ForwardOpaque → Transparent → PostProcess → UI`。  
-> **Pass 通用踩坑与后续 Pass 清单**见 [`pass-lessons-from-shadow.md`](pass-lessons-from-shadow.md)。
+> **Pass 通用踩坑与后续 Pass 清单**见 [`pass-lessons-from-shadow.md`](pass-lessons-from-shadow.md)。  
+> **当前优先级 / 下一步**见 [`renderer-pass-roadmap.md`](renderer-pass-roadmap.md)。  
+> **PostProcess 波纹滤镜**见 [`post-process.md`](post-process.md)。
 
 ## 快速启用
 

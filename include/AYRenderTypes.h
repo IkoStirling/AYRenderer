@@ -164,9 +164,10 @@ inline ShadowFlags makeShadowFlags(bool cast, bool receive) noexcept
 
 // Host-facing pass slots for RenderPipelineDesc. Order in
 // `RenderPipelineDesc::passes` is the dispatch order used by
-// Renderer::configurePipeline. Default product pipeline omits Shadow
-// (see RenderPipelineDesc::makeDefault); Editor / demos that want
-// visible shadows assemble makeForwardWithShadows() or a custom list.
+// Renderer::configurePipeline. Default product pipeline includes
+// Shadow enabled (E5 §5.4, 2026-07-22); Editor / demos that want
+// shadow disabled pass a custom desc that omits the Shadow slot.
+// makeForwardWithShadows() is now an alias for makeDefault().
 enum class RenderPassSlot : uint8_t {
     Shadow = 0,
     ForwardOpaque,

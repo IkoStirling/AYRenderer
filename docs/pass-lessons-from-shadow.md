@@ -2,6 +2,7 @@
 
 > 目的：把 AYEditor 阴影 Pass 从「能编过」到「和已验证 hand `.sc` 表现一致」过程中踩过的坑，收成**可复用检查表**，指导后续 Transparent / PostProcess 扩展、新 lighting pass、延迟等。  
 > 状态：Editor Play 阴影从表现上已基本通过（2026-07-22，stamp `v13-phase7-vec4-abi`）。  
+> **默认管线 = 5-pass 含 enabled Shadow**（E5 §5.4, 2026-07-22）；FO / Transparent 通过 `PassExecContext::shadowPass` 旁路 getter 消费 shadow map。  
 > 配套使用说明仍见 [`shadow-pass.md`](shadow-pass.md)。
 
 ---

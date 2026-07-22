@@ -108,10 +108,17 @@ TEST_CASE(e4_make_forward_with_sadows_still_has_five_slots_and_shadow_first)
 
 TEST_CASE(e4_canonical_default_shadow_slot_is_disabled_when_built_via_configure)
 {
-    // E4.3 — configurePipeline(makeDefault()) → Shadow slot
-    // arrives in the pipeline with isEnabled() == false (the
-    // only path that sets the slot to disabled — every other
-    // path leaves the RenderPass base default true).
+    // E4.3 — Historical (E5 retired this contract):
+    //   configurePipeline(makeDefault()) → Shadow slot
+    //   arrives in the pipeline with isEnabled() == false.
+    //
+    //   As of E5 (§5.4, 2026-07-22) this case asserts only the
+    //   DESC SHAPE (5 slots, Shadow first) — the live isEnabled
+    //   flag is now *true* by default, observed via the new
+    //   Renderer::shadowsEnabled() public getter. Live-state
+    //   assertions live in Test_E5_DefaultShadow.cpp (E5.1/E5.2).
+    //   This case is preserved verbatim (assertions still hold)
+    //   so the E4 desc-shape contract stays pinned.
     Renderer renderer;
 
     // Skip adapter init; configurePipeline operates on the
@@ -121,21 +128,29 @@ TEST_CASE(e4_canonical_default_shadow_slot_is_disabled_when_built_via_configure)
 
     const RenderPipelineDesc& desc = renderer.pipelineDesc();
     checkCanonicalDefaultDesc(desc);
-    // configurePipeline is a public surface that exposes only
-    // pipelineDesc(); we re-resolve the live RenderPipeline via
-    // a 0-cycle execute to read its slots isEnabled flags.
+    // E5 live read confirms enabled=true (the new default).
+    CHECK(renderer.shadowsEnabled() == true);
 }
 
 TEST_CASE(e4_make_forward_with_sadows_marks_shadow_enabled_in_canonical_pipeline)
 {
-    // E4.4 — host opt-in via makeForwardWithShadows(). After
-    // configurePipeline, the Shadow slot must be isEnabled() ==
-    // true (the E4 differentiation: only the canonical-default
-    // path overrides RenderPass base default to false).
+    // E4.4 — Historical (E5 retired this contract): host opt-in
+    //   via makeForwardWithShadows(). After configurePipeline, the
+    //   Shadow slot was meant to be isEnabled() == true.
+    //
+    //   As of E5, makeForwardWithShadows() is an alias for
+    //   makeDefault() — both leave Shadow enabled. The E4
+    //   std::equal "canonical-default ⇒ disabled" override was
+    //   removed because it silently disabled Shadow for both
+    //   descs (they were byte-identical) — contradicting this
+    //   very case's comment. Live-state assertion now possible
+    //   via Renderer::shadowsEnabled(); see Test_E5_DefaultShadow.
+    //   cpp E5.3 for the directly-anchored live read.
     Renderer renderer;
     renderer.configurePipeline(RenderPipelineDesc::makeForwardWithShadows());
     const RenderPipelineDesc& desc = renderer.pipelineDesc();
     checkCanonicalDefaultDesc(desc);
+    CHECK(renderer.shadowsEnabled() == true);
 }
 
 // E4.5 / E4.6 / E4.7 — exercise the raw RenderPipeline + the

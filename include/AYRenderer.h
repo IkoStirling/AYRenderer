@@ -123,15 +123,26 @@ public:
     void setShadowPcfEnabled(bool enabled);
     bool shadowPcfEnabled() const noexcept;
 
-    // R5+ (Phase PostProcess, 2026-07-20) — knobs consumed by
-    // PostProcessPass::execute via FrameContext. Defaults = no effect
-    // (bloomStrength=0, exposure=1.0, tonemap=None) so legacy hosts
-    // see the same image as the pre-R5+ forward-only pipeline.
-    // Renderer::render() reads these into FrameContext each frame; the
-    // shader uniform names match (`u_bloomStrength`, `u_exposure`,
-    // `u_tonemapMode`).
+    // E5 (§5.4, 2026-07-22) — live read of the Shadow slot's enabled
+    // flag in the current pipeline. Default ctor + configurePipeline(
+    // makeDefault()) + configurePipeline(makeForwardWithShadows()) all
+    // return true (Shadow enabled by default). Pass a custom desc that
+    // omits RenderPassSlot::Shadow to opt out; returns false then.
+    // Const noexcept; no mirror field — reads the pass directly via
+    // findPass("Shadow").
+    bool shadowsEnabled() const noexcept;
+
+    // R5+ (Phase PostProcess) — knobs → FrameContext each frame.
+    // Defaults = no visible effect (bloom=0, exposure=1, ripple=0,
+    // tonemap=None). Shader uniforms are vec4 slots (.x used); see
+    // docs/pass-lessons-from-shadow.md §3.1.
     void setPostProcessBloomStrength(float strength);
     void setPostProcessExposure(float exposure);
+    // Screen ripple warp strength in UV units (typical 0.008–0.03).
+    // 0 disables the effect (passthrough sample UV).
+    void setPostProcessRippleStrength(float strength);
+    void setPostProcessRippleFrequency(float frequency);
+    void setPostProcessRippleSpeed(float speed);
     enum class TonemapMode : uint8_t {
         None     = 0,
         Reinhard = 1,
@@ -141,14 +152,10 @@ public:
 
     // Rebuild the RenderPipeline from an ordered pass-slot list.
     // Default ctor builds makeDefault() which mounts Shadow at slot 0
-    // *disabled* (E4 §5.4, 2026-07-22). Hosts that want shadows
-    // either (a) flip the existing slot on:
-    //     renderer.pipelineDesc(); // findPass<->get it via pimpl
-    // or, more idiomatically:
-    //     renderer.configurePipeline(
-    //         RenderPipelineDesc::makeForwardWithShadows());
-    // Empty `passes` falls back to makeDefault(). Preserves any UI
-    // backend previously injected via setUiBackend.
+    // *enabled* (E5 §5.4, 2026-07-22). To opt out, pass a custom desc
+    // that omits RenderPassSlot::Shadow. Empty `passes` falls back to
+    // makeDefault(). Preserves any UI backend previously injected via
+    // setUiBackend. Live state via shadowsEnabled().
     void configurePipeline(const RenderPipelineDesc& desc);
     const RenderPipelineDesc& pipelineDesc() const noexcept;
 
