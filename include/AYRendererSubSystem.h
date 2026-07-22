@@ -90,7 +90,8 @@ public:
     static std::size_t diagSizeofFrameContext();
     static int diagFlagLight();
     static int diagFlagFrameShadow();
-    static int diagFlagDefaultShadow();
+    // diagFlagDefaultShadow() was retired in E4 (§5.4, 2026-07-22).
+    // See include/AYF1DiagFlags.h for the retirement note.
 
 private:
     void renderFrame();

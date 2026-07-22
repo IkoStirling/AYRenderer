@@ -140,11 +140,15 @@ public:
     void setPostProcessTonemapMode(TonemapMode mode);
 
     // Rebuild the RenderPipeline from an ordered pass-slot list.
-    // Default ctor builds makeDefault() (no Shadow). Hosts that want
-    // shadows call configurePipeline(makeForwardWithShadows()) once
-    // after initialize (or at any quiet frame). Preserves any UI
-    // backend previously injected via setUiBackend. Empty `passes`
-    // falls back to makeDefault().
+    // Default ctor builds makeDefault() which mounts Shadow at slot 0
+    // *disabled* (E4 §5.4, 2026-07-22). Hosts that want shadows
+    // either (a) flip the existing slot on:
+    //     renderer.pipelineDesc(); // findPass<->get it via pimpl
+    // or, more idiomatically:
+    //     renderer.configurePipeline(
+    //         RenderPipelineDesc::makeForwardWithShadows());
+    // Empty `passes` falls back to makeDefault(). Preserves any UI
+    // backend previously injected via setUiBackend.
     void configurePipeline(const RenderPipelineDesc& desc);
     const RenderPipelineDesc& pipelineDesc() const noexcept;
 

@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <utility>
+#include <algorithm>
 
 namespace ayt::render
 {
@@ -39,7 +40,14 @@ std::size_t detailDiagSizeofFrameContext()
 
 RenderPipelineDesc RenderPipelineDesc::makeDefault()
 {
+    // E4 (§5.4, 2026-07-22): default pipeline now mounts Shadow at
+    // slot 0, but disabled (setEnabled(false) in applyPipelineDesc).
+    // This is the post-PR-F1' baseline: hosts that want shadows
+    // call findPass("Shadow")->setEnabled(true) or rebuild via
+    // configurePipeline(makeForwardWithShadows()). The dispatch
+    // order of the remaining enabled passes is unchanged.
     return RenderPipelineDesc{{
+        RenderPassSlot::Shadow,
         RenderPassSlot::ForwardOpaque,
         RenderPassSlot::Transparent,
         RenderPassSlot::PostProcess,
@@ -176,11 +184,13 @@ struct Renderer::Impl {
     Impl()
         : resources(adapter, shaderPool)
     {
-#if AY_F1_DIAG_DEFAULT_SHADOW
-        applyPipelineDesc(RenderPipelineDesc::makeForwardWithShadows());
-#else
+        // E4 (§5.4, 2026-07-22): makeDefault() now mounts Shadow
+        // disabled (not gone). Pre-E4 this branch alternatively
+        // mounted enable-or-disabled based on the AY_F1_DIAG_DEFAULT_SHADOW
+        // CMake flag — that flag is removed in E4 because the
+        // canonical default + setEnabled(false) gives the same
+        // 0-behavior-change baseline uniformly.
         applyPipelineDesc(RenderPipelineDesc::makeDefault());
-#endif
     }
 };
 
@@ -203,8 +213,25 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     }
 
     pipeline.clear();
+    // E4 (§5.4, 2026-07-22): detect whether this desc is the
+    // canonical makeDefault() (which mounts Shadow disabled) vs a
+    // custom desc (which leaves every pass at RenderPass base default
+    // _enabled = true). The detection is intentional — only the
+    // product default ever mounts Shadow in the disabled state;
+    // every other entry point (makeForwardWithShadows, hand-built
+    // desc with Shadow slot) is the "I want shadows" path.
+    const RenderPipelineDesc kCanonicalDefault =
+        RenderPipelineDesc::makeDefault();
+    const bool isCanonicalDefault =
+        resolved.passes.size() == kCanonicalDefault.passes.size()
+        && std::equal(resolved.passes.begin(),
+                      resolved.passes.end(),
+                      kCanonicalDefault.passes.begin());
     for (const RenderPassSlot slot : resolved.passes) {
         if (auto pass = makePassForSlot(slot)) {
+            if (isCanonicalDefault && slot == RenderPassSlot::Shadow) {
+                pass->setEnabled(false);
+            }
             pipeline.addPass(std::move(pass));
         }
     }
@@ -478,11 +505,14 @@ void Renderer::render(const RenderScene& scene)
     // chrome lifecycle contract — execute() DOES call flushBatches;
     // beginFrame/endFrame stay on the host's UIManager::render lambda).
     //
-    // Per-pass isEnabled() guards are honored by the pipeline; today
-    // all four default to true (set by the RenderPass base ctor).
+    // Per-pass isEnabled() guards are honored by the pipeline. As of
+    // E4 (§5.4, 2026-07-22) the canonical default mounts Shadow at
+    // slot 0 but disabled (setEnabled(false)); hosts enable it on
+    // demand via findPass("Shadow")->setEnabled(true) or via
+    // configurePipeline(makeForwardWithShadows()).
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
 
-#if AY_F1_DIAG_FRAME_SHADOW && AY_F1_DIAG_DEFAULT_SHADOW
+#if AY_F1_DIAG_FRAME_SHADOW
     for (auto& pass : _impl->pipeline.passes()) {
         if (pass && pass->name() == "Shadow") {
             auto* shadow = static_cast<detail::ShadowPass*>(pass.get());

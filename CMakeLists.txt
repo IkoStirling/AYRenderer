@@ -117,9 +117,10 @@ target_compile_definitions(AYRenderer PRIVATE
 # Clean rebuild AYRenderer + AYRenderer_Test (never incremental-only).
 option(AY_F1_DIAG_LIGHT "F1 diag: RenderScene::Light storage" OFF)
 option(AY_F1_DIAG_FRAME_SHADOW "F1 diag: FrameContext shadowFbo/lightViewProj + lastFrameShadowFbo" OFF)
-option(AY_F1_DIAG_DEFAULT_SHADOW "F1 diag: default-pipeline addPass(Shadow) enabled" OFF)
+# E4 (§5.4, 2026-07-22) removed AY_F1_DIAG_DEFAULT_SHADOW — see
+# include/AYF1DiagFlags.h for the retirement note.
 
-foreach(_f1_flag AY_F1_DIAG_LIGHT AY_F1_DIAG_FRAME_SHADOW AY_F1_DIAG_DEFAULT_SHADOW)
+foreach(_f1_flag AY_F1_DIAG_LIGHT AY_F1_DIAG_FRAME_SHADOW)
     if(${_f1_flag})
         set(_f1_val 1)
     else()

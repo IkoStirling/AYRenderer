@@ -26,13 +26,13 @@ int g_sentinelWindowHandle = 0;
 void printDiagBanner()
 {
     std::fprintf(stderr,
-                 "[F1 DIAG] flags light=%d frameShadow=%d defaultShadow=%d\n"
+                 "[F1 DIAG] flags light=%d frameShadow=%d "
+                 "(AY_F1_DIAG_DEFAULT_SHADOW retired in E4 §5.4 2026-07-22)\n"
                  "[F1 DIAG] sizeof RenderScene     test=%zu lib=%zu\n"
                  "[F1 DIAG] sizeof SubSystem       test=%zu lib=%zu\n"
                  "[F1 DIAG] sizeof FrameContext    test=%zu lib=%zu\n",
                  AY_F1_DIAG_LIGHT,
                  AY_F1_DIAG_FRAME_SHADOW,
-                 AY_F1_DIAG_DEFAULT_SHADOW,
                  sizeof(ayt::render::RenderScene),
                  RendererSubSystem::diagSizeofRenderScene(),
                  sizeof(RendererSubSystem),
@@ -60,7 +60,9 @@ TEST_CASE(f1_diag_sizeof_matches_between_test_tu_and_lib)
 
     CHECK_INT_EQ(RendererSubSystem::diagFlagLight(), AY_F1_DIAG_LIGHT);
     CHECK_INT_EQ(RendererSubSystem::diagFlagFrameShadow(), AY_F1_DIAG_FRAME_SHADOW);
-    CHECK_INT_EQ(RendererSubSystem::diagFlagDefaultShadow(), AY_F1_DIAG_DEFAULT_SHADOW);
+    // diagFlagDefaultShadow() retired in E4 (§5.4, 2026-07-22).
+    // The remaining two flags + sizeof checks still cover the ODR /
+    // layout-drift concerns that motivated the original suite.
 }
 
 TEST_CASE(f1_diag_eventbridge_subscribe_after_noop_init)

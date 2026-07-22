@@ -615,10 +615,7 @@ int RendererSubSystem::diagFlagFrameShadow()
     return AY_F1_DIAG_FRAME_SHADOW;
 }
 
-int RendererSubSystem::diagFlagDefaultShadow()
-{
-    return AY_F1_DIAG_DEFAULT_SHADOW;
-}
+// diagFlagDefaultShadow() was retired in E4 (§5.4, 2026-07-22).
 
 } // namespace ayt::render
 
