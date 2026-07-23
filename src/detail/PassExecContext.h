@@ -89,6 +89,15 @@ class SkyboxPass;
 // B6 lock); S1b BloomBlurPass is the first consumer.
 class BloomExtractPass;
 
+// §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — BloomBlurPass
+// produces the half-resolution vertically-blurred FBO that the
+// final PostProcess composite samples as the actual bloom
+// contribution. Forward decl mirrors BloomExtractPass above;
+// PostProcessPass::execute reads `ctx.bloomBlurPass->pongFbo()`
+// (RT0 of the blur result) via the borrowed pointer. S1c is the
+// first consumer.
+class BloomBlurPass;
+
 
 
 struct PassExecContext {
@@ -321,6 +330,33 @@ struct PassExecContext {
     // Test_Skybox0, ...) keep compiling without edits via C++14
     // trailing-default behavior.
     const BloomExtractPass* bloomExtractPass = nullptr;
+
+    // §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — borrowed,
+    // non-owning pointer to the BloomBlurPass that produced the
+    // half-resolution vertically-blurred FBO this frame. PostProcessPass
+    // reads `ctx.bloomBlurPass->pongFbo()` (RT0 of the blur result)
+    // and binds it as an additional sampler on the fullscreen-triangle
+    // composite draw, replacing the pre-S1 fake
+    // `raw + raw*bloomStrength` shader hack with the real
+    // `raw + sample(bloomTexture, uv) * bloomStrength` composite.
+    //
+    // Mirrors the bloomExtractPass / skyboxPass / lightingPass /
+    // gbufferPass / shadowPass borrowed-pointer pattern; same
+    // lifetime contract: pointer must remain valid for the duration
+    // of pipeline::executeAll(ctx).
+    //
+    // Default-init = nullptr ⇒ PostProcessPass falls back to the
+    // pre-S1 fake composite (`raw + raw*bloomStrength`) which is
+    // visually a no-op when bloomStrength=0 (host default). Custom
+    // desc that omits both BloomExtract and BloomBlur yields a
+    // pipeline where ctx.bloomBlurPass is null AND the composite
+    // contribution is `raw * (1 + 0) = raw` (zero bloom) — same
+    // visual result as a pipeline without any bloom passes mounted.
+    // All existing 20-/21-field brace-init test sites
+    // (Test_BloomExtract_S1a, Test_BloomBlur_S1b, Test_PostProcess_R51,
+    // Test_E4_DefaultShadow, Test_E5_DefaultShadow, Test_Skybox0, ...)
+    // keep compiling without edits via C++14 trailing-default behavior.
+    const BloomBlurPass* bloomBlurPass = nullptr;
 };
 
 } // namespace ayt::render::detail

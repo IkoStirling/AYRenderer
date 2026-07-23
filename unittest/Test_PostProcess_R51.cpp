@@ -97,9 +97,18 @@ bool shadercAvailable()
 // R5.1 — the inline Phoskia source as it lives in PostProcessPass.cpp
 // (kept in sync via the test pattern). If the file's constexpr string
 // ever drifts, this comparison pin catches it.
+//
+// §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — added the
+// `texture2d bloomTexture` decl + `let bloomSample = sample(bloomTexture, uv)`
+// + `bloomSample.xyz * bloomStrength.x` composite (replacing the
+// pre-S1 fake `raw + raw*bloomStrength`). The cache key was bumped
+// from v2_yflip_fs → v3_bloom_composite_fs (same monotonic suffix
+// pattern as Skybox/Lighting/BloomExtract/BloomBlur). The mirror
+// substring list grew to include the new contract elements.
 constexpr const char* kExpectedPhoskiaSourceContains[] = {
     "material PostProcess",
     "texture2d sceneColor",
+    "texture2d bloomTexture",         // §S1c (2026-07-23)
     "uniform vec4 bloomStrength",
     "uniform vec4 exposure",
     "uniform vec4 tonemapMode",
@@ -107,6 +116,8 @@ constexpr const char* kExpectedPhoskiaSourceContains[] = {
     "uniform vec4 gammaParams",
     "pow(",
     "sample(sceneColor, uv)",
+    "sample(bloomTexture, uv)",       // §S1c (2026-07-23)
+    "bloomSample.xyz * bloomStrength.x",  // §S1c (2026-07-23)
     "step(1.5, m)",
     "2.51",
 };
@@ -201,6 +212,7 @@ TEST_CASE(r51_inlined_source_string_has_canonical_substrings) {
     constexpr const char* kLiveSource = R"(
 material PostProcess {
     texture2d sceneColor
+    texture2d bloomTexture
     uniform vec4 bloomStrength
     uniform vec4 exposure
     uniform vec4 tonemapMode
@@ -215,8 +227,9 @@ material PostProcess {
         in  vUv : texcoord
         let uv = vec2(vUv.x, 1.0 - vUv.y)
         let sampled = sample(sceneColor, uv)
+        let bloomSample = sample(bloomTexture, uv)
         let raw = sampled.xyz * exposure.x
-        let withBloom = raw + raw * bloomStrength.x
+        let withBloom = raw + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -266,6 +279,7 @@ TEST_CASE(r51_uniform_binding_names_match_phoskia_decl) {
     constexpr const char* kLiveSource = R"(
 material PostProcess {
     texture2d sceneColor
+    texture2d bloomTexture
     uniform vec4 bloomStrength
     uniform vec4 exposure
     uniform vec4 tonemapMode
@@ -280,8 +294,9 @@ material PostProcess {
         in  vUv : texcoord
         let uv = vec2(vUv.x, 1.0 - vUv.y)
         let sampled = sample(sceneColor, uv)
+        let bloomSample = sample(bloomTexture, uv)
         let raw = sampled.xyz * exposure.x
-        let withBloom = raw + raw * bloomStrength.x
+        let withBloom = raw + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -313,12 +328,18 @@ material PostProcess {
     // Bindings resolved via getUniformBinding / getTextureBinding.
     // If the Phoskia source uses any name other than the contract
     // names below, these resolve to InvalidBinding = 0.
+    //
+    // §S1c (2026-07-23) — added bloomTexture binding check; the
+    // Phoskia source now declares 2 samplers (sceneColor +
+    // bloomTexture) so the binding resolution must surface both.
     CHECK(res.getUniformBinding("bloomStrength") != ayt::shader::InvalidBinding);
     CHECK(res.getUniformBinding("exposure")      != ayt::shader::InvalidBinding);
     CHECK(res.getUniformBinding("tonemapMode")   != ayt::shader::InvalidBinding);
     CHECK(res.getUniformBinding("uTime")         != ayt::shader::InvalidBinding);
     CHECK(res.getUniformBinding("gammaParams")   != ayt::shader::InvalidBinding);
     CHECK(res.getTextureBinding("sceneColor")    != ayt::shader::InvalidBinding);
+    // §S1c (2026-07-23) — second sampler binding check.
+    CHECK(res.getTextureBinding("bloomTexture")  != ayt::shader::InvalidBinding);
 }
 
 TEST_CASE(r51_renderer_setters_roundtrip_through_framecontext) {

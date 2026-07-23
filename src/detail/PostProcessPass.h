@@ -163,6 +163,13 @@ private:
     ayt::shader::BindingId      _uTime          = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uGammaParams   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tSceneColor    = ayt::shader::InvalidBinding;
+    // §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — second
+    // sampler on the fullscreen-triangle composite draw, bound to
+    // `ctx.bloomBlurPass->pongFbo()` RT0 when present. Replaces
+    // the pre-S1 fake `raw + raw*bloomStrength` shader hack with
+    // `raw + sample(bloomTexture, uv) * bloomStrength`. Invalid
+    // when the program hasn't been acquired yet (mirror _tSceneColor).
+    ayt::shader::BindingId      _tBloomTexture  = ayt::shader::InvalidBinding;
     // Latch so a failed acquire does not re-run shaderc every frame
     // (was the main stutter source when Phoskia→HLSL rejected).
     bool                        _programAcquireFailed = false;

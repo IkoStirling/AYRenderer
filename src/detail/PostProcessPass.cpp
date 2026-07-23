@@ -1,5 +1,6 @@
 #include "detail/PostProcessPass.h"
 
+#include "detail/BloomBlurPass.h"  // §S1c (2026-07-23) — PongFbo access
 #include "detail/GpuResources.h"
 #include "detail/GBufferPass.h"
 #include "detail/LightingPass.h"
@@ -36,18 +37,27 @@ constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 
 // Post-process: sample sceneColor → exposure → optional bloom tint →
 // branchless tonemap (None / Reinhard / ACES) → display gamma.
-// Ripple UV warp removed.
 //
-// Branchless (converter drops if/for). Knobs are vec4 (.x) for bgfx
-// Vec4 upload ABI — see docs/pass-lessons-from-shadow.md §3.1.
-// tonemapMode.x: 0=None, 1=Reinhard, 2=ACES (Narkowicz fitted).
-// Select via mix(mix(none, reinhard, step(0.5,m)), aces, step(1.5,m)).
+// §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — added a second
+// sampler `bloomTexture` that, when bound by execute() to
+// `ctx.bloomBlurPass->pongFbo()` RT0, replaces the pre-S1 fake
+// `raw + raw*bloomStrength` shader hack with the real composite
+// `raw + sample(bloomTexture, uv) * bloomStrength`. When the
+// bloomTexture sampler is NOT bound (custom desc omits BloomExtract
+// + BloomBlur, or first-frame race), the FS branchless mix collapses
+// to `raw * (1 + 0) = raw` — visually identical to a zero-bloom
+// pipeline (cutsheet §S1 §K3 invariant #1). Branchless (converter
+// drops if/for). Knobs are vec4 (.x) for bgfx Vec4 upload ABI — see
+// docs/pass-lessons-from-shadow.md §3.1. tonemapMode.x: 0=None,
+// 1=Reinhard, 2=ACES (Narkowicz fitted). Select via
+// mix(mix(none, reinhard, step(0.5,m)), aces, step(1.5,m)).
 //
 // UV.y flip in fragment (1 - vUv.y): Phoskia vertex blocks reject
 // `let` before `out`. Same D3D RT vs backbuffer convention as shadows.
 constexpr const char* kPostProcessPhoskiaSource = R"(
 material PostProcess {
     texture2d sceneColor
+    texture2d bloomTexture
     uniform vec4 bloomStrength
     uniform vec4 exposure
     uniform vec4 tonemapMode
@@ -62,8 +72,9 @@ material PostProcess {
         in  vUv : texcoord
         let uv = vec2(vUv.x, 1.0 - vUv.y)
         let sampled = sample(sceneColor, uv)
+        let bloomSample = sample(bloomTexture, uv)
         let raw = sampled.xyz * exposure.x
-        let withBloom = raw + raw * bloomStrength.x
+        let withBloom = raw + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -87,13 +98,14 @@ material PostProcess {
 }
 )";
 
-constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v2_yflip_fs";
+constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v3_bloom_composite_fs";
 
 // Fallback if primary program fails to acquire — same tonemap+gamma
 // contract so Editor composite does not go black / linear-washed.
 constexpr const char* kPostProcessPassthroughSource = R"(
 material PostProcessBlit {
     texture2d sceneColor
+    texture2d bloomTexture
     uniform vec4 bloomStrength
     uniform vec4 exposure
     uniform vec4 tonemapMode
@@ -108,8 +120,9 @@ material PostProcessBlit {
         in  vUv : texcoord
         let uv = vec2(vUv.x, 1.0 - vUv.y)
         let sampled = sample(sceneColor, uv)
+        let bloomSample = sample(bloomTexture, uv)
         let raw = sampled.xyz * exposure.x
-        let withBloom = raw + raw * bloomStrength.x
+        let withBloom = raw + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -132,7 +145,7 @@ material PostProcessBlit {
     }
 }
 )";
-constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v2_yflip_fs";
+constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v3_bloom_composite_fs";
 
 } // namespace
 
@@ -203,13 +216,21 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         return 0;
     }
     ensureProgram(pool);
+    // §S1c (2026-07-23) — added _tBloomTexture to the ready check.
+    // When the program acquires successfully (kPostProcessCacheKey
+    // bumped to v3_bloom_composite_fs), the Phoskia source declares
+    // `texture2d bloomTexture` and the binding resolves to non-zero.
+    // Phoskia parser failure path leaves _program invalid → the
+    // whole `programReady` expression short-circuits to false and
+    // execute() returns 0 (mirror R5.1 fallback contract).
     const bool programReady = _program.isValid()
         && _uBloomStrength != ayt::shader::InvalidBinding
         && _uExposure      != ayt::shader::InvalidBinding
         && _uTonemapMode   != ayt::shader::InvalidBinding
         && _uTime          != ayt::shader::InvalidBinding
         && _uGammaParams   != ayt::shader::InvalidBinding
-        && _tSceneColor    != ayt::shader::InvalidBinding;
+        && _tSceneColor    != ayt::shader::InvalidBinding
+        && _tBloomTexture  != ayt::shader::InvalidBinding;
 
     const bgfx::TextureHandle fboColor = adapter.getFboAttachment(sourceFbo, 0);
     if (!BGFXAdapter::isValid(fboColor)) {
@@ -243,6 +264,24 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
 
     const ayt::shader::TextureHandle texHandle =
         ayt::render::detail::toShaderTexture(fboColor);
+    // §S1c (2026-07-23) — second sampler (bloomTexture). Bound to
+    // ctx.bloomBlurPass->pongFbo() RT0 when the producer is mounted
+    // AND its pongFbo is valid (first-frame race → pongFbo invalid
+    // ⇒ we bind sceneColor as a no-op fallback so the FS branchless
+    // composite collapses to `raw * (1 + 0) = raw`). When the
+    // producer is absent entirely (custom desc omits BloomBlur),
+    // bind sceneColor to the bloom slot too — same byte-equivalent
+    // result, no GLSL sampler-not-set warning. S1c K3 invariant #1.
+    ayt::shader::TextureHandle bloomTexHandle = texHandle;  // fallback
+    if (ctx.bloomBlurPass != nullptr
+        && BGFXAdapter::isValid(ctx.bloomBlurPass->pongFbo())) {
+        const bgfx::TextureHandle pongColor =
+            adapter.getFboAttachment(ctx.bloomBlurPass->pongFbo(), 0);
+        if (BGFXAdapter::isValid(pongColor)) {
+            bloomTexHandle =
+                ayt::render::detail::toShaderTexture(pongColor);
+        }
+    }
     // bgfx Vec4 slots — pad scalars into .x (lessons §3.1).
     const float bloomPad[4] = {frame.bloomStrength, 0.0f, 0.0f, 0.0f};
     const float exposurePad[4] = {frame.exposure, 0.0f, 0.0f, 0.0f};
@@ -255,6 +294,8 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
     adapter.setIndexBuffer(_fullscreenIB, 0, 3);
     _program.setTexture(0, _tSceneColor, texHandle);
+    // §S1c — second sampler at slot 1.
+    _program.setTexture(1, _tBloomTexture, bloomTexHandle);
     _program.setUniform(_uBloomStrength, bloomPad, sizeof(bloomPad));
     _program.setUniform(_uExposure, exposurePad, sizeof(exposurePad));
     _program.setUniform(_uTonemapMode, tonemapPad, sizeof(tonemapPad));
@@ -395,6 +436,12 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
     _uTime          = _program.getUniformBinding("uTime");
     _uGammaParams   = _program.getUniformBinding("gammaParams");
     _tSceneColor    = _program.getTextureBinding("sceneColor");
+    // §S1c (2026-07-23) — second sampler for the true bloom composite.
+    // Phoskia source declares `texture2d bloomTexture`; binding name
+    // matches what `execute()` uploads at slot 1. Resolution returns
+    // InvalidBinding when the program couldn't be acquired (mirror
+    // _tSceneColor — gated on _program.isValid()).
+    _tBloomTexture  = _program.getTextureBinding("bloomTexture");
 }
 
 void PostProcessPass::destroyResources(BGFXAdapter& adapter)
@@ -430,6 +477,7 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
     _uTime          = ayt::shader::InvalidBinding;
     _uGammaParams   = ayt::shader::InvalidBinding;
     _tSceneColor    = ayt::shader::InvalidBinding;
+    _tBloomTexture  = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
     _fboWidth = 0;
     _fboHeight = 0;

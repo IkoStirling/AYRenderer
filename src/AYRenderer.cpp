@@ -807,6 +807,24 @@ void Renderer::render(const RenderScene& scene)
         bloomExtractPassPtr = static_cast<const detail::BloomExtractPass*>(bloomExtractSlot);
     }
 
+    // §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — borrowed
+    // pointer to the BloomBlurPass in the pipeline. nullptr when
+    // the host built a custom desc that omitted the BloomBlur slot.
+    // PostProcessPass reads `ctx.bloomBlurPass->pongFbo()` (RT0 of
+    // the vertically-blurred result) and binds it as the second
+    // sampler on the fullscreen-triangle composite draw, replacing
+    // the pre-S1 fake `raw + raw*bloomStrength` shader hack with
+    // the real `raw + sample(bloomTexture, uv) * bloomStrength`
+    // composite. nullptr ⇒ PostProcessPass falls back to binding
+    // sceneColor on slot 1 (no GLSL sampler-not-set warning;
+    // FS branchless composite collapses to `raw * (1 + 0) = raw`
+    // — byte-equivalent to a zero-bloom pipeline). Mirrors
+    // bloomExtractPassPtr above.
+    const detail::BloomBlurPass* bloomBlurPassPtr = nullptr;
+    if (detail::RenderPass* bloomBlurSlot = _impl->pipeline.findPass("BloomBlur")) {
+        bloomBlurPassPtr = static_cast<const detail::BloomBlurPass*>(bloomBlurSlot);
+    }
+
     // §P5.5 C (2026-07-23) — wire the per-frame SceneLights ref
     // into ShadowPass so its multi-caster loop can read
     // `lights[i].castShadow` and build the per-slot LVP matrices.
@@ -878,6 +896,15 @@ void Renderer::render(const RenderScene& scene)
         // ⇒ BloomBlurPass early-returns 0 (no source to blur =
         // visually identical to bloomStrength=0 default).
         bloomExtractPassPtr,
+        // §S1c (2026-07-23) — borrowed pointer to the BloomBlurPass
+        // in the pipeline. PostProcessPass reads the producer's
+        // pongFbo() through this ptr; nullptr ⇒ PostProcessPass
+        // binds sceneColor on slot 1 (FS branchless composite
+        // collapses to `raw * (1 + 0) = raw` = zero bloom, no
+        // GLSL sampler-not-set warning). Mirrors bloomExtractPassPtr
+        // above (lifetime contract: pointer must remain valid for
+        // the duration of pipeline::executeAll(ctx)).
+        bloomBlurPassPtr,
     };
 
     static uint32_t s_compositeLog = 0;
