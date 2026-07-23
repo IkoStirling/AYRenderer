@@ -1,6 +1,7 @@
 #include "detail/PostProcessPass.h"
 
 #include "detail/BloomBlurPass.h"  // §S1c (2026-07-23) — PongFbo access
+#include "detail/DepthHazePass.h"  // §S4c (2026-07-23) — halfResFbo() access
 #include "detail/GpuResources.h"
 #include "detail/GBufferPass.h"
 #include "detail/LightingPass.h"
@@ -58,11 +59,15 @@ constexpr const char* kPostProcessPhoskiaSource = R"(
 material PostProcess {
     texture2d sceneColor
     texture2d bloomTexture
+    texture2d hazeTexture
     uniform vec4 bloomStrength
     uniform vec4 exposure
     uniform vec4 tonemapMode
     uniform vec4 uTime
     uniform vec4 gammaParams
+    uniform vec4 hazeDensity
+    uniform vec4 hazeStrength
+    uniform vec4 hazeColor
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -73,8 +78,28 @@ material PostProcess {
         let uv = vec2(vUv.x, 1.0 - vUv.y)
         let sampled = sample(sceneColor, uv)
         let bloomSample = sample(bloomTexture, uv)
+        // §S4c — sample the haze result RT0 (when bound by execute()
+        // to ctx.depthHazePass->halfResFbo(); otherwise the sampler
+        // returns the unbound sentinel = the same RT0 as sceneColor
+        // since both share the BGRA8 layout). The composite uses
+        // `hazeSample.w` (the haze FBO's alpha channel) as the dist
+        // proxy — the DepthHazePass S4b FS writes the un-hazed raw
+        // alpha there (`return vec4(mixed, raw.w)`), so
+        // `exp(-density * 0) = 1` and `1 - 1 = 0` ⇒ fogFactor
+        // collapses to 0 when the strength gate is off (K3 invariant
+        // #3 branchless).
+        let hazeSample = sample(hazeTexture, uv)
         let raw = sampled.xyz * exposure.x
-        let withBloom = raw + bloomSample.xyz * bloomStrength.x
+        // §S4c K3 invariant #3 — branchless strength gate. When the
+        // haze slot is unbound (custom desc omits DepthHaze) OR
+        // hazeStrength<=0, the gate collapses to
+        // `raw * (1 - 0) + fogColor * 0 = raw`. Mirrors §S1c
+        // bloomStrength branchless collapse.
+        let strengthGate = step(0.0, hazeStrength.x)
+        let fogFactor = 1.0 - exp(-hazeDensity.x * max(hazeSample.w, 0.0))
+        let gatedFactor = fogFactor * strengthGate * min(hazeStrength.x, 1.0)
+        let rawHaze = mix(raw, hazeColor.xyz, gatedFactor)
+        let withBloom = rawHaze + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -98,7 +123,7 @@ material PostProcess {
 }
 )";
 
-constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v3_bloom_composite_fs";
+constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v4_bloom_haze_composite_fs";
 
 // Fallback if primary program fails to acquire — same tonemap+gamma
 // contract so Editor composite does not go black / linear-washed.
@@ -106,11 +131,15 @@ constexpr const char* kPostProcessPassthroughSource = R"(
 material PostProcessBlit {
     texture2d sceneColor
     texture2d bloomTexture
+    texture2d hazeTexture
     uniform vec4 bloomStrength
     uniform vec4 exposure
     uniform vec4 tonemapMode
     uniform vec4 uTime
     uniform vec4 gammaParams
+    uniform vec4 hazeDensity
+    uniform vec4 hazeStrength
+    uniform vec4 hazeColor
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -121,8 +150,28 @@ material PostProcessBlit {
         let uv = vec2(vUv.x, 1.0 - vUv.y)
         let sampled = sample(sceneColor, uv)
         let bloomSample = sample(bloomTexture, uv)
+        // §S4c — sample the haze result RT0 (when bound by execute()
+        // to ctx.depthHazePass->halfResFbo(); otherwise the sampler
+        // returns the unbound sentinel = the same RT0 as sceneColor
+        // since both share the BGRA8 layout). The composite uses
+        // `hazeSample.w` (the haze FBO's alpha channel) as the dist
+        // proxy — the DepthHazePass S4b FS writes the un-hazed raw
+        // alpha there (`return vec4(mixed, raw.w)`), so
+        // `exp(-density * 0) = 1` and `1 - 1 = 0` ⇒ fogFactor
+        // collapses to 0 when the strength gate is off (K3 invariant
+        // #3 branchless).
+        let hazeSample = sample(hazeTexture, uv)
         let raw = sampled.xyz * exposure.x
-        let withBloom = raw + bloomSample.xyz * bloomStrength.x
+        // §S4c K3 invariant #3 — branchless strength gate. When the
+        // haze slot is unbound (custom desc omits DepthHaze) OR
+        // hazeStrength<=0, the gate collapses to
+        // `raw * (1 - 0) + fogColor * 0 = raw`. Mirrors §S1c
+        // bloomStrength branchless collapse.
+        let strengthGate = step(0.0, hazeStrength.x)
+        let fogFactor = 1.0 - exp(-hazeDensity.x * max(hazeSample.w, 0.0))
+        let gatedFactor = fogFactor * strengthGate * min(hazeStrength.x, 1.0)
+        let rawHaze = mix(raw, hazeColor.xyz, gatedFactor)
+        let withBloom = rawHaze + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -145,9 +194,25 @@ material PostProcessBlit {
     }
 }
 )";
-constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v3_bloom_composite_fs";
+constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v4_bloom_haze_composite_fs";
 
 } // namespace
+
+// §S4c (2026-07-23) — Bug fix #3 mirror (see DepthHazePass.cpp:118
+// / BloomExtractPass.h / BloomBlurPass.h:185-199 for the originating
+// pattern). Externalize the cache-key literal so unit tests can
+// include PostProcessPass.h and compare their mirror against the
+// live literal. Pre-S4c, kPostProcessCacheKey was a `.cpp` static
+// (not addressable from outside), so tests would fall back to
+// string self-comparison and drift detection would be a no-op
+// (false green — same drift trap that bit Test_B5 in §P5.5 B).
+// The extern declaration gives every test a single source of truth;
+// drift = test fails immediately. S4c bumps the key to v4 (haze
+// composite FS); future cuts bump to v5+.
+//
+// MUST live at file scope inside the `ayt::render::detail`
+// namespace so the extern declaration in PostProcessPass.h finds it.
+const char* const kPostProcessCacheKeyCStr = kPostProcessCacheKey;
 
 uint32_t PostProcessPass::execute(PassExecContext& ctx)
 {
@@ -217,17 +282,25 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     // When the program acquires successfully (kPostProcessCacheKey
     // bumped to v3_bloom_composite_fs), the Phoskia source declares
     // `texture2d bloomTexture` and the binding resolves to non-zero.
-    // Phoskia parser failure path leaves _program invalid → the
-    // whole `programReady` expression short-circuits to false and
-    // execute() returns 0 (mirror R5.1 fallback contract).
+    // §S4c (2026-07-23) — added _tHazeTexture + _uHazeDensity +
+    // _uHazeStrength + _uHazeColor to the ready check. v4 cache-key
+    // bump forces Phoskia to re-acquire; the hazeTexture sampler +
+    // 3 vec4 uniforms resolve to non-zero on success. Phoskia parser
+    // failure path leaves _program invalid → the whole `programReady`
+    // expression short-circuits to false and execute() returns 0
+    // (mirror R5.1 fallback contract).
     const bool programReady = _program.isValid()
         && _uBloomStrength != ayt::shader::InvalidBinding
         && _uExposure      != ayt::shader::InvalidBinding
         && _uTonemapMode   != ayt::shader::InvalidBinding
         && _uTime          != ayt::shader::InvalidBinding
         && _uGammaParams   != ayt::shader::InvalidBinding
+        && _uHazeDensity   != ayt::shader::InvalidBinding
+        && _uHazeStrength  != ayt::shader::InvalidBinding
+        && _uHazeColor     != ayt::shader::InvalidBinding
         && _tSceneColor    != ayt::shader::InvalidBinding
-        && _tBloomTexture  != ayt::shader::InvalidBinding;
+        && _tBloomTexture  != ayt::shader::InvalidBinding
+        && _tHazeTexture   != ayt::shader::InvalidBinding;
 
     const bgfx::TextureHandle fboColor = adapter.getFboAttachment(sourceFbo, 0);
     if (!BGFXAdapter::isValid(fboColor)) {
@@ -286,6 +359,16 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         static_cast<float>(static_cast<int32_t>(frame.tonemapMode)), 0.0f, 0.0f, 0.0f};
     const float timePad[4] = {frame.timeSeconds, 0.0f, 0.0f, 0.0f};
     const float gammaPad[4] = {frame.gamma, 0.0f, 0.0f, 0.0f};
+    // §S4c (2026-07-23) — three new vec4 uniforms for the haze
+    // composite (hazeDensity / hazeStrength / hazeColor). Mirror
+    // DepthHazePass S4b upload shape — same knobs, same per-frame
+    // FrameContext source — so the strength gate is consistent across
+    // the half-res FS write (DepthHazePass) and the full-res FS
+    // composite (PostProcessPass). hazeColor carries .xyz, .w zero pad.
+    const float hazeDensityPad[4]  = {frame.hazeDensity, 0.0f, 0.0f, 0.0f};
+    const float hazeStrengthPad[4] = {frame.hazeStrength, 0.0f, 0.0f, 0.0f};
+    const float hazeColorPad[4]    = {
+        frame.hazeColor.x, frame.hazeColor.y, frame.hazeColor.z, 0.0f};
 
     adapter.setTransformIdentity();
     adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
@@ -294,11 +377,33 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     // not override compile-time units — see AYShaderResource.h).
     _program.setTexture(0, _tSceneColor, texHandle);
     _program.setTexture(0, _tBloomTexture, bloomTexHandle);
+    // §S4c (2026-07-23) — third sampler on the fullscreen composite
+    // draw, bound to ctx.depthHazePass->halfResFbo() RT0 when the
+    // producer is mounted AND its halfResFbo() is valid (mirror §S1c
+    // bloomTexture bind shape above). When the producer is absent
+    // entirely (custom desc omits DepthHaze) OR first-frame race,
+    // bind sceneColor as a no-op fallback so the FS branchless
+    // strength gate collapses the mix to `raw * (1 - 0) = raw` — no
+    // GLSL sampler-not-set warning (K3 invariant #3).
+    ayt::shader::TextureHandle hazeTexHandle = texHandle;  // fallback
+    if (ctx.depthHazePass != nullptr
+        && BGFXAdapter::isValid(ctx.depthHazePass->halfResFbo())) {
+        const bgfx::TextureHandle hazeRtColor =
+            adapter.getFboAttachment(ctx.depthHazePass->halfResFbo(), 0);
+        if (BGFXAdapter::isValid(hazeRtColor)) {
+            hazeTexHandle =
+                ayt::render::detail::toShaderTexture(hazeRtColor);
+        }
+    }
+    _program.setTexture(0, _tHazeTexture, hazeTexHandle);
     _program.setUniform(_uBloomStrength, bloomPad, sizeof(bloomPad));
     _program.setUniform(_uExposure, exposurePad, sizeof(exposurePad));
     _program.setUniform(_uTonemapMode, tonemapPad, sizeof(tonemapPad));
     _program.setUniform(_uTime, timePad, sizeof(timePad));
     _program.setUniform(_uGammaParams, gammaPad, sizeof(gammaPad));
+    _program.setUniform(_uHazeDensity, hazeDensityPad, sizeof(hazeDensityPad));
+    _program.setUniform(_uHazeStrength, hazeStrengthPad, sizeof(hazeStrengthPad));
+    _program.setUniform(_uHazeColor, hazeColorPad, sizeof(hazeColorPad));
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
@@ -315,10 +420,18 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         const bool bloomFromPong = (ctx.bloomBlurPass != nullptr)
             && BGFXAdapter::isValid(ctx.bloomBlurPass->pongFbo())
             && (bloomTexHandle.id != texHandle.id);
+        // §S4c (2026-07-23) — log the haze slot source too (mirror
+        // bloomFromPong shape). `hazeFromHalf` = the haze tex came
+        // from ctx.depthHazePass->halfResFbo() RT0; otherwise it's
+        // the fallback (sceneColor) and the FS haze mix collapses
+        // to raw via the branchless strength gate.
+        const bool hazeFromHalf = (ctx.depthHazePass != nullptr)
+            && BGFXAdapter::isValid(ctx.depthHazePass->halfResFbo())
+            && (hazeTexHandle.id != texHandle.id);
         std::fprintf(stderr,
             "[PostProcessPass] blit ok view=%u rect=(%u,%u,%u,%u) "
             "gamma=%.1f exposure=%.2f tonemap=%.0f bloom=%.2f "
-            "bloomSrc=%s time=%.2f\n",
+            "bloomSrc=%s haze=%.2f density=%.3f hazeSrc=%s time=%.2f\n",
             static_cast<unsigned>(viewId),
             static_cast<unsigned>(viewportX),
             static_cast<unsigned>(viewportY),
@@ -329,6 +442,9 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
             tonemapPad[0],
             frame.bloomStrength,
             bloomFromPong ? "pong" : "fallback(scene)",
+            frame.hazeStrength,
+            frame.hazeDensity,
+            hazeFromHalf ? "hazeHalf" : "fallback(scene)",
             frame.timeSeconds);
         s_loggedSubmit = true;
     }
@@ -439,6 +555,15 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
     _uTonemapMode   = _program.getUniformBinding("tonemapMode");
     _uTime          = _program.getUniformBinding("uTime");
     _uGammaParams   = _program.getUniformBinding("gammaParams");
+    // §S4c (2026-07-23) — three new vec4 uniforms for the haze
+    // composite. Phoskia source declares `uniform vec4 hazeDensity`
+    // / hazeStrength / hazeColor; binding names match what
+    // `execute()` uploads via setUniform. Resolution returns
+    // InvalidBinding when the program couldn't be acquired (mirror
+    // _uBloomStrength — gated on _program.isValid()).
+    _uHazeDensity   = _program.getUniformBinding("hazeDensity");
+    _uHazeStrength  = _program.getUniformBinding("hazeStrength");
+    _uHazeColor     = _program.getUniformBinding("hazeColor");
     _tSceneColor    = _program.getTextureBinding("sceneColor");
     // §S1c (2026-07-23) — second sampler for the true bloom composite.
     // Phoskia source declares `texture2d bloomTexture`; binding name
@@ -446,6 +571,11 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
     // InvalidBinding when the program couldn't be acquired (mirror
     // _tSceneColor — gated on _program.isValid()).
     _tBloomTexture  = _program.getTextureBinding("bloomTexture");
+    // §S4c (2026-07-23) — third sampler for the haze composite.
+    // Phoskia source declares `texture2d hazeTexture`; binding name
+    // matches what `execute()` uploads at slot 2 (after
+    // ctx.depthHazePass->halfResFbo() RT0, or sceneColor fallback).
+    _tHazeTexture   = _program.getTextureBinding("hazeTexture");
 }
 
 void PostProcessPass::destroyResources(BGFXAdapter& adapter)
@@ -480,8 +610,16 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
     _uTonemapMode   = ayt::shader::InvalidBinding;
     _uTime          = ayt::shader::InvalidBinding;
     _uGammaParams   = ayt::shader::InvalidBinding;
+    // §S4c (2026-07-23) — reset the three new vec4 haze uniforms
+    // + the hazeTexture sampler binding so a stale resolved id from
+    // the previous program acquire doesn't poison the next acquire
+    // (mirror _uBloomStrength reset above).
+    _uHazeDensity   = ayt::shader::InvalidBinding;
+    _uHazeStrength  = ayt::shader::InvalidBinding;
+    _uHazeColor     = ayt::shader::InvalidBinding;
     _tSceneColor    = ayt::shader::InvalidBinding;
     _tBloomTexture  = ayt::shader::InvalidBinding;
+    _tHazeTexture   = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
     _fboWidth = 0;
     _fboHeight = 0;

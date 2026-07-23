@@ -47,6 +47,22 @@ namespace ayt::render::detail
 // PostProcessPass on a Deferred pipeline would blit an empty
 // sceneFbo — visible blackness on Editor Play.
 //
+// §S4c (2026-07-23, short-term-plan §S4 sub-cut 3) — third sampler
+// `hazeTexture` added on the fullscreen-triangle composite draw,
+// bound to `ctx.depthHazePass->halfResFbo()` RT0 when present.
+// Applies the per-pixel exponential depth-haze composite
+// `mix(raw, fogColor, fogFactor * strength)` over the *un-bloomed*
+// raw scene color (per short-term-plan §S4 决策 2026-07-23:
+// "haze 只改 raw, bloom 独立") — bloom stays additive on top of
+// the post-haze raw so the composite order is haze(raw) + bloom
+// (NOT haze(raw + bloom)). When the haze slot is unbound (custom
+// desc omits DepthHaze OR first-frame race when halfResFbo() is
+// invalid), execute() binds sceneColor on the haze slot and the
+// FS branchless strength gate collapses the mix to
+// `raw * (1 - 0) + fogColor * 0 = raw` — byte-equivalent to a
+// zero-haze pipeline (K3 invariant #3). Mirrors the §S1c
+// bloomTexture branchless-collapse pattern.
+//
 // Source-FBO priority order (B6 lock):
 //   1. `ctx.gbufferPass != nullptr && ctx.lightingPass != nullptr
 //       && bgfx::isValid(ctx.lightingPass->lightingOutputFbo())`
@@ -161,6 +177,16 @@ private:
     ayt::shader::BindingId      _uTonemapMode   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uTime          = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uGammaParams   = ayt::shader::InvalidBinding;
+    // §S4c (2026-07-23) — three new vec4 uniforms for the haze
+    // composite (hazeDensity / hazeStrength / hazeColor). Mirror
+    // _uBloomStrength shape (vec4 + .x for scalars; .xyz for
+    // fogColor). Uploads gated on the same per-frame source —
+    // FrameContext::haze* — that DepthHazePass S4b reads, so the
+    // strength gate stays consistent across the half-res FS write
+    // (DepthHazePass) and the full-res FS composite (PostProcessPass).
+    ayt::shader::BindingId      _uHazeDensity   = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uHazeStrength  = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uHazeColor     = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tSceneColor    = ayt::shader::InvalidBinding;
     // §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — second
     // sampler on the fullscreen-triangle composite draw, bound to
@@ -169,6 +195,14 @@ private:
     // `raw + sample(bloomTexture, uv) * bloomStrength`. Invalid
     // when the program hasn't been acquired yet (mirror _tSceneColor).
     ayt::shader::BindingId      _tBloomTexture  = ayt::shader::InvalidBinding;
+    // §S4c (2026-07-23, short-term-plan §S4 sub-cut 3) — third
+    // sampler on the fullscreen-triangle composite draw, bound to
+    // `ctx.depthHazePass->halfResFbo()` RT0 when present. When
+    // unbound (custom desc omits DepthHaze OR first-frame race),
+    // execute() falls back to binding sceneColor and the FS
+    // branchless strength gate collapses the haze mix to zero
+    // (K3 invariant #3). Mirrors _tSceneColor / _tBloomTexture.
+    ayt::shader::BindingId      _tHazeTexture   = ayt::shader::InvalidBinding;
     // Latch so a failed acquire does not re-run shaderc every frame
     // (was the main stutter source when Phoskia→HLSL rejected).
     bool                        _programAcquireFailed = false;
@@ -180,5 +214,21 @@ private:
     void ensureProgram(shader::ShaderResourcePool& pool);
     void destroyResources(BGFXAdapter& adapter);
 };
+
+// §S4c (2026-07-23) — Bug fix #3 mirror (see DepthHazePass.h:154-167
+// for the most-recent previous application, mirrored by
+// BloomExtractPass.h, BloomBlurPass.h:185-199, LightingPass.h).
+// Externalize the cache-key literal so unit tests can include this
+// header and compare their mirror against the live literal. Pre-S4c,
+// kPostProcessCacheKey was a `.cpp` static (not addressable from
+// outside), so tests would fall back to string self-comparison
+// ("mine == mine") and the drift detection would be a no-op (false
+// green). The extern declaration gives every test a single source
+// of truth; drift = test fails immediately.
+//
+// Naming: `kPostProcessCacheKeyCStr` (CStr suffix = "raw C-string"
+// per the AY naming rules). The actual string literal lives in
+// PostProcessPass.cpp as the canonical definition.
+extern const char* const kPostProcessCacheKeyCStr;
 
 } // namespace ayt::render::detail
