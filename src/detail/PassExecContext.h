@@ -98,6 +98,20 @@ class BloomExtractPass;
 // first consumer.
 class BloomBlurPass;
 
+// §S4a (2026-07-23, short-term-plan §S4 sub-cut 1) — DepthHazePass
+// produces the half-resolution depth-aware haze FBO that the final
+// PostProcess composite samples as the additional haze contribution
+// (mixed over the *un-bloomed* raw scene color, NOT over the
+// bloomed composite — per short-term-plan §S4 决策 2026-07-23:
+// "haze 只改 raw, bloom 独立"). Forward decl mirrors BloomBlurPass
+// above; PostProcessPass::execute (after §S4c) will read
+// `ctx.depthHazePass->halfResFbo()` (RT0 of the haze result) via
+// the borrowed pointer. §S4a is the SKELETON cut — the type is
+// declared, PassExecContext carries the field, but DepthHazePass
+// itself currently early-returns 0 from execute() (the real
+// shader + FBO ensure land in §S4b).
+class DepthHazePass;
+
 
 
 struct PassExecContext {
@@ -357,6 +371,33 @@ struct PassExecContext {
     // Test_E4_DefaultShadow, Test_E5_DefaultShadow, Test_Skybox0, ...)
     // keep compiling without edits via C++14 trailing-default behavior.
     const BloomBlurPass* bloomBlurPass = nullptr;
+
+    // §S4a (2026-07-23, short-term-plan §S4 sub-cut 1) — borrowed,
+    // non-owning pointer to the DepthHazePass that produces the
+    // half-resolution depth-aware haze FBO. PostProcessPass (after
+    // §S4c) reads `ctx.depthHazePass->halfResFbo()` (RT0 of the haze
+    // result) and binds it as an additional sampler on the fullscreen
+    // composite draw. Mirrors the bloomExtractPass / bloomBlurPass /
+    // skyboxPass / lightingPass / gbufferPass / shadowPass
+    // borrowed-pointer pattern; same lifetime contract: pointer must
+    // remain valid for the duration of pipeline::executeAll(ctx).
+    //
+    // Default-init = nullptr ⇒ S4c PostProcessPass haze-sampler code
+    // path binds `sceneColor` to the haze slot (byte-equivalent to
+    // hazeStrength=0 ⇒ no fog applied). Custom desc that omits
+    // DepthHaze from the pipeline yields a pipeline with
+    // ctx.depthHazePass null AND zero haze contribution — visually
+    // identical to a pipeline that never mounted haze (K3 invariant
+    // mirrored from S1c).
+    //
+    // §S4a is the SKELETON cut: only the field declaration + the
+    // empty DepthHazePass class land here. Real shader, real FBO
+    // ensure, and the PostProcessPass consumer-side wiring all
+    // arrive in §S4b / §S4c.
+    //
+    // All existing 20-/21-/22-field brace-init test sites keep
+    // compiling without edits via C++14 trailing-default behavior.
+    const DepthHazePass* depthHazePass = nullptr;
 };
 
 } // namespace ayt::render::detail

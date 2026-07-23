@@ -105,6 +105,55 @@ Shadow → Skybox → GBuffer → Lighting → Transparent → PostProcess(Final
 
 ---
 
+### 刀 S4 — Depth-aware Haze（半分辨率雾 Pass,3–5 天）
+
+**唯一允许新增的 Pass 族（短期第二族,继 §S1 Bloom 之后）。** 插在 `BloomBlur` 与 `PostProcess(Final)` 之间；bloom 仍读未雾化 scene，haze 改 raw,bloom 独立合成进 Final。
+
+#### 管线位置
+
+```
+Shadow → [Skybox → GBuffer → Lighting → Transparent]
+       → BloomExtract → BloomBlur (读未雾化 scene)
+       → **DepthHaze**（半分辨率雾结果）
+       → PostProcess(Final)：tonemap( haze(raw) + bloom )
+```
+
+#### 设计决策（2026-07-23 主人拍板）
+
+| 决策点 | 拍板 | 理由 |
+|---|---|---|
+| 雾模型 | **指数** `1 - exp(-density * dist)` | 单参数可控,比线性（近/远两参数）短期划算,比指数平方好调 |
+| depth 来源 | **Deferred 采 GBuffer RT2 worldPos**;**Forward 用 FS 重建**（`inverse(VP) * ndc.xyzz`） | 不碰 GBuffer 拓扑;Deferred 主路径直接采 worldPos 0 矩阵重建;Forward 兜底 |
+| 合成顺序 | **haze 只改 raw,bloom 独立** | bloom 别卷雾;haze 别进 BloomExtract 源 |
+| 关效果行为 | **`enabled=false` ⇒ FBO 不 ensure;K3 字节一致** | 守 frame-graph-mvp §7 第 3 条"关效果即不分配 RT" |
+
+#### 切片
+
+| 子刀 | 内容 | 验收 |
+|------|------|------|
+| S4a | `DepthHazePass` 空壳 + `PassExecContext::depthHazePass` borrowed ptr（mirror `bloomExtractPass`）+ `RenderPassSlot::DepthHaze=10` append-only ABI | 编译过,单测 Noop 不崩 |
+| S4b | `DepthHazePass` 真做：half-res FBO,Deferred 采 worldPos / Forward FS 重建,指数雾公式,view 14（紧接 BloomBlur 的 12/13） | log `[DepthHazePass] haze ok view=14 ...` |
+| S4c | PostProcessPass 加第三 sampler `hazeTexture`,合成 `finalRaw = mix(raw, fogColor, fogFactor)` + bloom 独立相加;K3 守 | log `[PostProcessPass] ... hazeSrc=...` |
+| S4d | Editor `setDepthHazeEnabled(true)` + `setDepthHazeParams(density=0.04, fogColor=(0.7,0.75,0.8))` 默认略开（**可选,可只留 API,默认关**） | 肉眼可辨远处雾;可关;**关 = 与今日字节一致** |
+
+#### 实现约束
+
+- FBO 生命周期：`ensure(w/2,h/2)` 跟 viewport resize,**只在 enabled=true 时 ensure**
+- viewId：紧挨 BloomBlur（12 横 / 13 纵）,S4b 用 14
+- 一律 `uniform vec4` + cache key bump
+- hazeStrength 默认 0（host 0 行为变化）
+- 雾色 `uniform vec4`(.xyz = RGB,.w 备用)
+- **不要**引入资源图、不要自动 alias（§0 红线）
+
+#### 完成标准
+
+1. Editor 可见远处雾;关 haze（enabled=false）字节一致今日
+2. Deferred 验收日志仍全绿（`lighting_v26` 等）
+3. Bloom + Haze 并存不互相污染（haze 不进 bloom 源）
+4. 单测：`AYRenderer_Test` 内 `Test_DepthHaze_S4{a,b,c}`
+
+---
+
 ## 4. 「下一刀是什么」速查
 
 | 你现在的状态 | 下一刀 |

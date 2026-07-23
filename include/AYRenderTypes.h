@@ -216,6 +216,28 @@ enum class RenderPassSlot : uint8_t {
     // keeping extract (forward-compat for hosts that want only
     // the bright-extract stage, e.g. for custom compositing).
     BloomBlur,
+
+    // §S4a (2026-07-23, short-term-plan §S4 sub-cut 1) — append-only
+    // ABI value: DepthHaze takes slot 10 (the value 10 was unused
+    // in the §S1 composite view table). Half-resolution depth-aware
+    // haze pass inserted AFTER BloomBlur + BEFORE PostProcess on
+    // BOTH Forward + Deferred default pipelines (per §S4 决策
+    // 2026-07-23: "haze 只改 raw, bloom 独立" ⇒ haze reads
+    // *un-bloomed* sceneColor/lightingOutput, bloom chain is
+    // untouched). View 14 (first contiguous unused id after S1b's
+    // 12/13). Reserved for §S4b; §S4a only adds the slot.
+    //
+    // When `hazeStrength == 0` (host default) the haze sampler in
+    // PostProcessPass (§S4c) collapses to sceneColor ⇒
+    // pre-S4 zero-behavior-change (K3 invariant mirrored from §S1c
+    // for the haze sampler). Omit this slot in a custom desc to
+    // disable haze entirely (forward-compat for hosts that want
+    // neither bloom nor haze).
+    //
+    // ABI: append-only. NEVER reorder or repurpose existing slot
+    // values (mirror §S1 cutsheet append-only rule, cutsheet
+    // `docs/pass-lessons-from-deferred.md` §7).
+    DepthHaze = 10,
 };
 
 // §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was
