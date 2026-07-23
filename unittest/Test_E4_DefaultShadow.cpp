@@ -70,17 +70,21 @@ namespace shader = ayt::shader;
 
 namespace {
 
-// Shared "default has 5 slots, slot 0 is Shadow" check.
+// Shared "default has 6 slots, slot 0 is Shadow" check.
+// S1a (2026-07-23) added BloomExtract between Transparent and
+// PostProcess — slot index shifts for PostProcess/UI only.
 void checkCanonicalDefaultDesc(const RenderPipelineDesc& desc)
 {
-    CHECK(desc.passes.size() == 5u);
+    CHECK(desc.passes.size() == 6u);
     CHECK(desc.contains(RenderPassSlot::Shadow));
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
-    // Pre-E4 ordering of the remaining 4 preserved.
+    // Pre-E4 ordering of the remaining 5 preserved (S1a BloomExtract
+    // appended between Transparent and PostProcess).
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[3] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[4] == RenderPassSlot::UI);
+    CHECK(desc.passes[3] == RenderPassSlot::BloomExtract);   // S1a (2026-07-23)
+    CHECK(desc.passes[4] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[5] == RenderPassSlot::UI);
 }
 
 } // namespace

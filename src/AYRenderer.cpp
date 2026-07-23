@@ -3,6 +3,7 @@
 #include "AYF1DiagFlags.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/BgfxMatrix.h"
+#include "detail/BloomExtractPass.h"
 #include "detail/DebugOverlay.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/GBufferPass.h"
@@ -55,6 +56,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::Shadow,
         RenderPassSlot::ForwardOpaque,
         RenderPassSlot::Transparent,
+        RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
         RenderPassSlot::UI,
     }};
@@ -95,6 +97,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::GBuffer,
         RenderPassSlot::Lighting,
         RenderPassSlot::Transparent,
+        RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
         RenderPassSlot::UI,
     }, RenderPath::Deferred};
@@ -143,6 +146,13 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::LightingPass>();
     case RenderPassSlot::Skybox:
         return std::make_unique<detail::SkyboxPass>();
+    // S1a (2026-07-23, short-term-plan §S1) — half-resolution
+    // bright-extract pass. Default-enabled in both Forward and
+    // Deferred pipelines. View 5 claim. K1 invariant #2: when
+    // host keeps the default bloomStrength=0, the pass writes
+    // zeros — visually identical to pre-S1 renders.
+    case RenderPassSlot::BloomExtract:
+        return std::make_unique<detail::BloomExtractPass>();
     }
     return nullptr;
 }
@@ -401,6 +411,18 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     if (detail::RenderPass* skyboxPass = pipeline.findPass("Skybox")) {
         if (adapter.isInitialized()) {
             static_cast<detail::SkyboxPass*>(skyboxPass)->destroyResources(adapter);
+        }
+    }
+
+    // S1a (2026-07-23, short-term-plan §S1) — BloomExtractPass
+    // destroyResources mirror (mirror SkyboxPass destroy block
+    // above). BloomExtractPass owns a half-resolution RGBA8 FBO
+    // (no depth) + fullscreen-triangle VB/IB + Phoskia extract
+    // program; all three must be released BEFORE pipeline.clear()
+    // for the same handle-rotation reason.
+    if (detail::RenderPass* bloomExtractPass = pipeline.findPass("BloomExtract")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::BloomExtractPass*>(bloomExtractPass)->destroyResources(adapter);
         }
     }
 

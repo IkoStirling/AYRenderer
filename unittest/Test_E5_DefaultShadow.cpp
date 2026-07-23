@@ -88,7 +88,7 @@ TEST_CASE(e5_fresh_renderer_default_shadow_enabled)
     // from outside the library; shadowsEnabled() closes that gap.
     Renderer renderer;
     CHECK(renderer.shadowsEnabled() == true);
-    CHECK(renderer.pipelineDesc().passes.size() == 5u);
+    CHECK(renderer.pipelineDesc().passes.size() == 6u);   // S1a (2026-07-23): BloomExtract added
     CHECK(renderer.pipelineDesc().passes[0] == RenderPassSlot::Shadow);
 }
 
@@ -120,7 +120,7 @@ TEST_CASE(e5_empty_desc_fallback_shadow_enabled)
     Renderer renderer;
     renderer.configurePipeline(RenderPipelineDesc{});
     CHECK(renderer.shadowsEnabled() == true);
-    CHECK(renderer.pipelineDesc().passes.size() == 5u);
+    CHECK(renderer.pipelineDesc().passes.size() == 6u);   // S1a (2026-07-23): BloomExtract added
     CHECK(renderer.pipelineDesc().contains(RenderPassSlot::Shadow));
 }
 

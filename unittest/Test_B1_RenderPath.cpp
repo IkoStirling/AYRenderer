@@ -72,10 +72,11 @@ TEST_CASE(b1_make_default_path_is_forward)
     const RenderPipelineDesc def = RenderPipelineDesc::makeDefault();
     CHECK(def.path == RenderPath::Forward);
     CHECK(def.isDeferred() == false);
-    CHECK(def.passes.size() == 5u);
+    CHECK(def.passes.size() == 6u);
     CHECK(def.contains(RenderPassSlot::Shadow));
     CHECK(def.contains(RenderPassSlot::ForwardOpaque));
     CHECK(def.contains(RenderPassSlot::Transparent));
+    CHECK(def.contains(RenderPassSlot::BloomExtract));   // S1a (2026-07-23)
     CHECK(def.contains(RenderPassSlot::PostProcess));
     CHECK(def.contains(RenderPassSlot::UI));
 }
@@ -87,8 +88,9 @@ TEST_CASE(b1_make_forward_with_shadows_path_is_forward)
     const RenderPipelineDesc fws = RenderPipelineDesc::makeForwardWithShadows();
     CHECK(fws.path == RenderPath::Forward);
     CHECK(fws.isDeferred() == false);
-    CHECK(fws.passes.size() == 5u);
+    CHECK(fws.passes.size() == 6u);
     CHECK(fws.contains(RenderPassSlot::Shadow));
+    CHECK(fws.contains(RenderPassSlot::BloomExtract));   // S1a (2026-07-23)
 }
 
 TEST_CASE(b1_make_deferred_factory_path_is_deferred_passes_unchanged)

@@ -109,7 +109,7 @@ namespace {
 // mirror here ALSO moves v20 �?v22; live drift detection
 // compares against `kLightingCacheKeyCStr` (Bug fix #3 mirror �?// pre-D self-compare was false-green).
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v23_p5p5c_per_light_shadow_atlas";
+    "lighting_v26_mix_vec2_overloads";
 
 // §Skybox0 (2026-07-23) �?SkyboxPass cache-key literal. Pin
 // here so a master-cache-key change without a Test_Skybox0
@@ -272,7 +272,7 @@ TEST_CASE(render_pass_slot_skybox_enum_index) {
     // We test the Skybox value directly; downstream tests verify
     // the relative order.
     CHECK(static_cast<uint8_t>(RenderPassSlot::Skybox) == 1u);
-    CHECK(RenderPipelineDesc::makeDeferred().passes.size() == 7u);
+    CHECK(RenderPipelineDesc::makeDeferred().passes.size() == 8u);   // S1a (2026-07-23): +1 BloomExtract
 }
 
 TEST_CASE(deferred_pipeline_skybox_slot_order) {
@@ -312,7 +312,7 @@ TEST_CASE(forward_default_pipeline_does_not_include_skybox) {
     // configurePipeline(makeDeferred()).
     auto desc = RenderPipelineDesc::makeDefault();
     CHECK(!desc.contains(RenderPassSlot::Skybox));
-    CHECK(desc.passes.size() == 5u);  // Shadow + FO + Trans + PP + UI
+    CHECK(desc.passes.size() == 6u);  // Shadow + FO + Trans + BloomExtract(S1a 2026-07-23) + PP + UI
 }
 
 TEST_CASE(skybox_pass_name_and_initial_state) {
@@ -360,7 +360,7 @@ TEST_CASE(lighting_pass_cache_key_bump_v22_p5p5d) {
     CHECK(std::string(kExpectedLightingCacheKey).size() >= 10u);
     // Live drift detection (Bug fix #3 mirror) �?the mirror
     // literal MUST match the live kLightingCacheKeyCStr extern.
-    CHECK(std::string(kLightingCacheKeyCStr).find("v23_p5p5c_per_light_shadow_atlas")
+    CHECK(std::string(kLightingCacheKeyCStr).find("v26_mix_vec2_overloads")
           != std::string::npos);
 }
 

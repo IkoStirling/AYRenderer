@@ -189,6 +189,18 @@ enum class RenderPassSlot : uint8_t {
     // never reorder without a cutsheet-style B0 reset.
     GBuffer,
     Lighting,
+    // S1a BloomExtract (2026-07-23, short-term-plan §S1) — half-
+    // resolution bright-extract pass inserted between Transparent
+    // and PostProcess on BOTH Forward + Deferred default pipelines.
+    // View 5 was the only unused slot before S1a (composite view
+    // table: 0=FO, 1=ShadowC, 2=ShadowR, 3=Trans, 4=PP, 6=Skybox,
+    // 7=GBuffer, 8=Lighting, 9=Trans-deferred, 10=PP-deferred,
+    // 11=UI). When bloomStrength == 0 (the host default), the
+    // half-res FBO writes are zero ⇒ pre-S1 zero-behavior-change
+    // (cutsheet §S1 K1 invariant #1). Omit this slot in a custom
+    // desc to disable the entire bloom chain (forward-compat for
+    // S1b/S1c).
+    BloomExtract,
 };
 
 // §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was
