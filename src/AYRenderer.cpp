@@ -297,6 +297,13 @@ struct Renderer::Impl {
     float                          ambientStrength           = 0.6f;
     detail::FrameContext::TonemapMode postProcessTonemapMode = detail::FrameContext::TonemapMode::None;
 
+    // §S4d — DepthHaze host knobs (FrameContext defaults stay off).
+    bool                           depthHazeEnabled  = false;
+    float                          depthHazeStrength = 0.0f;
+    float                          depthHazeDensity  = 0.02f;
+    ayt::math::FVector3            depthHazeColor    =
+        ayt::math::FVector3(0.55f, 0.65f, 0.78f);
+
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias in ndc01
     // units. Mirrored into FrameContext::shadowBias each render so
     // tryBindShadowSampler() (ForwardOpaquePass + TransparentPass
@@ -681,6 +688,11 @@ void Renderer::render(const RenderScene& scene)
     frame.exposure         = _impl->postProcessExposure;
     frame.gamma            = _impl->postProcessGamma;
     frame.tonemapMode      = _impl->postProcessTonemapMode;
+    // §S4d — DepthHaze knobs (Editor / host). Defaults keep haze off.
+    frame.hazeEnabled      = _impl->depthHazeEnabled;
+    frame.hazeStrength     = _impl->depthHazeStrength;
+    frame.hazeDensity      = _impl->depthHazeDensity;
+    frame.hazeColor        = _impl->depthHazeColor;
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias copied
     // into FrameContext each frame; tryBindShadowSampler reads it.
     frame.shadowBias       = _impl->shadowBias;
@@ -1682,6 +1694,65 @@ void Renderer::setPostProcessTonemapMode(TonemapMode mode)
         _impl->postProcessTonemapMode = detail::FrameContext::TonemapMode::ACES;
         break;
     }
+}
+
+void Renderer::setDepthHazeEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->depthHazeEnabled = enabled;
+}
+
+bool Renderer::depthHazeEnabled() const noexcept
+{
+    return _impl != nullptr && _impl->depthHazeEnabled;
+}
+
+void Renderer::setDepthHazeStrength(float strength)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->depthHazeStrength = strength;
+}
+
+float Renderer::depthHazeStrength() const noexcept
+{
+    return _impl ? _impl->depthHazeStrength : 0.0f;
+}
+
+void Renderer::setDepthHazeDensity(float density)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->depthHazeDensity = density;
+}
+
+float Renderer::depthHazeDensity() const noexcept
+{
+    return _impl ? _impl->depthHazeDensity : 0.02f;
+}
+
+void Renderer::setDepthHazeColor(const ayt::math::FVector3& color)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->depthHazeColor = color;
+}
+
+ayt::math::FVector3 Renderer::depthHazeColor() const noexcept
+{
+    return _impl ? _impl->depthHazeColor
+                 : ayt::math::FVector3(0.55f, 0.65f, 0.78f);
+}
+
+void Renderer::setDepthHazeParams(float density, const ayt::math::FVector3& fogColor)
+{
+    setDepthHazeDensity(density);
+    setDepthHazeColor(fogColor);
 }
 
 void Renderer::configurePipeline(const RenderPipelineDesc& desc)

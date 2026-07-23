@@ -23,18 +23,14 @@
 //      fallback-to-sceneColor semantics (the FS haze strength
 //      gate collapses the mix regardless of what the haze RT
 //      actually contains).
-//   3) Cache-key bump: PostProcessPass now compiles under
-//      `postprocess_tonemap_aces_v4_bloom_haze_composite_fs` (v3
-//      → v4). Passthrough fallback key also bumped to
-//      `postprocess_passthrough_tonemap_aces_v4_bloom_haze_
-//      composite_fs`. Extern addressable via
-//      kPostProcessCacheKeyCStr (Bug fix #3 mirror).
-//   4) Phoskia source substring pin — the inlined source declares
-//      `texture2d hazeTexture` + the S4c composite line
-//      `mix(raw, hazeColor.xyz, gatedFactor)` + the
-//      `1.0 - exp(-hazeDensity.x * max(hazeSample.w, 0.0))`
-//      fogFactor (replacing the pre-S4c post-process, which had
-//      no haze composite).
+//   3) Cache-key bump: PostProcessPass compiles under
+//      `postprocess_tonemap_aces_v5_prehazed_bloom_fs` (v4 → v5).
+//      Passthrough fallback key also bumped to
+//      `postprocess_passthrough_tonemap_aces_v5_prehazed_bloom_fs`.
+//      Extern addressable via kPostProcessCacheKeyCStr.
+//   4) Phoskia source substring pin — declares `texture2d hazeTexture`
+//      + prefers DepthHazePass pre-mixed RGB:
+//      `mix(raw, hazeSample.xyz * exposure.x, hazeWeight)`.
 //   5) Three-sampler contract: the Phoskia source declares
 //      `texture2d sceneColor` + `texture2d bloomTexture` +
 //      `texture2d hazeTexture`, and all three
@@ -131,26 +127,22 @@ constexpr const char* kS4cExpectedSubstrings[] = {
     "material PostProcess",
     "texture2d sceneColor",
     "texture2d bloomTexture",
-    "texture2d hazeTexture",                         // §S4c (2026-07-23) — new sampler
-    "let hazeSample = sample(hazeTexture, uv)",      // §S4c — real haze composite sample
-    "let fogFactor = 1.0 - exp(-hazeDensity.x * max(hazeSample.w, 0.0))",  // §S4c — exp fog formula
-    "let gatedFactor = fogFactor * strengthGate * min(hazeStrength.x, 1.0)",  // §S4c — branchless gate
-    "let rawHaze = mix(raw, hazeColor.xyz, gatedFactor)",  // §S4c — raw-haze composite
-    "let withBloom = rawHaze + bloomSample.xyz * bloomStrength.x",  // §S4c — bloom additive AFTER haze (haze 只改 raw, bloom 独立)
+    "texture2d hazeTexture",                         // §S4c — haze sampler
+    "let hazeSample = sample(hazeTexture, uv)",      // §S4c — sample pre-hazed RT
+    "let hazeWeight = step(0.0001, hazeStrength.x)", // prefer pre-hazed when strength>0
+    "let rawHaze = mix(raw, hazeSample.xyz * exposure.x, hazeWeight)",
+    "let withBloom = rawHaze + bloomSample.xyz * bloomStrength.x",  // bloom AFTER haze
     "uniform vec4 hazeDensity",
     "uniform vec4 hazeStrength",
     "uniform vec4 hazeColor",
 };
 
-// Mirror the live cache-key literal after the S4c bump
-// (cutsheet §S4 "cache-key bump" + Bug fix #3 mirror).
+// Mirror the live cache-key literal after the pre-hazed bump.
 constexpr const char* kExpectedS4cCacheKey =
-    "postprocess_tonemap_aces_v4_bloom_haze_composite_fs";
+    "postprocess_tonemap_aces_v5_prehazed_bloom_fs";
 
-// Mirror of PostProcessPass.cpp's kPostProcessPhoskiaSource after
-// the S4c patch — includes the hazeTexture sampler + composite +
-// 3 new uniforms. Used for the phoskia-compile pin when shaderc
-// is available on the host.
+// Mirror of PostProcessPass.cpp's kPostProcessPhoskiaSource — uses
+// DepthHazePass's already-mixed RGB (no re-fog from alpha).
 constexpr const char* kS4cLivePPSource = R"(
 material PostProcess {
     texture2d sceneColor
@@ -176,10 +168,8 @@ material PostProcess {
         let bloomSample = sample(bloomTexture, uv)
         let hazeSample = sample(hazeTexture, uv)
         let raw = sampled.xyz * exposure.x
-        let strengthGate = step(0.0, hazeStrength.x)
-        let fogFactor = 1.0 - exp(-hazeDensity.x * max(hazeSample.w, 0.0))
-        let gatedFactor = fogFactor * strengthGate * min(hazeStrength.x, 1.0)
-        let rawHaze = mix(raw, hazeColor.xyz, gatedFactor)
+        let hazeWeight = step(0.0001, hazeStrength.x)
+        let rawHaze = mix(raw, hazeSample.xyz * exposure.x, hazeWeight)
         let withBloom = rawHaze + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
@@ -285,23 +275,15 @@ TEST_CASE(s4c_finalpp_inlined_source_has_canonical_substrings) {
 }
 
 TEST_CASE(s4c_finalpp_cache_key_literal_pinned) {
-    // Cutsheet §S4 "cache-key bump": post-S4c the live cache key
-    // is `postprocess_tonemap_aces_v4_bloom_haze_composite_fs`.
-    // If the bump was forgotten this test fails immediately. (Bug
-    // fix #3 mirror — pre-extern the test was self-compare =
-    // false green.) The extern addressable form is verified in
-    // the next test.
+    // Cutsheet §S4 "cache-key bump": pre-hazed composite is v5.
     CHECK(std::string(kExpectedS4cCacheKey)
-          == "postprocess_tonemap_aces_v4_bloom_haze_composite_fs");
+          == "postprocess_tonemap_aces_v5_prehazed_bloom_fs");
 }
 
 TEST_CASE(s4c_finalpp_cache_key_extern_addressable) {
-    // §S4c — Bug fix #3 mirror (BloomExtractPass / BloomBlurPass /
-    // SkyboxPass / LightingPass / DepthHazePass pattern). The extern
-    // declaration in PostProcessPass.h must bind to the file-scope
-    // literal in PostProcessPass.cpp. Drift between the two is now
-    // a compile-time link error instead of a runtime self-compare.
-    const char* const mirror = "postprocess_tonemap_aces_v4_bloom_haze_composite_fs";
+    // §S4c — Bug fix #3 mirror. Extern in PostProcessPass.h must
+    // bind to the file-scope literal in PostProcessPass.cpp.
+    const char* const mirror = "postprocess_tonemap_aces_v5_prehazed_bloom_fs";
     CHECK(std::string(ayt::render::detail::kPostProcessCacheKeyCStr)
           == std::string(mirror));
 }

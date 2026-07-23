@@ -38,7 +38,8 @@ public:
     //   6 = Skybox, 7 = GBuffer, 8 = Lighting, 9 = Transparent (Deferred)
     //  10 = BloomExtract (half-res bright)
     //  11 = BloomBlur horizontal, 12 = BloomBlur vertical
-    //  13 = PostProcess blit → backbuffer panel (Forward + Deferred)
+    //  13 = DepthHaze (half-res fog; before Final so same-frame sample)
+    //  14 = PostProcess blit → backbuffer panel (Forward + Deferred)
     //  255 = UI chrome / menus (fixed high slot — insert Post passes
     //        without reshuffling UI; must stay > Final PP)
     static constexpr uint8_t kViewId = 255;

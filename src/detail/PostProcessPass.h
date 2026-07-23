@@ -101,9 +101,9 @@ namespace ayt::render::detail
 // (destroy on shutdown / resize / adapter-reinit).
 class PostProcessPass : public RenderPass {
 public:
-    // After BloomBlur V=12; shared by Forward + Deferred.
-    // UI chrome is fixed at view 255 (not 14 — leave Post headroom).
-    static constexpr uint8_t kBlitViewId = 13;
+    // After DepthHaze=13; shared by Forward + Deferred.
+    // UI chrome is fixed at view 255 (must stay > Final PP).
+    static constexpr uint8_t kBlitViewId = 14;
 
     PostProcessPass() = default;
     // R5+ — destructor intentionally does NOT touch bgfx handles.

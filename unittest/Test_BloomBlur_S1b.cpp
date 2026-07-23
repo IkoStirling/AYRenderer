@@ -18,8 +18,8 @@
 //   5) Cache-key externalize (Bug fix #3 mirror):
 //      `extern const char* const kBloomBlurCacheKeyCStr` from the
 //      header pins to the live literal in BloomBlurPass.cpp.
-//   6) View id constants: Extract=10, BlurH=11, BlurV=12
-//      (before PostProcess=13; UI fixed at 255).
+//   6) View id constants: Extract=10, BlurH=11, BlurV=12,
+//      DepthHaze=13, PostProcess=14; UI fixed at 255.
 //   7) RenderPipeline dispatch order: BloomBlurPass fires AFTER
 //      BloomExtractPass and BEFORE PostProcessPass in a custom
 //      pipeline.
@@ -44,6 +44,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
+#include "detail/DepthHazePass.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FrameContext.h"
 #include "detail/PassExecContext.h"
@@ -75,6 +76,7 @@ using ayt::render::detail::RenderPass;
 using ayt::render::detail::BGFXAdapter;
 using ayt::render::detail::BloomExtractPass;
 using ayt::render::detail::BloomBlurPass;
+using ayt::render::detail::DepthHazePass;
 using ayt::render::detail::FrameContext;
 using ayt::render::detail::GpuMaterial;
 using ayt::render::detail::GpuMesh;
@@ -312,15 +314,18 @@ TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
 // === C. View id constants ===========================================
 
 TEST_CASE(s1b_bloomblur_view_ids_after_extract_before_pp) {
-    // Order lock: Extract=10 → BlurH=11 → BlurV=12 → PP=13; UI=255 (fixed).
+    // Order lock: Extract=10 → BlurH=11 → BlurV=12 → Haze=13 → PP=14;
+    // UI=255 (fixed). Haze must sort before Final PP (same-frame sample).
     CHECK(BloomBlurPass::kBloomBlurHorizontalViewId == 11);
     CHECK(BloomBlurPass::kBloomBlurVerticalViewId   == 12);
     CHECK(BloomBlurPass::kBloomBlurHorizontalViewId
           == BloomExtractPass::kBloomExtractViewId + 1);
     CHECK(BloomBlurPass::kBloomBlurVerticalViewId
           == BloomBlurPass::kBloomBlurHorizontalViewId + 1);
-    CHECK(PostProcessPass::kBlitViewId
+    CHECK(DepthHazePass::kDepthHazeViewId
           == BloomBlurPass::kBloomBlurVerticalViewId + 1);
+    CHECK(PostProcessPass::kBlitViewId
+          == DepthHazePass::kDepthHazeViewId + 1);
     CHECK(ayt::render::UIRenderBackend::kViewId == 255);
     CHECK(ayt::render::UIRenderBackend::kViewId > PostProcessPass::kBlitViewId);
 }

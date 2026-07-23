@@ -121,7 +121,7 @@ inline constexpr const char* kExpectedLightingCacheKey =
 // The mirror compares against the live `kSkyboxCacheKeyCStr`
 // extern (Bug fix #3 mirror �?pre-D self-compare false-green).
 inline constexpr const char* kExpectedSkyboxCacheKey =
-    "skybox_v2_vec4_skykind";
+    "skybox_v3_cam_invview_dir";
 
 // §Skybox0 (2026-07-23) �?Phoskia source substring pins. Drift
 // between SkyboxPass.cpp's literal source and these mirrors = test
@@ -152,10 +152,12 @@ inline const char* kSkybox0SkyboxExpectedSubstrings[] = {
     "texturecube skyCube",             // §P5.5 D �?cube sampler declaration
     "uniform vec4 skyMix",             // skyMix uniform declaration
     "uniform vec4 skyKind",           // §P5.5 D �?skyKind gate
-    "let equirectColor = sample(skyEquirect, baseUv).xyz * skyMix.x",
-    "let dir3 = normalize(vec3(ndcXY.x, -ndcXY.y, -1.0))",  // §P5.5 D �?per-pixel dir
-    "let cubeColor = sample(skyCube, dir3).xyz * skyMix.x",
-    "let skyColor = mix(equirectColor, cubeColor, skyKind.x)",  // §P5.5 D �?kind select
+    "inverseProjectionMatrix",
+    "inverseViewMatrix",
+    "let equirectUv = vec2(lon * 0.15915494309 + 0.5, lat * 0.31830988618 + 0.5)",
+    "let equirectColor = sample(skyEquirect, equirectUv).xyz * skyMix.x",
+    "let cubeColor = sample(skyCube, worldDir).xyz * skyMix.x",
+    "let skyColor = mix(equirectColor, cubeColor, skyKind.x)",
     "return vec4(skyColor, 1.0)",
 };
 
@@ -177,11 +179,16 @@ material Skybox {
     }
     fragment {
         in vUv : texcoord
-        let baseUv = vec2(vUv.x, 1.0 - vUv.y)
-        let equirectColor = sample(skyEquirect, baseUv).xyz * skyMix.x
-        let ndcXY = vec2(baseUv.x * 2.0 - 1.0, baseUv.y * 2.0 - 1.0)
-        let dir3 = normalize(vec3(ndcXY.x, -ndcXY.y, -1.0))
-        let cubeColor = sample(skyCube, dir3).xyz * skyMix.x
+        let ndcXY = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0)
+        let viewH = inverseProjectionMatrix * vec4(ndcXY.x, ndcXY.y, 1.0, 1.0)
+        let viewDir = normalize(viewH.xyz)
+        let worldH = inverseViewMatrix * vec4(viewDir.x, viewDir.y, viewDir.z, 0.0)
+        let worldDir = normalize(worldH.xyz)
+        let lon = atan2(worldDir.x, worldDir.z)
+        let lat = asin(clamp(worldDir.y, -1.0, 1.0))
+        let equirectUv = vec2(lon * 0.15915494309 + 0.5, lat * 0.31830988618 + 0.5)
+        let equirectColor = sample(skyEquirect, equirectUv).xyz * skyMix.x
+        let cubeColor = sample(skyCube, worldDir).xyz * skyMix.x
         let skyColor = mix(equirectColor, cubeColor, skyKind.x)
         return vec4(skyColor, 1.0)
     }
@@ -373,7 +380,7 @@ TEST_CASE(skybox_pass_cache_key_bump_v1_equirect_or_cube) {
           == std::string(kSkyboxCacheKeyCStr));
     CHECK(std::string(kExpectedSkyboxCacheKey).size() >= 10u);
     // Live drift detection �?mirror MUST equal live extern.
-    CHECK(std::string(kSkyboxCacheKeyCStr).find("v2_vec4_skykind")
+    CHECK(std::string(kSkyboxCacheKeyCStr).find("v3_cam_invview_dir")
           != std::string::npos);
 }
 

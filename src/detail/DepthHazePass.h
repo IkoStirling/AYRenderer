@@ -4,12 +4,12 @@
 // real implementation. The S4a skeleton cut reserved the
 // RenderPassSlot + PassExecContext borrowed ptr + class shape; S4b
 // lands the exponential fog shader (主人拍板 B), the half-resolution
-// RGBA8 FBO ensure, the deferred-gbuffer-RT2 / forward-FS-recon
-// branch (主人拍板 B — S4b simplification: bind sceneColor on the
-// depth slot so the FS compiles; S4d swaps for a proper worldPos
-// attachment), and the hazeEnabled/hazeStrength zero-cost gate
-// (K3 invariant #2: frame.hazeEnabled=false ⇒ ensureFbo NOT called
-// ⇒ no FBO allocation; mirrors frame-graph-mvp.md §7 第 3 条).
+// RGBA8 FBO ensure, Deferred GBuffer-RT2 worldPos distance
+// (`length(worldPos - camPos)`), Forward safe no-haze when
+// gbufferMotionRt is missing, and the hazeEnabled/hazeStrength
+// zero-cost gate (K3 invariant #2: frame.hazeEnabled=false ⇒
+// ensureFbo NOT called ⇒ no FBO allocation; mirrors
+// frame-graph-mvp.md §7 第 3 条).
 //
 // Pipeline position (short-term-plan §S4 决策 2026-07-23):
 //   ... Lighting → Transparent → BloomExtract → BloomBlur → DepthHaze → PostProcess
@@ -19,8 +19,9 @@
 // `_fbo` (RT0 of haze result) as the `hazeTexture` sampler on the
 // fullscreen composite draw — S4c owns that wire.
 //
-// View id allocation: S4a locked `kDepthHazeViewId = 14`. S4b draws
-// on this view (mirror BloomExtractPass::kBloomExtractViewId).
+// View id allocation: BloomBlur V=12 → DepthHaze=13 → PostProcess=14.
+// Haze MUST sort before Final PP (bgfx ascending view id) so the
+// half-res fog RT is filled in the same frame PP samples it.
 //
 // Phoskia uniform gates (lessons §3.1): all scalars as `uniform vec4`
 // with .x carry. hazeColor as vec4 with .xyz used (.w zero pad).
@@ -44,13 +45,12 @@
 //      PostProcessPass haze sampler path binds sceneColor; FS branchless
 //      composite collapses to `raw * (1 - 0) = raw`. Mirror
 //      §S1c bloomBlurPass==nullptr invariant.
-//   4. dist proxy = luminance of worldPosOrDepth sampler; bounded
-//      [0, 1] so `exp(-density * dist)` is well-defined. S4d will
-//      swap the second sampler for a proper GBuffer RT2 / FS-recon
-//      attachment (proper worldPos-encoded distance).
+//   4. Deferred: dist = length(GBuffer RT2 worldPos - camPos);
+//      Forward / no gbufferMotionRt ⇒ execute returns 0 (safe
+//      no-haze). Avoids the failed D3D invVP reconstruct path.
 //   5. ABI: append-only — RenderPassSlot::DepthHaze = 10 (was unused
-//      in §S1 cutsheet); view id 14 reserved; no existing enum /
-//      view-id value reorders.
+//      in §S1 cutsheet). View ids: Haze=13, Final PP=14 (Haze before
+//      PP so same-frame sampling works).
 
 #include "AYShaderResource.h"
 
@@ -66,10 +66,9 @@ namespace ayt::render::detail
 
 class DepthHazePass : public RenderPass {
 public:
-    // §S4 view map lock (cutsheet §S1 + §S4 决策): BloomExtract=10 →
-    // BlurH=11 → BlurV=12 → PostProcess=13 → DepthHaze=14 → UI=255.
-    // S4b draws on view 14.
-    static constexpr uint8_t kDepthHazeViewId = 14;
+    // §S4 view map lock: BloomExtract=10 → BlurH=11 → BlurV=12 →
+    // DepthHaze=13 → PostProcess=14 → UI=255. Haze before Final PP.
+    static constexpr uint8_t kDepthHazeViewId = 13;
 
     DepthHazePass() = default;
     // Mirror BloomExtractPass + PostProcessPass + BloomBlurPass:
@@ -136,6 +135,7 @@ private:
     ayt::shader::BindingId      _uHazeDensity     = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uHazeStrength    = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uHazeColor       = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uCamPos          = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tSceneColor      = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tWorldPosOrDepth = ayt::shader::InvalidBinding;
 

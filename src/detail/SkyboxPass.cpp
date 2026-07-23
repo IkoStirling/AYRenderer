@@ -42,24 +42,22 @@ static constexpr const char* kSkyboxBuildStamp = "sky0-2026-07-23";
 // Phoskia source now declares BOTH `texture2d skyEquirect` AND
 // `texturecube skyCube` + `uniform float skyKind` (0 = Equirect,
 // 1 = CubeMap) + `uniform vec4 skyMix`. The FS picks one of two
-// per-pixel paths via `mix(equirectColor, cubeColor, skyKind)`:
-//   - Equirect (skyKind=0): the A-ship panorama blit
-//                           (screen UV → panorama UV).
-//   - CubeMap  (skyKind=1): per-pixel lat/long → 3D dir +
-//                           `sample(skyCube, dir)`. Re-uses the
-//                           fullscreen triangle; no new mesh
-//                           (mirror §Skybox0 "cheap backdrop"
-//                           rule). The dir formula treats the
-//                           triangle as facing -Z (camera
-//                           looking down -Z), with the X axis
-//                           mirrored to match OpenGL cubemap
-//                           convention.
-// The cube sampler is bound unconditionally (per-frame lookup
-// via `Renderer::setSkySourceCube` + ctx.textures); when
-// skyKind=0 the FS discards the cubeColor contribution via
-// `mix(..., 0)` — no observable effect.
+// per-pixel paths via `mix(equirectColor, cubeColor, skyKind)`.
+//
+// §Skybox-cam (2026-07-23) — bump v2 → v3. Root cause of "skybox
+// doesn't follow freecam": the FS sampled equirect at screen UV and
+// built cube dirs as fixed `normalize(ndc.x, -ndc.y, -1)` in a
+// camera-locked view space. `setViewTransform(view, frame.view,
+// frame.proj)` was already called, but the fullscreen VS emits
+// clip-space positions directly so view/proj never affected the
+// look direction. Fix: unproject NDC through
+// `inverseProjectionMatrix`, rotate with `inverseViewMatrix`
+// (w=0 ⇒ translation stripped), then sample equirect/cube from
+// that world direction. Freecam → setCameraLookAt →
+// setMainCameraLookAtPerspective → frame.view is live; Skybox now
+// consumes it via bgfx builtins.
 static constexpr const char* kSkyboxCacheKey =
-    "skybox_v2_vec4_skykind";
+    "skybox_v3_cam_invview_dir";
 
 // §P5.5 D (2026-07-23) — Bug fix #3 (mirror
 // LightingPass.cpp:69-72). Externalize the cache-key string for
@@ -114,31 +112,15 @@ constexpr uint16_t kSkyboxFullscreenIndices[3] = { 0, 1, 2 };
 //                   cubeHandleValid`. Default 0 ⇒ equirect
 //                   path (A-ship byte-equivalent).
 //
-// Math (skyKind=0, equirect panorama blit — §Skybox0 A):
-//   uv = vec2(vUv.x, 1.0 - vUv.y)   // Y-flip for RT vs backbuffer
-//   skyColor = sample(skyEquirect, uv).xyz * skyMix.x
+// Math (both kinds — §Skybox-cam 2026-07-23):
+//   ndc     = vUv * 2 - 1                         (pre Y-flip clip)
+//   viewH   = inverseProjectionMatrix * (ndc,1,1)
+//   viewDir = normalize(viewH.xyz)
+//   worldD  = normalize((inverseViewMatrix * (viewDir, 0)).xyz)
+//   Equirect: lon=atan(x,z), lat=asin(y) → UV
+//   CubeMap : sample(skyCube, worldD)
 //
-// Math (skyKind=1, per-pixel lat/long → 3D dir + cube sample —
-// §P5.5 D):
-//   ndcXY = vec2(baseUv.x*2-1, baseUv.y*2-1)        // -1..1 NDC
-//   dir   = normalize(vec3(ndcXY.x, -ndcXY.y, -1))  // OpenGL
-//                                                    // cubemap
-//                                                    // convention
-//   skyColor = sample(skyCube, dir).xyz * skyMix.x
-//
-// Final color = mix(equirectColor, cubeColor, skyKind). One
-// `sample` lookup per kind per fragment; the FS evaluates both
-// branches unconditionally but `mix` selects exactly one
-// contribution per pixel (Phoskia `let` evaluation is eager, so
-// both `sample()` calls run — this is a small GPU waste for the
-// unused branch but keeps the FS simple; future cut can branch
-// with `step`/Phoskia `if` if profile shows it matters).
-//
-// The `let` chain uses the same surface as the B4b GBufferFill /
-// B5 Lighting source (verified at PR-F2/PR-F3/B5 ship) — `let`
-// declarations + arithmetic + sample() texture lookups. No MRT,
-// no bone palettes, no shadow compare — falls back to the
-// legacy `return → gl_FragColor` path.
+// Final color = mix(equirectColor, cubeColor, skyKind).
 constexpr const char* kSkyboxPhoskiaSource = R"(
 material Skybox {
     texture2d skyEquirect
@@ -152,15 +134,16 @@ material Skybox {
     }
     fragment {
         in vUv : texcoord
-        let baseUv = vec2(vUv.x, 1.0 - vUv.y)
-        // §Skybox0 equirect path (skyKind.x=0).
-        let equirectColor = sample(skyEquirect, baseUv).xyz * skyMix.x
-        // §P5.5 D cube path (skyKind.x=1). Per-pixel lat/long → dir
-        // for the fullscreen triangle (cheap backdrop style —
-        // no new mesh, mirror equirect's no-new-mesh rule).
-        let ndcXY = vec2(baseUv.x * 2.0 - 1.0, baseUv.y * 2.0 - 1.0)
-        let dir3 = normalize(vec3(ndcXY.x, -ndcXY.y, -1.0))
-        let cubeColor = sample(skyCube, dir3).xyz * skyMix.x
+        let ndcXY = vec2(vUv.x * 2.0 - 1.0, vUv.y * 2.0 - 1.0)
+        let viewH = inverseProjectionMatrix * vec4(ndcXY.x, ndcXY.y, 1.0, 1.0)
+        let viewDir = normalize(viewH.xyz)
+        let worldH = inverseViewMatrix * vec4(viewDir.x, viewDir.y, viewDir.z, 0.0)
+        let worldDir = normalize(worldH.xyz)
+        let lon = atan2(worldDir.x, worldDir.z)
+        let lat = asin(clamp(worldDir.y, -1.0, 1.0))
+        let equirectUv = vec2(lon * 0.15915494309 + 0.5, lat * 0.31830988618 + 0.5)
+        let equirectColor = sample(skyEquirect, equirectUv).xyz * skyMix.x
+        let cubeColor = sample(skyCube, worldDir).xyz * skyMix.x
         let skyColor = mix(equirectColor, cubeColor, skyKind.x)
         return vec4(skyColor, 1.0)
     }

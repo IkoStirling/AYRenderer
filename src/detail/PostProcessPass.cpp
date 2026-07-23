@@ -90,15 +90,13 @@ material PostProcess {
         // #3 branchless).
         let hazeSample = sample(hazeTexture, uv)
         let raw = sampled.xyz * exposure.x
-        // §S4c K3 invariant #3 — branchless strength gate. When the
-        // haze slot is unbound (custom desc omits DepthHaze) OR
-        // hazeStrength<=0, the gate collapses to
-        // `raw * (1 - 0) + fogColor * 0 = raw`. Mirrors §S1c
-        // bloomStrength branchless collapse.
-        let strengthGate = step(0.0, hazeStrength.x)
-        let fogFactor = 1.0 - exp(-hazeDensity.x * max(hazeSample.w, 0.0))
-        let gatedFactor = fogFactor * strengthGate * min(hazeStrength.x, 1.0)
-        let rawHaze = mix(raw, hazeColor.xyz, gatedFactor)
+        // §S4c fix (2026-07-23) — DepthHazePass already wrote the
+        // exponential fog mix into hazeSample.rgb. Final PP must NOT
+        // re-derive fog from alpha (raw.w was never a distance proxy).
+        // Prefer the pre-hazed color when hazeStrength > 0; when the
+        // haze slot falls back to sceneColor the mix is a no-op.
+        let hazeWeight = step(0.0001, hazeStrength.x)
+        let rawHaze = mix(raw, hazeSample.xyz * exposure.x, hazeWeight)
         let withBloom = rawHaze + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
@@ -123,7 +121,7 @@ material PostProcess {
 }
 )";
 
-constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v4_bloom_haze_composite_fs";
+constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v5_prehazed_bloom_fs";
 
 // Fallback if primary program fails to acquire — same tonemap+gamma
 // contract so Editor composite does not go black / linear-washed.
@@ -162,15 +160,13 @@ material PostProcessBlit {
         // #3 branchless).
         let hazeSample = sample(hazeTexture, uv)
         let raw = sampled.xyz * exposure.x
-        // §S4c K3 invariant #3 — branchless strength gate. When the
-        // haze slot is unbound (custom desc omits DepthHaze) OR
-        // hazeStrength<=0, the gate collapses to
-        // `raw * (1 - 0) + fogColor * 0 = raw`. Mirrors §S1c
-        // bloomStrength branchless collapse.
-        let strengthGate = step(0.0, hazeStrength.x)
-        let fogFactor = 1.0 - exp(-hazeDensity.x * max(hazeSample.w, 0.0))
-        let gatedFactor = fogFactor * strengthGate * min(hazeStrength.x, 1.0)
-        let rawHaze = mix(raw, hazeColor.xyz, gatedFactor)
+        // §S4c fix (2026-07-23) — DepthHazePass already wrote the
+        // exponential fog mix into hazeSample.rgb. Final PP must NOT
+        // re-derive fog from alpha (raw.w was never a distance proxy).
+        // Prefer the pre-hazed color when hazeStrength > 0; when the
+        // haze slot falls back to sceneColor the mix is a no-op.
+        let hazeWeight = step(0.0001, hazeStrength.x)
+        let rawHaze = mix(raw, hazeSample.xyz * exposure.x, hazeWeight)
         let withBloom = rawHaze + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
@@ -194,7 +190,7 @@ material PostProcessBlit {
     }
 }
 )";
-constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v4_bloom_haze_composite_fs";
+constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v5_prehazed_bloom_fs";
 
 } // namespace
 
@@ -221,8 +217,8 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     const FrameContext& frame = ctx.frame;
     // Own blit view — must not reuse the scene view id (would clobber
     // scene FBO binding + camera VP for every FO submit that frame).
-    // After BloomExtract=10 / BlurH=11 / BlurV=12; before UI=255.
-    // Forward + Deferred share kBlitViewId (only one path per frame).
+    // After BloomExtract=10 / BlurH=11 / BlurV=12 / DepthHaze=13;
+    // before UI=255. Forward + Deferred share kBlitViewId.
     const uint8_t viewId = kBlitViewId;
     const uint16_t viewportWidth  = ctx.viewportWidth;
     const uint16_t viewportHeight = ctx.viewportHeight;

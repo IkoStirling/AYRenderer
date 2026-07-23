@@ -277,6 +277,21 @@ public:
     };
     void setPostProcessTonemapMode(TonemapMode mode);
 
+    // §S4d — Depth-aware haze knobs → FrameContext each frame.
+    // Renderer defaults: enabled=false, strength=0 (K3 zero-behavior).
+    // Editor may enable with density≈0.04 and fogColor≈(0.7,0.75,0.8).
+    // Pass early-returns (no FBO) when !enabled OR strength<=0.
+    void setDepthHazeEnabled(bool enabled);
+    bool depthHazeEnabled() const noexcept;
+    void setDepthHazeStrength(float strength);
+    float depthHazeStrength() const noexcept;
+    void setDepthHazeDensity(float density);
+    float depthHazeDensity() const noexcept;
+    void setDepthHazeColor(const ayt::math::FVector3& color);
+    ayt::math::FVector3 depthHazeColor() const noexcept;
+    // Convenience: density + fog color (does not change enabled/strength).
+    void setDepthHazeParams(float density, const ayt::math::FVector3& fogColor);
+
     // Rebuild the RenderPipeline from an ordered pass-slot list.
     // Default ctor builds makeDefault() which mounts Shadow at slot 0
     // *enabled* (E5 §5.4, 2026-07-22). To opt out, pass a custom desc

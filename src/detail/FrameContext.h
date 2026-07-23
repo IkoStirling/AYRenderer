@@ -66,15 +66,10 @@ struct FrameContext {
     //      pre-S4 renders.
     //   2. hazeEnabled == true ⇒ DepthHazePass ensureFbo at
     //      (W+1)/2 × (H+1)/2 (mirror BloomExtractPass) + Phoskia
-    //      exponential fog blit on view 14 (S4a view-id lock).
-    //   3. depth source — currently opaque (Deferred reads GBuffer
-    //      RT2 via ctx.gbufferPass->gbufferMotionRt() which today
-    //      stores worldPos-encoded motion vectors per §P5 B4c; the
-    //      fallback "no motion available" worldPos is the camera
-    //      position itself, so the exponential collapse to `raw *
-    //      (1 - exp(0)) = raw * 0 = 0` is the S4b safe default
-    //      — see DepthHazePass::execute for the per-source
-    //      decision tree).
+    //      exponential fog blit on view 13 (before Final PP=14).
+    //   3. depth source — Deferred samples GBuffer RT2 worldPos via
+    //      ctx.gbufferPass->gbufferMotionRt(); Forward / missing
+    //      gbuffer ⇒ DepthHazePass returns 0 (safe no-haze).
     //
     // Default = haze OFF (hazeEnabled=false, hazeStrength=0) so
     // FrameContext's brace-init default keeps the pre-S4 byte-

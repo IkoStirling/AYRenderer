@@ -1,6 +1,6 @@
 // §S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — DepthHazePass
 // real-implementation test. Pins the S4b SHIP — exponential fog
-// shader (主人拍板 B) + half-res RGBA8 FBO + view 14 + K3
+// shader (主人拍板 B) + half-res RGBA8 FBO + view 13 + K3
 // invariants — without touching the PostProcessPass haze sampler
 // wire (that lands in §S4c).
 //
@@ -19,7 +19,7 @@
 //   5) K3 invariant #3 — PassExecContext default-init keeps
 //      depthHazePass == nullptr. C++14 trailing-default behavior
 //      preserves all existing 22-/23-field brace-init test sites.
-//   6) View-id lock — kDepthHazeViewId == 14 (cutsheet §S4 lock).
+//   6) View-id lock — kDepthHazeViewId == 13 (before Final PP=14).
 //   7) Cache-key extern — kDepthHazeCacheKeyCStr is addressable and
 //      matches the mirror literal (Bug fix #3 mirror — guards
 //      against the pre-S4 `.cpp` static self-compare trap).
@@ -81,7 +81,7 @@ TEST_SUITE(AYRenderer_DepthHazePass_S4b)
 TEST_CASE(s4b_depth_haze_view_id_lock_is_14) {
     // Append-only view-id allocation; cutsheet §S4 lock:
     //   BloomBlurV=13 → DepthHaze=14 → UI=255.
-    CHECK(DepthHazePass::kDepthHazeViewId == 14u);
+    CHECK(DepthHazePass::kDepthHazeViewId == 13u);
 }
 
 TEST_CASE(s4b_render_pass_slot_depth_haze_is_10) {
@@ -100,7 +100,7 @@ TEST_CASE(s4b_depth_haze_cache_key_extern_addressable) {
     // DepthHazePass.h must bind to the file-scope literal in
     // DepthHazePass.cpp. Drift between the two is now a compile-time
     // link error instead of a runtime self-compare.
-    const char* const mirror = "depthhaze_v1_exp_fog_fs";
+    const char* const mirror = "depthhaze_v2_worldpos_campos";
     CHECK(std::string(ayt::render::detail::kDepthHazeCacheKeyCStr)
           == std::string(mirror));
 }
@@ -333,11 +333,9 @@ TEST_CASE(s4b_k3_invariants_documented) {
     //                  (1 - 0) = raw` (byte-equivalent to
     //                  hazeEnabled=false). Mirror §S1c
     //                  bloomBlurPass==nullptr invariant.
-    // K3 invariant #4: dist proxy = luminance of worldPosOrDepth
-    //                  sampler (S4b simplification); bounded [0, 1]
-    //                  so exp(-density * dist) is well-defined.
-    //                  S4d swaps the second sampler for proper
-    //                  GBuffer RT2 / FS-recon attachment.
+    // K3 invariant #4: Deferred dist = length(GBuffer RT2 worldPos
+    //                  - camPos); Forward / no gbufferMotionRt ⇒
+    //                  execute returns 0 (safe no-haze).
     // K3 invariant #5: ABI: append-only — RenderPassSlot::DepthHaze
     //                  = 10; view id 14 reserved; no existing
     //                  enum / view-id value reorders.

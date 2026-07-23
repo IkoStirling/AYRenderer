@@ -21,8 +21,7 @@
 //   8) PassExecContext default-init keeps depthHazePass == nullptr
 //      — trailing-default behavior (C++14). All existing 20-/21-/22-/
 //      23-field brace-init test sites stay compiling without edits.
-//   9) kDepthHazeViewId == 14 — append-only view id; S4b will draw
-//      on this view.
+//   9) kDepthHazeViewId == 13 — before Final PP=14 so same-frame sample.
 //  10) destroyResources idempotent — called twice + on uninitialized
 //      adapter, no crash, no log noise. Mirror BloomExtractPass /
 //      PostProcessPass.
@@ -88,7 +87,7 @@ TEST_CASE(s4a_depth_haze_pass_name_is_depth_haze) {
 TEST_CASE(s4a_depth_haze_view_id_lock_is_14) {
     // Append-only view-id allocation; cutsheet §0.14 lock:
     //   BloomBlurV=13 → DepthHaze=14 → UI=255.
-    CHECK(DepthHazePass::kDepthHazeViewId == 14u);
+    CHECK(DepthHazePass::kDepthHazeViewId == 13u);
 }
 
 TEST_CASE(s4a_render_pass_slot_depth_haze_is_10) {

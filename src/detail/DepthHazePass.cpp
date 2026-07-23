@@ -2,6 +2,7 @@
 
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
+#include "detail/GBufferPass.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
@@ -48,28 +49,24 @@ constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 //                          composite contract for BloomExtract /
 //                          PostProcessPass layered blits).
 //
-// dist = max(raw.b, 0) — S4b simplification: S4a/§S4 决策
-// "Forward 用 FS 重建 fallback,Deferred 用 GBuffer RT2 worldPos" is
-// punted to §S4d once proper worldPos reconstruction is in scope;
-// today we read sceneColor.b as a cheap luminance-encoded distance
-// proxy so the pass can ship without growing the sampler chain.
-// §S4b K3 invariant #4: the dist proxy is bounded [0, 1] (raw.b is
-// the BT.709 luminance already in the [0, 1] RT0 range), so
-// `exp(-density * 0) = 1` and `exp(-density * 1) ≈ 0` for
-// density > 5, which collapses the fog to a 0..1 fade without
-// blowing up the exp. Result is byte-equivalent to a no-op when
-// density is 0 OR raw.b is 0 (both ⇒ exp(0) = 1 ⇒ fogFactor = 0).
+// dist = length(worldPos.xyz - camPos.xyz) — §S4 决策:
+//   Deferred: sample GBuffer RT2 (gbufferMotionRt, RGBA16F worldPos)
+//   Forward (no gbuffer): safe no-haze (execute early-returns 0).
+//   FS depth reconstruct is intentionally NOT used here — the D3D
+//   invVP reconstruct path already failed once in Lighting (B5.5)
+//   and is why RT2 stores raw worldPos. Keep Forward at no-haze
+//   rather than re-introduce that failure mode.
 //
 // Uniform gates (cutsheet lessons §3.1): all scalars as `uniform vec4`
-// with .x carry — bgfx Vec4 upload ABI. hazeColor carries .xyz; pad
-// .w with 0. UV.y flipped for D3D RT vs backbuffer convention (mirror
-// BloomExtractPass / BloomBlurPass FS).
+// with .x carry — bgfx Vec4 upload ABI. hazeColor / camPos carry
+// .xyz; pad .w with 0. UV.y flipped for D3D RT vs backbuffer
+// convention (mirror BloomExtractPass / BloomBlurPass FS).
 //
 // Branchless: converter drops if/for. fogFactor strength gating is a
-// single `mix(0, fogFactor, step(0.0, strength))` so a hazeStrength
-// of 0 keeps the composite at `rawRgb * (1 - 0) = rawRgb` (mirror
-// §S1c bloomStrength branchless collapse — PostProcessPass S4c
-// sampler wire relies on this when depthHazePass is null).
+// single `step(0.0, strength)` so a hazeStrength of 0 keeps the
+// composite at `rawRgb` (mirror §S1c bloomStrength branchless
+// collapse — PostProcessPass S4c sampler wire relies on this when
+// depthHazePass is null).
 constexpr const char* kDepthHazePhoskiaSource = R"(
 material DepthHaze {
     texture2d sceneColor
@@ -77,6 +74,7 @@ material DepthHaze {
     uniform vec4 hazeDensity
     uniform vec4 hazeStrength
     uniform vec4 hazeColor
+    uniform vec4 camPos
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -86,15 +84,9 @@ material DepthHaze {
         in  vUv : texcoord
         let uv = vec2(vUv.x, 1.0 - vUv.y)
         let raw = sample(sceneColor, uv)
-        let depthProxy = sample(worldPosOrDepth, uv)
-        // S4b simplification: dist proxy = luminance of the depth
-        // source. S4d will swap this for a proper worldPos / depth
-        // attachment sample. Bounded [0, 1] so exp(-density * dist)
-        // is well-defined for all density >= 0.
-        let dist = max(depthProxy.b, 0.0)
+        let worldPos = sample(worldPosOrDepth, uv).xyz
+        let dist = length(worldPos - camPos.xyz)
         let fogFactor = 1.0 - exp(-hazeDensity.x * dist)
-        // Branchless strength gate — hazeStrength.x <= 0 ⇒ mix
-        // weight collapses to 0 ⇒ output == raw (K3 invariant #1).
         let gated = fogFactor * step(0.0, hazeStrength.x)
         let mixed = mix(raw.xyz, hazeColor.xyz, gated * min(hazeStrength.x, 1.0))
         return vec4(mixed, raw.w)
@@ -102,9 +94,8 @@ material DepthHaze {
 }
 )";
 
-// §S4b — cache-key bump forces re-acquire after shader fix. v1 ships
-// exponential fog + depth-proxy + hazeColor. Future cuts bump to v2+
-constexpr const char* kDepthHazeCacheKey = "depthhaze_v1_exp_fog_fs";
+// Cache-key bump: v1 luminance-proxy → v2 real worldPos + camPos.
+constexpr const char* kDepthHazeCacheKey = "depthhaze_v2_worldpos_campos";
 
 } // namespace
 
@@ -185,6 +176,17 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
         return 0;
     }
 
+    // Deferred: GBuffer RT2 (gbufferMotionRt) holds RGBA16F worldPos.
+    // Forward / no-gbuffer: safe no-haze BEFORE ensureFbo so we do
+    // not allocate a half-res RT we will never sample (K3 #2 spirit).
+    bgfx::TextureHandle worldPosRt = BGFX_INVALID_HANDLE;
+    if (ctx.gbufferPass != nullptr) {
+        worldPosRt = ctx.gbufferPass->gbufferMotionRt();
+    }
+    if (!BGFXAdapter::isValid(worldPosRt)) {
+        return 0;
+    }
+
     // Half-resolution size — (W+1)/2 rounds UP so we never sample
     // outside [0, W) on the source texture. Mirror conventional
     // half-res chain math (S1 cutsheet §S1 "ensure(w/2, h/2)").
@@ -206,6 +208,7 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
         && _uHazeDensity      != ayt::shader::InvalidBinding
         && _uHazeStrength     != ayt::shader::InvalidBinding
         && _uHazeColor        != ayt::shader::InvalidBinding
+        && _uCamPos           != ayt::shader::InvalidBinding
         && _tSceneColor       != ayt::shader::InvalidBinding
         && _tWorldPosOrDepth  != ayt::shader::InvalidBinding;
     if (!programReady) {
@@ -234,8 +237,10 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
 
     const ayt::shader::TextureHandle texHandle =
         ayt::render::detail::toShaderTexture(fboColor);
+    const ayt::shader::TextureHandle worldPosHandle =
+        ayt::render::detail::toShaderTexture(worldPosRt);
 
-    // bgfx Vec4 slots — pad scalars into .x, fog color into .xyz
+    // bgfx Vec4 slots — pad scalars into .x, fog color / cam into .xyz
     // (lessons §3.1). strength clamp at upload time prevents any host
     // accident (e.g. setDepthHazeStrength(2.0)) from over-driving
     // the fog beyond a full fade-to-color.
@@ -243,28 +248,25 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
     const float strengthPad[4] = {frame.hazeStrength, 0.0f, 0.0f, 0.0f};
     const float colorPad[4]    = {
         frame.hazeColor.x, frame.hazeColor.y, frame.hazeColor.z, 0.0f};
+    const float camPosPad[4]   = {
+        frame.cameraPosition.x, frame.cameraPosition.y,
+        frame.cameraPosition.z, 0.0f};
 
     adapter.setTransformIdentity();
     adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
     adapter.setIndexBuffer(_fullscreenIB, 0, 3);
-    // §S4b — both samplers bind to the SAME sceneColor handle.
-    // S4d will swap the second slot for a proper depth / worldPos
-    // attachment (cutsheet §S4 决策 "Deferred 采 GBuffer RT2 worldPos
-    // + Forward FS 重建 fallback"). Today we use the same RT for
-    // both texture slots so the Phoskia source compiles + links
-    // without leaving a sampler unit unbound (which would
-    // otherwise emit GLSL "sampler not set" warnings on the
-    // backend). Net result: the dist proxy == raw.b luminance, and
-    // the exponential collapse to raw is correct for the S4b
-    // simplification (the FS hazeColor mix factor becomes
-    // `1 - exp(-density * raw.b) * strength`, which is a
-    // luminance-keyed fade — visually similar enough to depth
-    // fog for the S4b ship).
-    _program.setTexture(0, _tSceneColor,      texHandle);
-    _program.setTexture(0, _tWorldPosOrDepth, texHandle);
+    {
+        const uint8_t stageColor =
+            _program.getTextureStage(_tSceneColor);
+        const uint8_t stageWorld =
+            _program.getTextureStage(_tWorldPosOrDepth);
+        _program.setTexture(stageColor, _tSceneColor,      texHandle);
+        _program.setTexture(stageWorld, _tWorldPosOrDepth, worldPosHandle);
+    }
     _program.setUniform(_uHazeDensity,  densityPad,  sizeof(densityPad));
     _program.setUniform(_uHazeStrength, strengthPad, sizeof(strengthPad));
     _program.setUniform(_uHazeColor,    colorPad,    sizeof(colorPad));
+    _program.setUniform(_uCamPos,       camPosPad,   sizeof(camPosPad));
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
@@ -380,6 +382,7 @@ void DepthHazePass::ensureProgram(shader::ShaderResourcePool& pool)
     _uHazeDensity     = _program.getUniformBinding("hazeDensity");
     _uHazeStrength    = _program.getUniformBinding("hazeStrength");
     _uHazeColor       = _program.getUniformBinding("hazeColor");
+    _uCamPos          = _program.getUniformBinding("camPos");
     _tSceneColor      = _program.getTextureBinding("sceneColor");
     _tWorldPosOrDepth = _program.getTextureBinding("worldPosOrDepth");
 }
@@ -407,6 +410,7 @@ void DepthHazePass::destroyResources(BGFXAdapter& adapter)
     _uHazeDensity     = ayt::shader::InvalidBinding;
     _uHazeStrength    = ayt::shader::InvalidBinding;
     _uHazeColor       = ayt::shader::InvalidBinding;
+    _uCamPos          = ayt::shader::InvalidBinding;
     _tSceneColor      = ayt::shader::InvalidBinding;
     _tWorldPosOrDepth = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;

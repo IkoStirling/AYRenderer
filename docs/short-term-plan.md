@@ -132,14 +132,14 @@ Shadow → [Skybox → GBuffer → Lighting → Transparent]
 | 子刀 | 内容 | 验收 |
 |------|------|------|
 | S4a | `DepthHazePass` 空壳 + `PassExecContext::depthHazePass` borrowed ptr（mirror `bloomExtractPass`）+ `RenderPassSlot::DepthHaze=10` append-only ABI | 编译过,单测 Noop 不崩 |
-| S4b | `DepthHazePass` 真做：half-res FBO,Deferred 采 worldPos / Forward FS 重建,指数雾公式,view 14（紧接 BloomBlur 的 12/13） | log `[DepthHazePass] haze ok view=14 ...` |
+| S4b | `DepthHazePass` 真做：half-res FBO,Deferred 采 worldPos,指数雾公式,**view 13**（BlurV=12 → Haze=13 → PP=14；Haze 必须先于 Final 同帧采样） | log `[DepthHazePass] ... view=13 ...` |
 | S4c | PostProcessPass 加第三 sampler `hazeTexture`,合成 `finalRaw = mix(raw, fogColor, fogFactor)` + bloom 独立相加;K3 守 | log `[PostProcessPass] ... hazeSrc=...` |
-| S4d | Editor `setDepthHazeEnabled(true)` + `setDepthHazeParams(density=0.04, fogColor=(0.7,0.75,0.8))` 默认略开（**可选,可只留 API,默认关**） | 肉眼可辨远处雾;可关;**关 = 与今日字节一致** |
+| S4d | Editor 默认略开 Depth Haze（API + Render 面板） | ✅ 2026-07-23 |
 
 #### 实现约束
 
 - FBO 生命周期：`ensure(w/2,h/2)` 跟 viewport resize,**只在 enabled=true 时 ensure**
-- viewId：紧挨 BloomBlur（12 横 / 13 纵）,S4b 用 14
+- viewId：BlurV=12 → **DepthHaze=13** → **PostProcess=14** → UI=255（Haze 必须小于 Final，bgfx 按 view id 升序）
 - 一律 `uniform vec4` + cache key bump
 - hazeStrength 默认 0（host 0 行为变化）
 - 雾色 `uniform vec4`(.xyz = RGB,.w 备用)
