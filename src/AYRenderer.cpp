@@ -4,6 +4,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/BloomExtractPass.h"
+#include "detail/BloomBlurPass.h"
 #include "detail/DebugOverlay.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/GBufferPass.h"
@@ -57,6 +58,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::ForwardOpaque,
         RenderPassSlot::Transparent,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
+        RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
         RenderPassSlot::UI,
     }};
@@ -98,6 +100,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::Lighting,
         RenderPassSlot::Transparent,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
+        RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
         RenderPassSlot::UI,
     }, RenderPath::Deferred};
@@ -153,6 +156,15 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
     // zeros — visually identical to pre-S1 renders.
     case RenderPassSlot::BloomExtract:
         return std::make_unique<detail::BloomExtractPass>();
+    // S1b (2026-07-23, short-term-plan §S1 sub-cut 2) — half-
+    // resolution separable-Gaussian blur ping-pong. Default-
+    // enabled in both Forward and Deferred pipelines. Views 12
+    // (horizontal) + 13 (vertical) claim. K2 invariant #1: when
+    // ctx.bloomExtractPass is absent (custom desc omits Extract)
+    // or producer FBO is invalid, the pass early-returns 0 —
+    // visually identical to pre-S1 renders.
+    case RenderPassSlot::BloomBlur:
+        return std::make_unique<detail::BloomBlurPass>();
     }
     return nullptr;
 }
@@ -423,6 +435,19 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     if (detail::RenderPass* bloomExtractPass = pipeline.findPass("BloomExtract")) {
         if (adapter.isInitialized()) {
             static_cast<detail::BloomExtractPass*>(bloomExtractPass)->destroyResources(adapter);
+        }
+    }
+
+    // S1b (2026-07-23, short-term-plan §S1 sub-cut 2) —
+    // BloomBlurPass destroyResources mirror (mirror
+    // BloomExtractPass destroy block above). BloomBlurPass owns
+    // two half-resolution RGBA8 ping-pong FBOs (no depth) +
+    // fullscreen-triangle VB/IB + Phoskia blur program; all four
+    // must be released BEFORE pipeline.clear() for the same
+    // handle-rotation reason.
+    if (detail::RenderPass* bloomBlurPass = pipeline.findPass("BloomBlur")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::BloomBlurPass*>(bloomBlurPass)->destroyResources(adapter);
         }
     }
 
@@ -767,6 +792,21 @@ void Renderer::render(const RenderScene& scene)
         skyboxPassPtr = static_cast<const detail::SkyboxPass*>(skyboxSlot);
     }
 
+    // §S1b BloomBlur (2026-07-23) — borrowed pointer to the
+    // BloomExtractPass in the pipeline. nullptr when the host
+    // built a custom desc that omitted the BloomExtract slot
+    // (cutsheet §S1 "omit slot = opt out"). BloomBlurPass reads
+    // the producer's half-res FBO through this pointer; absent
+    // ⇒ BloomBlurPass early-returns 0 (visually identical to
+    // bloomStrength=0 default). Mirrors the skyboxPassPtr /
+    // lightingPassPtr / gbufferPassPtr / shadowPassPtr shape
+    // (lifetime contract: pointer must remain valid for the
+    // duration of pipeline::executeAll(ctx)).
+    const detail::BloomExtractPass* bloomExtractPassPtr = nullptr;
+    if (detail::RenderPass* bloomExtractSlot = _impl->pipeline.findPass("BloomExtract")) {
+        bloomExtractPassPtr = static_cast<const detail::BloomExtractPass*>(bloomExtractSlot);
+    }
+
     // §P5.5 C (2026-07-23) — wire the per-frame SceneLights ref
     // into ShadowPass so its multi-caster loop can read
     // `lights[i].castShadow` and build the per-slot LVP matrices.
@@ -832,6 +872,12 @@ void Renderer::render(const RenderScene& scene)
         // perLightShadowCount=0 upload ⇒ byte-equivalent pre-C
         // key-only shadow multiply on lights[0].
         _impl->sceneLights,
+        // §S1b BloomBlur (2026-07-23) — borrowed pointer to the
+        // BloomExtractPass in the pipeline. BloomBlurPass reads
+        // the producer's half-res FBO through this ptr; nullptr
+        // ⇒ BloomBlurPass early-returns 0 (no source to blur =
+        // visually identical to bloomStrength=0 default).
+        bloomExtractPassPtr,
     };
 
     static uint32_t s_compositeLog = 0;
@@ -921,6 +967,26 @@ void Renderer::resize(uint32_t width, uint32_t height)
     if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
         static_cast<detail::ShadowPass*>(shadowPass)
             ->destroyResources(_impl->adapter);
+    }
+    // §S1a (2026-07-23) — BloomExtractPass destroyResources mirror
+    // (mirror Shadow destroy block above). bgfx::reset (triggered
+    // by resize) drops view attachments, so the half-res FBO must
+    // rebuild on next execute().
+    if (detail::RenderPass* bloomExtractPass = _impl->pipeline.findPass("BloomExtract")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::BloomExtractPass*>(bloomExtractPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+    // §S1b (2026-07-23) — BloomBlurPass destroyResources mirror
+    // (mirror BloomExtractPass destroy block above). Both ping-
+    // pong FBOs must release before bgfx::reset invalidates the
+    // attachments.
+    if (detail::RenderPass* bloomBlurPass = _impl->pipeline.findPass("BloomBlur")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::BloomBlurPass*>(bloomBlurPass)
+                ->destroyResources(_impl->adapter);
+        }
     }
 
     _impl->initDesc.width  = width;
@@ -1353,6 +1419,25 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
         if (detail::RenderPass* lightingPass = _impl->pipeline.findPass("Lighting")) {
             if (_impl->adapter.isInitialized()) {
                 static_cast<detail::LightingPass*>(lightingPass)
+                    ->destroyResources(_impl->adapter);
+            }
+        }
+        // §S1a (2026-07-23) — BloomExtractPass destroyResources
+        // mirror. bgfx::reset (triggered by MSAA change at the
+        // `before != new` branch) drops view attachments, so the
+        // half-res FBO must rebuild on next execute().
+        if (detail::RenderPass* bloomExtractPass = _impl->pipeline.findPass("BloomExtract")) {
+            if (_impl->adapter.isInitialized()) {
+                static_cast<detail::BloomExtractPass*>(bloomExtractPass)
+                    ->destroyResources(_impl->adapter);
+            }
+        }
+        // §S1b (2026-07-23) — BloomBlurPass destroyResources
+        // mirror. Both ping-pong FBOs must release before
+        // bgfx::reset invalidates the attachments.
+        if (detail::RenderPass* bloomBlurPass = _impl->pipeline.findPass("BloomBlur")) {
+            if (_impl->adapter.isInitialized()) {
+                static_cast<detail::BloomBlurPass*>(bloomBlurPass)
                     ->destroyResources(_impl->adapter);
             }
         }

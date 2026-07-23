@@ -218,36 +218,44 @@ TEST_CASE(s1a_make_default_includes_bloomextract_after_transparent) {
     // PostProcess in the dispatch order. The literal `passes{}`
     // list dictates order — BloomExtract must appear at index 3
     // (after Shadow=0, ForwardOpaque=1, Transparent=2, before
-    // PostProcess=4).
+    // PostProcess). S1b (2026-07-23) appended BloomBlur between
+    // BloomExtract and PostProcess — slot index shifts for
+    // PostProcess/UI by +1, but BloomExtract stays at index 3.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 6);
+    CHECK(desc.passes.size() == 7);   // S1b (2026-07-23): +1 BloomBlur
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::Transparent);
     CHECK(desc.passes[3] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[4] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[5] == RenderPassSlot::UI);
+    CHECK(desc.passes[4] == RenderPassSlot::BloomBlur);      // S1b (2026-07-23)
+    CHECK(desc.passes[5] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[6] == RenderPassSlot::UI);
     // contains() helper round-trip
     CHECK(desc.contains(RenderPassSlot::BloomExtract));
+    CHECK(desc.contains(RenderPassSlot::BloomBlur));          // S1b (2026-07-23)
 }
 
 TEST_CASE(s1a_make_deferred_includes_bloomextract_after_transparent) {
     // The Deferred path also gets BloomExtract at the same
     // dispatch position (between Transparent and PostProcess). On
     // Deferred, BloomExtract samples ctx.lightingPass->lightingOutputFbo()
-    // (the B5 LIT color) instead of ctx.sceneFbo.
+    // (the B5 LIT color) instead of ctx.sceneFbo. S1b appended
+    // BloomBlur between BloomExtract and PostProcess — slot
+    // index shifts for PostProcess/UI by +1, but BloomExtract
+    // stays at index 5.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 8);
+    CHECK(desc.passes.size() == 9);   // S1b (2026-07-23): +1 BloomBlur
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
     CHECK(desc.passes[3] == RenderPassSlot::Lighting);
     CHECK(desc.passes[4] == RenderPassSlot::Transparent);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[6] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[7] == RenderPassSlot::UI);
+    CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);      // S1b (2026-07-23)
+    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[8] == RenderPassSlot::UI);
 }
 
 // === C. Half-resolution size math =====================================

@@ -263,34 +263,40 @@ TEST_CASE(b3_full_deferred_pipeline_noop_dispatch_with_lighting_pointer_wired) {
     // without an isInitialized() guard — pre-existing FO bug,
     // orthogonal to B3.
 
-    // Part 1: Forward default — 6 slots (S1a 2026-07-23 added
-    // BloomExtract between Transparent and PostProcess), no GBuffer,
-    // no Lighting.
+    // Part 1: Forward default — 7 slots (S1a 2026-07-23 added
+    // BloomExtract between Transparent and PostProcess; S1b
+    // 2026-07-23 added BloomBlur between BloomExtract and
+    // PostProcess), no GBuffer, no Lighting.
     const RenderPipelineDesc def = RenderPipelineDesc::makeDefault();
     CHECK(def.path == RenderPath::Forward);
-    CHECK(def.passes.size() == 6u);
+    CHECK(def.passes.size() == 7u);
     CHECK(def.contains(RenderPassSlot::Shadow));
     CHECK(def.contains(RenderPassSlot::ForwardOpaque));
     CHECK(def.contains(RenderPassSlot::Transparent));
     CHECK(def.contains(RenderPassSlot::BloomExtract));   // S1a (2026-07-23)
+    CHECK(def.contains(RenderPassSlot::BloomBlur));      // S1b (2026-07-23)
     CHECK(def.contains(RenderPassSlot::PostProcess));
     CHECK(def.contains(RenderPassSlot::UI));
     CHECK(!def.contains(RenderPassSlot::GBuffer));   // B3: not in Forward
     CHECK(!def.contains(RenderPassSlot::Lighting));  // B3: not in Forward
     CHECK(!def.contains(RenderPassSlot::Skybox));    // §Skybox0: Skybox not in Forward
 
-    // Part 2: Deferred factory — 8 slots (§Skybox0 2026-07-23 added
+    // Part 2: Deferred factory — 9 slots (§Skybox0 2026-07-23 added
     // Skybox between Shadow and GBuffer; S1a 2026-07-23 added
-    // BloomExtract between Transparent and PostProcess). GBuffer +
-    // Lighting + Skybox added, ForwardOpaque OMITTED.
+    // BloomExtract between Transparent and PostProcess; S1b
+    // 2026-07-23 added BloomBlur between BloomExtract and
+    // PostProcess). GBuffer + Lighting + Skybox added,
+    // ForwardOpaque OMITTED.
     const RenderPipelineDesc deferred = RenderPipelineDesc::makeDeferred();
     CHECK(deferred.path == RenderPath::Deferred);
-    CHECK(deferred.passes.size() == 8u);
+    CHECK(deferred.passes.size() == 9u);
     CHECK(deferred.contains(RenderPassSlot::Shadow));
     CHECK(deferred.contains(RenderPassSlot::Skybox));    // §Skybox0: in Deferred
     CHECK(deferred.contains(RenderPassSlot::GBuffer));   // B3: in Deferred
     CHECK(deferred.contains(RenderPassSlot::Lighting));  // B3: in Deferred
     CHECK(deferred.contains(RenderPassSlot::Transparent));
+    CHECK(deferred.contains(RenderPassSlot::BloomExtract));   // S1a (2026-07-23)
+    CHECK(deferred.contains(RenderPassSlot::BloomBlur));      // S1b (2026-07-23)
     CHECK(deferred.contains(RenderPassSlot::PostProcess));
     CHECK(deferred.contains(RenderPassSlot::UI));
     CHECK(!deferred.contains(RenderPassSlot::ForwardOpaque)); // B3: OMIT per §4.1 red line #4

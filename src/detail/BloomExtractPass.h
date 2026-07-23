@@ -103,6 +103,16 @@ public:
     uint16_t halfWidth()  const noexcept { return _fboWidth;  }
     uint16_t halfHeight() const noexcept { return _fboHeight; }
 
+    // §S1b (2026-07-23) — consumer entry point. The downstream
+    // BloomBlurPass reads this FBO (its RT0 attachment is sampled
+    // as the blur source) and ping-pongs into two of its own
+    // halfW × halfH FBOs. Mirrors LightingPass::lightingOutputFbo()
+    // / SkyboxPass::skyFbo() / GBufferPass::gbufferFbo() producer-
+    // state pattern. Returns BGFX_INVALID_HANDLE when the FBO
+    // hasn't been ensured yet (first frame race; S1b gates on
+    // bgfx::isValid).
+    bgfx::FrameBufferHandle halfResFbo() const noexcept { return _fbo; }
+
     // Destructor-side release — call BEFORE pipeline.clear() /
     // adapter.shutdown(). Mirror PostProcessPass::destroyResources
     // contract. Idempotent (BGFXAdapter::destroy on invalid handle

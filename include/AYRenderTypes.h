@@ -201,6 +201,21 @@ enum class RenderPassSlot : uint8_t {
     // desc to disable the entire bloom chain (forward-compat for
     // S1b/S1c).
     BloomExtract,
+    // S1b BloomBlur (2026-07-23, short-term-plan §S1 sub-cut 2) —
+    // half-resolution separable-Gaussian blur ping-pong pass
+    // inserted AFTER BloomExtract on BOTH Forward + Deferred
+    // default pipelines. Views 12 (horizontal) + 13 (vertical)
+    // were the only contiguous pair of unused view ids before
+    // S1b (composite view table now: 0=FO, 1=ShadowC, 2=ShadowR,
+    // 3=Trans, 4=PP, 5=BloomExtract, 6=Skybox, 7=GBuffer,
+    // 8=Lighting, 9=Trans-deferred, 10=PP-deferred, 11=UI,
+    // 12=BloomBlurH, 13=BloomBlurV). When bloomStrength == 0
+    // (host default) the blur samples are zero ⇒ pre-S1
+    // zero-behavior-change (cutsheet §S1 K1 invariant #1
+    // propagated). Omit this slot to disable the blur while
+    // keeping extract (forward-compat for hosts that want only
+    // the bright-extract stage, e.g. for custom compositing).
+    BloomBlur,
 };
 
 // §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was

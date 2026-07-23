@@ -79,6 +79,16 @@ class LightingPass;
 // includes PassExecContext.h.
 class SkyboxPass;
 
+// §S1a BloomExtract (2026-07-23) — BloomExtractPass writes the
+// half-resolution bright-extract FBO. Forward decl mirrors the
+// SkyboxPass pattern so PassExecContext can carry the borrowed
+// pointer without dragging the full BloomExtractPass definition
+// into every TU that already includes PassExecContext.h. S1a
+// itself does NOT use this pointer (it reads upstream scene
+// color via PostProcessPass::selectSourceFbo per cutsheet §P5
+// B6 lock); S1b BloomBlurPass is the first consumer.
+class BloomExtractPass;
+
 
 
 struct PassExecContext {
@@ -290,6 +300,27 @@ struct PassExecContext {
     // Test_B7, Test_Skybox0, ...) keep compiling without edits
     // via C++14 trailing-default behavior.
     const ayt::render::SceneLights* perLightShadows = nullptr;
+
+    // §S1b BloomBlur (2026-07-23, short-term-plan §S1 sub-cut 2) —
+    // borrowed, non-owning pointer to the BloomExtractPass that
+    // produced the half-resolution bright FBO this frame. BloomBlurPass
+    // reads `ctx.bloomExtractPass->halfResFbo()` (RT0 of the bright
+    // extract) as its blur source and ping-pongs into two of its own
+    // halfW × halfH FBOs (horizontal pass → vertical pass). Mirrors
+    // the skyboxPass / lightingPass / gbufferPass / shadowPass
+    // borrowed-pointer pattern; lifetime contract: pointer must
+    // remain valid for the duration of pipeline::executeAll(ctx).
+    //
+    // Default-init = nullptr ⇒ BloomBlurPass early-returns 0 (no
+    // source FBO to read; visually identical to bloomStrength=0
+    // default — the BloomExtract slot in makeDefault() is optional
+    // from the host's perspective; custom desc that omits both
+    // BloomExtract and BloomBlur yields a zero-bloom pipeline).
+    // All existing 20-field brace-init test sites
+    // (Test_BloomExtract_S1a, Test_E4_DefaultShadow, Test_E5_DefaultShadow,
+    // Test_Skybox0, ...) keep compiling without edits via C++14
+    // trailing-default behavior.
+    const BloomExtractPass* bloomExtractPass = nullptr;
 };
 
 } // namespace ayt::render::detail
