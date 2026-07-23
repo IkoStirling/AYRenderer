@@ -34,6 +34,9 @@
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
 
+#include "AYRenderScene.h"
+#include "AYRenderTypes.h"
+
 #include <AYShaderResource.h>
 
 #include <bgfx/bgfx.h>
@@ -84,6 +87,49 @@ public:
     bgfx::TextureHandle     skyRt()    const noexcept { return _skyRt; }
     uint16_t                skyWidth()  const noexcept { return _skyW; }
     uint16_t                skyHeight() const noexcept { return _skyH; }
+
+    // §P5.5 D (2026-07-23) — host-uploaded cube map handle for IBL
+    // MVP. Lives on the SkyboxPass producer state (mirror shadowFbo
+    // / lightingFbo / gbufferAlbedoRt producer-state pattern — the
+    // cube is a producer resource owned by this pass). Renderer::
+    // setSkySourceCube(TextureHandle) forwards to setCubeTexture().
+    // Default = TextureHandle{} (invalid) = cube path inactive =
+    // pre-D byte-equivalent flat ambient + flat equirect backdrop.
+    //
+    // hasCubeActive() returns true iff BOTH:
+    //   1. The host called Renderer::setSkySourceCube with a valid
+    //      TextureHandle (i.e., _skyCubeTexture.isValid()).
+    //   2. ctx.skySource->kind == CubeMap (set by the host in the
+    //      SkySource POD).
+    // SkyboxPass::execute + LightingPass::execute both consult this
+    // single predicate so the two paths agree per frame (cutsheet
+    // §P5.5 D hard rule: "cube valid ⇒ CubeMap path; otherwise
+    // equirect, never each draws half").
+    //
+    // Note: the SkySource->kind check happens at execute() time
+    // because we don't store a borrowed-ptr mirror here (the host
+    // owns the SkySource; the borrowed ptr lives in PassExecContext).
+    // The accessor below is pure: returns the handle + validity
+    // state. The hasCubeActive() overload takes the SkySource kind
+    // so callers can decide.
+    void setCubeTexture(ayt::render::TextureHandle cube) noexcept {
+        _skyCubeTexture = cube;
+    }
+    ayt::render::TextureHandle cubeTexture() const noexcept {
+        return _skyCubeTexture;
+    }
+    bool hasCubeTexture() const noexcept {
+        return _skyCubeTexture.isValid();
+    }
+    // Combined predicate: cube handle valid AND host wants CubeMap
+    // kind. SkyboxPass::execute and LightingPass::execute both call
+    // this with the same arg; the resulting bool drives both FS
+    // branches (SkyboxPass skyKind upload + LightingPass cubeActive
+    // upload) so they can never disagree per frame.
+    bool hasCubeActive(ayt::render::SkySourceKind kind) const noexcept {
+        return _skyCubeTexture.isValid()
+            && kind == ayt::render::SkySourceKind::CubeMap;
+    }
 
     // §Skybox0 (2026-07-23) — host-driven store-only call (mirror
     // LightingPass::setOutputSize at LightingPass.cpp:253-260 and
@@ -168,12 +214,42 @@ private:
     bool _programReady         = false;
     bool _programAcquireFailed = false;
 
+    // §P5.5 D (2026-07-23) — host-uploaded cube map handle. Producer
+    // state (mirror shadowFbo / lightingFbo / gbufferAlbedoRt). Set
+    // by Renderer::setSkySourceCube → setCubeTexture forward. Read
+    // by execute() + LightingPass::execute via `cubeTexture()` /
+    // `hasCubeActive()` accessors. Default = invalid = cube path
+    // inactive = pre-D byte-equivalent.
+    ayt::render::TextureHandle _skyCubeTexture{};
+
     // §Skybox0 (2026-07-23) — lazy-resolved binding IDs (mirror
     // LightingPass.cpp:498-528 binding-cache pattern). First execute
     // resolves; subsequent frames reuse the cached IDs. Default =
     // InvalidBinding (forces lazy resolve on first execute).
     ayt::shader::BindingId _tSkyEquirect  = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uSkyMix       = ayt::shader::InvalidBinding;
+    // §P5.5 D (2026-07-23) — cube sampler + per-frame skyKind
+    // uniform binding IDs. The cube sampler is declared in the
+    // Phoskia source alongside the equirect sampler; the FS uses
+    // `mix(equirectColor, cubeColor, skyKind)` to select one path.
+    // Default = InvalidBinding; lazy-resolved after the cache-key
+    // bump to v1 forces a re-acquire.
+    ayt::shader::BindingId _tSkyCube      = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uSkyKind      = ayt::shader::InvalidBinding;
 };
+
+// §P5.5 D (2026-07-23) — Bug fix #3 mirror (see LightingPass.h:177-189
+// for the originating pattern in §P5.5 B). Externalize the
+// SkyboxPass cache-key literal so unit tests can include this
+// header and compare their mirror against the live literal. Pre-D,
+// kSkyboxCacheKey was a `.cpp` static, so the only comparison was
+// self-compare ("mine == mine") = false-green drift detection.
+// The extern declaration gives every test a single source of
+// truth; drift = test fails immediately.
+//
+// Naming: `kSkyboxCacheKeyCStr` (CStr suffix = "raw C-string" per
+// the AY naming rules). The actual string literal lives in
+// SkyboxPass.cpp as the canonical definition.
+extern const char* const kSkyboxCacheKeyCStr;
 
 } // namespace ayt::render::detail

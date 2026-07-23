@@ -36,8 +36,36 @@ static constexpr const char* kSkyboxBuildStamp = "sky0-2026-07-23";
 // MVP A scope: `texture2d skyEquirect` (kind=Equirect) only.
 // CubeMap kind → SkyboxPass early-returns 0 (CubeMap sampler
 // path is reserved for §Skybox0-B).
+//
+// §P5.5 D (2026-07-23) — bump v0 → v1. Cache-key bump
+// `v0_equirect_fullscreen` → `v1_equirect_or_cube_perpixel_dir`.
+// Phoskia source now declares BOTH `texture2d skyEquirect` AND
+// `texturecube skyCube` + `uniform float skyKind` (0 = Equirect,
+// 1 = CubeMap) + `uniform vec4 skyMix`. The FS picks one of two
+// per-pixel paths via `mix(equirectColor, cubeColor, skyKind)`:
+//   - Equirect (skyKind=0): the A-ship panorama blit
+//                           (screen UV → panorama UV).
+//   - CubeMap  (skyKind=1): per-pixel lat/long → 3D dir +
+//                           `sample(skyCube, dir)`. Re-uses the
+//                           fullscreen triangle; no new mesh
+//                           (mirror §Skybox0 "cheap backdrop"
+//                           rule). The dir formula treats the
+//                           triangle as facing -Z (camera
+//                           looking down -Z), with the X axis
+//                           mirrored to match OpenGL cubemap
+//                           convention.
+// The cube sampler is bound unconditionally (per-frame lookup
+// via `Renderer::setSkySourceCube` + ctx.textures); when
+// skyKind=0 the FS discards the cubeColor contribution via
+// `mix(..., 0)` — no observable effect.
 static constexpr const char* kSkyboxCacheKey =
-    "skybox_v0_equirect_fullscreen";
+    "skybox_v2_vec4_skykind";
+
+// §P5.5 D (2026-07-23) — Bug fix #3 (mirror
+// LightingPass.cpp:69-72). Externalize the cache-key string for
+// unit-test live-drift detection. Extern declared in
+// SkyboxPass.h.
+const char* const kSkyboxCacheKeyCStr = kSkyboxCacheKey;
 
 // §Skybox0 (2026-07-23) — fullscreen-triangle vertex data,
 // duplicated from LightingPass.cpp:85-89 (private state there —
@@ -60,24 +88,51 @@ constexpr SkyboxFullscreenVertex kSkyboxFullscreenTriangle[3] = {
 
 constexpr uint16_t kSkyboxFullscreenIndices[3] = { 0, 1, 2 };
 
-// §Skybox0 (2026-07-23) — Phoskia Skybox VS/FS source.
+// §Skybox0 (2026-07-23) + §P5.5 D (2026-07-23) — Phoskia Skybox
+// VS/FS source.
 //
 // Sampler inputs:
 //   - skyEquirect : color (RGB = panorama color, A unused — host
 //                    can populate with any 2:1 panoramic texture
 //                    via Renderer::createTextureFromRgba8 +
 //                    SkySource::equirect)
+//   - skyCube     : samplerCube (RGBA8 cube map — host uploads
+//                    via Renderer::setSkySourceCube(TextureHandle)).
+//                    Used only when skyKind=1 (mirror §P5.5 D
+//                    hard rule: cube path active only when both
+//                    SkySource::kind == CubeMap AND the cube
+//                    handle is valid).
 //
 // Uniform inputs:
 //   - skyMix      : vec4 — .x = intensity scalar (1.0 default;
 //                            host can override per-material via
 //                            Renderer::setMaterialVec3(material,
 //                            "skyMix", v) to dim the backdrop)
+//   - skyKind     : float (0.0 = Equirect, 1.0 = CubeMap). Per-
+//                   frame uploaded by SkyboxPass::execute based
+//                   on `ctx.skySource->kind == CubeMap &&
+//                   cubeHandleValid`. Default 0 ⇒ equirect
+//                   path (A-ship byte-equivalent).
 //
-// Math (simple equirect panorama blit):
+// Math (skyKind=0, equirect panorama blit — §Skybox0 A):
 //   uv = vec2(vUv.x, 1.0 - vUv.y)   // Y-flip for RT vs backbuffer
 //   skyColor = sample(skyEquirect, uv).xyz * skyMix.x
-//   return vec4(skyColor, 1.0)
+//
+// Math (skyKind=1, per-pixel lat/long → 3D dir + cube sample —
+// §P5.5 D):
+//   ndcXY = vec2(baseUv.x*2-1, baseUv.y*2-1)        // -1..1 NDC
+//   dir   = normalize(vec3(ndcXY.x, -ndcXY.y, -1))  // OpenGL
+//                                                    // cubemap
+//                                                    // convention
+//   skyColor = sample(skyCube, dir).xyz * skyMix.x
+//
+// Final color = mix(equirectColor, cubeColor, skyKind). One
+// `sample` lookup per kind per fragment; the FS evaluates both
+// branches unconditionally but `mix` selects exactly one
+// contribution per pixel (Phoskia `let` evaluation is eager, so
+// both `sample()` calls run — this is a small GPU waste for the
+// unused branch but keeps the FS simple; future cut can branch
+// with `step`/Phoskia `if` if profile shows it matters).
 //
 // The `let` chain uses the same surface as the B4b GBufferFill /
 // B5 Lighting source (verified at PR-F2/PR-F3/B5 ship) — `let`
@@ -87,16 +142,26 @@ constexpr uint16_t kSkyboxFullscreenIndices[3] = { 0, 1, 2 };
 constexpr const char* kSkyboxPhoskiaSource = R"(
 material Skybox {
     texture2d skyEquirect
+    texturecube skyCube
     uniform vec4 skyMix
+    uniform vec4 skyKind
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
         return vec4(pos.x, pos.y, 0.0, 1.0)
     }
     fragment {
-        in  vUv : texcoord
+        in vUv : texcoord
         let baseUv = vec2(vUv.x, 1.0 - vUv.y)
-        let skyColor = sample(skyEquirect, baseUv).xyz * skyMix.x
+        // §Skybox0 equirect path (skyKind.x=0).
+        let equirectColor = sample(skyEquirect, baseUv).xyz * skyMix.x
+        // §P5.5 D cube path (skyKind.x=1). Per-pixel lat/long → dir
+        // for the fullscreen triangle (cheap backdrop style —
+        // no new mesh, mirror equirect's no-new-mesh rule).
+        let ndcXY = vec2(baseUv.x * 2.0 - 1.0, baseUv.y * 2.0 - 1.0)
+        let dir3 = normalize(vec3(ndcXY.x, -ndcXY.y, -1.0))
+        let cubeColor = sample(skyCube, dir3).xyz * skyMix.x
+        let skyColor = mix(equirectColor, cubeColor, skyKind.x)
         return vec4(skyColor, 1.0)
     }
 }
@@ -148,6 +213,16 @@ void SkyboxPass::destroyResources(BGFXAdapter& adapter)
     _programAcquireFailed = false;
     _tSkyEquirect         = ayt::shader::InvalidBinding;
     _uSkyMix              = ayt::shader::InvalidBinding;
+    // §P5.5 D — cube binding IDs reset on destroy so the next
+    // ensureProgram() re-resolves them after a cache-key bump
+    // (mirror equirect binding reset above).
+    _tSkyCube             = ayt::shader::InvalidBinding;
+    _uSkyKind             = ayt::shader::InvalidBinding;
+    // §P5.5 D — cube producer handle reset on destroy. The host
+    // is responsible for re-uploading via Renderer::setSkySourceCube
+    // after a pipeline rebuild (cutsheet §P5.5 D producer-state
+    // lifecycle mirrors shadowMap producer state).
+    _skyCubeTexture       = ayt::render::TextureHandle{};
 }
 
 void SkyboxPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
@@ -244,6 +319,11 @@ void SkyboxPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
         _programAcquireFailed = false;
         _tSkyEquirect         = ayt::shader::InvalidBinding;
         _uSkyMix              = ayt::shader::InvalidBinding;
+        // §P5.5 D — cube bindings reset on cache-key bump so
+        // the next resolve path re-acquires them after v1
+        // forces a re-acquire.
+        _tSkyCube             = ayt::shader::InvalidBinding;
+        _uSkyKind             = ayt::shader::InvalidBinding;
         s_acquiredCacheKey    = kSkyboxCacheKey;
     }
 
@@ -276,6 +356,12 @@ void SkyboxPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     // frames reuse the cached IDs.
     _tSkyEquirect = _program.getTextureBinding("skyEquirect");
     _uSkyMix      = _program.getUniformBinding("skyMix");
+    // §P5.5 D (2026-07-23) — cube sampler + per-frame skyKind
+    // uniform binding IDs. Default InvalidBinding on acquire
+    // failure; the FS's mix() with skyKind=0 will collapse to the
+    // equirect branch even if skyCube binding never resolves.
+    _tSkyCube     = _program.getTextureBinding("skyCube");
+    _uSkyKind     = _program.getUniformBinding("skyKind");
 }
 
 uint32_t SkyboxPass::execute(PassExecContext& ctx)
@@ -311,22 +397,29 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // §Skybox0 (2026-07-23) — sky-source gate. Three independent
-    // reasons to early-return:
+    // §Skybox0 (2026-07-23) + §P5.5 D (2026-07-23) — sky-source gate.
+    // Two independent reasons to early-return 0:
     //   1. No host pointer passed ⇒ default Forward host sees no
     //      sky (cutsheet §Skybox0 "default host = no sky").
-    //   2. Kind != Equirect ⇒ CubeMap path reserved for B cut; A
-    //      ships equirect only. Setting CubeMap today is a safe
-    //      no-op (no crash, just no sky on screen).
-    //   3. equirect handle invalid (TextureHandle{} default) ⇒
-    //      host populated the kind but forgot to allocate a
-    //      texture. Same safe no-op semantics.
+    //   2. SkySource is inactive (kind mismatch OR no handle
+    //      uploaded). SkySource::isActive() encapsulates the
+    //      per-kind active contract:
+    //      - Equirect: equirect handle valid (host populated SkySource)
+    //      - CubeMap : cubeMap handle valid (host populated SkySource)
+    //      Note: `hasCubeActive()` (this pass's own cube handle) is
+    //      NOT consulted here — only the host-supplied SkySource
+    //      intent matters for the gate. The cube-side handle is
+    //      consulted below when deciding skyKind=0 vs skyKind=1.
     const ayt::render::SkySource* sky = ctx.skySource;
-    if (sky == nullptr
-        || sky->kind != ayt::render::SkySourceKind::Equirect
-        || !sky->hasEquirect()) {
+    if (sky == nullptr || !sky->isActive()) {
         return 0;
     }
+
+    // §P5.5 D (2026-07-23) — skyKind predicate: cube handle valid
+    // AND host wants CubeMap kind. Hard rule: cube valid ⇒ CubeMap
+    // path wins; otherwise equirect path. The two paths are
+    // mutually exclusive per frame — never "each draws half".
+    const bool cubeActive = hasCubeActive(sky->kind);
 
     ensure(ctx.adapter, _skyW, _skyH);
     if (!bgfx::isValid(_skyFbo)) {
@@ -344,21 +437,50 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // §Skybox0 (2026-07-23) — bind the equirect texture the host
-    // referenced in SkySource::equirect. Look up the actual
-    // bgfx::TextureHandle via ctx.textures (the canonical map
-    // populated by RenderResourceManager when the host calls
-    // Renderer::createTextureFromRgba8 / loadTexture).
-    const auto texIt = ctx.textures.find(sky->equirect.id);
-    if (texIt == ctx.textures.end()
-        || !BGFXAdapter::isValid(texIt->second.handle)) {
-        return 0;
+    // §Skybox0 (2026-07-23) + §P5.5 D — bind the per-kind texture
+    // sampler. The Phoskia source declares BOTH `texture2d
+    // skyEquirect` AND `texturecube skyCube`; per-frame we bind
+    // whichever kind is active (skyKind uniform selects the branch
+    // via `mix`). Equirect lookup goes through `ctx.textures`
+    // (canonical map populated by RenderResourceManager when the
+    // host calls Renderer::createTextureFromRgba8 / loadTexture).
+    // Cube lookup uses this pass's `_skyCubeTexture` handle directly
+    // (mirror shadowMap lookup in tryBindShadowSampler — producer
+    // owns the bgfx::TextureHandle, the helper just binds it).
+    bgfx::TextureHandle equirectHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle cubeHandle{BGFX_INVALID_HANDLE};
+    if (!cubeActive) {
+        const auto texIt = ctx.textures.find(sky->equirect.id);
+        if (texIt == ctx.textures.end()
+            || !BGFXAdapter::isValid(texIt->second.handle)) {
+            return 0;
+        }
+        equirectHandle = texIt->second.handle;
+    } else {
+        // §P5.5 D — cube path. The cube handle lives on this pass's
+        // producer state (set by Renderer::setSkySourceCube →
+        // setCubeTexture). We look up the underlying bgfx ::
+        // TextureHandle via ctx.textures using the handle id (mirror
+        // equirect lookup — the cube handle is a TextureHandle
+        // resource, same lifetime contract).
+        const auto cubeIt = ctx.textures.find(_skyCubeTexture.id);
+        if (cubeIt == ctx.textures.end()
+            || !BGFXAdapter::isValid(cubeIt->second.handle)) {
+            return 0;
+        }
+        cubeHandle = cubeIt->second.handle;
     }
 
-    if (_tSkyEquirect != ayt::shader::InvalidBinding) {
+    if (!cubeActive
+        && _tSkyEquirect != ayt::shader::InvalidBinding) {
         const uint8_t stage = _program.getTextureStage(_tSkyEquirect);
         _program.setTexture(stage, _tSkyEquirect,
-                            toShaderTexture(texIt->second.handle));
+                            toShaderTexture(equirectHandle));
+    } else if (cubeActive
+               && _tSkyCube != ayt::shader::InvalidBinding) {
+        const uint8_t stage = _program.getTextureStage(_tSkyCube);
+        _program.setTexture(stage, _tSkyCube,
+                            toShaderTexture(cubeHandle));
     }
 
     // §Skybox0 (2026-07-23) — upload `skyMix` uniform. Default
@@ -369,6 +491,28 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
     if (_uSkyMix != ayt::shader::InvalidBinding) {
         const float skyMixPad[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
         _program.setUniform(_uSkyMix, skyMixPad, sizeof(skyMixPad));
+    }
+
+    // §P5.5 D (2026-07-23) — upload `skyKind` uniform. 0.0 =
+    // Equirect path, 1.0 = CubeMap path. The Phoskia FS uses
+    // `mix(equirectColor, cubeColor, skyKind)` to pick one branch;
+    // when skyKind=0 the cube branch's `sample(skyCube, ...)` reads
+    // 0 (the FS still evaluates but `mix` discards) — same for
+    // skyKind=1 vs the equirect branch. Default 0 ⇒ pre-D
+    // byte-equivalent (host never called setSkySourceCube).
+    //
+    // Upload-shape note: bgfx's `setUniform` writes a vec4 slot
+    // regardless of the Phoskia-declared type. AYShaderPool maps
+    // `uniform float` → bgfx::UniformType::Vec4 (one Vec4 slot
+    // = 16 bytes). All other pass uniforms (skyMix / bloom / ...)
+    // use the same 16-byte padded upload pattern. Using
+    // sizeof(float)=4 would under-write the slot — see the §P5.5 D
+    // bug fix in LightingPass (cubeActive/ambientStrength pads).
+    if (_uSkyKind != ayt::shader::InvalidBinding) {
+        const float skyKindPad[4] = {
+            cubeActive ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f
+        };
+        _program.setUniform(_uSkyKind, skyKindPad, sizeof(skyKindPad));
     }
 
     // §Skybox0 (2026-07-23) — view 6 wiring: bind SkyOutput FBO,

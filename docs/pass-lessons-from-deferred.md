@@ -516,8 +516,82 @@ Point + Spot 真光路径 ── host 设 `Light{ type=Point/Spot, ... }`
 | Item | Reason |
 |---|---|
 | Per-light shadow (Point/Spot 各自 shadow map) | §P5.5 C 范围 ── cutsheet 已预留 PassExecContext::perLightShadows borrowed ptr 位 |
-| IBL (ambient cube / irradiance / radiance) | 独立 roadmap,不是 Deferred Pass 自身的事 |
+| IBL (ambient cube / irradiance / radiance) | **§P5.5 D ships ambient cube lookup MVP (2026-07-23);** radiance / prefilter / roughness-driven LOD = §P5.5 D-radiance future |
 | Spot light shadow | 跟 Point shadow 一并进 §P5.5 C |
 | Phoskia `fn` 性能优化(避免 fn call 边界) | Phoskia converter 自决;若不支持,降级到 8 段 inlined if/else if |
 | `setUniformBlock` 单路径迁回 | D3D 3-run 验证 B ship 稳后,future cut 再迁 |
 | Light POD 字段重排 (把 type 字段挪到底) | 当前布局已 4-byte align,没必要 |
+
+---
+
+## §P5.5 D — IBL MVP (Ambient Diffuse Cube Lookup, 2026-07-23, ships)
+
+### Context
+
+§P5.5 A/B ship (2026-07-23) — `Light` POD + Point/Spot per-type math。§Skybox0 ship — equirect 2D backdrop,LightingPass `mix(skyColor, lit, coverage)` 当 unlit-area backdrop。
+
+**本刀目标 (post-§P5.5 B, 2026-07-23)**: 接通 IBL MVP ── host 调 `Renderer::setSkySourceCube(cubeHandle)` 后,
+- SkyboxPass::execute 的 CubeMap kind 走全屏三角 per-pixel lat/long→dir + `sample(skyCube, dir)` 出图
+- LightingPass ambient term 替换 ── `sample(envCube, N) * albedo * ambientStrength` 替代 flat `vec3(0.1)` (当 cubeActive=1)
+- host 不调 / cube handle invalid ⇒ 回落 pre-D byte-equivalent (flat `vec3(0.1)`)
+
+**主路线决定 (文字版已拍)**:
+1. **scope 只 ambient diffuse** ── 不掺 spec lobe / 不全 mip chain;radiance / prefilter / roughness-driven LOD = §P5.5 D-radiance 后续切
+2. **SkyboxPass cube kind 接缝 ── 全屏三角 + per-pixel lat/long→dir** ── 不引 cube mesh,mirror equirect 的 cheap backdrop 风格,只换 sampler/FS
+3. **host 上传路径 ── `Renderer::setSkySourceCube(TextureHandle)` API** ── 借 ptr 形态不可用 (cube handle 是 Resource 不是 borrowed ptr) ── 新 setter 转发到 SkyboxPass producer state (`_skyCubeTexture` field)
+
+### 设计契约
+
+| 维度 | 决策 |
+|---|---|
+| **数据源** | `ayt::render::SkySource` host POD ── `kind` (Equirect / CubeMap) + `equirect` (TextureHandle) + **`cubeMap`** (TextureHandle,D 替换原 `cubeReserve: uint6464_t` placeholder);`isActive()` ⇒ `kind==Equirect && hasEquirect() || kind==CubeMap && hasCubeMap()` |
+| **host upload API** | `Renderer::setSkySourceCube(TextureHandle)` + `skySourceCube() const noexcept` getter;setter 内部也 forward 到 SkyboxPass producer state (cutsheet producer-state pattern ── mirror shadowFbo / lightingFbo / gbufferAlbedoRt) |
+| **borrowed ptr / ctx field** | 0 新 PassExecContext field;cube handle 走 producer state (SkyboxPass 内部 `_skyCubeTexture`),host 通过 `ctx.skyboxPass->cubeTexture()` + `hasCubeActive(kind)` 读 |
+| **Pipeline slot** | 不变 ── 复用 §Skybox0 Skybox slot |
+| **几何** | 全屏三角复用 (no new mesh) |
+| **view id** | 不变 ── Skybox 6 + Lighting 8 |
+| **FS dual-path 决策** | **单 FS + uniform gating** ── `cubeActive` uniform (0/1 per-frame gate) + `ambientStrength` uniform (default 0.6);SkyboxPass skyKind uniform 同 pattern。省一半 program acquire overhead,mirror §Skybox0 single-FS 风格 |
+| **Cache-key bump** | `skybox_v0_equirect_fullscreen` → `skybox_v1_equirect_or_cube_perpixel_dir`;`lighting_v21_p5p5b_point_spot_atten_cone` → `lighting_v22_p5p5d_ibl_ambient_cube` |
+
+### 文件触碰 (7 文件,在 ≤ 8 红线内)
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `include/AYRenderScene.h` | `SkySource::cubeReserve: uint64_t` → `cubeMap: TextureHandle`;新增 `hasCubeMap()` getter;`isActive()` 加 cube 分支 |
+| 2 | `include/AYRenderer.h` | 新增 `setSkySourceCube(TextureHandle)` + `skySourceCube() const noexcept` getter |
+| 3 | `src/AYRenderer.cpp` | `Impl::skyCubeTexture` cache + setter 实现 (转发到 SkyboxPass via `findPass("Skybox")→setCubeTexture`) |
+| 4 | `src/detail/SkyboxPass.h` | `extern kSkyboxCacheKeyCStr` + `_tSkyCube` / `_uSkyKind` binding IDs + `_skyCubeTexture` producer state + `setCubeTexture / cubeTexture / hasCubeTexture / hasCubeActive` accessors |
+| 5 | `src/detail/SkyboxPass.cpp` | cache-key bump v0 → v1;Phoskia source 加 `texturecube skyCube` + `uniform float skyKind`;FS dual-kind branch with `mix(equirectColor, cubeColor, skyKind)`;execute body 加 cube sampler bind path + skyKind upload |
+| 6 | `src/detail/LightingPass.h` | `_tEnvCube` / `_uCubeActive` / `_uAmbientStrength` binding IDs |
+| 7 | `src/detail/LightingPass.cpp` | cache-key bump v21 → v22;Phoskia source 加 `texturecube envCube` + `uniform float cubeActive` + `uniform float ambientStrength`;FS ambient term `ambientFlat + ambientCube`;execute body 加 envCube sampler bind (from `ctx.skyboxPass->cubeTexture()`) + cubeActive / ambientStrength uniform uploads |
+
+**触碰面 7 文件 ≤ 8 红线** ── 跟 §P5.5 B 持平。
+
+### K1 关键 invariants
+
+1. **cubeActive=0 default ⇒ flat `vec3(0.1)` ambient,byte-equivalent pre-D** ── Test_B7 `b7_ibl_cube_active_zero_default_pins_byte_equivalent` pin `ambientFlat` substring 仍出现;FS `ambientCube * cubeActive = 0`
+2. **setSkySourceCube(invalid) ⇒ equirect path 完整保留** ── SkyboxPass producer state `_skyCubeTexture = TextureHandle{}`,`hasCubeActive()` 返 false,FS skyKind=0 ⇒ equirect branch;LightingPass cubeActive=0 ⇒ flat ambient
+3. **setSkySourceCube(valid) + skySource equirect 同时有效 ⇒ cube path 赢 (硬规则)** ── cube handle valid + `SkySource::kind == CubeMap` ⇒ cubeActive=1 ⇒ FS ambient term 加 cube lookup;SkyboxPass skyKind=1 ⇒ FS `mix(equirect, cube, 1) = cube`,两 path 不各画一半
+4. **SkySource POD 字段从 `cubeReserve: uint64_t` 升级 `cubeMap: TextureHandle`** ── ABI churn 仍守公共头不漏 bgfx:: (TextureHandle 已 ship 在 AYRenderTypes.h)
+5. **LightingPass dual-FS 决策 ── 单 FS + uniform gating** ── `cubeActive` 是 uniform 不是 #ifdef;省一半 program acquire overhead,mirror §Skybox0 single-FS 风格
+6. **SkyboxPass cache-key bump `v0 → v1_equirect_or_cube_perpixel_dir`** ── 强制 program re-acquire;`extern kSkyboxCacheKeyCStr` (mirror §P5.5 B Bug fix #3)
+7. **§Skybox0 backdrop 行为保留** ── `mix(skyColor, lit, coverage)` 仍存;cubeColor 替换 equirectColor 但 backdrop 语义不变 (unlit area 仍填 sky)
+8. **Forward host 0 行为变化** ── default `setSkySourceCube` 不调 = cubeActive=0 = pre-D;`makeDefault()` (Forward 5-slot) 不含 Skybox slot,Test_ForwardOpaque + Test_ShadowPass + Test_PostProcessPass + Test_TransparentPass 全保留
+9. **触碰面 7 文件 ≤ 8** ── 不超红线
+10. **scope 不掺 spec** ── ambient diffuse only,radiance / prefilter / roughness-driven LOD = §P5.5 D-radiance future cut
+
+### Bug fix #3 mirror
+
+`kSkyboxCacheKeyCStr` extern declared in `SkyboxPass.h:177-189` (mirrors §P5.5 B `kLightingCacheKeyCStr` extern). Test_Skybox0 的 `skybox_pass_cache_key_bump_v1_equirect_or_cube` 现在跟 live extern 比较,而不是 self-compare pre-D false-green ── drift 现在立即 fail。
+
+### 不在 §P5.5 D scope (deferred 到 future)
+
+| Item | Reason |
+|---|---|
+| Radiance / spec lobe / prefilter mip chain | §P5.5 D-radiance 后续切 (要 `textureCubeLod` + mip 生成 pipeline) |
+| IBL diffuse convolution (irradiance map pre-bake) | D 刀只查 cube raw,radiance 后续 |
+| Roughness-driven LOD | 跟 radiance 一并 |
+| HDR cube (RGB16F) | D 刀只 RGBA8 (8-bit,no Float texture path);future cut 加 |
+| PMREM (Pre-filtered Mipmap Radiance Environment Map) | future |
+| Diffuse IBL convolution shader | 留 radiance 切 |
+| host cube 数据上传 helper (`RenderResourceManager::createCubeTexture` + `BGFXAdapter::createCubeTexture`) | §P5.5 D-upload 单独 PR (本切只 ship `setSkySourceCube(TextureHandle)` API ── host 用外部 `bgfx::createTextureCube` manage 或等 upload helper PR) |

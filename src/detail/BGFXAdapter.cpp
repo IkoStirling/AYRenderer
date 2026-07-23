@@ -377,6 +377,22 @@ bgfx::TextureHandle BGFXAdapter::createTexture2D(uint16_t width, uint16_t height
                                  mem);
 }
 
+bgfx::TextureHandle BGFXAdapter::createTextureCube(uint16_t size,
+                                                    const void* rgba8Faces,
+                                                    uint64_t flags)
+{
+    if (!_initialized || isNoopBackend() || size == 0 || rgba8Faces == nullptr) {
+        return BGFX_INVALID_HANDLE;
+    }
+    // 6 faces × size × size × RGBA8
+    const uint32_t bytes = static_cast<uint32_t>(size) * size * 4u * 6u;
+    const bgfx::Memory* mem = bgfx::copy(rgba8Faces, bytes);
+    return bgfx::createTextureCube(size, false, 1,
+                                   bgfx::TextureFormat::RGBA8,
+                                   static_cast<uint64_t>(flags),
+                                   mem);
+}
+
 bgfx::TextureHandle BGFXAdapter::createTexture2DFromData(uint16_t width, uint16_t height,
                                                           bgfx::TextureFormat::Enum format,
                                                           const void* data, uint32_t size,

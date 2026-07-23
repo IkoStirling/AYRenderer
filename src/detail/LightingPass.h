@@ -55,6 +55,9 @@
 #include "detail/RenderPass.h"
 #include "detail/SkyboxPass.h"
 
+#include "AYRenderScene.h"
+#include "AYRenderTypes.h"
+
 #include <AYShaderResource.h>
 
 #include <bgfx/bgfx.h>
@@ -172,6 +175,17 @@ private:
     ayt::shader::ShaderResource _program;
     bool _programReady      = false;  // mirror GBufferPass _acquireFailed semantics: _program.isValid() OR _programReady=true (set on success); failure path leaves _programReady=false
     bool _programAcquireFailed = false;  // mirror GBufferPass _acquireFailed
+
+    // §P5.5 D (2026-07-23) — lazy-resolved binding IDs for the
+    // cube-driven ambient lookup (mirror _gbufferSkyRt + skyMix
+    // binding pattern above). Phoskia source declares
+    // `texturecube envCube` + `uniform float cubeActive` +
+    // `uniform float ambientStrength` alongside the existing
+    // gbufferSky / skyMix. Default = InvalidBinding; lazy-resolved
+    // after the cache-key bump to v22 forces a re-acquire.
+    ayt::shader::BindingId _tEnvCube         = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uCubeActive      = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uAmbientStrength = ayt::shader::InvalidBinding;
 };
 
 // §P5.5 B (2026-07-23) — Bug fix #3: externalize the cache-key

@@ -63,8 +63,21 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
  // Bug fix #3 (Test_B5 cache-key false-green) is resolved by
  // `kLightingCacheKeyCStr` extern declared in LightingPass.h —
  // see definition below.
+//
+// §P5.5 D (2026-07-23) — bump v21 → v22: IBL MVP (Ambient Diffuse
+// Cube Lookup). Phoskia source declares `texturecube envCube` +
+// `uniform float cubeActive` (0/1 per-frame gate) +
+// `uniform float ambientStrength` (default 0.6). The FS ambient
+// term becomes `ambientFlat + ambientCube` where
+//   ambientFlat = vec3(0.1, 0.1, 0.1)              // pre-D floor
+//   ambientCube = sample(envCube, N).rgb * ambientStrength * cubeActive
+// When cubeActive=0 (host never called Renderer::setSkySourceCube
+// OR SkySource::kind != CubeMap) the cube branch contributes 0 —
+// byte-equivalent to pre-D flat ambient. The single-FS +
+// uniform-gating strategy mirrors §Skybox0 SkyboxPass dual-kind
+// decision (avoid dual-FS program acquire overhead).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v21_p5p5b_point_spot_atten_cone";
+    "lighting_v23_vec4_ibl_gates";
 
 // §P5.5 B (2026-07-23) — Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -164,6 +177,7 @@ material Lighting {
     texture2d gbufferMotion
     texture2d shadowMap
     texture2d gbufferSky
+    texturecube envCube
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
@@ -172,6 +186,8 @@ material Lighting {
     uniform vec4 shadowMapTexel
     uniform vec4 shadowPcf
     uniform vec4 skyMix
+    uniform vec4 cubeActive
+    uniform vec4 ambientStrength
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     vertex {
         in  pos : position
@@ -184,7 +200,15 @@ material Lighting {
         let albedo = sample(gbufferAlbedo, baseUv)
         let normalSample = sample(gbufferNormal, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
-        let ambient = vec3(0.1, 0.1, 0.1)
+        // §P5.5 D (2026-07-23) — IBL MVP ambient term. Default
+        // cubeActive=0 ⇒ ambient = ambientFlat (pre-D byte-
+        // equivalent). When host calls Renderer::setSkySourceCube
+        // + SkySource::kind=CubeMap, cubeActive=1 and the cube
+        // lookup adds normal-driven diffuse term scaled by
+        // ambientStrength (default 0.6).
+        let ambientFlat = vec3(0.1, 0.1, 0.1)
+        let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x
+        let ambient = ambientFlat + ambientCube
         // §P5 B5.5 v16 — worldPos from GBuffer RT2 (RGBA16F raw xyz).
         let worldPos = sample(gbufferMotion, baseUv).xyz
         // §P5 B5.5 — Key-light shadow 9-tap PCF (cutsheet §10
@@ -280,7 +304,7 @@ material Lighting {
         let d0 = length(toL0)
         let Lp0 = toL0 * (1.0 / max(d0, 0.0001))
         let sdn0 = Lights.spotDir[0].xyz * (1.0 / max(length(Lights.spotDir[0].xyz), 0.0001))
-        let cosT0 = dot(Lp0, sdn0)
+        let cosT0 = -1.0 * dot(Lp0, sdn0)
         let cone0 = smoothstep(Lights.params[0].w, Lights.params[0].z, cosT0)
         let falloff0 = 1.0 - smoothstep(0.0, Lights.params[0].x, d0)
         let attenPoint0 = Lights.params[0].y * falloff0 / max(d0 * d0, 0.01)
@@ -300,7 +324,7 @@ material Lighting {
         let d1 = length(toL1)
         let Lp1 = toL1 * (1.0 / max(d1, 0.0001))
         let sdn1 = Lights.spotDir[1].xyz * (1.0 / max(length(Lights.spotDir[1].xyz), 0.0001))
-        let cosT1 = dot(Lp1, sdn1)
+        let cosT1 = -1.0 * dot(Lp1, sdn1)
         let cone1 = smoothstep(Lights.params[1].w, Lights.params[1].z, cosT1)
         let falloff1 = 1.0 - smoothstep(0.0, Lights.params[1].x, d1)
         let attenPoint1 = Lights.params[1].y * falloff1 / max(d1 * d1, 0.01)
@@ -319,7 +343,7 @@ material Lighting {
         let d2 = length(toL2)
         let Lp2 = toL2 * (1.0 / max(d2, 0.0001))
         let sdn2 = Lights.spotDir[2].xyz * (1.0 / max(length(Lights.spotDir[2].xyz), 0.0001))
-        let cosT2 = dot(Lp2, sdn2)
+        let cosT2 = -1.0 * dot(Lp2, sdn2)
         let cone2 = smoothstep(Lights.params[2].w, Lights.params[2].z, cosT2)
         let falloff2 = 1.0 - smoothstep(0.0, Lights.params[2].x, d2)
         let attenPoint2 = Lights.params[2].y * falloff2 / max(d2 * d2, 0.01)
@@ -338,7 +362,7 @@ material Lighting {
         let d3 = length(toL3)
         let Lp3 = toL3 * (1.0 / max(d3, 0.0001))
         let sdn3 = Lights.spotDir[3].xyz * (1.0 / max(length(Lights.spotDir[3].xyz), 0.0001))
-        let cosT3 = dot(Lp3, sdn3)
+        let cosT3 = -1.0 * dot(Lp3, sdn3)
         let cone3 = smoothstep(Lights.params[3].w, Lights.params[3].z, cosT3)
         let falloff3 = 1.0 - smoothstep(0.0, Lights.params[3].x, d3)
         let attenPoint3 = Lights.params[3].y * falloff3 / max(d3 * d3, 0.01)
@@ -357,7 +381,7 @@ material Lighting {
         let d4 = length(toL4)
         let Lp4 = toL4 * (1.0 / max(d4, 0.0001))
         let sdn4 = Lights.spotDir[4].xyz * (1.0 / max(length(Lights.spotDir[4].xyz), 0.0001))
-        let cosT4 = dot(Lp4, sdn4)
+        let cosT4 = -1.0 * dot(Lp4, sdn4)
         let cone4 = smoothstep(Lights.params[4].w, Lights.params[4].z, cosT4)
         let falloff4 = 1.0 - smoothstep(0.0, Lights.params[4].x, d4)
         let attenPoint4 = Lights.params[4].y * falloff4 / max(d4 * d4, 0.01)
@@ -376,7 +400,7 @@ material Lighting {
         let d5 = length(toL5)
         let Lp5 = toL5 * (1.0 / max(d5, 0.0001))
         let sdn5 = Lights.spotDir[5].xyz * (1.0 / max(length(Lights.spotDir[5].xyz), 0.0001))
-        let cosT5 = dot(Lp5, sdn5)
+        let cosT5 = -1.0 * dot(Lp5, sdn5)
         let cone5 = smoothstep(Lights.params[5].w, Lights.params[5].z, cosT5)
         let falloff5 = 1.0 - smoothstep(0.0, Lights.params[5].x, d5)
         let attenPoint5 = Lights.params[5].y * falloff5 / max(d5 * d5, 0.01)
@@ -395,7 +419,7 @@ material Lighting {
         let d6 = length(toL6)
         let Lp6 = toL6 * (1.0 / max(d6, 0.0001))
         let sdn6 = Lights.spotDir[6].xyz * (1.0 / max(length(Lights.spotDir[6].xyz), 0.0001))
-        let cosT6 = dot(Lp6, sdn6)
+        let cosT6 = -1.0 * dot(Lp6, sdn6)
         let cone6 = smoothstep(Lights.params[6].w, Lights.params[6].z, cosT6)
         let falloff6 = 1.0 - smoothstep(0.0, Lights.params[6].x, d6)
         let attenPoint6 = Lights.params[6].y * falloff6 / max(d6 * d6, 0.01)
@@ -414,7 +438,7 @@ material Lighting {
         let d7 = length(toL7)
         let Lp7 = toL7 * (1.0 / max(d7, 0.0001))
         let sdn7 = Lights.spotDir[7].xyz * (1.0 / max(length(Lights.spotDir[7].xyz), 0.0001))
-        let cosT7 = dot(Lp7, sdn7)
+        let cosT7 = -1.0 * dot(Lp7, sdn7)
         let cone7 = smoothstep(Lights.params[7].w, Lights.params[7].z, cosT7)
         let falloff7 = 1.0 - smoothstep(0.0, Lights.params[7].x, d7)
         let attenPoint7 = Lights.params[7].y * falloff7 / max(d7 * d7, 0.01)
@@ -486,6 +510,12 @@ void LightingPass::destroyResources(BGFXAdapter& adapter)
     _program.reset();
     _programReady = false;
     _programAcquireFailed = false;
+    // §P5.5 D (2026-07-23) — cube binding IDs reset on destroy so
+    // the next ensureProgram() re-resolves them after the v22
+    // cache-key bump forces a re-acquire.
+    _tEnvCube         = ayt::shader::InvalidBinding;
+    _uCubeActive      = ayt::shader::InvalidBinding;
+    _uAmbientStrength = ayt::shader::InvalidBinding;
 }
 
 void LightingPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
@@ -565,6 +595,12 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
         _program.reset();
         _programReady = false;
         _programAcquireFailed = false;
+        // §P5.5 D (2026-07-23) — cube binding IDs reset on cache-
+        // key bump (v21 → v22). Mirror shadowMap / gbufferSky
+        // binding reset pattern at the top of ensureProgram.
+        _tEnvCube         = ayt::shader::InvalidBinding;
+        _uCubeActive      = ayt::shader::InvalidBinding;
+        _uAmbientStrength = ayt::shader::InvalidBinding;
         s_acquiredCacheKey = kLightingCacheKey;
     }
 
@@ -591,6 +627,16 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
 
     _program = acquired;
     _programReady = true;
+
+    // §P5.5 D (2026-07-23) — lazy-resolve IBL MVP binding IDs.
+    // Default InvalidBinding on acquire failure; the FS's
+    // `ambientCube * cubeActive` collapses to 0 (ambientFlat only)
+    // when cubeActive=0 OR envCube binding is invalid. The
+    // cubeActive uniform binding is the per-frame gate that
+    // distinguishes pre-D flat ambient vs normal-driven ambient.
+    _tEnvCube         = _program.getTextureBinding("envCube");
+    _uCubeActive      = _program.getUniformBinding("cubeActive");
+    _uAmbientStrength = _program.getUniformBinding("ambientStrength");
 }
 
 uint32_t LightingPass::execute(PassExecContext& ctx)
@@ -763,6 +809,82 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     if (skyMixBinding != shader::InvalidBinding) {
         const float skyMixPad[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
         _program.setUniform(skyMixBinding, skyMixPad, sizeof(skyMixPad));
+    }
+
+    // §P5.5 D (2026-07-23) — IBL MVP cube path: bind envCube
+    // sampler + upload cubeActive / ambientStrength uniforms. The
+    // cube handle is read from the SkyboxPass producer state
+    // (ctx.skyboxPass->cubeTexture()) — same producer-state
+    // pattern as the SkyboxPass owns the FBO. The `cubeActive`
+    // gate is the same predicate SkyboxPass::execute uses for
+    // `skyKind` — hard rule: cube valid + CubeMap kind ⇒ cube
+    // path wins; otherwise equirect / pre-D flat ambient (never
+    // "each draws half").
+    //
+    // cubeActive=0 (host never called setSkySourceCube OR
+    // SkySource::kind != CubeMap OR no SkyboxPass slot mounted)
+    // ⇒ FS `ambientCube * cubeActive` contributes 0 ⇒ byte-
+    // equivalent pre-D flat ambient. cubeActive=1 ⇒ FS evaluates
+    // `sample(envCube, N) * ambientStrength` for normal-driven
+    // diffuse.
+    bool cubeActive = false;
+    if (ctx.skyboxPass != nullptr
+        && ctx.skySource != nullptr
+        && ctx.skyboxPass->hasCubeActive(ctx.skySource->kind)) {
+        // Bind the cube sampler to the cube handle's underlying
+        // bgfx::TextureHandle via ctx.textures (mirror equirect
+        // / sky lookup; the cube handle is a TextureHandle
+        // resource, same lifetime contract).
+        const auto cubeIt = ctx.textures.find(
+            ctx.skyboxPass->cubeTexture().id);
+        if (cubeIt != ctx.textures.end()
+            && BGFXAdapter::isValid(cubeIt->second.handle)) {
+            const shader::BindingId envCubeBinding =
+                _program.getTextureBinding("envCube");
+            if (envCubeBinding != shader::InvalidBinding) {
+                const uint8_t stage = _program.getTextureStage(envCubeBinding);
+                _program.setTexture(stage, envCubeBinding,
+                                    toShaderTexture(cubeIt->second.handle));
+            }
+            cubeActive = true;
+        }
+    }
+
+    // §P5.5 D (2026-07-23) — upload cubeActive (0.0 or 1.0) +
+    // ambientStrength (default 0.6). cubeActive mirrors the same
+    // predicate SkyboxPass::execute uses for skyKind so the two
+    // paths can never disagree per frame. ambientStrength is a
+    // constant scalar — the host can override via per-material
+    // setMaterialFloat(material, "ambientStrength", v) if a future
+    // cut exposes it; D ships the default and pins the value
+    // here.
+    //
+    // Upload-shape note: bgfx's `setUniform` writes a vec4 slot
+    // regardless of the Phoskia-declared type (uniform float is
+    // emitted as `uniform float foo;` by AYBGFXConverter but the
+    // CPU upload path always takes 16 bytes; HLSL auto-pads
+    // scalars into the cbuffer vec4 slot). All other uniforms in
+    // this pass (skyMix / u_lightDirection / ...) follow the
+    // same 16-byte padded upload pattern — see RenderPass.cpp
+    // tryBindShadowSampler + LightingPass.cpp skyMix upload
+    // above. Using sizeof(float)=4 would under-write the slot
+    // and the HLSL `uniform float foo;` read would sample
+    // garbage.
+    const shader::BindingId cubeActiveBinding =
+        _program.getUniformBinding("cubeActive");
+    if (cubeActiveBinding != shader::InvalidBinding) {
+        const float cubeActivePad[4] = {
+            cubeActive ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f
+        };
+        _program.setUniform(cubeActiveBinding, cubeActivePad,
+                            sizeof(cubeActivePad));
+    }
+    const shader::BindingId ambientStrengthBinding =
+        _program.getUniformBinding("ambientStrength");
+    if (ambientStrengthBinding != shader::InvalidBinding) {
+        const float ambientStrengthPad[4] = { 0.6f, 0.0f, 0.0f, 0.0f };
+        _program.setUniform(ambientStrengthBinding, ambientStrengthPad,
+                            sizeof(ambientStrengthPad));
     }
 
     // §P5 B5 (2026-07-22) — upload 3 light uniforms from FrameContext

@@ -1,4 +1,4 @@
-// Â§P5 B5 (2026-07-22) â€” LightingPass fullscreen-triangle Lambert
+// Â§P5 B5 (2026-07-22) â€?LightingPass fullscreen-triangle Lambert
 // directional light contract tests.
 //
 // Pins the B5 ship:
@@ -15,11 +15,11 @@
 //      succeeded AND the program is ready. Default-constructed:
 //      false (no FBO, no program). After setOutputSize + ensure
 //      path runs (on a real backend): true. On Noop: false
-//      (program fails to acquire). This is the B3 â†’ B5 contract
+//      (program fails to acquire). This is the B3 â†?B5 contract
 //      upgrade.
 //
 //   3) Cache-key bump: literal is `lighting_v3_b5_hlsl_vec_ctors`
-//      â€” first lock. Build-stamp stays at `b5-2026-07-22`. Pin via
+//      â€?first lock. Build-stamp stays at `b5-2026-07-22`. Pin via
 //      TU-local mirror (same pattern as B4c.3 + B4c.6).
 //
 //   4) Phoskia source contract: kLightingPhoskiaSource contains
@@ -35,13 +35,13 @@
 //      never UB" contract. Same as B4c.5.
 //
 //   6) Build-stamp unchanged across B5: stays at `b5-2026-07-22`
-//      (B5 is the first lock â€” no FBO rebuild trigger from
+//      (B5 is the first lock â€?no FBO rebuild trigger from
 //      stamp changes within B5.x).
 //
 //   7) E2E pipeline with full shadow/GBuffer(B4c)/Lighting(B5)/
 //      Transparent/PP/UI chain on Noop backend: 1 draw from
-//      LightingPass (B5 ships exactly 1 draw â€” the fullscreen
-//      triangle â€” different from GBufferPass's scene-items loop
+//      LightingPass (B5 ships exactly 1 draw â€?the fullscreen
+//      triangle â€?different from GBufferPass's scene-items loop
 //      count which depends on the scene), `ctx.gbufferPass` and
 //      `ctx.lightingPass` borrowed pointers propagate, and
 //      `LightingPass::setOutputSize` was actually called (proven
@@ -91,18 +91,18 @@ namespace shader = ayt::shader;
 
 namespace {
 
-// Â§P5 B5 (2026-07-22) â€” TU-local inspector mirrors for the cache
+// Â§P5 B5 (2026-07-22) â€?TU-local inspector mirrors for the cache
 // key + build stamp + expected source substrings. Drift between
 // LightingPass.cpp's literals and these mirrors = test fails.
 // Same pattern as Test_B4c_MotionVector.cpp kExpectedGBufferCacheKey.
 //
-// Â§P5.5 B (2026-07-23) â€” Bug fix #3: `kLightingCacheKey` was a
+// Â§P5.5 B (2026-07-23) â€?Bug fix #3: `kLightingCacheKey` was a
 // `.cpp` static pre-B, so the only way to compare was self-compare
 // (mirror == mirror), which is a no-op. B externalizes the live
 // key via `kLightingCacheKeyCStr` in LightingPass.h, so this test
-// compares the mirror against the live key â€” drift now fails.
+// compares the mirror against the live key â€?drift now fails.
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v21_p5p5b_point_spot_atten_cone";
+    "lighting_v23_vec4_ibl_gates";
 inline constexpr const char* kExpectedLightingBuildStamp =
     "b5-2026-07-22";
 
@@ -110,27 +110,33 @@ inline const char* kExpectedSourceSubstrings[] = {
     "texture2d gbufferAlbedo",    // sampler declaration (Phoskia keyword)
     "texture2d gbufferNormal",
     "texture2d gbufferMotion",
+    "texturecube envCube",        // Â§P5.5 D: IBL ambient sampler
     "uniform vec4 u_lightDirection",
     "uniform vec4 u_lightColor",
     "uniform vec4 u_cameraPos",
+    "uniform vec4 cubeActive",   // Â§P5.5 D: IBL gate
+    "uniform vec4 ambientStrength",  // Â§P5.5 D: IBL strength
     "sample(gbufferAlbedo, baseUv)",
     "sample(gbufferNormal, baseUv)",
     "let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)",  // HLSL-safe
     "let NdotDir0  = max(dot(N, Ld0), 0.0)",      // Â§P5.5 B: per-type NdotL (2-space `=`)
     "let NdotPos0  = max(dot(N, Lp0), 0.0)",
-    "let ambient = vec3(0.1, 0.1, 0.1)",          // HLSL-safe ambient
+    "let ambientFlat = vec3(0.1, 0.1, 0.1)",  // Â§P5.5 D: pre-D floor preserved
+    "let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x",
+    "let ambient = ambientFlat + ambientCube",  // Â§P5.5 D: combined term
     "return vec4(mix(skyColor, lit, coverage), albedo.a)",  // Â§Skybox0 backdrop blend
 };
 
-// Forbidden substrings â€” pins "no MRT (no `out ... : color`)".
-// `shadowMap` is no longer forbidden â€” B5.5+ shadow consumption is
+// Forbidden substrings â€?pins "no MRT (no `out ... : color`)".
+// `shadowMap` is no longer forbidden â€?B5.5+ shadow consumption is
 // in scope (Test_B5p5 covers the actual shadow contract).
 inline const char* kForbiddenSourceSubstrings[] = {
     "out gbuffer",        // B5 is single-output (legacy return), NOT MRT
 };
 
 // Mirror of kLightingPhoskiaSource at LightingPass.cpp (the
-// Â§P5.5 B-bumped variant â€” 4-array Lights UBO + per-type branches).
+// Â§P5.5 B + Â§P5.5 D-bumped variant â€?4-array Lights UBO + per-type
+// branches + envCube IBL ambient).
 // Simplified to the contract-critical lines (the full source has
 // 8 unrolled per-type branches; mirror shows one Directional + one
 // Point + one Spot branch shape to keep size manageable while still
@@ -150,6 +156,7 @@ material Lighting {
     texture2d gbufferMotion
     texture2d shadowMap
     texture2d gbufferSky
+    texturecube envCube
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
@@ -158,6 +165,8 @@ material Lighting {
     uniform vec4 shadowMapTexel
     uniform vec4 shadowPcf
     uniform vec4 skyMix
+    uniform vec4 cubeActive
+    uniform vec4 ambientStrength
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     vertex {
         in  pos : position
@@ -170,7 +179,9 @@ material Lighting {
         let albedo = sample(gbufferAlbedo, baseUv)
         let normalSample = sample(gbufferNormal, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
-        let ambient = vec3(0.1, 0.1, 0.1)
+        let ambientFlat = vec3(0.1, 0.1, 0.1)
+        let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x
+        let ambient = ambientFlat + ambientCube
         let worldPos = sample(gbufferMotion, baseUv).xyz
         let Ld0 = Lights.dirs[0].xyz * (1.0 / max(length(Lights.dirs[0].xyz), 0.0001))
         let toL0 = Lights.dirs[0].xyz - worldPos
@@ -201,7 +212,7 @@ material Lighting {
 )");
 }
 
-// Capture pass â€” mirrors Test_B4_GBufferRealDraw / Test_B4c_MotionVector
+// Capture pass â€?mirrors Test_B4_GBufferRealDraw / Test_B4c_MotionVector
 // pattern. Records what ctx.lightingPass points at, plus the FBO
 // accessors (lightingFbo/lightingWidth/lightingHeight) so the test
 // can verify the LightingPass slot's setOutputSize broadcast was
@@ -229,20 +240,20 @@ struct B5CapturePass final : public ayt::render::detail::RenderPass {
 TEST_SUITE(AYRenderer_B5_LightingDirectional)
 
 TEST_CASE(b5_lighting_pass_ensure_program_contract) {
-    // B5.1 â€” `ensureProgram + isProgramReady` contract (mirror
+    // B5.1 â€?`ensureProgram + isProgramReady` contract (mirror
     // GBufferPass B4b.1 at Test_B4_GBufferRealDraw.cpp).
     LightingPass pass;
     CHECK(pass.isProgramReady() == false);  // default = not yet
 
     // After ensureProgram on a real ShaderResourcePool the
     // outcome depends on the test sandbox shaderc availability:
-    //   - shaderc + bgfx::init works â†’ program is valid
-    //   - shaderc missing / Noop path â†’ _programAcquireFailed = true
+    //   - shaderc + bgfx::init works â†?program is valid
+    //   - shaderc missing / Noop path â†?_programAcquireFailed = true
     // Both outcomes pin "ensureProgram was reached"; idempotent.
     BGFXAdapter adapter;
     ayt::shader::ShaderResourcePool pool;
     pass.ensureProgram(pool);
-    // Re-calling must be idempotent â€” early-return on
+    // Re-calling must be idempotent â€?early-return on
     // _program.isValid() || _programAcquireFailed.
     pass.ensureProgram(pool);
     pass.ensureProgram(pool);
@@ -251,18 +262,18 @@ TEST_CASE(b5_lighting_pass_ensure_program_contract) {
 }
 
 TEST_CASE(b5_lighting_pass_is_ready_requires_both_fbo_and_program) {
-    // B5.2 â€” `isReady()` upgrade: B3 unconditionally returned
+    // B5.2 â€?`isReady()` upgrade: B3 unconditionally returned
     // false; B5 flips to true ONLY when both the FBO is valid
     // AND the program is ready. Default-constructed LightingPass:
     // false (no FBO, no program). After setOutputSize + the
     // adapter ensure path: FBO valid (on real backend); program
-    // valid (also real backend). On Noop: program fails â†’ false.
+    // valid (also real backend). On Noop: program fails â†?false.
     LightingPass pass;
     CHECK(pass.isReady() == false);  // default
 
     pass.setOutputSize(1280, 720);
     // setOutputSize is HOST-DRIVEN STORE-ONLY (mirror GBufferPass
-    // setGbufferSize at GBufferPass.cpp:231-238) â€” it writes the
+    // setGbufferSize at GBufferPass.cpp:231-238) â€?it writes the
     // W/H fields directly, with no adapter access. The next
     // execute() honors the size. So lightingWidth()/Height()
     // report the REQUESTED size, not the FBO size, until execute
@@ -272,7 +283,7 @@ TEST_CASE(b5_lighting_pass_is_ready_requires_both_fbo_and_program) {
     CHECK(pass.isReady() == false);   // FBO ensure not yet called
     CHECK(pass.buildStamp()[0] == '\0'); // never ensured
 
-    // Disable signal: setOutputSize(0, 0) â†’ execute() early-returns.
+    // Disable signal: setOutputSize(0, 0) â†?execute() early-returns.
     pass.setOutputSize(0, 0);
     CHECK(pass.isReady() == false);
     CHECK(pass.lightingWidth() == 0u);
@@ -280,8 +291,8 @@ TEST_CASE(b5_lighting_pass_is_ready_requires_both_fbo_and_program) {
 }
 
 TEST_CASE(b5_lighting_cache_key_and_build_stamp_pinned) {
-    // B5.3 + B5.6 + Â§P5.5 B (2026-07-23) â€” Cache-key + build-stamp
-    // pin. Pre-B this asserted "mine == mine" (false green â€” the
+    // B5.3 + B5.6 + Â§P5.5 B (2026-07-23) â€?Cache-key + build-stamp
+    // pin. Pre-B this asserted "mine == mine" (false green â€?the
     // literal lived in a `.cpp` static so the mirror could only
     // self-compare). B externalized the live cache-key via
     // `kLightingCacheKeyCStr` in LightingPass.h, so the mirror now
@@ -304,7 +315,7 @@ TEST_CASE(b5_lighting_cache_key_and_build_stamp_pinned) {
 }
 
 TEST_CASE(b5_phoskia_lighting_source_contract) {
-    // B5.4 â€” Source-string contract: Phoskia source contains
+    // B5.4 â€?Source-string contract: Phoskia source contains
     // the required substrings (3 samplers + 3 uniforms + Lambert
     // formula) and does NOT contain the forbidden ones (no MRT
     // `out ... : color`, no shadow terms). Drift = test fails.
@@ -330,10 +341,10 @@ TEST_CASE(b5_phoskia_lighting_source_contract) {
 }
 
 TEST_CASE(b5_lighting_shader_resource_uniform_path) {
-    // B5.5 â€” `_program.getUniformBinding("u_lightDirection")`
+    // B5.5 â€?`_program.getUniformBinding("u_lightDirection")`
     // either returns a valid id (D3D11/Vulkan/Metal real backend)
     // or Invalid (Noop / shaderc missing). Either is a defined
-    // outcome â€” never a crash. Mirror B4c.5.
+    // outcome â€?never a crash. Mirror B4c.5.
     LightingPass pass;
     BGFXAdapter adapter;
     ayt::shader::ShaderResourcePool pool;
@@ -347,9 +358,9 @@ TEST_CASE(b5_lighting_shader_resource_uniform_path) {
 }
 
 TEST_CASE(b5_lighting_destroy_resources_resets_state) {
-    // B5 destroyResources contract â€” mirror GBufferPass B4a.6.
+    // B5 destroyResources contract â€?mirror GBufferPass B4a.6.
     // On a shell (no FBO yet), destroyResources is a clean no-op
-    // for state â€” all handles stay invalid, W/H stays 0,
+    // for state â€?all handles stay invalid, W/H stays 0,
     // buildStamp stays empty. When real FBO/VB/IB are allocated,
     // destroy drops them and resets all state.
     BGFXAdapter adapter;
@@ -365,9 +376,9 @@ TEST_CASE(b5_lighting_destroy_resources_resets_state) {
 }
 
 TEST_CASE(b5_full_pipeline_lighting_pass_e2e) {
-    // B5.7 â€” E2E pipeline with full Shadow/GBuffer(B4c)/Lighting(B5)/
+    // B5.7 â€?E2E pipeline with full Shadow/GBuffer(B4c)/Lighting(B5)/
     // Transparent/PP/UI chain on Noop backend. LightingPass submits
-    // 1 draw (the fullscreen triangle â€” different from
+    // 1 draw (the fullscreen triangle â€?different from
     // GBufferPass's N-draw scene-items loop).
     B5CapturePass::lastSeen = nullptr;
     B5CapturePass::callCount = 0;
@@ -402,13 +413,13 @@ TEST_CASE(b5_full_pipeline_lighting_pass_e2e) {
 
     const uint32_t total = pipe.executeAll(ctx);
     // On an UNINITIALIZED adapter (default-constructed
-    // BGFXAdapter â€” the test bypasses Renderer::render() and
+    // BGFXAdapter â€?the test bypasses Renderer::render() and
     // drives PassExecContext directly), every pass Noop-gates
     // via `isInitialized()` early-return (Â§5.4 fix at
     // ForwardOpaquePass.cpp / TransparentPass.cpp /
-    // LightingPass.cpp â€” pre-existing UB landmine). Total = 0.
+    // LightingPass.cpp â€?pre-existing UB landmine). Total = 0.
     // LightingPass's logical "1 fullscreen-triangle draw" is
-    // only counted on a live adapter (live adapter â†’ execute()
+    // only counted on a live adapter (live adapter â†?execute()
     // reaches the submit block).
     CHECK(total == 0u);
 
@@ -418,12 +429,12 @@ TEST_CASE(b5_full_pipeline_lighting_pass_e2e) {
 
     // Borrowed-pointer contract: ctx.lightingPass survives the
     // full dispatch (through B4c GBufferPass::execute + B5
-    // LightingPass::execute â€” both preserve ctx fields).
-    // Size honored: setOutputSize broadcast in render() â€” but
+    // LightingPass::execute â€?both preserve ctx fields).
+    // Size honored: setOutputSize broadcast in render() â€?but
     // the test bypasses render() and goes direct via PassExecContext
     // (mirror Test_B4_GBufferRealDraw case 7), so the LightingPass
     // has not been setOutputSize'd yet. observedSizeHonored=false
-    // is the expected shape (sanity â€” confirms we're hitting the
+    // is the expected shape (sanity â€?confirms we're hitting the
     // right code path).
     CHECK(B5CapturePass::observedSizeHonored == false);
 

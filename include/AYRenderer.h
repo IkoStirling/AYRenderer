@@ -76,6 +76,10 @@ public:
     TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
                                          const uint8_t* pixels,
                                          const std::string& cacheKey = "");
+    // §P5.5 D-upload — host-facing cubemap create (6×RGBA8 faces).
+    TextureHandle createCubeTextureFromRgba8(uint32_t size,
+                                             const uint8_t* rgba8Faces,
+                                             const std::string& cacheKey = "");
     TextureHandle createTextureFromFile(const std::string& path,
                                         const std::string& cacheKey = "");
     TextureHandle loadTexture(const std::string& path);
@@ -156,6 +160,44 @@ public:
     // place; the renderer reads the borrowed pointer each frame.
     void setSkySource(const SkySource* sky);
     const SkySource* skySource() const noexcept;
+
+    // §P5.5 D (2026-07-23) — IBL MVP (Ambient Diffuse Cube Lookup).
+    // Host-side upload setter for the cube map (samplerCube)
+    // consumed by SkyboxPass::execute (kind=CubeMap path) AND
+    // LightingPass::execute (ambient cube lookup term).
+    //
+    // The cube handle is a host-owned TextureHandle resource
+    // (mirror equirect `texture2d` path semantics — same Texture
+    // Resource lifetime; the renderer borrows the bgfx::TextureHandle
+    // lookup via ctx.textures). Default = TextureHandle{} (invalid)
+    // = cube path inactive = SkyboxPass kind stays Equirect (or
+    // no-op if no equirect) and LightingPass uploads cubeActive=0
+    // ⇒ pre-D byte-equivalent flat ambient + flat backdrop.
+    //
+    // Hard rule (owner-confirmed 2026-07-23): cube handle valid ⇒
+    // CubeMap path; invalid (or setSkySourceCube never called) ⇒
+    // fallback to the equirect setSkySource path. The two paths are
+    // MUTUALLY EXCLUSIVE per frame — never "each draws half". The
+    // SkyboxPass FS uses `mix(equirectColor, cubeColor, skyKind)`
+    // with skyKind derived from `kind == CubeMap && hasValidCube`;
+    // the LightingPass FS uses `ambientFlat + ambientCube *
+    // cubeActive` with cubeActive derived from the same predicate.
+    //
+    // Pass an invalid TextureHandle to clear the cube path and
+    // revert to equirect.
+    //
+    // Lifetime: the TextureHandle must outlive any in-flight
+    // render() call (mirror equirect handle lifetime). Easiest
+    // lifetime = a host member, populated once at startup or per
+    // scene change. For hosts that want to dynamically swap cube
+    // maps (e.g. room-to-room IBL transition), swap the handle
+    // between render() calls — pass the new handle, then call
+    // render().
+    //
+    // Host-side cube upload: Renderer::createCubeTextureFromRgba8
+    // (6×RGBA8 faces). HDR / file-based cube load can follow later.
+    void setSkySourceCube(TextureHandle cube);
+    TextureHandle skySourceCube() const noexcept;
 
     // Quality / style knobs (safe to call after initialize).
     // msaa: 0=off, 2/4/8/16. Applies via bgfx::reset (backbuffer).

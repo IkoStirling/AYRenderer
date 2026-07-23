@@ -817,6 +817,40 @@ TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint
     return out;
 }
 
+TextureHandle RenderResourceManager::createCubeTextureFromRgba8(uint32_t size,
+                                                                const uint8_t* rgba8Faces,
+                                                                const std::string& cacheKey)
+{
+    TextureHandle out;
+    if (!_adapter.isInitialized() || size == 0 || rgba8Faces == nullptr) {
+        return out;
+    }
+
+    if (!cacheKey.empty()) {
+        const auto cached = _textureCacheByKey.find(cacheKey);
+        if (cached != _textureCacheByKey.end()) {
+            out.id = cached->second;
+            return out;
+        }
+    }
+
+    GpuTexture gpuTex;
+    gpuTex.width  = static_cast<uint16_t>(size);
+    gpuTex.height = static_cast<uint16_t>(size);
+    gpuTex.handle = _adapter.createTextureCube(gpuTex.width, rgba8Faces);
+    if (!bgfx::isValid(gpuTex.handle)) {
+        return out;
+    }
+
+    const uint64_t id = _nextTextureId++;
+    _textures.emplace(id, gpuTex);
+    if (!cacheKey.empty()) {
+        _textureCacheByKey.emplace(cacheKey, id);
+    }
+    out.id = id;
+    return out;
+}
+
 TextureHandle RenderResourceManager::createTextureFromData(uint32_t width, uint32_t height,
                                                            uint32_t bgfxTextureFormat,
                                                            const void* data, uint32_t size,

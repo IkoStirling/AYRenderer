@@ -1,12 +1,12 @@
-// §P5 B7+ (2026-07-22) + §P5.5 A (2026-07-23) — multi-light
+// §P5 B7+ (2026-07-22) + §P5.5 A (2026-07-23) �?multi-light
 // accumulation contract tests.
 //
 // Pins the B7 ship + the A ship (unified `Light` POD with
-// `LightType` enum + UBO `dirs[8]` → `record[8]` rename):
+// `LightType` enum + UBO `dirs[8]` �?`record[8]` rename):
 //
 //   1) SceneLights POD contract (cutsheet §5.3 red lines preserved):
 //      - MAX = 8 (kMaxSceneLights)
-//      - default ctor → count = 0, no lights
+//      - default ctor �?count = 0, no lights
 //      - add() returns assigned slot, fails soft past MAX (UINT32_MAX)
 //      - A: pre-§P5.5 `DirectionalLight` POD still compiles because
 //        AYRenderScene.h:142 carries `using DirectionalLight = Light;`.
@@ -18,19 +18,19 @@
 //        Test_B4c_MotionVector, ...) keep compiling without edits.
 //      - Default-init = nullptr (B5 single-light fallback preserved).
 //
-//   3) Renderer::setSceneLights wiring contract — borrowed pointer
+//   3) Renderer::setSceneLights wiring contract �?borrowed pointer
 //      pinned to the slot, lifetime is host's responsibility
 //      (mirror shadowPass borrowed pointer pattern; cutsheet
 //      pass-lessons-from-deferred.md §5.4 / execution-plan.md:329
 //      "ctx.lights 借用指针").
 //
-//   4) LightingPass Phoskia source — A upgraded B7 contract:
+//   4) LightingPass Phoskia source �?A upgraded B7 contract:
 //      - declares `uniformblock Lights { vec4 record[8];
 //        vec4 colors[8]; } binding 0` (renamed from `dirs[8]`).
-//      - cache-key bump: v3_b5_hlsl_vec_ctors → v4_b7_multi_light_ubo
-//        → v16_b5p5_worldpos_rgba16f → v18_b5p5a_light_pod.
+//      - cache-key bump: v3_b5_hlsl_vec_ctors �?v4_b7_multi_light_ubo
+//        �?v16_b5p5_worldpos_rgba16f �?v18_b5p5a_light_pod.
 //
-//   5) B7 lightsBlock layout pin — `uniformblock Lights` field
+//   5) B7 lightsBlock layout pin �?`uniformblock Lights` field
 //      order is `dirs[8]` (pre-A) / `record[8]` (post-A) then
 //      `colors[8]`. CPU upload mirrors std140 layout so
 //      `setUniformBlock(Lights, ...)` packs the same byte
@@ -49,14 +49,14 @@
 // plus a `kForbiddenSourceSubstrings` array that catches a regression
 // to the pre-A `dirs` access syntax if it ever leaks back in. A
 // keeps the existing `dirs[8]` substring pins as a historical
-// snapshot of the B7-era contract — they coexist with the v18
+// snapshot of the B7-era contract �?they coexist with the v18
 // cache-key bump (which is the only authoritative runtime change).
 //
 // Red lines preserved (cutsheet §5.3 + §5.5):
-//   - NO RenderScene::Light (永久退休)
+//   - NO RenderScene::Light (永久退�?
 //   - NO FrameContext field additions
 //   - NO ForwardOpaque / Transparent sampler changes
-//   - PassExecContext grew by 1 borrowed-pointer field (≤ 1 per cut).
+//   - PassExecContext grew by 1 borrowed-pointer field (�?1 per cut).
 
 #include "AYTest.h"
 #include "AYRenderScene.h"
@@ -101,23 +101,29 @@ using ayt::math::FVector3;
 
 namespace {
 
-// §P5.5 A (2026-07-23) — cache-key bump v10 → v18 (UBO `dirs[8]`
+// §P5.5 A (2026-07-23) �?cache-key bump v10 �?v18 (UBO `dirs[8]`
 // renamed to `record[8]`; the unified `Light` POD carries
 // `LightType` so the receiver can gate per type in B). Bump is
 // monotonic and additive (v10, v18 = 8 chars each).
 //
-// §P5.5 B (2026-07-23) — bump v20 → v21 (Point/Spot per-type math
+// §P5.5 B (2026-07-23) �?bump v20 �?v21 (Point/Spot per-type math
 // + UBO widens to 4 arrays). Mirror now compares against the live
 // `kLightingCacheKeyCStr` extern (was self-compare false-green
 // pre-B). Drift now fails immediately.
+//
+// §P5.5 D (2026-07-23) �?bump v21 �?v22 (IBL MVP ambient cube:
+// Phoskia source adds `texturecube envCube` + `uniform float
+// cubeActive` + `uniform vec4 ambientStrength`; ambient term
+// becomes `ambientFlat + ambientCube`). Mirror stays live-
+// drift-pinned via `kLightingCacheKeyCStr`.
 //
 // Drift between LightingPass.cpp's literal and this mirror = test
 // fails. Same TU-local-mirror pattern used by
 // Test_B5_LightingDirectional.cpp::kExpectedLightingCacheKey.
 inline constexpr const char* kExpectedB7LightingCacheKey =
-    "lighting_v21_p5p5b_point_spot_atten_cone";
+    "lighting_v23_vec4_ibl_gates";
 
-// §P5 B7+ (2026-07-22) — Phoskia source substring pins. Drift =
+// §P5 B7+ (2026-07-22) �?Phoskia source substring pins. Drift =
 // test fails. Note PascalCase `Lights` block name (matches
 // AYShader/unittest/golden/material_with_ubo_binding.phoskia:5
 // "Camera.position" canonical access shape).
@@ -128,6 +134,12 @@ inline const char* kExpectedSourceSubstrings[] = {
     "vec4 params[8]",                 // §P5.5 B: per-light params
     "vec4 spotDir[8]",                // §P5.5 B: spot direction
     "} binding 0",                    // binding 0 (matches B5 single-light contract slot)
+    "texturecube envCube",            // §P5.5 D: IBL ambient sampler
+    "uniform vec4 cubeActive",       // §P5.5 D: IBL gate
+    "uniform vec4 ambientStrength",  // §P5.5 D: IBL strength
+    "let ambientFlat = vec3(0.1, 0.1, 0.1)",  // §P5.5 D: pre-D floor preserved
+    "let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x",
+    "let ambient = ambientFlat + ambientCube",  // §P5.5 D: combined term
     "Lights.dirs[0].xyz",             // access pattern (PascalCase block + lowercase field)
     "Lights.colors[0].xyz",
     "Lights.params[0]",               // §P5.5 B: per-light params access
@@ -137,30 +149,38 @@ inline const char* kExpectedSourceSubstrings[] = {
     "max(length(Lights.dirs[0].xyz), 0.0001)",  // safe empty-slot normalize
 };
 
-// Forbidden substrings — pins "no RenderScene::Light" + "no
-// FrameContext field" + "no new pass slot" — all of these are
+// Forbidden substrings �?pins "no RenderScene::Light" + "no
+// FrameContext field" + "no new pass slot" �?all of these are
 // forbidden by cutsheet §5.3 / §5.5. They CANNOT appear anywhere
 // in the B7 file set (the new code paths produce them implicitly
 // via class names; absent here means nobody accidentally
 // reintroduced a Light struct).
 //
 // §P5.5 A *deliberately* does NOT add the pre-A `vec4 dirs[8]`
-// UBO shape here — A renames the field to `record[8]` and the
+// UBO shape here �?A renames the field to `record[8]` and the
 // mirror used by the substring test below still uses the legacy
 // `dirs[8]` shape (the mirror is historically stale and gets
 // cleaned up in a follow-up; pinning `dirs[8]` as forbidden here
 // would force an early mirror rewrite that exceeds A's scope).
 inline const char* kForbiddenSourceSubstrings[] = {
-    "RenderScene::Light",   // 永久退休 per §5.5
+    "RenderScene::Light",   // 永久退�?per §5.5
     "FrameContext lights",   // FrameContext 0 grow per §5.3
 };
 
 // Mirror of kLightingPhoskiaSource at LightingPass.cpp (the
-// §P5.5 B-bumped variant). Kept in sync by code review
+// §P5.5 B + §P5.5 D-bumped variant). Kept in sync by code review
 // (string-search contract pinned by the substring tests above).
+//
+// §P5.5 D (2026-07-23) �?adds `texturecube envCube` +
+// `uniform vec4 cubeActive` + `uniform vec4 ambientStrength` +
+// `ambientFlat` / `ambientCube` / `ambient = ambientFlat +
+// ambientCube` term. The pre-D flat `vec3(0.1, 0.1, 0.1)`
+// ambient is preserved as the `ambientFlat` floor; cubeActive=0
+// (the default) �?`ambientCube * 0 = 0` �?ambient = ambientFlat
+// = pre-D byte-equivalent.
 std::string mirrorLightingPhoskiaSourceB7()
 {
-    // Top-level Lights UBO (same as LightingPass.cpp) — nested inside
+    // Top-level Lights UBO (same as LightingPass.cpp) �?nested inside
     // material never emits a cbuffer on the D3D path. B widens from
     // 2 vec4 arrays to 4 (dirs/colors/params/spotDir).
     return std::string(R"(
@@ -174,9 +194,12 @@ material Lighting {
     texture2d gbufferAlbedo
     texture2d gbufferNormal
     texture2d gbufferMotion
+    texturecube envCube
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
+    uniform vec4 cubeActive
+    uniform vec4 ambientStrength
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -188,8 +211,11 @@ material Lighting {
         let albedo = sample(gbufferAlbedo, baseUv)
         let normalSample = sample(gbufferNormal, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
-        let ambient = vec3(0.1, 0.1, 0.1)
-        // §P5.5 B (2026-07-23) — per-type branch on `dirs[0].w`
+        // §P5.5 D (2026-07-23) �?IBL MVP ambient term.
+        let ambientFlat = vec3(0.1, 0.1, 0.1)
+        let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x
+        let ambient = ambientFlat + ambientCube
+        // §P5.5 B (2026-07-23) �?per-type branch on `dirs[0].w`
         // = float(LightType): Directional < 0.5, Point < 1.5,
         // Spot otherwise. Phoskia `if` is statement-only, so the
         // dispatch uses step() to select one of the 3 precomputed
@@ -242,7 +268,7 @@ material Lighting {
 )");
 }
 
-// Capture pass — mirrors Test_B5 / Test_B6 CapturePass pattern.
+// Capture pass �?mirrors Test_B5 / Test_B6 CapturePass pattern.
 // Records whether ctx.sceneLights survives the full pipeline
 // dispatch (borrowed-pointer contract).
 struct B7CapturePass final : public ayt::render::detail::RenderPass {
@@ -267,7 +293,7 @@ struct B7CapturePass final : public ayt::render::detail::RenderPass {
 TEST_SUITE(AYRenderer_B7_MultiLightAccumulation)
 
 TEST_CASE(b7_scene_lights_pod_max_and_default) {
-    // B7.1 — SceneLights POD contract: MAX = 8, default ctor empty.
+    // B7.1 �?SceneLights POD contract: MAX = 8, default ctor empty.
     CHECK(kMaxSceneLights == 8u);
 
     SceneLights empty;
@@ -285,8 +311,8 @@ TEST_CASE(b7_scene_lights_pod_max_and_default) {
 }
 
 TEST_CASE(b7_scene_lights_add_appends_and_caps_at_max) {
-    // B7.1 — add() returns assigned slot, fails soft past MAX.
-    // §P5.5 A — pre-A's `{direction, color}` brace-init no longer
+    // B7.1 �?add() returns assigned slot, fails soft past MAX.
+    // §P5.5 A �?pre-A's `{direction, color}` brace-init no longer
     // matches the 4-field `Light` POD (now has type/position/color).
     // The `Light::directional(dir, col)` factory produces the same
     // pre-A `DirectionalLight { direction, color }` shape.
@@ -314,7 +340,7 @@ TEST_CASE(b7_scene_lights_add_appends_and_caps_at_max) {
 }
 
 TEST_CASE(b7_pass_exec_context_brace_init_default_keeps_compatibility) {
-    // B7.2 — 17-field brace init compiles. Default-init at the
+    // B7.2 �?17-field brace init compiles. Default-init at the
     // tail position uses sceneLights = nullptr. Mirror the
     // shadowPass / gbufferPass / lightingPass trailing-default
     // pattern (cutsheet PassExecContext.h).
@@ -343,7 +369,7 @@ TEST_CASE(b7_pass_exec_context_brace_init_default_keeps_compatibility) {
 }
 
 TEST_CASE(b7_phoskia_lighting_source_contract) {
-    // B7.4 — Phoskia source substring pin. The B7-bumped source
+    // B7.4 �?Phoskia source substring pin. The B7-bumped source
     // declares the Lights UBO and unrolls 8 directional taps.
     const std::string src = mirrorLightingPhoskiaSourceB7();
     for (const char* needle : kExpectedSourceSubstrings) {
@@ -355,7 +381,7 @@ TEST_CASE(b7_phoskia_lighting_source_contract) {
 }
 
 TEST_CASE(b7_lighting_cache_key_bump_pinned) {
-    // §P5.5 B (2026-07-23) — Bug fix #3: cache-key mirror compares
+    // §P5.5 B (2026-07-23) �?Bug fix #3: cache-key mirror compares
     // against the live `kLightingCacheKeyCStr` extern (was self-
     // compare false-green pre-B). Drift now fails immediately.
     // B7 cache-key bump (mirror Test_B5::b5_lighting_cache_key_and_build_stamp_pinned).
@@ -366,7 +392,7 @@ TEST_CASE(b7_lighting_cache_key_bump_pinned) {
 }
 
 TEST_CASE(b7_lights_block_layout_dirs_then_colors) {
-    // §P5.5 B (2026-07-23) — lightsBlock layout pin: 4 vec4 arrays
+    // §P5.5 B (2026-07-23) �?lightsBlock layout pin: 4 vec4 arrays
     // (dirs[8] + colors[8] + params[8] + spotDir[8]) at offsets
     // 0/128/256/384 respectively (each vec4 = 16 bytes; 8 vec4 =
     // 128 bytes per array). Total = 512 bytes.
@@ -379,9 +405,9 @@ TEST_CASE(b7_lights_block_layout_dirs_then_colors) {
         + kParamBlockSizeBytes + kSpotDirBlockSizeBytes;
     CHECK(kTotalBlockSizeBytes == 512u);
 
-    // Mirror the lightsBlock layout: index 0..7 → dirs, index
-    // 8..15 → colors (stored as 8 + i mapping).
-    // §P5.5 A — same brace-init → Light::directional factory, since
+    // Mirror the lightsBlock layout: index 0..7 �?dirs, index
+    // 8..15 �?colors (stored as 8 + i mapping).
+    // §P5.5 A �?same brace-init �?Light::directional factory, since
     // the pre-A 2-tuple initializer no longer matches the 4-field
     // `Light` POD.
     SceneLights two;
@@ -397,7 +423,7 @@ TEST_CASE(b7_lights_block_layout_dirs_then_colors) {
 }
 
 TEST_CASE(b7_full_pipeline_multi_light_e2e) {
-    // B7.7 — E2E pipeline: Shadow/GBuffer(B4c)/Lighting(B5+B7)/
+    // B7.7 �?E2E pipeline: Shadow/GBuffer(B4c)/Lighting(B5+B7)/
     // Transparent/PP/UI on UNINITIALIZED adapter (test bypasses
     // Renderer::render(), drives PassExecContext directly).
     B7CapturePass::lastSeen    = nullptr;
@@ -440,7 +466,7 @@ TEST_CASE(b7_full_pipeline_multi_light_e2e) {
     ctx.sceneLights  = &lights;
 
     const uint32_t total = pipe.executeAll(ctx);
-    // Uninit adapter (§5.4 fix) ⇒ total = 0.
+    // Uninit adapter (§5.4 fix) �?total = 0.
     CHECK(total == 0u);
     // Capture pass slot (index 6) ran.
     CHECK(B7CapturePass::callCount == 1u);
@@ -461,12 +487,12 @@ TEST_CASE(b7_full_pipeline_multi_light_e2e) {
     CHECK(pipe.passes()[6]->name() == "B7Capture");
 }
 
-// §P5.5 B (2026-07-23) — new cases pinning the Point + Spot light
+// §P5.5 B (2026-07-23) �?new cases pinning the Point + Spot light
 // factories, the Light POD widen, the 4-array UBO layout, and the
 // live cache-key extern (Bug fix #3).
 
 TEST_CASE(b7_point_light_factory_sets_type_position_range_intensity) {
-    // B.1 — `Light::point()` factory: type=Point, position/range/
+    // B.1 �?`Light::point()` factory: type=Point, position/range/
     // intensity/color fields populated; direction/spotDirection/
     // coneCos* fields left at their defaults (Directional-side
     // fields are unused by Point branch in the FS).
@@ -491,7 +517,7 @@ TEST_CASE(b7_point_light_factory_sets_type_position_range_intensity) {
 }
 
 TEST_CASE(b7_spot_light_factory_sets_type_position_dir_cone_params) {
-    // B.2 — `Light::spot()` factory: type=Spot, all 7 params set.
+    // B.2 �?`Light::spot()` factory: type=Spot, all 7 params set.
     Light s = Light::spot(
         FVector3(0.0f, 3.0f, 0.0f),       // position
         FVector3(0.0f, -1.0f, 0.0f),      // spotDirection
@@ -511,24 +537,24 @@ TEST_CASE(b7_spot_light_factory_sets_type_position_dir_cone_params) {
 }
 
 TEST_CASE(b7_light_pod_size_assert_passes_after_widen) {
-    // B.3 — `sizeof(Light)` is bounded by the `static_assert` ceiling
-    // bumped in B (≤ 96). The actual size on MSVC with the new
+    // B.3 �?`sizeof(Light)` is bounded by the `static_assert` ceiling
+    // bumped in B (�?96). The actual size on MSVC with the new
     // fields (4 float + FVector3 spotDirection) is ~72 bytes (see
     // AYRenderScene.h comment for layout rationale).
     //
-    // We pin the exact size as the contract — any future field
+    // We pin the exact size as the contract �?any future field
     // addition that pushes past 96 will trip the static_assert at
     // compile time and surface here as a test failure (the test
     // asserts the boundary, not the exact value).
     CHECK(sizeof(Light) <= 96u);
     // B documented ~68B; verify the actual is consistent with the
     // planned layout (8-byte multiple of float alignment):
-    CHECK(sizeof(Light) >= 64u);   // pre-B was 40B; B widens to ≥ 64
+    CHECK(sizeof(Light) >= 64u);   // pre-B was 40B; B widens to �?64
     CHECK(sizeof(Light) <= 96u);
 }
 
 TEST_CASE(b7_lights_block_layout_four_arrays) {
-    // B.4 — lightsBlock layout: 4 vec4 arrays × 8 lights × 16 bytes
+    // B.4 �?lightsBlock layout: 4 vec4 arrays × 8 lights × 16 bytes
     // per vec4 = 512 bytes total (vs A's 256B). This is the same
     // memory the CPU pack code writes to and the field-split upload
     // reads from (4 separate `setUniform` calls, each 128B).
@@ -553,20 +579,74 @@ TEST_CASE(b7_lights_block_layout_four_arrays) {
 }
 
 TEST_CASE(b7_lighting_cache_key_bump_pinned_live) {
-    // B.5 — Bug fix #3 verification: the test mirror MUST equal the
-    // live `kLightingCacheKeyCStr` extern. Pre-B this was a self-
-    // compare (false green); the extern makes it a real drift
-    // detector. If LightingPass.cpp's `kLightingCacheKey` literal
-    // ever drifts from the mirror literal in this file, this test
-    // fails immediately (cutsheet §P5.5 B Bug fix #3).
+    // B.5 + D �?Bug fix #3 verification: the test mirror MUST
+    // equal the live `kLightingCacheKeyCStr` extern. Pre-B this
+    // was a self-compare (false green); the extern makes it a
+    // real drift detector. If LightingPass.cpp's
+    // `kLightingCacheKey` literal ever drifts from the mirror
+    // literal in this file, this test fails immediately
+    // (cutsheet §P5.5 B Bug fix #3).
     CHECK(std::string(kExpectedB7LightingCacheKey)
           == std::string(kLightingCacheKeyCStr));
     // Both strings should be non-empty and reasonably long (cache
     // keys are stable identifiers, not free-form text).
     CHECK(std::string(kExpectedB7LightingCacheKey).size() >= 20u);
     CHECK(std::string(kLightingCacheKeyCStr).size() >= 20u);
-    // The literal must contain the §P5.5 B version bump marker.
-    CHECK(std::string(kLightingCacheKeyCStr).find("v21_p5p5b")
+    // The literal must contain the §P5.5 D version bump marker.
+    CHECK(std::string(kLightingCacheKeyCStr).find("v23_vec4_ibl_gates")
+          != std::string::npos);
+}
+
+// §P5.5 D (2026-07-23) �?IBL MVP ambient cube lookup contract
+// pins. Two new cases pinning the D ship:
+//
+//   D.1) `cubeActive=0 default` �?pre-D byte-equivalent flat
+//        ambient term (`vec3(0.1, 0.1, 0.1)`). The Phoskia
+//        source MUST still contain the ambientFlat substring;
+//        the cube lookup term MUST be gated by `cubeActive`
+//        (so the FS evaluates `0 * cubeActive = 0` when
+//        cubeActive=0).
+//   D.2) `cubeActive=1` �?FS evaluates `sample(envCube, N) *
+//        ambientStrength.x * cubeActive.x`. Pins the envCube sampler
+//        + cubeActive / ambientStrength uniform substrings.
+
+TEST_CASE(b7_ibl_cube_active_zero_default_pins_byte_equivalent) {
+    // §P5.5 D.1 �?Pre-D byte-equivalent contract: the LightingPass
+    // FS ambient term MUST contain `vec3(0.1, 0.1, 0.1)` as the
+    // flat floor (the pre-D / pre-IBL ambient value). When
+    // cubeActive=0 (host never called Renderer::setSkySourceCube,
+    // or SkySource::kind != CubeMap, or no SkyboxPass slot), the
+    // cube lookup contribution collapses to 0 �?flat ambient =
+    // `vec3(0.1, 0.1, 0.1)`, byte-equivalent to pre-D.
+    const std::string src = mirrorLightingPhoskiaSourceB7();
+    // ambientFlat substring pins pre-D floor preservation.
+    CHECK(src.find("ambientFlat = vec3(0.1, 0.1, 0.1)")
+          != std::string::npos);
+    // cubeActive gate: ambientCube is multiplied by cubeActive
+    // �?0 contribution when cubeActive=0 (pre-D byte-equivalent).
+    CHECK(src.find("ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x")
+          != std::string::npos);
+    CHECK(src.find("ambient = ambientFlat + ambientCube")
+          != std::string::npos);
+}
+
+TEST_CASE(b7_ibl_cube_active_one_uses_envcube_sampler) {
+    // §P5.5 D.2 �?Cube path contract: Phoskia source MUST
+    // declare `texturecube envCube` + `uniform vec4 cubeActive`
+    // + `uniform vec4 ambientStrength`. When cubeActive=1 the
+    // FS evaluates `sample(envCube, N).rgb * ambientStrength *
+    // 1.0` for normal-driven diffuse ambient (the IBL MVP
+    // surface).
+    const std::string src = mirrorLightingPhoskiaSourceB7();
+    CHECK(src.find("texturecube envCube")
+          != std::string::npos);
+    CHECK(src.find("uniform vec4 cubeActive")
+          != std::string::npos);
+    CHECK(src.find("uniform vec4 ambientStrength")
+          != std::string::npos);
+    // The `let` chain evaluates the cube lookup eagerly; cubeActive
+    // is the per-frame gate that controls contribution magnitude.
+    CHECK(src.find("sample(envCube, N)")
           != std::string::npos);
 }
 

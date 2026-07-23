@@ -198,6 +198,19 @@ struct Renderer::Impl {
     // pointer; the SkySource instance must outlive render(). Mirror
     // `sceneLights` borrowed-ptr shape; same lifetime contract.
     const ayt::render::SkySource*   skySource   = nullptr;
+    // §P5.5 D (2026-07-23) — host-uploaded cube map handle for IBL
+    // MVP. Cached here so the host-facing getter (`skySourceCube()`)
+    // can read it back, AND so setSkySourceCube can forward to the
+    // SkyboxPass via `pipeline.findPass("Skybox")` → setCubeTexture
+    // (mirror equirect: equirect lives in SkySource; cube lives on
+    // the SkyboxPass producer state so execute() can read it
+    // without touching PassExecContext / FrameContext — cutsheet
+    // §5.3 red lines 0 ctx field additions per cut). Default =
+    // TextureHandle{} (invalid) = cube path inactive =
+    // pre-D byte-equivalent flat ambient + flat equirect backdrop.
+    // Clear-by-invalid: the host passes `TextureHandle{}` to revert
+    // to the equirect path.
+    ayt::render::TextureHandle      skyCubeTexture{};
     // §P5 B4c (2026-07-22) — previous-frame view/projection cached on
     // Renderer::Impl. GBufferPass samples these for per-pixel motion
     // vectors (gl_FragData[2] = NDC half-range encoded displacement
@@ -1032,6 +1045,16 @@ TextureHandle Renderer::createTextureFromRgba8(uint32_t width, uint32_t height,
     return _impl->resources.createTextureFromRgba8(width, height, pixels, cacheKey);
 }
 
+TextureHandle Renderer::createCubeTextureFromRgba8(uint32_t size,
+                                                   const uint8_t* rgba8Faces,
+                                                   const std::string& cacheKey)
+{
+    if (!_impl || !_impl->adapter.isInitialized()) {
+        return {};
+    }
+    return _impl->resources.createCubeTextureFromRgba8(size, rgba8Faces, cacheKey);
+}
+
 TextureHandle Renderer::createTextureFromFile(const std::string& path,
                                               const std::string& cacheKey)
 {
@@ -1170,6 +1193,47 @@ const ayt::render::SkySource* Renderer::skySource() const noexcept
         return nullptr;
     }
     return _impl->skySource;
+}
+
+// §P5.5 D (2026-07-23) — IBL MVP (Ambient Diffuse Cube Lookup).
+// Host-side cube map handle upload. Mirror setSkySource() shape
+// (Impl member write + nullptr/early-return guard) but the
+// payload is a TextureHandle resource, not a borrowed SkySource
+// pointer. Clear-by-invalid semantics: pass TextureHandle{} to
+// revert to the equirect path.
+//
+// Forwarding: the cube handle is also pushed into the
+// SkyboxPass producer state via `findPass("Skybox")→setCubeTexture`
+// so SkyboxPass::execute and LightingPass::execute can both
+// read it (LightingPass via `ctx.skyboxPass->cubeTexture()`) on
+// the live pipeline. When the Skybox slot isn't mounted
+// (Forward makeDefault()), the cube handle is cached here but
+// has no observable effect — Forward hosts see 0 behavior change
+// per cutsheet §5.3 red line #4.
+//
+// The hard rule (cube valid ⇒ CubeMap path; otherwise equirect)
+// is enforced downstream by SkyboxPass::execute +
+// LightingPass::execute reading the cube handle + SkySource::kind
+// together.
+void Renderer::setSkySourceCube(ayt::render::TextureHandle cube)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->skyCubeTexture = cube;
+    // Forward to the SkyboxPass producer (cutsheet producer-state
+    // pattern — mirror shadowPass / lightingPass borrowed-ptr
+    // shape, but the cube handle is a Resource not a borrowed
+    // pointer). No-op when Skybox slot isn't mounted.
+    if (detail::RenderPass* skyboxPass = _impl->pipeline.findPass("Skybox")) {
+        static_cast<detail::SkyboxPass*>(skyboxPass)
+            ->setCubeTexture(cube);
+    }
+}
+
+ayt::render::TextureHandle Renderer::skySourceCube() const noexcept
+{
+    return _impl ? _impl->skyCubeTexture : ayt::render::TextureHandle{};
 }
 
 void Renderer::setMsaaSampleCount(uint32_t samples)

@@ -238,16 +238,17 @@ using DirectionalLight = Light;
 
 // §Skybox0 (2026-07-23) — host-facing Skybox DataSource.
 // Single equirect texture (current default) OR single cube map
-// (future B cut). Lives on the host; renderer borrows via
+// (§P5.5 D). Lives on the host; renderer borrows via
 // PassExecContext::skySource — mirror SceneLights borrowed-ptr
 // pattern.
 //
-// Constraints (cutsheet §10 pass-lessons-from-deferred.md + §Skybox0):
+// Constraints (cutsheet §10 pass-lessons-from-deferred.md + §Skybox0 +
+// §P5.5 D):
 //   - ❌ NO bgfx:: types in this header (public surface; mirror Light).
 //   - ❌ NO RenderScene mutation (sky is a *scene-exterior* property,
 //     like SceneLights — RenderScene holds only DrawItems).
-//   - ✅ POD-only (enum + TextureHandle + uint64_t); no allocators,
-//     no strings, no GPU types.
+//   - ✅ POD-only (enum + TextureHandle); no allocators, no strings,
+//     no GPU types.
 //   - ✅ Borrowed-ptr pattern: host owns the SkySource instance,
 //     passes its address into Renderer::setSkySource(); the renderer
 //     reads the pointer through PassExecContext::skySource per frame
@@ -257,25 +258,57 @@ using DirectionalLight = Light;
 //
 // MVP A scope (equirect only, 2026-07-23):
 //   - `kind == Equirect` ⇒ SkyboxPass renders via `texture2d skyEquirect`.
-//   - `kind == CubeMap`  ⇒ SkyboxPass early-returns 0 today (enum
-//     placeholder; B-cut will add the samplerCube path).
-//   - `cubeReserve` is reserved for the B-cut handle. A leaves it 0.
+//
+// §P5.5 D (2026-07-23) — CubeMap kind upgraded to a real
+// `samplerCube` path. The previously reserved `uint64_t cubeReserve`
+// placeholder is upgraded to `TextureHandle cubeMap` (TextureHandle
+// already in AYRenderTypes.h; no new public type). The renderer
+// drives the cube kind via TWO inputs:
+//   1. `SkySource::kind` (host-declared scene state; default Equirect)
+//   2. `Renderer::setSkySourceCube(TextureHandle)` — host uploads the
+//      cube handle. Valid cube ⇒ CubeMap path; invalid/cleared ⇒
+//      fallback to equirect.
+// Hard rule: the two paths are MUTUALLY EXCLUSIVE per frame — never
+// "each draws half". A valid cube handle always wins.
 enum class SkySourceKind : uint8_t {
     Equirect = 0,  // 2D panoramic sphere (current default).
-    CubeMap  = 1,  // samplerCube — reserved for §Skybox0-B cut.
+    CubeMap  = 1,  // samplerCube — §P5.5 D ships the cube path
+                   // (SkyboxPass FS dual-kind + LightingPass ambient
+                   // cube lookup).
 };
 
 struct SkySource {
     SkySourceKind kind = SkySourceKind::Equirect;
     TextureHandle equirect{};  // 2D equirect texture (kind==Equirect)
-    // Cube sampler handle reserved for future B cut; A leaves it 0
-    // (host can populate later via Renderer::setSkySourceCube() — not
-    // in A scope).
-    uint64_t cubeReserve = 0;
+    // §P5.5 D (2026-07-23) — cube sampler handle. Replaces the
+    // pre-D `uint64_t cubeReserve` placeholder (was a reserved field
+    // with no semantics; now holds a real TextureHandle). Host
+    // uploads the handle via Renderer::setSkySourceCube() — see
+    // AYRenderer.h for the upload contract and the
+    // invalid-handle-clears-the-path semantics.
+    TextureHandle cubeMap{};
 
     bool hasEquirect() const noexcept { return equirect.isValid(); }
+    // §P5.5 D — cube-side presence predicate. The renderer treats
+    // `setSkySourceCube` as the source of truth for whether the cube
+    // path is active (the cube handle is stored on Renderer::Impl,
+    // not in SkySource — mirror equirect borrowed-ptr pattern + the
+    // cube handle is a host-owned Resource). SkySource::cubeMap
+    // exists so the host can introspect its own state (e.g. the
+    // UI scene tree listing the active sky); isActive() does NOT
+    // read it directly.
+    bool hasCubeMap()  const noexcept { return cubeMap.isValid(); }
+    // §P5.5 D — isActive() branches on kind. Equirect path unchanged
+    // (A-ship). CubeMap path requires the cubeMap handle to be valid
+    // AND the host to have called Renderer::setSkySourceCube with a
+    // valid handle (see LightingPass::execute + SkyboxPass::execute
+    // for the dual-guard). The SkySource::kind alone is not
+    // sufficient — a CubeMap SkySource with no uploaded cube handle
+    // early-returns 0 on SkyboxPass and uploads cubeActive=0 on
+    // LightingPass, preserving the equirect/pre-D fallback.
     bool isActive()    const noexcept {
-        return kind == SkySourceKind::Equirect && hasEquirect();
+        return (kind == SkySourceKind::Equirect && hasEquirect())
+            || (kind == SkySourceKind::CubeMap  && hasCubeMap());
     }
 };
 

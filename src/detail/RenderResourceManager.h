@@ -71,6 +71,11 @@ public:
     TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
                                          const uint8_t* pixels,
                                          const std::string& cacheKey = "");
+    // §P5.5 D-upload — RGBA8 cubemap. `rgba8Faces` layout matches
+    // bgfx::createTextureCube (6 faces × size² × 4).
+    TextureHandle createCubeTextureFromRgba8(uint32_t size,
+                                             const uint8_t* rgba8Faces,
+                                             const std::string& cacheKey = "");
     TextureHandle createTextureFromData(uint32_t width, uint32_t height,
                                         uint32_t bgfxTextureFormat,
                                         const void* data, uint32_t size,
