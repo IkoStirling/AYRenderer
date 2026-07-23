@@ -261,6 +261,17 @@ void BGFXAdapter::setViewRect(uint8_t viewId, uint16_t x, uint16_t y, uint16_t w
     bgfx::setViewRect(viewId, x, y, w, h);
 }
 
+void BGFXAdapter::setViewScissor(uint8_t viewId, uint16_t x, uint16_t y,
+                                 uint16_t w, uint16_t h)
+{
+    // §P5.5 C (2026-07-23) — fragment-cull rect for the per-light
+    // shadow atlas scissor loop. Noop-safe: when bgfx is not alive
+    // (or this adapter is uninitialized), bgfx::setViewScissor is
+    // a no-op anyway, so we don't gate here. Caller is expected
+    // to skip the scissor entirely on Noop (cutsheet §1 Noop gate).
+    bgfx::setViewScissor(viewId, x, y, w, h);
+}
+
 void BGFXAdapter::setViewClear(uint8_t viewId, const ClearDesc& clear)
 {
     uint16_t flags = BGFX_CLEAR_COLOR;

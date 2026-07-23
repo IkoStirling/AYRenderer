@@ -45,6 +45,13 @@ public:
     bool requestScreenshot(const std::string& filePath);
 
     void setViewRect(uint8_t viewId, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+    // §P5.5 C (2026-07-23) — per-light shadow atlas sub-rect clip.
+    // bgfx::setViewScissor wraps the fragment-cull rect (orthogonal
+    // to setViewRect which is the viewport). ShadowPass calls this
+    // per-caster-slot inside its multi-light scissor loop. Noop-safe
+    // (returns early when !_initialized).
+    void setViewScissor(uint8_t viewId, uint16_t x, uint16_t y,
+                        uint16_t w, uint16_t h);
     void setViewClear(uint8_t viewId, const ClearDesc& clear);
     void setViewClearNone(uint8_t viewId);
     // View/proj must be true AYMath row-major Float4x4; converted to

@@ -301,4 +301,118 @@ TEST_CASE(r5plus_bgfxaadapter_pass_side_helpers_noop_safe) {
     CHECK(bgfx::isValid(fbo0) == false);
 }
 
+// §P5.5 C (2026-07-23) — per-light shadow atlas layout. The grid
+// is auto-derived from the slot count: rows = ceil(sqrt(N)),
+// cols = ceil(N / rows). For N=8 ⇒ rows=3, cols=3 (3×3 grid
+// covering the 4096×4096 atlas ⇒ 1365×1365 per slot). Pinning the
+// layout invariants here protects against accidental grid
+// regressions (e.g. someone changing rows=ceil(sqrt(N)) to a
+// different heuristic that breaks sub-rect UV computation in
+// LightingPass).
+TEST_CASE(shadow_pass_atlas_layout_default_3x3_grid_for_8_slots) {
+    using namespace ayt::render::detail;
+    ShadowAtlasConfig cfg{4096, 8};
+    ShadowAtlasLayout layout = computeShadowAtlasLayout(cfg);
+    CHECK(layout.slotCount == 8u);
+    CHECK(layout.atlasSize == 4096u);
+    // N=8 ⇒ rows=ceil(sqrt(8))=3, cols=ceil(8/3)=3
+    CHECK(layout.gridCols == 3u);
+    CHECK(layout.gridRows == 3u);
+    // Slot 0 lands in the top-left tile (col=0, row=0):
+    //   u0=0, v0=0, u1=1/3, v1=1/3
+    CHECK(layout.subRects[0][0] == 0.0f);
+    CHECK(layout.subRects[0][1] == 0.0f);
+    CHECK_FLOAT_EQ(layout.subRects[0][2], 1.0f / 3.0f, 1e-5f);
+    CHECK_FLOAT_EQ(layout.subRects[0][3], 1.0f / 3.0f, 1e-5f);
+    // Slot 7 lands in col=1, row=2 (slot/cols = 7/3 = 2 rem 1):
+    //   u0=1/3, v0=2/3, u1=2/3, v1=1.0
+    CHECK_FLOAT_EQ(layout.subRects[7][0], 1.0f / 3.0f, 1e-5f);
+    CHECK_FLOAT_EQ(layout.subRects[7][1], 2.0f / 3.0f, 1e-5f);
+    CHECK_FLOAT_EQ(layout.subRects[7][2], 2.0f / 3.0f, 1e-5f);
+    CHECK(layout.subRects[7][3] == 1.0f);
+}
+
+TEST_CASE(shadow_pass_atlas_subrects_within_unit_square) {
+    using namespace ayt::render::detail;
+    // All slots for the default config must have UV in [0,1] and
+    // non-overlapping (verified by sampling all 8 slots for bounds).
+    ShadowAtlasLayout layout = computeShadowAtlasLayout(
+        ShadowAtlasConfig{4096, 8});
+    for (uint32_t i = 0; i < layout.slotCount; ++i) {
+        const float u0 = layout.subRects[i][0];
+        const float v0 = layout.subRects[i][1];
+        const float u1 = layout.subRects[i][2];
+        const float v1 = layout.subRects[i][3];
+        CHECK(u0 >= 0.0f); CHECK(u0 <= 1.0f);
+        CHECK(v0 >= 0.0f); CHECK(v0 <= 1.0f);
+        CHECK(u1 >= 0.0f); CHECK(u1 <= 1.0f);
+        CHECK(v1 >= 0.0f); CHECK(v1 <= 1.0f);
+        CHECK(u1 > u0);  // non-zero width
+        CHECK(v1 > v0);  // non-zero height
+    }
+}
+
+TEST_CASE(shadow_pass_atlas_slot_pixel_rects_default) {
+    using namespace ayt::render::detail;
+    // Default 4096 atlas, 8 slots, 3×3 grid ⇒ each slot is
+    // 1365×1365 (atlasSize/cols × atlasSize/rows, integer
+    // truncation — floor division; the last column/row absorbs the
+    // remainder).
+    ShadowAtlasLayout layout = computeShadowAtlasLayout(
+        ShadowAtlasConfig{4096, 8});
+    const ShadowAtlasPixelRect r0 = shadowAtlasSlotPixelRect(layout, 0);
+    CHECK(r0.x == 0);    CHECK(r0.y == 0);
+    CHECK(r0.w == 1365); CHECK(r0.h == 1365);
+    const ShadowAtlasPixelRect r7 = shadowAtlasSlotPixelRect(layout, 7);
+    // col = 7 % 3 = 1, row = 7 / 3 = 2
+    CHECK(r7.x == 1365); CHECK(r7.y == 2730);
+    CHECK(r7.w == 1365); CHECK(r7.h == 1365);
+}
+
+TEST_CASE(shadow_pass_per_light_shadow_count_zero_default) {
+    // No setSceneLightsRef call ⇒ perLightShadowCount() = 0 (pre-C
+    // byte-equivalent path). All atlas sub-rects / LVPs stay at
+    // identity baseline.
+    ayt::render::detail::ShadowPass sp;
+    CHECK(sp.perLightShadowCount() == 0u);
+    // atlas config defaults — 4096 + 8 slots, 3×3 grid for N=8.
+    CHECK(sp.atlasConfig().atlasSize == 4096u);
+    CHECK(sp.atlasConfig().slotCount == 8u);
+    CHECK(sp.atlasLayout().gridCols == 3u);
+    CHECK(sp.atlasLayout().gridRows == 3u);
+    // Sub-rects for slot 0 = (0, 0, 1/3, 1/3)
+    const float* rects = sp.atlasSubRects();
+    CHECK(rects[0] == 0.0f);
+    CHECK(rects[1] == 0.0f);
+    CHECK_FLOAT_EQ(rects[2], 1.0f / 3.0f, 1e-5f);
+    CHECK_FLOAT_EQ(rects[3], 1.0f / 3.0f, 1e-5f);
+    // Per-slot LVP[0] = identity (col-major float[16]).
+    const float* lvps = sp.atlasLightViewProjsColumnMajor();
+    CHECK(lvps[0] == 1.0f);   // (0,0) = 1
+    CHECK(lvps[5] == 1.0f);   // (1,1) = 5th float = 1
+    CHECK(lvps[10] == 1.0f);  // (2,2) = 10th float = 1
+    CHECK(lvps[15] == 1.0f);  // (3,3) = 15th float = 1
+    // Per-slot biases = 0.
+    const float* biases = sp.atlasShadowBiases();
+    for (uint32_t i = 0; i < 8u; ++i) {
+        CHECK(biases[i] == 0.0f);
+    }
+}
+
+TEST_CASE(shadow_pass_atlas_config_setter_overrides_default) {
+    // Tests can swap the atlas size + slot count via setAtlasConfig.
+    // 2048 atlas, 4 slots ⇒ rows=ceil(sqrt(4))=2, cols=ceil(4/2)=2
+    // ⇒ 2×2 grid, 1024×1024 per slot.
+    ayt::render::detail::ShadowPass sp;
+    sp.setAtlasConfig(ayt::render::detail::ShadowAtlasConfig{2048, 4});
+    CHECK(sp.atlasConfig().atlasSize == 2048u);
+    CHECK(sp.atlasConfig().slotCount == 4u);
+    CHECK(sp.atlasLayout().gridCols == 2u);
+    CHECK(sp.atlasLayout().gridRows == 2u);
+    // Slot 0 = top-left: (0, 0, 0.5, 0.5)
+    const float* rects = sp.atlasSubRects();
+    CHECK(rects[2] == 0.5f);
+    CHECK(rects[3] == 0.5f);
+}
+
 TEST_SUITE_END

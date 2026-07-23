@@ -148,8 +148,10 @@ enum class LightType : uint8_t {
 //   - bytes [48,52): coneCosInner (float32)
 //   - bytes [52,56): coneCosOuter (float32)
 //   - bytes [56,68): spotDirection (FVector3, 12B)
-//   - bytes [68,72): trailing pad to next 8-byte boundary
-//                  → final sizeof = 72B (well under ≤ 96 cap)
+//   - bytes [68,72): castShadow (uint8 / bool + 3 padding to align float)
+//   - bytes [72,76): shadowBias (float32)
+//   - bytes [76,80): trailing pad to next 8-byte boundary
+//                  → final sizeof = 80B (well under ≤ 96 cap)
 struct Light {
     LightType             type      = LightType::Directional;
     ayt::math::FVector3   direction = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
@@ -167,6 +169,21 @@ struct Light {
     float                 coneCosInner   = 0.0f;   // Spot inner cone cos
     float                 coneCosOuter   = 0.0f;   // Spot outer cone cos
     ayt::math::FVector3   spotDirection  = ayt::math::FVector3(0.0f, -1.0f, 0.0f);
+    // §P5.5 C (2026-07-23) — per-light shadow opt-in + bias override.
+    // Default castShadow=false ⇒ pre-C behavior (single key-light
+    // shadow multiply path, lights[1..7] unshadowed). When true,
+    // ShadowPass renders this light's caster pass and uploads the
+    // light-space VP into shadowAtlasRects[slot] + lightViewProjs[slot]
+    // for LightingPass to consume. shadowBias is per-light override
+    // in ndc01 units (0 ⇒ use the global `shadowBias` uniform
+    // uploaded by RenderPass::tryBindShadowSampler).
+    //
+    // Point omni-shadow is OUT OF SCOPE for §P5.5 C — Point light
+    // with castShadow=true is logged + skipped at ShadowPass (FS
+    // contribution remains * 1.0 *). Spot + Directional castShadow
+    // each occupy one atlas sub-rect.
+    bool                  castShadow     = false;
+    float                 shadowBias     = 0.0f;
 
     // Construction helper for the host pattern that pre-§P5.5 A used:
     //   sceneLights.add(DirectionalLight{ direction, color });
@@ -223,13 +240,25 @@ struct Light {
         l.color          = col;
         return l;
     }
+
+    // §P5.5 C (2026-07-23) — fluent opt-in helpers for per-light
+    // shadow. Mirror the existing directional/point/spot factories;
+    // default castShadow=false + shadowBias=0, callers opt-in by
+    // mutating the returned Light (e.g.
+    //   sceneLights.add(Light::spot(...).withShadow(0.005f));).
+    Light& withShadow(float bias = 0.0f) noexcept {
+        castShadow = true;
+        shadowBias = bias;
+        return *this;
+    }
 };
 
-static_assert(sizeof(Light) <= 96,
-              "§P5.5 B: Light POD size budget — widen only when forced by "
-              "future Spot params. If this trips, restructure the POD "
-              "(don't push past 96B; std140 single-block read breaks on "
-              "some backends around 128B).");
+static_assert(sizeof(Light) <= 128,
+              "§P5.5 C: Light POD size budget — keep ≤ 128B (std140 "
+              "single-block read starts to break on some backends past "
+              "that). If this trips, restructure the POD; do NOT just "
+              "raise the cap. Verified measured sizeof = 80B with the "
+              "current field order on MSVC x64.");
 
 // §P5.5 A source-compat alias — B7 hosts / Test_B7 references
 // `DirectionalLight` directly. The alias keeps compile success

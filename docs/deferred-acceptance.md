@@ -20,7 +20,7 @@ Editor：`AY_DEFERRED=1`。
 | `Skybox equirect + IBL envCube ready` | 天空 = 全景；IBL = 独立 cube（**不要** `kind=CubeMap` 顶掉 equirect） |
 | `sceneLights=4` + `point+spot` | keyDir + fillDir + point + spot；**仅 lights[0] 带影** |
 | `ShadowPass` … `sampleReady=1` | 阴影 map 可采样 |
-| `PostProcessPass` … `gamma=2.2` | 显示 gamma |
+| `PostProcessPass` … `gamma=2.2` `tonemap=2` | ACES + 显示 gamma |
 
 ## 硬契约（禁止回滚）
 
@@ -35,6 +35,7 @@ Editor：`AY_DEFERRED=1`。
 
 ```cpp
 setPostProcessGamma(2.2f);
+setPostProcessTonemapMode(TonemapMode::ACES);
 setAmbientStrength(0.85f);  // IBL diffuse 略抬，便于肉眼确认
 ```
 

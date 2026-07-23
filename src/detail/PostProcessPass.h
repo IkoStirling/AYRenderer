@@ -58,7 +58,8 @@ namespace ayt::render::detail
 //   3. neither valid → return 0 (no-op; matches existing P2 shape).
 //
 // Algorithm today (2026-07-23): sample sceneColor → exposure/bloom
-  // gain → display gamma encode (pow 1/gamma). All scalar knobs are
+  // gain → branchless tonemap (None/Reinhard/ACES) → display gamma
+  // encode (pow 1/gamma). All scalar knobs are
   // Phoskia `vec4` (.x) for bgfx Vec4 upload ABI. See docs/post-process.md.
   //
   // Historical note (R5.1 / P2 / B6):

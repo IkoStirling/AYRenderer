@@ -102,10 +102,13 @@ constexpr const char* kExpectedPhoskiaSourceContains[] = {
     "texture2d sceneColor",
     "uniform vec4 bloomStrength",
     "uniform vec4 exposure",
+    "uniform vec4 tonemapMode",
     "uniform vec4 uTime",
     "uniform vec4 gammaParams",
     "pow(",
     "sample(sceneColor, uv)",
+    "step(1.5, m)",
+    "2.51",
 };
 
 } // namespace
@@ -217,8 +220,21 @@ material PostProcess {
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
+        let rx = cx / (1.0 + cx)
+        let ry = cy / (1.0 + cy)
+        let rz = cz / (1.0 + cz)
+        let ax = (cx * (2.51 * cx + 0.03)) / (cx * (2.43 * cx + 0.59) + 0.14)
+        let ay = (cy * (2.51 * cy + 0.03)) / (cy * (2.43 * cy + 0.59) + 0.14)
+        let az = (cz * (2.51 * cz + 0.03)) / (cz * (2.43 * cz + 0.59) + 0.14)
+        let m = tonemapMode.x
+        let selX = mix(mix(cx, rx, step(0.5, m)), ax, step(1.5, m))
+        let selY = mix(mix(cy, ry, step(0.5, m)), ay, step(1.5, m))
+        let selZ = mix(mix(cz, rz, step(0.5, m)), az, step(1.5, m))
+        let mx = max(selX, 0.0)
+        let my = max(selY, 0.0)
+        let mz = max(selZ, 0.0)
         let invG = 1.0 / max(gammaParams.x, 0.0001)
-        let encoded = vec3(pow(cx, invG), pow(cy, invG), pow(cz, invG))
+        let encoded = vec3(pow(mx, invG), pow(my, invG), pow(mz, invG))
         return vec4(encoded, sampled.w)
     }
 }
@@ -269,8 +285,21 @@ material PostProcess {
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
+        let rx = cx / (1.0 + cx)
+        let ry = cy / (1.0 + cy)
+        let rz = cz / (1.0 + cz)
+        let ax = (cx * (2.51 * cx + 0.03)) / (cx * (2.43 * cx + 0.59) + 0.14)
+        let ay = (cy * (2.51 * cy + 0.03)) / (cy * (2.43 * cy + 0.59) + 0.14)
+        let az = (cz * (2.51 * cz + 0.03)) / (cz * (2.43 * cz + 0.59) + 0.14)
+        let m = tonemapMode.x
+        let selX = mix(mix(cx, rx, step(0.5, m)), ax, step(1.5, m))
+        let selY = mix(mix(cy, ry, step(0.5, m)), ay, step(1.5, m))
+        let selZ = mix(mix(cz, rz, step(0.5, m)), az, step(1.5, m))
+        let mx = max(selX, 0.0)
+        let my = max(selY, 0.0)
+        let mz = max(selZ, 0.0)
         let invG = 1.0 / max(gammaParams.x, 0.0001)
-        let encoded = vec3(pow(cx, invG), pow(cy, invG), pow(cz, invG))
+        let encoded = vec3(pow(mx, invG), pow(my, invG), pow(mz, invG))
         return vec4(encoded, sampled.w)
     }
 }

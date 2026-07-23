@@ -109,7 +109,7 @@ namespace {
 // mirror here ALSO moves v20 �?v22; live drift detection
 // compares against `kLightingCacheKeyCStr` (Bug fix #3 mirror �?// pre-D self-compare was false-green).
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v23_vec4_ibl_gates";
+    "lighting_v23_p5p5c_per_light_shadow_atlas";
 
 // §Skybox0 (2026-07-23) �?SkyboxPass cache-key literal. Pin
 // here so a master-cache-key change without a Test_Skybox0
@@ -360,7 +360,7 @@ TEST_CASE(lighting_pass_cache_key_bump_v22_p5p5d) {
     CHECK(std::string(kExpectedLightingCacheKey).size() >= 10u);
     // Live drift detection (Bug fix #3 mirror) �?the mirror
     // literal MUST match the live kLightingCacheKeyCStr extern.
-    CHECK(std::string(kLightingCacheKeyCStr).find("v23_vec4_ibl_gates")
+    CHECK(std::string(kLightingCacheKeyCStr).find("v23_p5p5c_per_light_shadow_atlas")
           != std::string::npos);
 }
 

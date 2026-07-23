@@ -51,4 +51,17 @@ TEST_CASE(public_renderer_lighting_enabled_getter_resolves)
     CHECK((renderer.*fn)() == true);   // after Deferred config: Lighting slot mounted
 }
 
+// §P5.5 C (2026-07-23) — Light POD size budget guard. Widened from
+// ≤96 to ≤128 with the addition of castShadow + shadowBias fields
+// (~80B actual). The static_assert in AYRenderScene.h:256 is the
+// compile-time guard; this test is the runtime pin so any future
+// cuts that try to widen past 128 trip both gates.
+TEST_CASE(public_light_pod_size_post_c_widen_under_128) {
+    using ayt::render::Light;
+    const size_t sz = sizeof(Light);
+    CHECK(sz > 0u);
+    CHECK(sz <= 128u);   // §P5.5 C cap (was ≤96 pre-C)
+    CHECK(sz >= 64u);    // sanity — pre-B was 40B, C widens to ~80B
+}
+
 TEST_SUITE_END

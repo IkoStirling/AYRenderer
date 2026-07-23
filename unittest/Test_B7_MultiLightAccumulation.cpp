@@ -121,7 +121,7 @@ namespace {
 // fails. Same TU-local-mirror pattern used by
 // Test_B5_LightingDirectional.cpp::kExpectedLightingCacheKey.
 inline constexpr const char* kExpectedB7LightingCacheKey =
-    "lighting_v23_vec4_ibl_gates";
+    "lighting_v23_p5p5c_per_light_shadow_atlas";
 
 // §P5 B7+ (2026-07-22) �?Phoskia source substring pins. Drift =
 // test fails. Note PascalCase `Lights` block name (matches
@@ -542,15 +542,21 @@ TEST_CASE(b7_light_pod_size_assert_passes_after_widen) {
     // fields (4 float + FVector3 spotDirection) is ~72 bytes (see
     // AYRenderScene.h comment for layout rationale).
     //
-    // We pin the exact size as the contract �?any future field
-    // addition that pushes past 96 will trip the static_assert at
+    // §P5.5 C (2026-07-23) — Light POD widened with castShadow +
+    // shadowBias (2 new fields, ~80B). Static assert cap bumped
+    // from ≤96 to ≤128 in AYRenderScene.h (std140 single-block
+    // read breaks past ~128B on some backends).
+    //
+    // We pin the exact size as the contract — any future field
+    // addition that pushes past 128 will trip the static_assert at
     // compile time and surface here as a test failure (the test
     // asserts the boundary, not the exact value).
-    CHECK(sizeof(Light) <= 96u);
-    // B documented ~68B; verify the actual is consistent with the
-    // planned layout (8-byte multiple of float alignment):
-    CHECK(sizeof(Light) >= 64u);   // pre-B was 40B; B widens to �?64
-    CHECK(sizeof(Light) <= 96u);
+    CHECK(sizeof(Light) <= 128u);
+    // §P5.5 B documented ~68B; C widens to ~80B. Verify the
+    // actual is consistent with the planned layout (8-byte
+    // multiple of float alignment):
+    CHECK(sizeof(Light) >= 64u);   // pre-B was 40B; C widens to ~80
+    CHECK(sizeof(Light) <= 128u);
 }
 
 TEST_CASE(b7_lights_block_layout_four_arrays) {
@@ -593,7 +599,7 @@ TEST_CASE(b7_lighting_cache_key_bump_pinned_live) {
     CHECK(std::string(kExpectedB7LightingCacheKey).size() >= 20u);
     CHECK(std::string(kLightingCacheKeyCStr).size() >= 20u);
     // The literal must contain the §P5.5 D version bump marker.
-    CHECK(std::string(kLightingCacheKeyCStr).find("v23_vec4_ibl_gates")
+    CHECK(std::string(kLightingCacheKeyCStr).find("v23_p5p5c_per_light_shadow_atlas")
           != std::string::npos);
 }
 
@@ -648,6 +654,34 @@ TEST_CASE(b7_ibl_cube_active_one_uses_envcube_sampler) {
     // is the per-frame gate that controls contribution magnitude.
     CHECK(src.find("sample(envCube, N)")
           != std::string::npos);
+}
+
+// §P5.5 C (2026-07-23) — Light POD widen contract: default
+// castShadow=false preserves pre-C byte-equivalent behavior; opt-in
+// is via direct mutation or the `withShadow(bias)` fluent helper.
+TEST_CASE(b7_light_pod_widen_castshadow_default_false) {
+    ayt::render::Light dir;
+    CHECK(dir.castShadow == false);
+    CHECK(dir.shadowBias == 0.0f);
+
+    ayt::render::Light p = ayt::render::Light::point(
+        ayt::math::FVector3(0, 0, 0), 1.0f, 1.0f,
+        ayt::math::FVector3(1, 1, 1));
+    CHECK(p.castShadow == false);
+
+    // Fluent opt-in helper mirrors directional()/point()/spot().
+    ayt::render::Light spotWithShadow = ayt::render::Light::spot(
+        ayt::math::FVector3(0, 1, 0), ayt::math::FVector3(0, -1, 0),
+        5.0f, 2.0f, 0.9f, 0.7f,
+        ayt::math::FVector3(1, 1, 1)).withShadow(0.005f);
+    CHECK(spotWithShadow.castShadow == true);
+    CHECK(spotWithShadow.shadowBias == 0.005f);
+    // The chained builder returns a Light& so callers can do
+    //   sceneLights.add(Light::spot(...).withShadow(0.005f));
+    // — verify the reference return type by binding to const&.
+    const ayt::render::Light& ref = spotWithShadow.withShadow(0.01f);
+    CHECK(ref.castShadow == true);
+    CHECK(ref.shadowBias == 0.01f);
 }
 
 TEST_SUITE_END

@@ -260,6 +260,36 @@ struct PassExecContext {
     // zero — byte-equivalent to pre-§Skybox0 dark-frame behavior
     // on a Forward / non-sky host).
     const SkyboxPass* skyboxPass = nullptr;
+
+    // §P5.5 C (2026-07-23) — borrowed, non-owning pointer to the
+    // host-supplied per-light shadow source (cutsheet reservation
+    // pass-lessons-from-deferred.md:330 — "wires per-light shadow
+    // via PassExecContext::perLightShadows borrowed ptr"). Mirror
+    // the `sceneLights` / `skySource` borrowed-pointer pattern;
+    // lifetime contract: pointer must remain valid for the duration
+    // of pipeline::executeAll(ctx).
+    //
+    // In practice, this points to the SAME SceneLights instance as
+    // `ctx.sceneLights` — the host populates one SceneLights and
+    // the renderer reads it through both ptrs (ShadowPass consumes
+    // `castShadow` flags + builds per-slot LVP; LightingPass
+    // consumes the lights[] array for accumulation and the
+    // per-slot shadow uniforms for shadow multiply). Cutsheet
+    // reserves the separate field name for future cuts where the
+    // host may want to drive ShadowPass with a DIFFERENT
+    // per-light shadow source than LightingPass (e.g. fewer
+    // shadow casters than accumulation lights).
+    //
+    // Default-init = nullptr ⇒ ShadowPass falls back to the
+    // single-key-light behavior (pre-C byte-equivalent — casts
+    // shadow only from FrameContext::lightDirection into one
+    // atlas sub-rect[0]); LightingPass uploads
+    // perLightShadowCount=0 (FS skips per-light shadow loop —
+    // byte-equivalent to pre-C key-only shadow multiply path).
+    // All existing 19-field brace-init test sites (Test_B5p5,
+    // Test_B7, Test_Skybox0, ...) keep compiling without edits
+    // via C++14 trailing-default behavior.
+    const ayt::render::SceneLights* perLightShadows = nullptr;
 };
 
 } // namespace ayt::render::detail

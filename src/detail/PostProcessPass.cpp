@@ -35,10 +35,13 @@ constexpr FullscreenVertex kFullscreenTriangle[3] = {
 constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 
 // Post-process: sample sceneColor → exposure → optional bloom tint →
-// display gamma (sRGB approx pow 1/2.2). Ripple UV warp removed.
+// branchless tonemap (None / Reinhard / ACES) → display gamma.
+// Ripple UV warp removed.
 //
 // Branchless (converter drops if/for). Knobs are vec4 (.x) for bgfx
 // Vec4 upload ABI — see docs/pass-lessons-from-shadow.md §3.1.
+// tonemapMode.x: 0=None, 1=Reinhard, 2=ACES (Narkowicz fitted).
+// Select via mix(mix(none, reinhard, step(0.5,m)), aces, step(1.5,m)).
 //
 // UV.y flip in fragment (1 - vUv.y): Phoskia vertex blocks reject
 // `let` before `out`. Same D3D RT vs backbuffer convention as shadows.
@@ -64,17 +67,30 @@ material PostProcess {
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
+        let rx = cx / (1.0 + cx)
+        let ry = cy / (1.0 + cy)
+        let rz = cz / (1.0 + cz)
+        let ax = (cx * (2.51 * cx + 0.03)) / (cx * (2.43 * cx + 0.59) + 0.14)
+        let ay = (cy * (2.51 * cy + 0.03)) / (cy * (2.43 * cy + 0.59) + 0.14)
+        let az = (cz * (2.51 * cz + 0.03)) / (cz * (2.43 * cz + 0.59) + 0.14)
+        let m = tonemapMode.x
+        let selX = mix(mix(cx, rx, step(0.5, m)), ax, step(1.5, m))
+        let selY = mix(mix(cy, ry, step(0.5, m)), ay, step(1.5, m))
+        let selZ = mix(mix(cz, rz, step(0.5, m)), az, step(1.5, m))
+        let mx = max(selX, 0.0)
+        let my = max(selY, 0.0)
+        let mz = max(selZ, 0.0)
         let invG = 1.0 / max(gammaParams.x, 0.0001)
-        let encoded = vec3(pow(cx, invG), pow(cy, invG), pow(cz, invG))
+        let encoded = vec3(pow(mx, invG), pow(my, invG), pow(mz, invG))
         return vec4(encoded, sampled.w)
     }
 }
 )";
 
-constexpr const char* kPostProcessCacheKey = "postprocess_gamma_v1_yflip_fs";
+constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v2_yflip_fs";
 
-// Fallback if gamma program fails to acquire — still gamma-encodes so
-// Editor composite does not go black / linear-washed.
+// Fallback if primary program fails to acquire — same tonemap+gamma
+// contract so Editor composite does not go black / linear-washed.
 constexpr const char* kPostProcessPassthroughSource = R"(
 material PostProcessBlit {
     texture2d sceneColor
@@ -97,13 +113,26 @@ material PostProcessBlit {
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
+        let rx = cx / (1.0 + cx)
+        let ry = cy / (1.0 + cy)
+        let rz = cz / (1.0 + cz)
+        let ax = (cx * (2.51 * cx + 0.03)) / (cx * (2.43 * cx + 0.59) + 0.14)
+        let ay = (cy * (2.51 * cy + 0.03)) / (cy * (2.43 * cy + 0.59) + 0.14)
+        let az = (cz * (2.51 * cz + 0.03)) / (cz * (2.43 * cz + 0.59) + 0.14)
+        let m = tonemapMode.x
+        let selX = mix(mix(cx, rx, step(0.5, m)), ax, step(1.5, m))
+        let selY = mix(mix(cy, ry, step(0.5, m)), ay, step(1.5, m))
+        let selZ = mix(mix(cz, rz, step(0.5, m)), az, step(1.5, m))
+        let mx = max(selX, 0.0)
+        let my = max(selY, 0.0)
+        let mz = max(selZ, 0.0)
         let invG = 1.0 / max(gammaParams.x, 0.0001)
-        let encoded = vec3(pow(cx, invG), pow(cy, invG), pow(cz, invG))
+        let encoded = vec3(pow(mx, invG), pow(my, invG), pow(mz, invG))
         return vec4(encoded, sampled.w)
     }
 }
 )";
-constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_gamma_v1_yflip_fs";
+constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v2_yflip_fs";
 
 } // namespace
 
@@ -246,7 +275,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     if (!s_loggedSubmit) {
         std::fprintf(stderr,
             "[PostProcessPass] blit ok view=%u rect=(%u,%u,%u,%u) "
-            "gamma=%.1f exposure=%.2f time=%.2f\n",
+            "gamma=%.1f exposure=%.2f tonemap=%.0f time=%.2f\n",
             static_cast<unsigned>(viewId),
             static_cast<unsigned>(viewportX),
             static_cast<unsigned>(viewportY),
@@ -254,6 +283,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
             static_cast<unsigned>(viewportHeight),
             gammaPad[0],
             frame.exposure,
+            tonemapPad[0],
             frame.timeSeconds);
         s_loggedSubmit = true;
     }
@@ -323,16 +353,24 @@ void PostProcessPass::ensureFullscreenQuad(BGFXAdapter& adapter)
 
 void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
 {
+    // Cache-key bump forces re-acquire (pointer-equal compare).
+    static const char* s_acquiredCacheKey = nullptr;
+    if (s_acquiredCacheKey != kPostProcessCacheKey) {
+        _program.reset();
+        _programAcquireFailed = false;
+        s_acquiredCacheKey = kPostProcessCacheKey;
+    }
+
     if (_program.isValid() || _programAcquireFailed) {
         return;
     }
-    // Prefer the gamma blit; fall back to passthrough gamma so Editor
-    // composite (FBO → backbuffer) never goes black on a bad compile.
+    // Prefer tonemap+gamma blit; fall back to identical passthrough
+    // so Editor composite (FBO → backbuffer) never goes black.
     ayt::shader::ShaderResource acquired =
         pool.acquire(kPostProcessPhoskiaSource, kPostProcessCacheKey);
     if (!acquired.isValid()) {
         std::fprintf(stderr,
-                     "[PostProcessPass] gamma Phoskia acquire failed; "
+                     "[PostProcessPass] tonemap Phoskia acquire failed; "
                      "trying passthrough blit\n");
         for (const std::string& err : pool.lastCompileErrors()) {
             std::fprintf(stderr, "[PostProcessPass]   %s\n", err.c_str());

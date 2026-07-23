@@ -252,7 +252,8 @@ public:
     float  shadowBias() const noexcept;
 
     // R5+ (Phase PostProcess) — knobs → FrameContext each frame.
-    // Defaults: bloom=0, exposure=1, gamma=2.2, tonemap=None.
+    // Defaults: bloom=0, exposure=1, gamma=2.2, tonemap=None
+    // (Editor Deferred sets TonemapMode::ACES).
     // Shader uniforms are vec4 slots (.x used); see
     // docs/pass-lessons-from-shadow.md §3.1.
     void setPostProcessBloomStrength(float strength);
@@ -268,6 +269,7 @@ public:
     // (typically GameLoop::getElapsedTime). When set, overrides the
     // wall-clock path. Call once per composite frame.
     void setSimulationTimeSeconds(float seconds);
+    // Final-blit tonemap before gamma. 0=None, 1=Reinhard, 2=ACES.
     enum class TonemapMode : uint8_t {
         None     = 0,
         Reinhard = 1,

@@ -745,6 +745,25 @@ void Renderer::render(const RenderScene& scene)
         skyboxPassPtr = static_cast<const detail::SkyboxPass*>(skyboxSlot);
     }
 
+    // §P5.5 C (2026-07-23) — wire the per-frame SceneLights ref
+    // into ShadowPass so its multi-caster loop can read
+    // `lights[i].castShadow` and build the per-slot LVP matrices.
+    // Mirror pattern: the SkyboxPass receives its cube texture
+    // via `findPass("Skybox")→setCubeTexture(...)` (not via a
+    // borrowed ptr) because the cube handle is a Resource (host-
+    // owned TextureHandle). ShadowPass needs the borrowed SceneLights
+    // ref because it reads castShadow flags per-frame — host owns
+    // the SceneLights instance lifetime (mirror ctx.perLightShadows
+    // borrowed ptr lifetime contract).
+    //
+    // When `_impl->sceneLights == nullptr` (host on Forward path /
+    // never called setSceneLights), ShadowPass falls back to the
+    // pre-C single key-light caster (pre-C byte-equivalent).
+    if (detail::RenderPass* shadowSlot = _impl->pipeline.findPass("Shadow")) {
+        static_cast<detail::ShadowPass*>(shadowSlot)->setSceneLightsRef(
+            _impl->sceneLights);
+    }
+
     detail::PassExecContext ctx{
         _impl->adapter,
         _impl->shaderPool,
@@ -780,6 +799,17 @@ void Renderer::render(const RenderScene& scene)
         // not mounted (Forward default). LightingPass uses this to
         // bind the gbufferSky sampler (mirrors gbufferPassPtr).
         skyboxPassPtr,
+        // §P5.5 C (2026-07-23) — borrowed pointer to the host-
+        // supplied per-light shadow source. In practice the same
+        // SceneLights instance as `sceneLights` above — host
+        // populates one SceneLights, renderer reads it via both
+        // ptrs (cutsheet reservation pass-lessons-from-deferred
+        // .md:330 — "wires per-light shadow via PassExecContext
+        // ::perLightShadows borrowed ptr"). nullptr ⇒ ShadowPass
+        // pre-C single-key-light fallback + LightingPass
+        // perLightShadowCount=0 upload ⇒ byte-equivalent pre-C
+        // key-only shadow multiply on lights[0].
+        _impl->sceneLights,
     };
 
     static uint32_t s_compositeLog = 0;

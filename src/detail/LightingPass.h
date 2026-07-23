@@ -193,6 +193,27 @@ private:
     ayt::shader::BindingId _uCubeActive      = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uAmbientStrength = ayt::shader::InvalidBinding;
 
+    // §P5.5 C (2026-07-23) — per-light shadow atlas bindings. The
+    // atlas is a single texture2d (mirrors the pre-C `shadowMap`
+    // sampler name — FS contract doesn't change), but the FS now
+    // also consumes four array uniforms to walk each light's
+    // sub-rect + LVP + bias + active count.
+    //
+    // Array uniform pattern (cutsheet B7+ ships `vec4 dirs[8]` etc.):
+    //   uniform vec4  shadowAtlasRects[8]   // (u0,v0,u1,v1) per slot
+    //   uniform mat4  lightViewProjs[8]     // light-space VP per slot
+    //   uniform vec4  shadowBiases[8]       // per-slot bias (.x used)
+    //   uniform vec4  perLightShadowCount   // .x = N (0..7)
+    //
+    // All four are lazy-resolved post cache-key bump to v24.
+    // `_tShadow` is the existing pre-C shadow-map sampler; we keep
+    // its existing binding (no rename — Test_B5p5 pins
+    // `texture2d shadowMap` substring).
+    ayt::shader::BindingId _uShadowAtlasRects    = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uLightViewProjs      = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uShadowBiases        = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uPerLightShadowCount = ayt::shader::InvalidBinding;
+
     // §P5.5 D — IBL ambient cube strength (.x of ambientStrength vec4).
     // Host: Renderer::setAmbientStrength → per-frame broadcast in render().
     float _ambientStrength = 0.6f;
