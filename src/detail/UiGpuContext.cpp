@@ -402,6 +402,12 @@ void UiGpuContext::beginView(uint8_t viewId, uint16_t width, uint16_t height)
 
 
 
+    // Target default backbuffer so UI/popups are not stuck on a stale FBO.
+
+    // UI view id must also stay > PostProcess (see UIRenderBackend::kViewId).
+
+    bgfx::setViewFrameBuffer(viewId, BGFX_INVALID_HANDLE);
+
     bgfx::setViewRect(viewId, 0, 0, width, height);
 
     bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);

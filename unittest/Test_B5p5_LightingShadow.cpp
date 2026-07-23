@@ -1,4 +1,4 @@
-// Â§P5 B5.5 (2026-07-22) ï¿½?Deferred path shadow consumption tests.
+// Â§P5 B5.5 (2026-07-22) ï¿?Deferred path shadow consumption tests.
 //
 // Pins the B5.5 wire from `ctx.shadowPass` into LightingPass's
 // fullscreen-triangle fragment:
@@ -13,14 +13,14 @@
 //        unshadowed. This is the user-facing distinction between
 //        B5.5 and a naive "8 lights Ã— 1 shadow" pseudo-correct.
 //
-//   2) World-position reconstruction ï¿½?the deferred FS has no VS-
+//   2) World-position reconstruction ï¿?the deferred FS has no VS-
 //      carried worldPos, so depth + inverse view / projection
 //      chain is required. The Phoskia source MUST reconstruct
 //      worldPos from gbufferDepth (gbufferDepth sampler)
-//      + u_invProjection (clip ï¿½?view)
-//      + u_invView (view ï¿½?world).
+//      + u_invProjection (clip ï¿?view)
+//      + u_invView (view ï¿?world).
 //
-//   3) Cache-key bump ï¿½?`lighting_v11_b7_ubo_struct_types`
+//   3) Cache-key bump ï¿?`lighting_v11_b7_ubo_struct_types`
 //      base + `_b5p5_worldpos_pcf_key_only` suffix pin.
 //
 //   4) No shield on flags: fullscreen Lighting is not a per-draw
@@ -76,26 +76,26 @@ using ayt::math::Float4x4;
 
 namespace {
 
-// Â§P5 B5.5 (2026-07-22) ï¿½?TU-local inspector mirrors for cache
+// Â§P5 B5.5 (2026-07-22) ï¿?TU-local inspector mirrors for cache
 // key + source substring contract pins. Drift between
 // LightingPass.cpp's literal source and these mirrors = test
 // fails. Same TU-local-mirror pattern used by Test_B5,
 // Test_B4c, Test_B7.
 
-// Â§P5.5 A (2026-07-23) ï¿½?cache-key bump v16 ï¿½?v18 (unified `Light`
-// POD + `LightType` enum + UBO `Lights.dirs[8]` ï¿½?`Lights.record[8]`
+// Â§P5.5 A (2026-07-23) ï¿?cache-key bump v16 ï¿?v18 (unified `Light`
+// POD + `LightType` enum + UBO `Lights.dirs[8]` ï¿?`Lights.record[8]`
 // rename; receiver math byte-equivalent).
 //
-// Â§P5.5 B (2026-07-23) ï¿½?Bug fix #3: cache-key bump v20 ï¿½?v21
+// Â§P5.5 B (2026-07-23) ï¿?Bug fix #3: cache-key bump v20 ï¿?v21
 // (Point + Spot per-type math + UBO widens to 4 arrays). Mirror
 // now compares against the live `kLightingCacheKeyCStr` extern
 // (was self-compare false-green pre-B).
 //
-// Â§P5.5 D (2026-07-23) ï¿½?bump v21 ï¿½?v22 (IBL MVP ambient cube).
+// Â§P5.5 D (2026-07-23) ï¿?bump v21 ï¿?v22 (IBL MVP ambient cube).
 // Live extern drift detection; this mirror MUST match
 // `kLightingCacheKeyCStr` or this test fails (Bug fix #3).
 inline constexpr const char* kExpectedB5p5CacheKey =
-    "lighting_v23_p5p5c_per_light_shadow_atlas";
+    "lighting_v26_mix_vec2_overloads";
 
 // Mirror of LightingPass.cpp worldPos+shadow contract (abbreviated).
 // Full FS also has 8-light Lambert + sky Mix + Â§P5.5 D envCube
@@ -127,7 +127,7 @@ material Lighting {
     uniform vec4 skyMix
     uniform vec4 cubeActive
     uniform vec4 ambientStrength
-    // Â§P5.5 C (2026-07-23) â€” per-light shadow atlas bindings.
+    // Â§P5.5 C (2026-07-23) â€?per-light shadow atlas bindings.
     uniform vec4 shadowAtlasRects[8]
     uniform mat4 lightViewProjs[8]
     uniform vec4 shadowBiases[8]
@@ -144,7 +144,7 @@ material Lighting {
         let albedo = sample(gbufferAlbedo, baseUv)
         let normalSample = sample(gbufferNormal, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
-        // Â§P5.5 D (2026-07-23) ï¿½?IBL MVP ambient term.
+        // Â§P5.5 D (2026-07-23) ï¿?IBL MVP ambient term.
         let ambientFlat = vec3(0.1, 0.1, 0.1)
         let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x
         let ambient = ambientFlat + ambientCube
@@ -178,7 +178,7 @@ material Lighting {
         let isPoint0 = step(0.5, Lights.dirs[0].w) - step(1.5, Lights.dirs[0].w)
         let isSpot0 = step(1.5, Lights.dirs[0].w)
         let keyContrib = dirPart0 * isDir0 + pointPart0 * isPoint0 + spotPart0 * isSpot0
-        // Â§P5.5 C â€” per-slot shadow factors. Mirror contract: lights[0]
+        // Â§P5.5 C â€?per-slot shadow factors. Mirror contract: lights[0]
         // mixes legacy global `_shadowKey` with per-slot `perLightShadow0.x`
         // via step(0.5, perLightShadowCount.x); lights[1..7] use
         // per-slot perLightShadow{i}.x directly (when count > i).
@@ -228,7 +228,7 @@ inline const char* kExpectedSourceSubstrings[] = {
     "let worldPos = sample(gbufferMotion, baseUv).xyz",
     "let clipPos = u_lightViewProj * vec4(worldPos, 1.0)",
     "let shadowKey =",
-    // Â§P5.5 B (2026-07-23) ï¿½?per-light per-type branches.
+    // Â§P5.5 B (2026-07-23) ï¿?per-light per-type branches.
     // The shadow-multiply is now embedded inside the `keyContrib`
     // Directional branch; the `fillContrib` branch (no shadow)
     // mirrors it for lights[1]. Both pin the per-type shape.
@@ -241,7 +241,7 @@ inline const char* kExpectedSourceSubstrings[] = {
     "Lights.dirs[0]",
 };
 
-// Capture pass ï¿½?pins the borrowed-pointer contract:
+// Capture pass ï¿?pins the borrowed-pointer contract:
 // ctx.shadowPass survives through full pipeline dispatch when set.
 struct B5p5CapturePass final : public ayt::render::detail::RenderPass {
     static inline const ayt::render::detail::ShadowPass* lastSeenShadow = nullptr;
@@ -265,7 +265,7 @@ struct B5p5CapturePass final : public ayt::render::detail::RenderPass {
 TEST_SUITE(AYRenderer_B5p5_LightingShadow)
 
 TEST_CASE(b5p5_phoskia_source_substring_contract) {
-    // B5.5.1 / B5.5.2 ï¿½?Phoskia source contract: shadowMap +
+    // B5.5.1 / B5.5.2 ï¿?Phoskia source contract: shadowMap +
     // gbufferDepth samplers + 4 shadow uniforms + 2 inverse
     // matrices + 9-tap PCF inner loop + key-light only.
     const std::string src = mirrorLightingPhoskiaSourceB5p5();
@@ -275,16 +275,16 @@ TEST_CASE(b5p5_phoskia_source_substring_contract) {
 }
 
 TEST_CASE(b5p5_key_light_shadow_only_fill_unshadowed) {
-    // B5.5 ï¿½?User-facing distinction: only lights[0] (key) is
+    // B5.5 ï¿?User-facing distinction: only lights[0] (key) is
     // multiplied by shadowKey; lights[1..7] (fill / rim) are
     // NOT multiplied by any shadow term.
     //
-    // Â§P5.5 B (2026-07-23) ï¿½?per-type branching: shadowKey multiply
+    // Â§P5.5 B (2026-07-23) ï¿?per-type branching: shadowKey multiply
     // is now embedded inside the `keyContrib` Directional branch
     // (lights[0]). The `fillContrib` branch (lights[1]) mirrors
     // the shape but contains no `* shadowKey` token. Substring
     // search across the mirror source catches both presence and
-    // absence ï¿½?the `f1_branch` token below must NOT contain
+    // absence ï¿?the `f1_branch` token below must NOT contain
     // `shadowKey`.
     const std::string src = mirrorLightingPhoskiaSourceB5p5();
     // Structural pin: key branch contains `* shadowKey *`.
@@ -303,7 +303,7 @@ TEST_CASE(b5p5_key_light_shadow_only_fill_unshadowed) {
         src.substr(fillPos, fillEnd - fillPos);
     CHECK(fillBranch.find("shadowKey") == std::string::npos);
     // Detect if any `* shadowKey` accidental shape appears OUTSIDE
-    // the lights[0] keyContrib branch ï¿½?must NOT appear. The whole-
+    // the lights[0] keyContrib branch ï¿?must NOT appear. The whole-
     // string search for the marker is the strict test; we count
     // occurrences to confirm there's exactly one (the keyContrib branch).
     size_t shadowKeyCount = 0;
@@ -319,7 +319,7 @@ TEST_CASE(b5p5_key_light_shadow_only_fill_unshadowed) {
 }
 
 TEST_CASE(b5p5_worldpos_from_gbuffer_rt2) {
-    // B5.5 ï¿½?worldPos comes from GBuffer RT2 (gbufferMotion sample),
+    // B5.5 ï¿?worldPos comes from GBuffer RT2 (gbufferMotion sample),
     // NOT depth reconstruct (D3D reconstruct path failed; RGBA8
     // encode mosaicked). Then project via u_lightViewProj.
     const std::string src = mirrorLightingPhoskiaSourceB5p5();
@@ -336,7 +336,7 @@ TEST_CASE(b5p5_worldpos_from_gbuffer_rt2) {
 }
 
 TEST_CASE(b5p5_cache_key_bump_pinned) {
-    // Â§P5.5 B (2026-07-23) ï¿½?Bug fix #3: cache-key mirror compares
+    // Â§P5.5 B (2026-07-23) ï¿?Bug fix #3: cache-key mirror compares
     // against the live `kLightingCacheKeyCStr` extern (was self-
     // compare false-green pre-B). Drift now fails immediately.
     CHECK(std::string(kExpectedB5p5CacheKey)
@@ -359,7 +359,7 @@ TEST_CASE(b5p5_worldpos_rt2_contract_reachable) {
 }
 
 TEST_CASE(b5p5_full_pipeline_shadow_borrow_pointer_e2e) {
-    // B5.5 ï¿½?E2E pipeline: Shadow / GBuffer / Lighting(B5+B5.5) /
+    // B5.5 ï¿?E2E pipeline: Shadow / GBuffer / Lighting(B5+B5.5) /
     // Transparent / PP / UI on UNINITIALIZED adapter (test bypass
     // Renderer::render(), drives PassExecContext directly).
     B5p5CapturePass::lastSeenShadow   = nullptr;
@@ -394,12 +394,12 @@ TEST_CASE(b5p5_full_pipeline_shadow_borrow_pointer_e2e) {
         adapter, pool, scene, meshes, textures, materials,
         0, 0, 1280, 720, frame, /*viewId=*/0
     };
-    ctx.shadowPass   = nullptr;   // Noop path ï¿½?shadow uniform uploads are no-ops
+    ctx.shadowPass   = nullptr;   // Noop path ï¿?shadow uniform uploads are no-ops
     ctx.gbufferPass  = gbPtr;
     ctx.lightingPass = ltPtr;
 
     const uint32_t total = pipe.executeAll(ctx);
-    // Uninit adapter (Â§5.4 fix) ï¿½?total = 0.
+    // Uninit adapter (Â§5.4 fix) ï¿?total = 0.
     CHECK(total == 0u);
 
     // Capture pass slot ran (slot 5).
@@ -407,7 +407,7 @@ TEST_CASE(b5p5_full_pipeline_shadow_borrow_pointer_e2e) {
     // Borrowed-pointer preservation across full dispatch.
     CHECK(B5p5CapturePass::lastSeenLighting == ltPtr);
     CHECK(B5p5CapturePass::lastSeenGBuffer  == gbPtr);
-    // ctx.shadowPass was nullptr ï¿½?B5p5CapturePass observed null.
+    // ctx.shadowPass was nullptr ï¿?B5p5CapturePass observed null.
     CHECK(B5p5CapturePass::lastSeenShadow == nullptr);
 
     // Pipeline order preserved.
@@ -421,7 +421,7 @@ TEST_CASE(b5p5_full_pipeline_shadow_borrow_pointer_e2e) {
     CHECK(pipe.passes()[6]->name() == "B5p5Capture");
 }
 
-// Â§P5.5 C (2026-07-23) â€” per-light shadow atlas array uniforms
+// Â§P5.5 C (2026-07-23) â€?per-light shadow atlas array uniforms
 // pinned in the LightingPass Phoskia mirror source. These four
 // declarations MUST exist in the mirror (mirror contract = the
 // live Phoskia source structure). Real source lives in
@@ -438,8 +438,8 @@ TEST_CASE(b5p5_per_light_shadow_atlas_array_uniforms_pinned) {
     CHECK(src.find("uniform vec4 perLightShadowCount") != std::string::npos);
 }
 
-// Â§P5.5 C (2026-07-23) â€” K3 invariant pin: perLightShadowCount.x
-// == 0 â‡’ FS collapses to the legacy key-only shadow multiply
+// Â§P5.5 C (2026-07-23) â€?K3 invariant pin: perLightShadowCount.x
+// == 0 â‡?FS collapses to the legacy key-only shadow multiply
 // path. The mirror source must still contain the per-slot helper
 // code (for the count > 0 case) AND the global fallback that
 // lights[0] uses when count == 0 (legacy `shadowKey` computation

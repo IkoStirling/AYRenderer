@@ -74,6 +74,15 @@ public:
     Renderer& renderer();
     RenderScene& renderScene();
 
+    // Editor freecam / host camera. When enabled, renderScenePass uses
+    // this look-at instead of the built-in default (4,3,5)→origin.
+    void setCameraLookAt(const ayt::math::FVector3& eye,
+                         const ayt::math::FVector3& at,
+                         const ayt::math::FVector3& up,
+                         float fovYDegrees = 50.0f);
+    void clearCameraOverride();
+    bool hasCameraOverride() const noexcept { return _cameraOverride; }
+
     static RendererSubSystem* findRegistered();
 
     // Explicit registration (replaces static REGISTER_SUBSYSTEM for static-lib safety).
@@ -115,6 +124,12 @@ private:
     uint16_t           _viewportW    = 1280;
     uint16_t           _viewportH    = 720;
     bool               _ready        = false;
+
+    bool               _cameraOverride = false;
+    ayt::math::FVector3 _camEye{4.0f, 3.0f, 5.0f};
+    ayt::math::FVector3 _camAt{0.0f, 0.0f, 0.0f};
+    ayt::math::FVector3 _camUp{0.0f, 1.0f, 0.0f};
+    float               _camFovYDegrees = 50.0f;
 
     // INT-04: host-side EventBus host scope (Phase 4 lesson applied). The
     // renderer is a pure consumer today — the scope owns the WindowResize

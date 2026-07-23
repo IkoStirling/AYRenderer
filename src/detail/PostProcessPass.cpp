@@ -156,12 +156,9 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     const FrameContext& frame = ctx.frame;
     // Own blit view — must not reuse the scene view id (would clobber
     // scene FBO binding + camera VP for every FO submit that frame).
-    // Deferred: Lighting=8, Transparent=9 → blit must be AFTER both
-    // or PP samples a pre-lighting / pre-glass buffer.
-    constexpr uint8_t kDeferredBlitViewId = 10;
-    const bool deferredLit = (ctx.lightingPass != nullptr) &&
-        bgfx::isValid(ctx.lightingPass->lightingOutputFbo());
-    const uint8_t viewId = deferredLit ? kDeferredBlitViewId : kBlitViewId;
+    // After BloomExtract=10 / BlurH=11 / BlurV=12; before UI=255.
+    // Forward + Deferred share kBlitViewId (only one path per frame).
+    const uint8_t viewId = kBlitViewId;
     const uint16_t viewportWidth  = ctx.viewportWidth;
     const uint16_t viewportHeight = ctx.viewportHeight;
 
@@ -293,9 +290,10 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     adapter.setTransformIdentity();
     adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
     adapter.setIndexBuffer(_fullscreenIB, 0, 3);
+    // Bind by recorded SAMPLER2D slots (pass stage=0 so setTexture does
+    // not override compile-time units — see AYShaderResource.h).
     _program.setTexture(0, _tSceneColor, texHandle);
-    // §S1c — second sampler at slot 1.
-    _program.setTexture(1, _tBloomTexture, bloomTexHandle);
+    _program.setTexture(0, _tBloomTexture, bloomTexHandle);
     _program.setUniform(_uBloomStrength, bloomPad, sizeof(bloomPad));
     _program.setUniform(_uExposure, exposurePad, sizeof(exposurePad));
     _program.setUniform(_uTonemapMode, tonemapPad, sizeof(tonemapPad));
@@ -314,9 +312,13 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
 
     static bool s_loggedSubmit = false;
     if (!s_loggedSubmit) {
+        const bool bloomFromPong = (ctx.bloomBlurPass != nullptr)
+            && BGFXAdapter::isValid(ctx.bloomBlurPass->pongFbo())
+            && (bloomTexHandle.id != texHandle.id);
         std::fprintf(stderr,
             "[PostProcessPass] blit ok view=%u rect=(%u,%u,%u,%u) "
-            "gamma=%.1f exposure=%.2f tonemap=%.0f time=%.2f\n",
+            "gamma=%.1f exposure=%.2f tonemap=%.0f bloom=%.2f "
+            "bloomSrc=%s time=%.2f\n",
             static_cast<unsigned>(viewId),
             static_cast<unsigned>(viewportX),
             static_cast<unsigned>(viewportY),
@@ -325,6 +327,8 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
             gammaPad[0],
             frame.exposure,
             tonemapPad[0],
+            frame.bloomStrength,
+            bloomFromPong ? "pong" : "fallback(scene)",
             frame.timeSeconds);
         s_loggedSubmit = true;
     }

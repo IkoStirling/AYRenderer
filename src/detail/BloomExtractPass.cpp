@@ -53,7 +53,6 @@ constexpr const char* kBloomExtractPhoskiaSource = R"(
 material BloomExtract {
     texture2d sceneColor
     uniform vec4 bloomThreshold
-    uniform vec4 bloomStrength
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -63,21 +62,21 @@ material BloomExtract {
         in  vUv : texcoord
         let uv = vec2(vUv.x, 1.0 - vUv.y)
         let sampled = sample(sceneColor, uv)
-        // Rec.709 luminance approximation (cheap, branchless).
+        // Rec.709 luminance. LightingOutput is RGBA8 LDR — keep the
+        // threshold modest so Editor lit surfaces actually contribute.
         let lum = dot(sampled.xyz, vec3(0.2126, 0.7152, 0.0722))
-        // Soft-knee bright extraction: smoothstep maps lum-threshold
-        // through a 0.5-wide band so highlights don't pop hard.
         let knee  = bloomThreshold.x * 0.5
         let soft  = smoothstep(bloomThreshold.x - knee, bloomThreshold.x + knee, lum)
-        let brightColor = sampled.xyz * soft
-        // Zero contribution when bloomStrength=0 ⇒ pre-S1 zero-behavior-change.
-        let outRgb = brightColor * bloomStrength.x
+        // Strength is applied ONLY in Final PP (live slider). Extract
+        // always writes the bright plate so bloomStrength=0 ⇒ PP adds 0.
+        let outRgb = sampled.xyz * soft
         return vec4(outRgb, sampled.w)
     }
 }
 )";
 
-constexpr const char* kBloomExtractCacheKey = "bloomextract_v0_threshold_knee_soft_fs";
+// Cache-key bump: remove extract-side strength + lower default threshold.
+constexpr const char* kBloomExtractCacheKey = "bloomextract_v1_threshold_ldr_no_strength_fs";
 
 } // namespace
 
@@ -142,7 +141,6 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
     ensureProgram(pool);
     const bool programReady = _program.isValid()
         && _uBloomThreshold != ayt::shader::InvalidBinding
-        && _uBloomStrength  != ayt::shader::InvalidBinding
         && _tSceneColor     != ayt::shader::InvalidBinding;
     if (!programReady) {
         // Acquire failed (shaderc missing on CI). Skip the draw so
@@ -156,8 +154,6 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
     // sampler (mirror PostProcessPass::execute — same-FBO feedback
     // clears / blacks the half-res buffer for the next frame).
     constexpr uint8_t viewId = kBloomExtractViewId;
-    const uint16_t viewportX = ctx.viewportX;
-    const uint16_t viewportY = ctx.viewportY;
     const ayt::math::Float4x4 identity = ayt::math::Float4x4::identity();
 
     adapter.setViewFrameBuffer(viewId, _fbo);
@@ -171,20 +167,17 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
     const ayt::shader::TextureHandle texHandle =
         ayt::render::detail::toShaderTexture(fboColor);
 
-    // Default threshold = 0.85 (post-tonemap luminance — gives
-    // meaningful bloom only on truly bright highlights, not on
-    // mid-tones). Default strength = 0 ⇒ K1 invariant #1.
-    // Host can override via Renderer public setters added in
-    // S1d (future cut).
-    const float thresholdPad[4] = {0.85f, 0.0f, 0.0f, 0.0f};
-    const float strengthPad[4]  = {ctx.frame.bloomStrength, 0.0f, 0.0f, 0.0f};
+    // LDR LightingOutput (RGBA8): 0.85 was too high for Editor lit
+    // surfaces — extract stayed black and the strength slider looked
+    // dead. Soft-knee around ~0.35 catches highlights without blooming
+    // the whole frame. Final PP applies frame.bloomStrength.
+    const float thresholdPad[4] = {0.35f, 0.0f, 0.0f, 0.0f};
 
     adapter.setTransformIdentity();
     adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
     adapter.setIndexBuffer(_fullscreenIB, 0, 3);
     _program.setTexture(0, _tSceneColor, texHandle);
     _program.setUniform(_uBloomThreshold, thresholdPad, sizeof(thresholdPad));
-    _program.setUniform(_uBloomStrength,  strengthPad,  sizeof(strengthPad));
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
@@ -192,17 +185,17 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
     adapter.setStateDepthTestAlways();  // mirror PostProcessPass
     _program.submit(sub);
 
-    // Restore default backbuffer binding so the next pass
-    // (PostProcess) doesn't accidentally read from our half-res FBO
-    // via the same view id (cutsheet spirit: don't leave the view
-    // table in a non-default state at frame end).
-    adapter.setViewFrameBuffer(viewId, BGFX_INVALID_HANDLE);
+    // Do NOT setViewFrameBuffer(viewId, INVALID) after submit — in bgfx
+    // the last bind wins for the whole view this frame, which would
+    // redirect the half-res draw to the default backbuffer at (0,0)
+    // (tiny duplicate under Editor chrome). Leave the view bound to
+    // `_fbo` for the frame (same pattern as FO → sceneFbo).
 
     static bool s_loggedFirst = false;
     if (!s_loggedFirst) {
         std::fprintf(stderr,
             "[BloomExtractPass] first blit view=%u srcFbo=%u "
-            "half=%ux%u threshold=%.2f strength=%.2f\n",
+            "half=%ux%u threshold=%.2f (strength applied in Final PP=%.2f)\n",
             static_cast<unsigned>(viewId),
             static_cast<unsigned>(sourceFbo.idx),
             static_cast<unsigned>(halfW),
@@ -290,8 +283,8 @@ void BloomExtractPass::ensureProgram(shader::ShaderResourcePool& pool)
     }
     _program        = acquired;
     _uBloomThreshold = _program.getUniformBinding("bloomThreshold");
-    _uBloomStrength  = _program.getUniformBinding("bloomStrength");
     _tSceneColor     = _program.getTextureBinding("sceneColor");
+    _uBloomStrength  = ayt::shader::InvalidBinding; // strength lives in Final PP only
 }
 
 void BloomExtractPass::destroyResources(BGFXAdapter& adapter)

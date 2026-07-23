@@ -15,12 +15,10 @@
 // ping-pong / S1c Final PP compositing / S1d Editor knob). S1a is
 // the wire + the extract shader; S1b/c are future cuts.
 //
-// View id allocation (cutsheet §S1 §1 + §5.3 spirit): composite view
-// table 0..8 + UI=11 already taken by Shadow(1)/ShadowResolve(2)/
-// FO(0)/Trans(3,9)/PP(4,10)/Skybox(6)/GBuffer(7)/Lighting(8)/UI(11).
-// View 5 was the only unused slot before S1a; we claim it for
-// BloomExtract. View id matches the cutsheet view-id table (lock
-// per docs/execution-plan.md §5.1 — append-only).
+// View id allocation: Trans-deferred=9 → BloomExtract=10 → Blur →
+// PostProcess=13 → UI=255 (fixed high slot).
+// View id matches the cutsheet view-id table (lock per
+// docs/execution-plan.md §5.1 — append-only / order-critical).
 //
 // Lifecycle (cutsheet §S1 "FBO 生命周期：ensure(w/2, h/2)，跟 viewport
 // resize"): half-resolution RGBA8 FBO with no depth attachment,
@@ -43,10 +41,8 @@
 // crashing (matches PostProcessPass::execute contract).
 //
 // K1 invariants (must survive S1b/S1c additions):
-//   1. `frame.bloomStrength == 0` ⇒ bright=0 ⇒ half-res FBO writes
-//      are zero (visually identical to S1-pre + BloomExtract not
-//      in pipeline — zero-behavior-change to existing renders when
-//      host keeps default 0 bloomStrength).
+//   1. `frame.bloomStrength == 0` ⇒ Final PP adds zero bloom (extract
+//      still writes the bright plate; strength is Final-only).
 //   2. Noop backend ⇒ execute() returns 0 + no FBO created
 //      (BGFXAdapter gates FBO create on isInitialized; bloom FBO is
 //      lazy just like PostProcessPass FBO).
@@ -72,11 +68,10 @@ namespace ayt::render::detail
 
 class BloomExtractPass : public RenderPass {
 public:
-    // Composite view map — must differ from every other slot
-    // (FO=0, ShadowC=1, ShadowR=2, Trans=3, PP=4, Skybox=6,
-    // GBuffer=7, Lighting=8, Trans-deferred=9, PP-deferred=10,
-    // UI=11). View 5 is the only slot left before S1a.
-    static constexpr uint8_t kBloomExtractViewId = 5;
+    // Composite view map (S1 bloom order lock):
+    //   … Trans-deferred=9 → BloomExtract=10 → BlurH=11 → BlurV=12
+    //   → PostProcess=13 → UI=255 (fixed high slot).
+    static constexpr uint8_t kBloomExtractViewId = 10;
 
     BloomExtractPass() = default;
     // Mirror PostProcessPass: dtor does NOT touch bgfx handles.

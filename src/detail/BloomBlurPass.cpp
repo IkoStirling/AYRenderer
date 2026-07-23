@@ -78,19 +78,21 @@ material BloomBlur {
         let t2 = sample(source, uv + dir * tSize * 2.0)
         let t3 = sample(source, uv + dir * tSize * 3.0)
         let t4 = sample(source, uv + dir * tSize * 4.0)
+        // Weighted sum is already vec4 — do NOT wrap as vec4(result, c.w)
+        // (HLSL rejects float4(float4, float)). Keep rgb from the blur,
+        // preserve center-sample alpha.
         let result = c * 0.227
                    + t1 * 0.194 + sample(source, uv - dir * tSize * 1.0) * 0.194
                    + t2 * 0.121 + sample(source, uv - dir * tSize * 2.0) * 0.121
                    + t3 * 0.054 + sample(source, uv - dir * tSize * 3.0) * 0.054
                    + t4 * 0.016 + sample(source, uv - dir * tSize * 4.0) * 0.016
-        return vec4(result, c.w)
+        return vec4(result.x, result.y, result.z, c.w)
     }
 }
 )";
 
-// §S1b (2026-07-23) — cache-key bump forces re-acquire (pointer-
-// equal compare). S1b ships one cache-key; S1c/S2/S3 may bump it.
-constexpr const char* kBloomBlurCacheKey = "bloomblur_v0_separable_5tap_fs";
+// §S1b — cache-key bump forces re-acquire after shader fix.
+constexpr const char* kBloomBlurCacheKey = "bloomblur_v1_separable_5tap_fs";
 
 } // namespace
 
@@ -188,10 +190,6 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
     }
 
     const ayt::math::Float4x4 identity = ayt::math::Float4x4::identity();
-    adapter.setTransformIdentity();
-    adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
-    adapter.setIndexBuffer(_fullscreenIB, 0, 3);
-    adapter.setStateDepthTestAlways();  // mirror S1a + PostProcessPass
 
     // Pixel size — horizontal step = (1/halfW, 0); vertical step =
     // (0, 1/halfH). Stored as vec4 .xy with .zw zero (cutsheet
@@ -210,19 +208,22 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
     ayt::shader::TextureHandle pingShaderHandle =
         ayt::render::detail::toShaderTexture(_pingRt);
 
-    // === Pass A: horizontal blur (view 12) ===
+    // bgfx clears draw state after every submit — VB/IB/state must be
+    // rebound before EACH pass (H then V). Previously only the first
+    // submit had geometry → pong stayed black → Final bloom looked dead.
+
+    // === Pass A: horizontal blur (view 11) ===
     // Source = BloomExtract's RT0; target = _pingFbo.
-    // IMPORTANT: setViewFrameBuffer / setViewRect / setViewTransform
-    // MUST happen each submit (bgfx view table is per-view, but
-    // every dispatch rewrites its own row — and S1c Final PP will
-    // later rebind view 4 / 10 to the backbuffer; restoring to a
-    // known state here protects against any cross-frame alias).
     adapter.setViewFrameBuffer(kBloomBlurHorizontalViewId, _pingFbo);
     adapter.setViewRect(kBloomBlurHorizontalViewId, 0, 0, halfW, halfH);
     adapter.setViewTransform(kBloomBlurHorizontalViewId, identity, identity);
     adapter.setViewClearRaw(kBloomBlurHorizontalViewId,
                             BGFX_CLEAR_NONE, 0, 1.0f, 0);
 
+    adapter.setTransformIdentity();
+    adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
+    adapter.setIndexBuffer(_fullscreenIB, 0, 3);
+    adapter.setStateDepthTestAlways();
     _program.setTexture(0, _tSource, sourceShaderHandle);
     _program.setUniform(_uDirection, dirH, sizeof(dirH));
     _program.setUniform(_uTexelSize, texelH, sizeof(texelH));
@@ -232,15 +233,18 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
     subH.state  = 0;
     _program.submit(subH);
 
-    // === Pass B: vertical blur (view 13) ===
-    // Source = _pingFbo's RT0; target = _pongFbo. The vertical
-    // pass blurs the already-horizontally-blurred result.
+    // === Pass B: vertical blur (view 12) ===
+    // Source = _pingFbo's RT0; target = _pongFbo.
     adapter.setViewFrameBuffer(kBloomBlurVerticalViewId, _pongFbo);
     adapter.setViewRect(kBloomBlurVerticalViewId, 0, 0, halfW, halfH);
     adapter.setViewTransform(kBloomBlurVerticalViewId, identity, identity);
     adapter.setViewClearRaw(kBloomBlurVerticalViewId,
                             BGFX_CLEAR_NONE, 0, 1.0f, 0);
 
+    adapter.setTransformIdentity();
+    adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
+    adapter.setIndexBuffer(_fullscreenIB, 0, 3);
+    adapter.setStateDepthTestAlways();
     _program.setTexture(0, _tSource, pingShaderHandle);
     _program.setUniform(_uDirection, dirV, sizeof(dirV));
     _program.setUniform(_uTexelSize, texelV, sizeof(texelV));
@@ -250,11 +254,9 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
     subV.state  = 0;
     _program.submit(subV);
 
-    // Restore default backbuffer binding on both views so the next
-    // pass (PostProcess on view 4 / 10) doesn't accidentally read
-    // from our ping-pong FBOs via the same view id.
-    adapter.setViewFrameBuffer(kBloomBlurHorizontalViewId, BGFX_INVALID_HANDLE);
-    adapter.setViewFrameBuffer(kBloomBlurVerticalViewId,   BGFX_INVALID_HANDLE);
+    // Do NOT restore views to INVALID after submit — last
+    // setViewFrameBuffer wins per view for the frame and would paint
+    // half-res blur onto the default backbuffer at (0,0).
 
     static bool s_loggedFirst = false;
     if (!s_loggedFirst) {

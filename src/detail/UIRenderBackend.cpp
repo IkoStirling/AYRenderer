@@ -214,6 +214,8 @@ void UIRenderBackend::beginFrame()
         return;
     }
 
+    // UI chrome view — fixed high slot (255) so Final PP / bloom can
+    // grow without reshuffling menus; must stay > PostProcess (13).
     _gpu->beginView(kViewId, _width, _height);
 }
 

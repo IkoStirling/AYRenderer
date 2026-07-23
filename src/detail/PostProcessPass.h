@@ -85,10 +85,9 @@ namespace ayt::render::detail
 // (destroy on shutdown / resize / adapter-reinit).
 class PostProcessPass : public RenderPass {
 public:
-    // Blit to backbuffer on its own view so it cannot overwrite the
-    // scene view's FBO / camera transform (bgfx keeps one FBO+VP per
-    // Composite map: 4 = post blit (after FO on 3; shadow resolve uses 2).
-    static constexpr uint8_t kBlitViewId = 4;
+    // After BloomBlur V=12; shared by Forward + Deferred.
+    // UI chrome is fixed at view 255 (not 14 — leave Post headroom).
+    static constexpr uint8_t kBlitViewId = 13;
 
     PostProcessPass() = default;
     // R5+ — destructor intentionally does NOT touch bgfx handles.

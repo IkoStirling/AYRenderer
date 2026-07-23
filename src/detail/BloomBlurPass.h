@@ -76,12 +76,8 @@
 //   5. ABI: append-only — RenderPassSlot::BloomBlur = 9 (was 8
 //      after S1a; BloomExtract was the previous append). No
 //      existing enum value reorders.
-//   6. View id table: 12 + 13 reserved FOREVER for this pass. S1c
-//      Final PP composite (the upcoming sub-cut 3) does NOT get
-//      its own view id — it samples the existing kBlitViewId=4
-//      (Forward) / kDeferredBlitViewId=10 (Deferred) by binding
-//      _pongFbo as an additional sampler. Forward-compat: any
-//      future pass that needs a new view id MUST pick from ≥14.
+//   6. View id table: Extract=10, BlurH=11, BlurV=12, PP=13, UI=14.
+//      Future passes that need a new view id MUST pick from ≥15.
 
 #include "AYShaderResource.h"
 
@@ -97,13 +93,10 @@ namespace ayt::render::detail
 
 class BloomBlurPass : public RenderPass {
 public:
-    // §S1b (2026-07-23) — composite view map lock. Must differ from
-    // every other slot (FO=0, ShadowC=1, ShadowR=2, Trans=3, PP=4,
-    // BloomExtract=5, Skybox=6, GBuffer=7, Lighting=8,
-    // Trans-deferred=9, PP-deferred=10, UI=11). Views 12 + 13
-    // were the only contiguous pair of free slots before S1b.
-    static constexpr uint8_t kBloomBlurHorizontalViewId = 12;
-    static constexpr uint8_t kBloomBlurVerticalViewId   = 13;
+    // §S1b view map: after BloomExtract=10, before PostProcess=13.
+    // UI is fixed at 255 (not adjacent — leave Post headroom).
+    static constexpr uint8_t kBloomBlurHorizontalViewId = 11;
+    static constexpr uint8_t kBloomBlurVerticalViewId   = 12;
 
     BloomBlurPass() = default;
     // Mirror S1a BloomExtractPass + PostProcessPass: dtor does NOT

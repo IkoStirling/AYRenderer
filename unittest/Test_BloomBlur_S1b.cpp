@@ -18,8 +18,8 @@
 //   5) Cache-key externalize (Bug fix #3 mirror):
 //      `extern const char* const kBloomBlurCacheKeyCStr` from the
 //      header pins to the live literal in BloomBlurPass.cpp.
-//   6) View id constants: horizontal = 12, vertical = 13
-//      (the only contiguous pair of unused view ids before S1b).
+//   6) View id constants: Extract=10, BlurH=11, BlurV=12
+//      (before PostProcess=13; UI fixed at 255).
 //   7) RenderPipeline dispatch order: BloomBlurPass fires AFTER
 //      BloomExtractPass and BEFORE PostProcessPass in a custom
 //      pipeline.
@@ -39,6 +39,7 @@
 #include "AYRenderTypes.h"
 #include "AYShaderResourcePool.h"
 #include "AYShaderResource.h"
+#include "AYUIRenderBackend.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/BloomExtractPass.h"
@@ -125,7 +126,7 @@ constexpr const char* kBloomBlurExpectedSubstrings[] = {
 // Mirror the live cache key (cutsheet §S1 "cache-key bump" + Bug
 // fix #3 lesson: pre-self-compare was false-green).
 constexpr const char* kExpectedBloomBlurCacheKey =
-    "bloomblur_v0_separable_5tap_fs";
+    "bloomblur_v1_separable_5tap_fs";
 
 constexpr const char* kLiveBloomBlurSource = R"(
 material BloomBlur {
@@ -152,7 +153,7 @@ material BloomBlur {
                    + t2 * 0.121 + sample(source, uv - dir * tSize * 2.0) * 0.121
                    + t3 * 0.054 + sample(source, uv - dir * tSize * 3.0) * 0.054
                    + t4 * 0.016 + sample(source, uv - dir * tSize * 4.0) * 0.016
-        return vec4(result, c.w)
+        return vec4(result.x, result.y, result.z, c.w)
     }
 }
 )";
@@ -306,20 +307,18 @@ TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
 
 // === C. View id constants ===========================================
 
-TEST_CASE(s1b_bloomblur_view_ids_horizontal_12_vertical_13) {
-    // K2 invariant #6: view id table — 12 (horizontal) + 13
-    // (vertical) reserved FOREVER for this pass. S1c Final PP
-    // composite does NOT get its own view id (samples kBlitViewId=4
-    // / kDeferredBlitViewId=10 by binding _pongFbo as an
-    // additional sampler — see cutsheet §S1 sub-cut 3).
-    CHECK(BloomBlurPass::kBloomBlurHorizontalViewId == 12);
-    CHECK(BloomBlurPass::kBloomBlurVerticalViewId   == 13);
-    // No collision with any existing pass — every other view id
-    // (FO=0, ShadowC=1, ShadowR=2, Trans=3, PP=4, BloomExtract=5,
-    // Skybox=6, GBuffer=7, Lighting=8, Trans-deferred=9,
-    // PP-deferred=10, UI=11) is strictly less than 12.
-    CHECK(BloomBlurPass::kBloomBlurHorizontalViewId > 11);
-    CHECK(BloomBlurPass::kBloomBlurVerticalViewId   > 11);
+TEST_CASE(s1b_bloomblur_view_ids_after_extract_before_pp) {
+    // Order lock: Extract=10 → BlurH=11 → BlurV=12 → PP=13; UI=255 (fixed).
+    CHECK(BloomBlurPass::kBloomBlurHorizontalViewId == 11);
+    CHECK(BloomBlurPass::kBloomBlurVerticalViewId   == 12);
+    CHECK(BloomBlurPass::kBloomBlurHorizontalViewId
+          == BloomExtractPass::kBloomExtractViewId + 1);
+    CHECK(BloomBlurPass::kBloomBlurVerticalViewId
+          == BloomBlurPass::kBloomBlurHorizontalViewId + 1);
+    CHECK(PostProcessPass::kBlitViewId
+          == BloomBlurPass::kBloomBlurVerticalViewId + 1);
+    CHECK(ayt::render::UIRenderBackend::kViewId == 255);
+    CHECK(ayt::render::UIRenderBackend::kViewId > PostProcessPass::kBlitViewId);
 }
 
 // === D. Producer API (BloomExtract::halfResFbo) =====================
@@ -356,7 +355,7 @@ TEST_CASE(s1b_bloomblur_cache_key_literal_pinned_via_extern) {
     // would have been a self-compare ("mine == mine") = false-
     // green drift detection.
     CHECK(std::string(kBloomBlurCacheKeyCStr)
-          == "bloomblur_v0_separable_5tap_fs");
+          == "bloomblur_v1_separable_5tap_fs");
     CHECK(std::string(kExpectedBloomBlurCacheKey)
           == std::string(kBloomBlurCacheKeyCStr));
 }

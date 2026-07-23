@@ -14,57 +14,57 @@
 namespace ayt::render::detail
 {
 
-// §P5 B5 (2026-07-22) — build stamp literal (mirror
+// �P5 B5 (2026-07-22) ??build stamp literal (mirror
 // GBufferPass.cpp:15 `kGBufferBuildStamp`). Pointer-equal compare;
 // bumping this triggers a FBO rebuild on next execute(). B5 is
-// the first lock — bumping is safe across B5.x cuts.
+// the first lock ??bumping is safe across B5.x cuts.
 static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
 
-// §P5 B5 (2026-07-22) — cache key literal (mirror GBufferPass.cpp:68
+// �P5 B5 (2026-07-22) ??cache key literal (mirror GBufferPass.cpp:68
 // `kGBufferCacheKey`). Pointer-equal compare so cache invalidates
 // when the literal bumps. `s_acquiredCacheKey` static guard inside
 // ensureProgram() forces re-acquire.
-// §P5 B7+ (2026-07-22) — bump to v4: Phoskia source now declares a
+// �P5 B7+ (2026-07-22) ??bump to v4: Phoskia source now declares a
 // `uniformblock Lights { vec4 dirs[8]; vec4 colors[8]; } binding 0`
 // and the FS unrolls 8 directional-light taps unconditionally.
 // Single-light fallback path through u_lightDirection +
 // u_lightColor still exists (no-op on the data path; both uniforms
 // still ship) so existing setDirectionalLight host code stays
 // compatible.
-// §P5 B7+ (2026-07-22) — v6: Lights UBO must be program-top-level.
+// �P5 B7+ (2026-07-22) ??v6: Lights UBO must be program-top-level.
 // AYBGFXConverter only emits cbuffer from IRProgram::uniformBlocks;
 // nested material uniformblocks never reach the HLSL preamble
 // (`undeclared identifier 'Lights'` / D3D X3004).
-// §P5 B5.5 (2026-07-22) — bump on top of v11:
+// �P5 B5.5 (2026-07-22) ??bump on top of v11:
 //   + `texture2d gbufferMotion` carries encoded worldPos (RT2;
-//     GBufferFill v6) — Lighting decodes instead of sampling D24S8
+//     GBufferFill v6) ??Lighting decodes instead of sampling D24S8
 //   + `texture2d shadowMap` + 4 shadow uniforms (u_lightViewProj,
 //     shadowBias, shadowMapTexel, shadowPcf)
-//   + FS key-light only PCF (9 taps) — fill / rim lights
+//   + FS key-light only PCF (9 taps) ??fill / rim lights
 //     (lights[1..7]) stay unshadowed.
 //
-// Single shared shadow map for the key light (cutsheet §10
-// pass-lessons-from-deferred.md:300 — "LightingPass 共用
-// ShadowPass 只读借用"). Per-light shadow maps is a separate
+// Single shared shadow map for the key light (cutsheet �10
+// pass-lessons-from-deferred.md:300 ??"LightingPass ??
+// ShadowPass ????"). Per-light shadow maps is a separate
 // future cut.
-// §P5 B5.5 (2026-07-22) — v16: worldPos from GBuffer RT2 as
+// �P5 B5.5 (2026-07-22) ??v16: worldPos from GBuffer RT2 as
 // RGBA16F raw xyz (no 8-bit encode). v15 RGBA8 encode caused
-// ~0.16m quantization → mosaic shadow blocks on the ground.
-// §P5.5 A (2026-07-23) — v19: keep UBO field name `dirs` (not `record`).
- // `record` as a bgfx/HLSL uniform identifier was a bad rename — host
+// ~0.16m quantization ??mosaic shadow blocks on the ground.
+// �P5.5 A (2026-07-23) ??v19: keep UBO field name `dirs` (not `record`).
+ // `record` as a bgfx/HLSL uniform identifier was a bad rename ??host
  // upload / reflection mismatch left light vectors uninitialized
  // (flickering cyan fill, unstable key, missing shadows) while
  // `colors[]` still updated. `.w` still carries float(LightType).
- // §P5.5 B (2026-07-23) — bump to v21: Light POD widened with
+ // �P5.5 B (2026-07-23) ??bump to v21: Light POD widened with
  // Point/Spot per-light params (range/intensity/coneCosInner/
  // coneCosOuter) + spotDirection; Phoskia FS rewritten with
  // per-type attenuation + cone math (see fragment body below).
  // UBO widened to 4 vec4 arrays (dirs/colors/params/spotDir).
  // Bug fix #3 (Test_B5 cache-key false-green) is resolved by
- // `kLightingCacheKeyCStr` extern declared in LightingPass.h —
+ // `kLightingCacheKeyCStr` extern declared in LightingPass.h ??
  // see definition below.
 //
-// §P5.5 D (2026-07-23) — bump v21 → v22: IBL MVP (Ambient Diffuse
+// �P5.5 D (2026-07-23) ??bump v21 ??v22: IBL MVP (Ambient Diffuse
 // Cube Lookup). Phoskia source declares `texturecube envCube` +
 // `uniform float cubeActive` (0/1 per-frame gate) +
 // `uniform float ambientStrength` (default 0.6). The FS ambient
@@ -72,40 +72,24 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
 //   ambientFlat = vec3(0.1, 0.1, 0.1)              // pre-D floor
 //   ambientCube = sample(envCube, N).rgb * ambientStrength * cubeActive
 // When cubeActive=0 (host never called Renderer::setSkySourceCube
-// OR SkySource::kind != CubeMap) the cube branch contributes 0 —
+// OR SkySource::kind != CubeMap) the cube branch contributes 0 ??
 // byte-equivalent to pre-D flat ambient. The single-FS +
-// uniform-gating strategy mirrors §Skybox0 SkyboxPass dual-kind
+// uniform-gating strategy mirrors �Skybox0 SkyboxPass dual-kind
 // decision (avoid dual-FS program acquire overhead).
 //
-// §P5.5 C (2026-07-23) — bump v22 → v23: per-light shadow atlas.
-// Phoskia source now declares 4 array uniforms
-//   uniform vec4 shadowAtlasRects[8]   // (u0,v0,u1,v1) per slot
-//   uniform mat4 lightViewProjs[8]     // light-space VP per slot
-//   uniform vec4 shadowBiases[8]       // per-slot bias override (.x)
-//   uniform vec4 perLightShadowCount   // .x = N (0..7)
-// alongside the existing `uniform mat4 u_lightViewProj` (kept for
-// the global fallback / pre-C path). The existing 9-tap PCF body
-// is wrapped into a `computeShadow(uv, slotRect, slotLvp,
-// slotBias)` helper that's invoked per-light: each light slot i
-// gets `shadowFactor_i` which is multiplied into its contribution.
-//
-// K3 invariant (cutsheet §P5.5 A :330): when
-// perLightShadowCount.x == 0 (host never set castShadow=true on
-// any light), the FS short-circuits to a `perLightShadow = vec4(1.0)`
-// baseline and lights[0]'s contribution falls back to
-// `* u_lightViewProj * globalBias` — exactly the pre-C byte-
-// equivalent 9-tap key-only path. Host that doesn't opt in
-// pays 0 incremental cost.
+// �P5.5 C (2026-07-23) ? per-light shadow atlas + AYShader fixes:
+//   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
+//   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v23_p5p5c_per_light_shadow_atlas";
+    "lighting_v26_mix_vec2_overloads";
 
-// §P5.5 B (2026-07-23) — Bug fix #3: single source of truth for
+// �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
 // LightingPass.h; this is its definition.
 const char* const kLightingCacheKeyCStr = kLightingCacheKey;
 
-// §P5 B5 (2026-07-22) — fullscreen-triangle vertex data, duplicated
-// from PostProcessPass.cpp:27-33 (private state there — coupling
+// �P5 B5 (2026-07-22) ? fullscreen-triangle vertex data, duplicated
+// from PostProcessPass.cpp:27-33 (private state there ? coupling
 // would require a friend class, duplicate is cheaper). Same
 // 3-vert NDC oversize-triangle bgfx pattern; same FullscreenVertex
 // {x,y,u,v} layout that vertexLayoutPosUv() emits.
@@ -124,15 +108,15 @@ constexpr LightingFullscreenVertex kLightingFullscreenTriangle[3] = {
 
 constexpr uint16_t kLightingFullscreenIndices[3] = { 0, 1, 2 };
 
-// §P5 B5 (2026-07-22) — Phoskia Lighting VS/FS source.
+// �P5 B5 (2026-07-22) ??Phoskia Lighting VS/FS source.
 //
 // Sampler inputs (cutsheet B5 spec):
 //   - gbufferAlbedo : color (RGB = baseColor, A = opacity) from B4b
 //   - gbufferNormal : color (RGB = world-space normal encoded [0,1])
-//   - gbufferMotion : color (xy = prev-frame displacement, [0,1] —
+//   - gbufferMotion : color (xy = prev-frame displacement, [0,1] ??
 //                                   B5 currently does NOT consume
 //                                   motion; binding present for B7+
-//                                   TAA consumer symmetry — cutsheet
+//                                   TAA consumer symmetry ??cutsheet
 //                                   B5 boundary documented)
 //
 // Uniform inputs (cutsheet B5 spec, all from FrameContext):
@@ -142,12 +126,12 @@ constexpr uint16_t kLightingFullscreenIndices[3] = { 0, 1, 2 };
 //                                          feed as-is)
 //   - u_lightColor     : vec3 = frame.lightColor
 //   - u_cameraPos      : vec3 = frame.cameraPosition
-//     (reserved for B5.5 specular/Blinn-Phong — B5 keeps Lambert
+//     (reserved for B5.5 specular/Blinn-Phong ??B5 keeps Lambert
 //     flat; uploader still emits it so future B5.x can reuse the
 //     same uniform binding without shader changes)
 //
 // Math (Lambert):
-//   N = sample(gbufferNormal).xyz * 2.0 - vec3(1,1,1)  // decode [0,1]→[-1,1]
+//   N = sample(gbufferNormal).xyz * 2.0 - vec3(1,1,1)  // decode [0,1]?[-1,1]
 //   L = normalize(u_lightDirection)
 //   NdotL = max(dot(N, L), 0.0)
 //   ambient = vec3(0.1)                                  // floor term
@@ -155,35 +139,35 @@ constexpr uint16_t kLightingFullscreenIndices[3] = { 0, 1, 2 };
 //   return vec4(lit, sample(gbufferAlbedo).a)
 //
 // Phoskia `let` chain uses the same surface as the B4b GBufferFill
-// source (verified at PR-F2/PR-F3 ship) — `let` declarations +
+// source (verified at PR-F2/PR-F3 ship) ??`let` declarations +
 // arithmetic + sample() texture lookups. B5 emits a SINGLE `return`
-// (not MRT) so no Phoskia MRT extension needed — falls back to the
-// legacy `return → gl_FragColor` path (verified at AYShader/
+// (not MRT) so no Phoskia MRT extension needed ??falls back to the
+// legacy `return ??gl_FragColor` path (verified at AYShader/
 // unittest/Test_MRT_Fragment.cpp::mrt_legacy_return_still_emits_fragcolor).
 //
-// §P5.5 B (2026-07-23) — Phoskia source rewritten for Point + Spot
+// �P5.5 B (2026-07-23) ??Phoskia source rewritten for Point + Spot
 // per-type math. UBO `Lights` widened from 2 vec4 arrays to 4
 // (`dirs[8]` + `colors[8]` + `params[8]` + `spotDir[8]`). Each of
 // the 8 light slots dispatches per-type inside an `if/else if`
-// chain (Phoskia `fn` support not relied on — keeps the converter
+// chain (Phoskia `fn` support not relied on ??keeps the converter
 // path simple). `params[]` carries (range, intensity, coneCosInner,
 // coneCosOuter); `spotDir[].xyz` carries Spot direction (Point /
-// Directional leave it zero — never read by their FS branches).
+// Directional leave it zero ??never read by their FS branches).
 //
-// Branch taxonomy (mirrors cutsheet §P5.5 B):
+// Branch taxonomy (mirrors cutsheet �P5.5 B):
 //   - Directional (w < 0.5):  NdotL * shadow (key only) * color
-//   - Point (0.5 ≤ w < 1.5):  NdotL * (intensity / max(dist², 0.01))
+//   - Point (0.5 ??w < 1.5):  NdotL * (intensity / max(dist�, 0.01))
 //                              * (1 - smoothstep(0, range, dist))
 //                              * color
-//   - Spot (w ≥ 1.5):         same as Point PLUS
-//                              smoothstep(coneCosOuter, coneCosInner, cosθ)
-//                              where cosθ = dot(L_to_frag, spotDir)
+//   - Spot (w ??1.5):         same as Point PLUS
+//                              smoothstep(coneCosOuter, coneCosInner, cos?)
+//                              where cos? = dot(L_to_frag, spotDir)
 //
 // Shadow attenuation: ONLY lights[0] (key) gets shadowKey multiply,
-// regardless of LightType. Fill / rim 1..7 stay unshadowed — mirror
-// A's cutsheet §10 contract. If a host puts Point/Spot in slot 0,
+// regardless of LightType. Fill / rim 1..7 stay unshadowed ??mirror
+// A's cutsheet �10 contract. If a host puts Point/Spot in slot 0,
 // they get shadow attenuation for free (v0 simplification; per-light
-// shadow is §P5.5 C scope).
+// shadow is �P5.5 C scope).
 constexpr const char* kLightingPhoskiaSource = R"(
 uniformblock Lights {
     vec4 dirs[8]
@@ -208,10 +192,10 @@ material Lighting {
     uniform vec4 skyMix
     uniform vec4 cubeActive
     uniform vec4 ambientStrength
-    // §P5.5 C (2026-07-23) — per-light shadow atlas bindings.
+    // �P5.5 C (2026-07-23) ??per-light shadow atlas bindings.
     // shadowAtlasRects[i] = (u0,v0,u1,v1) in atlas UV [0,1].
     // lightViewProjs[i]   = light-space VP for slot i.
-    // shadowBiases[i].x   = per-slot bias override (0 ⇒ use global).
+    // shadowBiases[i].x   = per-slot bias override (0 ??use global).
     // perLightShadowCount.x = N (0..7) active slots.
     uniform vec4 shadowAtlasRects[8]
     uniform mat4 lightViewProjs[8]
@@ -229,8 +213,8 @@ material Lighting {
         let albedo = sample(gbufferAlbedo, baseUv)
         let normalSample = sample(gbufferNormal, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
-        // §P5.5 D (2026-07-23) — IBL MVP ambient term. Default
-        // cubeActive=0 ⇒ ambient = ambientFlat (pre-D byte-
+        // �P5.5 D (2026-07-23) ??IBL MVP ambient term. Default
+        // cubeActive=0 ??ambient = ambientFlat (pre-D byte-
         // equivalent). When host calls Renderer::setSkySourceCube
         // + SkySource::kind=CubeMap, cubeActive=1 and the cube
         // lookup adds normal-driven diffuse term scaled by
@@ -238,23 +222,23 @@ material Lighting {
         let ambientFlat = vec3(0.1, 0.1, 0.1)
         let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x
         let ambient = ambientFlat + ambientCube
-        // §P5 B5.5 v16 — worldPos from GBuffer RT2 (RGBA16F raw xyz).
+        // �P5 B5.5 v16 ??worldPos from GBuffer RT2 (RGBA16F raw xyz).
         let worldPos = sample(gbufferMotion, baseUv).xyz
-        // §P5.5 C (2026-07-23) — per-light shadow factor helper.
+        // �P5.5 C (2026-07-23) ??per-light shadow factor helper.
         // Each light slot i computes its own shadow factor by
         // projecting worldPos through lightViewProjs[i] and
         // sampling shadowMap inside shadowAtlasRects[i]. When
         // i >= perLightShadowCount.x the slot has no shadow caster
-        // ⇒ shadowFactor_i = 1.0 (no shadow, byte-equivalent to
+        // ??shadowFactor_i = 1.0 (no shadow, byte-equivalent to
         // pre-C behavior for fill/rim lights).
         //
         // The helper body is the same 9-tap PCF used pre-C (cut-
-        // sheet §P5.5 C :330 keeps the contract). Per-slot bias
+        // sheet �P5.5 C :330 keeps the contract). Per-slot bias
         // falls back to the global `shadowBias.x` when 0.
         //
-        // K3 invariant: perLightShadowCount.x == 0 ⇒
+        // K3 invariant: perLightShadowCount.x == 0 ??
         // `let perLightShadow = vec4(1.0)` baseline (set below),
-        // `* perLightShadow *` collapses to no-op — lights[0]'s
+        // `* perLightShadow *` collapses to no-op ??lights[0]'s
         // shadow factor computed from the global `u_lightViewProj`
         // + `shadowBias` + `shadowMap` is byte-equivalent to the
         // pre-C 9-tap key-only path.
@@ -544,16 +528,16 @@ material Lighting {
         let _shadow7 = mix(1.0, mix(_t7e, _soft7, shadowPcf.x), _inMap7)
         let perLightShadow7 = mix(vec4(1.0), vec4(_shadow7), step(7.5, perLightShadowCount.x))
 
-        // §P5.5 B (2026-07-23) — per-light contribution. Each light
+        // �P5.5 B (2026-07-23) ??per-light contribution. Each light
         // dispatches per-type via `dirs[i].w = float(LightType)`:
         //   - Directional: NdotL * shadow (per-slot) * color
-        //   - Point:       NdotL * intensity / dist² * range-falloff * color
-        //   - Spot:        Point path * cone (smoothstep coneCosOuter→inner) * color
+        //   - Point:       NdotL * intensity / dist� * range-falloff * color
+        //   - Spot:        Point path * cone (smoothstep coneCosOuter?inner) * color
         //
-        // §P5.5 C (2026-07-23) — shadow multiply now per-light via
+        // �P5.5 C (2026-07-23) ??shadow multiply now per-light via
         // perLightShadow{i}.x. When perLightShadowCount.x = 0 the
         // mix collapses perLightShadow{i} = vec4(1.0) for all slots
-        // — pre-C byte-equivalent (lights[0] still uses the global
+        // ??pre-C byte-equivalent (lights[0] still uses the global
         // `shadowKey` via u_lightViewProj + global shadowBias as a
         // separate path; see `keyContrib` below).
         //
@@ -570,7 +554,7 @@ material Lighting {
         let attenSpot0  = Lights.params[0].y * falloff0 * cone0 / max(d0 * d0, 0.01)
         let NdotDir0  = max(dot(N, Ld0), 0.0)
         let NdotPos0  = max(dot(N, Lp0), 0.0)
-        // §P5.5 C — per-slot shadow for the key light. When
+        // �P5.5 C ??per-slot shadow for the key light. When
         // perLightShadowCount.x > 0 we use the per-slot PCF result;
         // when 0 we use the legacy global `shadowKey` (pre-C path)
         // so pre-C behavior is preserved exactly.
@@ -612,7 +596,7 @@ material Lighting {
         let isPoint0 = step(0.5, Lights.dirs[0].w) - step(1.5, Lights.dirs[0].w)
         let isSpot0 = step(1.5, Lights.dirs[0].w)
         let keyContrib = dirPart0 * isDir0 + pointPart0 * isPoint0 + spotPart0 * isSpot0
-        // --- lights 1..7 (fill/rim — per-slot shadow via perLightShadow{i}) ---
+        // --- lights 1..7 (fill/rim ??per-slot shadow via perLightShadow{i}) ---
         let Ld1 = Lights.dirs[1].xyz * (1.0 / max(length(Lights.dirs[1].xyz), 0.0001))
         let toL1 = Lights.dirs[1].xyz - worldPos
         let d1 = length(toL1)
@@ -748,12 +732,12 @@ material Lighting {
         let f7 = dirPart7 * isDir7 + pointPart7 * isPoint7 + spotPart7 * isSpot7
         let directionalSum = keyContrib + f1 + f2 + f3 + f4 + f5 + f6 + f7
         let lit = albedo.rgb * (ambient + directionalSum)
-        // §Skybox0 (2026-07-23) — backdrop blend: sky only shows
+        // �Skybox0 (2026-07-23) ??backdrop blend: sky only shows
         // where lit is near zero (so geometry keeps its color;
         // sky fills gaps in scene coverage). When
         // `ctx.skyboxPass == nullptr` the gbufferSky sampler stays
         // unbound and `sample(gbufferSky, baseUv)` returns black;
-        // `mix(black, lit, 1) == lit` collapses to the pre-§Skybox0
+        // `mix(black, lit, 1) == lit` collapses to the pre-�Skybox0
         // dark-frame behavior on a Forward / non-sky host.
         let skyColor = sample(gbufferSky, baseUv).xyz * skyMix.x
         let coverage = step(0.001, max(max(lit.r, lit.g), lit.b))
@@ -767,7 +751,7 @@ LightingPass::~LightingPass() = default;
 
 void LightingPass::setOutputSize(uint16_t width, uint16_t height) noexcept
 {
-    // §P5 B5 (2026-07-22) — host-driven store-only call (mirror
+    // �P5 B5 (2026-07-22) ??host-driven store-only call (mirror
     // GBufferPass::setGbufferSize at GBufferPass.cpp:231-238).
     // No adapter access here; the next execute() honors the size.
     _lightingW = width;
@@ -776,14 +760,14 @@ void LightingPass::setOutputSize(uint16_t width, uint16_t height) noexcept
 
 void LightingPass::destroyResources(BGFXAdapter& adapter)
 {
-    // §P5 B5 (2026-07-22) — mirror GBufferPass::destroyResources at
+    // �P5 B5 (2026-07-22) ??mirror GBufferPass::destroyResources at
     // GBufferPass.cpp:240-266. Drop the FBO, fullscreen VB/IB, and
     // reset all cached handles. W/H + buildStamp reset UNCONDITIONALLY
-    // so a host that calls setOutputSize(800,600) → destroyResources()
+    // so a host that calls setOutputSize(800,600) ??destroyResources()
     // expects W/H back to 0 (Test_B5 case 6 pins this). The FBO/VB/IB
     // handles are only destroyed when actually allocated (calling
     // bgfx::destroy on an invalid handle is a UAF on some bgfx
-    // backends — mirror ShadowMapResources::destroy guard).
+    // backends ??mirror ShadowMapResources::destroy guard).
     if (BGFXAdapter::isValid(_lightingFbo)) {
         adapter.destroy(_lightingFbo);
         _lightingFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
@@ -804,7 +788,7 @@ void LightingPass::destroyResources(BGFXAdapter& adapter)
     _program.reset();
     _programReady = false;
     _programAcquireFailed = false;
-    // §P5.5 D (2026-07-23) — cube binding IDs reset on destroy so
+    // �P5.5 D (2026-07-23) ??cube binding IDs reset on destroy so
     // the next ensureProgram() re-resolves them after the v22
     // cache-key bump forces a re-acquire.
     _tEnvCube         = ayt::shader::InvalidBinding;
@@ -814,7 +798,7 @@ void LightingPass::destroyResources(BGFXAdapter& adapter)
 
 void LightingPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
 {
-    // §P5 B5 (2026-07-22) — mirror GBufferPass::ensure at
+    // �P5 B5 (2026-07-22) ??mirror GBufferPass::ensure at
     // GBufferPass.cpp:268-314. Stamp-changed fast path + same-size
     // fast path; rebuild path on size/stamp change.
     if (!adapter.isInitialized() || width == 0 || height == 0) {
@@ -833,18 +817,18 @@ void LightingPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
         return;  // FBO cached
     }
 
-    // Rebuild path — drop old FBO + recreate
+    // Rebuild path ??drop old FBO + recreate
     if (bgfx::isValid(_lightingFbo)) {
         adapter.destroy(_lightingFbo);
         _lightingFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
         _allocatedW = _allocatedH = 0;
     }
 
-    // §P5 B5 (2026-07-22) — 1× RGBA8 LightingOutput FBO. NO depth
-    // attachment — this is a fullscreen post-process pass that
+    // �P5 B5 (2026-07-22) ??1� RGBA8 LightingOutput FBO. NO depth
+    // attachment ??this is a fullscreen post-process pass that
     // does not read depth. `withDepth=false` matches cutsheet
     // `pass-lessons-from-deferred.md:151,161,169` "LightingPass
-    // 写 LightingOutput FBO" semantics (independent RGBA8 RT, not
+    // ??LightingOutput FBO" semantics (independent RGBA8 RT, not
     // a color+depth like sceneFbo).
     _lightingFbo = adapter.createFrameBuffer(width, height,
                                               bgfx::TextureFormat::RGBA8,
@@ -859,7 +843,7 @@ void LightingPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
 
 void LightingPass::ensureFullscreenQuad(BGFXAdapter& adapter)
 {
-    // §P5 B5 (2026-07-22) — mirror PostProcessPass::ensureFullscreenQuad
+    // �P5 B5 (2026-07-22) ??mirror PostProcessPass::ensureFullscreenQuad
     // at PostProcessPass.cpp:280-309. Lazy creation; VB/IB cached
     // after first call.
     if (BGFXAdapter::isValid(_fullscreenVB)
@@ -878,7 +862,7 @@ void LightingPass::ensureFullscreenQuad(BGFXAdapter& adapter)
 
 void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
 {
-    // §P5 B5 (2026-07-22) — mirror GBufferPass::ensureProgram at
+    // �P5 B5 (2026-07-22) ??mirror GBufferPass::ensureProgram at
     // GBufferPass.cpp:72-107. Stamp-checked `s_acquiredCacheKey`
     // pointer-equal guard (ShadowCaster Issue 1 fix at
     // ShadowCaster.cpp:60-65). On compile failure: log + set
@@ -889,8 +873,8 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
         _program.reset();
         _programReady = false;
         _programAcquireFailed = false;
-        // §P5.5 D (2026-07-23) — cube binding IDs reset on cache-
-        // key bump (v21 → v22). Mirror shadowMap / gbufferSky
+        // �P5.5 D (2026-07-23) ??cube binding IDs reset on cache-
+        // key bump (v21 ??v22). Mirror shadowMap / gbufferSky
         // binding reset pattern at the top of ensureProgram.
         _tEnvCube         = ayt::shader::InvalidBinding;
         _uCubeActive      = ayt::shader::InvalidBinding;
@@ -922,7 +906,7 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     _program = acquired;
     _programReady = true;
 
-    // §P5.5 D (2026-07-23) — lazy-resolve IBL MVP binding IDs.
+    // �P5.5 D (2026-07-23) ??lazy-resolve IBL MVP binding IDs.
     // Default InvalidBinding on acquire failure; the FS's
     // `ambientCube * cubeActive` collapses to 0 (ambientFlat only)
     // when cubeActive=0 OR envCube binding is invalid. The
@@ -932,11 +916,11 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     _uCubeActive      = _program.getUniformBinding("cubeActive");
     _uAmbientStrength = _program.getUniformBinding("ambientStrength");
 
-    // §P5.5 C (2026-07-23) — per-light shadow atlas binding
+    // �P5.5 C (2026-07-23) ??per-light shadow atlas binding
     // resolves. Default InvalidBinding on acquire failure; the
     // FS's `mix(vec4(1.0), vec4(_shadow_i), step(i+0.5, N))`
     // collapses perLightShadow{i} = vec4(1.0) when the binding
-    // is invalid AND/OR perLightShadowCount.x = 0 — preserving
+    // is invalid AND/OR perLightShadowCount.x = 0 ??preserving
     // the pre-C byte-equivalent (key-only shadow multiply).
     _uShadowAtlasRects    = _program.getUniformBinding("shadowAtlasRects");
     _uLightViewProjs      = _program.getUniformBinding("lightViewProjs");
@@ -946,14 +930,14 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
 
 uint32_t LightingPass::execute(PassExecContext& ctx)
 {
-    // §P5 B5 (2026-07-22) — first real GPU work in the Deferred
+    // �P5 B5 (2026-07-22) ??first real GPU work in the Deferred
     // LightingPass. Phoskia VS/FS acquires, binds view 8 to the
     // LightingOutput FBO, dispatches a fullscreen triangle that
     // samples 3 GBuffer attachments + applies Lambert directional
     // light (1 direction from FrameContext::lightDirection, 1 color
     // from FrameContext::lightColor).
     //
-    // B5.5 (2026-07-22) — consumes `ctx.shadowPass->shadowMap()` via
+    // B5.5 (2026-07-22) ??consumes `ctx.shadowPass->shadowMap()` via
     // the shared tryBindShadowSampler helper (mirror FO / Trans
     // call sites at ForwardOpaquePass.cpp:105-106 + TransparentPass:
     // 170-171). helper uploads `u_lightViewProj` +
@@ -967,9 +951,9 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     //
     // B7+ TAA boundary (unchanged): NOT consuming gbufferMotion
     // (binding present for TAA consumer symmetry, FS does not
-    // read it — see cutsheet B5 boundary doc).
+    // read it ??see cutsheet B5 boundary doc).
     //
-    // §5.4 (2026-07-22, FO/Trans PR) — `isInitialized()` guard only,
+    // �5.4 (2026-07-22, FO/Trans PR) ??`isInitialized()` guard only,
     // NOT `|| isNoopBackend()`. Noop short-circuits inside
     // BGFXAdapter (each draw command is gated there); Pass-level
     // Noop gate would skip the scene-items loop on FO/Trans but
@@ -1013,8 +997,8 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     ctx.adapter.setViewTransform(viewId, frame.view, frame.projection);
     ctx.adapter.setViewFrameBuffer(viewId, _lightingFbo);
     ctx.adapter.setViewRect(viewId, 0, 0, _lightingW, _lightingH);
-    // Clear to black (matches cutsheet §5.2 "GBuffer/Lighting 默认
-    // clear=0" lock — black is the correct "no light contribution"
+    // Clear to black (matches cutsheet �5.2 "GBuffer/Lighting ??
+    // clear=0" lock ??black is the correct "no light contribution"
     // baseline; lit fragments overwrite).
     ctx.adapter.setViewClearRaw(viewId,
                                 BGFX_CLEAR_COLOR,
@@ -1023,26 +1007,26 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                                 /*stencil=*/0);
 
     // B5 lighting state: WRITE_RGB | WRITE_A | DEPTH_TEST_ALWAYS
-    // (no depth read, no depth write — fullscreen post-process).
+    // (no depth read, no depth write ??fullscreen post-process).
     // BGFXAdapter doesn't expose a setStatePostProcess helper yet,
     // so use the inline form via setStateOpaque() + override: we
     // bypass setStateOpaque and use bgfx::setState directly via
     // adapter.setStateOpaque() as the base (DEPTH_TEST_LESS +
-    // CULL_CW) — but for a fullscreen post-process pass CULL_CW is
+    // CULL_CW) ??but for a fullscreen post-process pass CULL_CW is
     // wrong (the oversize triangle needs no culling). Use
     // setStateDepthTestAlways() (verified at BGFXAdapter.cpp:171-178
     // documentation: "PostProcessPass fullscreen blit"). That's
     // WRITE_RGB | WRITE_A | DEPTH_TEST_ALWAYS + no CULL_CW.
     ctx.adapter.setStateDepthTestAlways();
 
-    // §P5 B5 (2026-07-22) — BIND 3 GBuffer samplers via borrowed
+    // �P5 B5 (2026-07-22) ??BIND 3 GBuffer samplers via borrowed
     // pointer to ctx.gbufferPass. The handles come from the
-    // producer (B4a GBufferPass cacheAttachments) — we just read
+    // producer (B4a GBufferPass cacheAttachments) ??we just read
     // them. Falls through cleanly if any is invalid (cutsheet
-    // §1.7 "no work" signal — but B5 draws 1 submit regardless;
+    // �1.7 "no work" signal ??but B5 draws 1 submit regardless;
     // missing samplers surface as visual artifacts, not crashes).
     if (ctx.gbufferPass != nullptr) {
-        // albedo sampler — stage from compiled Phoskia
+        // albedo sampler ??stage from compiled Phoskia
         const shader::BindingId albedoBinding =
             _program.getTextureBinding("gbufferAlbedo");
         if (albedoBinding != shader::InvalidBinding) {
@@ -1065,7 +1049,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             }
         }
         // motion sampler (binding present, FS does not currently read it;
-        // bound for B7+ TAA consumer symmetry — cutsheet B5 boundary)
+        // bound for B7+ TAA consumer symmetry ??cutsheet B5 boundary)
         const shader::BindingId motionBinding =
             _program.getTextureBinding("gbufferMotion");
         if (motionBinding != shader::InvalidBinding) {
@@ -1076,7 +1060,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                                     toShaderTexture(motionHandle));
             }
         }
-        // §Skybox0 (2026-07-23) — gbufferSky backdrop sampler.
+        // �Skybox0 (2026-07-23) ??gbufferSky backdrop sampler.
         // Mirror gbufferAlbedoRt / gbufferNormalRt / gbufferMotionRt
         // shape: lazy-resolve binding, bind from ctx.skyboxPass
         // (SkyboxPass-borrowed-pointer mirror), cache the handle in
@@ -1084,7 +1068,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         // When ctx.skyboxPass == nullptr (Forward path / no sky
         // mounted) the sampler stays unbound and
         // `sample(gbufferSky, baseUv)` returns black, collapsing
-        // the backdrop blend to `lit` (pre-§Skybox0 behavior).
+        // the backdrop blend to `lit` (pre-�Skybox0 behavior).
         const shader::BindingId skyBinding =
             _program.getTextureBinding("gbufferSky");
         if (skyBinding != shader::InvalidBinding
@@ -1101,11 +1085,11 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         }
     }
 
-    // §Skybox0 (2026-07-23) — upload `skyMix` uniform. Default =
+    // �Skybox0 (2026-07-23) ??upload `skyMix` uniform. Default =
     // 1.0 (full intensity). Host can override per-material via
     // `Renderer::setMaterialVec3(material, "skyMix", v)`. Phoskia
     // Vec4 ABI (bgfx Vec4 slot, see docs/pass-lessons-from-shadow.md
-    // §3.1) — scalar in .x, pad .yzw = 0. Bound unconditionally —
+    // �3.1) ??scalar in .x, pad .yzw = 0. Bound unconditionally ??
     // when the gbufferSky sampler is unbound the skyMix value has
     // no observable effect (the `sample` returns black regardless),
     // so this upload is safe on both Forward and Deferred paths.
@@ -1116,7 +1100,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         _program.setUniform(skyMixBinding, skyMixPad, sizeof(skyMixPad));
     }
 
-    // §P5.5 D (2026-07-23) — IBL MVP cube path: bind envCube
+    // �P5.5 D (2026-07-23) ??IBL MVP cube path: bind envCube
     // sampler + upload cubeActive / ambientStrength uniforms.
     // cube handle comes from SkyboxPass producer state
     // (setSkySourceCube). IBL is independent of SkySource::kind:
@@ -1141,11 +1125,11 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         }
     }
 
-    // §P5.5 D (2026-07-23) — upload cubeActive (0.0 or 1.0) +
+    // �P5.5 D (2026-07-23) ??upload cubeActive (0.0 or 1.0) +
     // ambientStrength (default 0.6). cubeActive mirrors the same
     // predicate SkyboxPass::execute uses for skyKind so the two
     // paths can never disagree per frame. ambientStrength is a
-    // constant scalar — the host can override via per-material
+    // constant scalar ??the host can override via per-material
     // setMaterialFloat(material, "ambientStrength", v) if a future
     // cut exposes it; D ships the default and pins the value
     // here.
@@ -1156,7 +1140,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // CPU upload path always takes 16 bytes; HLSL auto-pads
     // scalars into the cbuffer vec4 slot). All other uniforms in
     // this pass (skyMix / u_lightDirection / ...) follow the
-    // same 16-byte padded upload pattern — see RenderPass.cpp
+    // same 16-byte padded upload pattern ??see RenderPass.cpp
     // tryBindShadowSampler + LightingPass.cpp skyMix upload
     // above. Using sizeof(float)=4 would under-write the slot
     // and the HLSL `uniform float foo;` read would sample
@@ -1178,8 +1162,8 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                             sizeof(ambientStrengthPad));
     }
 
-    // §P5 B5 (2026-07-22) — upload 3 light uniforms from FrameContext
-    // (cutsheet §5.3 NO new FrameContext fields — reuse
+    // �P5 B5 (2026-07-22) ??upload 3 light uniforms from FrameContext
+    // (cutsheet �5.3 NO new FrameContext fields ??reuse
     // lightDirection/lightColor/cameraPosition already shipped).
     //
     // lightDirection: FrameContext stores FROM-light; Phoskia NdotL
@@ -1187,14 +1171,14 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // `-frame.lightDirection`). Negate once on upload.
     //
     // Phoskia uniform ABI: vec4 uniforms are uploaded as vec4 (one
-    // vec4 = bgfx Vec4 slot — see docs/pass-lessons-from-shadow.md
-    // §3.1). 3-float vec3 → 4-float padded with .w = 0 (or 1 for
+    // vec4 = bgfx Vec4 slot ??see docs/pass-lessons-from-shadow.md
+    // �3.1). 3-float vec3 ??4-float padded with .w = 0 (or 1 for
     // position-like).
     const shader::BindingId lightDirBinding =
         _program.getUniformBinding("u_lightDirection");
     if (lightDirBinding != shader::InvalidBinding) {
         // Match ForwardOpaquePass / TransparentPass: FrameContext stores
-        // FROM-light; Phoskia NdotL expects TO-light → negate once.
+        // FROM-light; Phoskia NdotL expects TO-light ??negate once.
         const float lightDir[4] = {
             -frame.lightDirection.x,
             -frame.lightDirection.y,
@@ -1223,13 +1207,13 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             frame.cameraPosition.x,
             frame.cameraPosition.y,
             frame.cameraPosition.z,
-            1.0f,  // position-like → .w = 1
+            1.0f,  // position-like ??.w = 1
         };
         _program.setUniform(cameraPosBinding, cameraPos, sizeof(cameraPos));
     }
 
-    // §P5 B7+ (2026-07-22) + §P5.5 A (2026-07-23) + §P5.5 B (2026-07-23)
-    // — multi-light DataSource upload via the host-supplied
+    // �P5 B7+ (2026-07-22) + �P5.5 A (2026-07-23) + �P5.5 B (2026-07-23)
+    // ??multi-light DataSource upload via the host-supplied
     // `ctx.sceneLights` borrowed pointer. The Phoskia FS unrolls 8
     // light taps with per-type dispatch (`dirs[i].w = LightType`).
     // We pack per-light GPU-side data into the
@@ -1240,10 +1224,10 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // (512B). The new arrays carry per-light attenuation / cone
     // params (`params[]`) and Spot direction (`spotDir[]`); the
     // `dirs[]` + `colors[]` array shapes stay byte-identical to A
-    // (cutsheet §P5.5 B #3 invariant: default LightType = Directional
-    // ⇒ byte-equivalent to pre-B).
+    // (cutsheet �P5.5 B #3 invariant: default LightType = Directional
+    // ??byte-equivalent to pre-B).
     //
-    // Per-type CPU pack (cutsheet §P5.5 B):
+    // Per-type CPU pack (cutsheet �P5.5 B):
     //   - Directional : dirs[].xyz = -direction (FROM-light negated)
     //                   params[] = default (range=0, intensity=1,
     //                                       coneCosInner=0, coneCosOuter=0)
@@ -1257,7 +1241,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     //                   spotDir[] = (spotDirection.xyz, 0)
     //
     // Mirrors Test_ShaderResource.cpp:392 (Camera UBO upload via
-    // `setUniformBlock`) — one std140-compatible buffer, one binding.
+    // `setUniformBlock`) ??one std140-compatible buffer, one binding.
     //
     // Layout (kMaxSceneLights = 8, defined in include/AYRenderScene.h):
     //   - bytes [0,   128): dirs[8] * vec4 = 8 * 16 = 128 bytes
@@ -1269,21 +1253,21 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     //   - bytes [384, 512): spotDir[8] * vec4 = 8 * 16 = 128 bytes (B new)
     //                       (xyz = spotDirection, w = 0)
     // Always upload the full 512-byte layout regardless of
-    // lights.count — Phoskia unroll uses unused slots as zero-vectors.
+    // lights.count ??Phoskia unroll uses unused slots as zero-vectors.
     //
-    // Fallback: ctx.sceneLights == nullptr or count == 0 → upload
+    // Fallback: ctx.sceneLights == nullptr or count == 0 ??upload
     // one "dirs[0] = -frame.lightDirection, colors[0] = frame.lightColor"
     // pair so the unrolled FS still produces a reasonable image
     // (matches B5 single-light behavior). Params + spotDir slots stay
-    // zero — Directional branch never reads them. This avoids the
-    // "FS unrolls 8 lights but UBO has all zero → black picture"
+    // zero ??Directional branch never reads them. This avoids the
+    // "FS unrolls 8 lights but UBO has all zero ??black picture"
     // failure mode when the host hasn't called setSceneLights yet.
     static_assert(ayt::render::kMaxSceneLights == 8,
                   "LightingPass B7 UBO assumes kMaxSceneLights == 8");
 
     alignas(16) float lightsBlock[ayt::render::kMaxSceneLights * 16] = {};
     // 8 vec4 dirs + 8 vec4 colors + 8 vec4 params + 8 vec4 spotDir
-    // = 32 floats × 4 bytes = 512 bytes total
+    // = 32 floats � 4 bytes = 512 bytes total
     const ayt::render::SceneLights* sceneLights = ctx.sceneLights;
     const bool useMulti = (sceneLights != nullptr) && (sceneLights->count > 0u);
 
@@ -1291,7 +1275,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         const uint32_t n = sceneLights->count;
         for (uint32_t i = 0; i < n && i < ayt::render::kMaxSceneLights; ++i) {
             const ayt::render::Light& L = sceneLights->lights[i];
-            // dirs[i] (16-byte vec4) — per LightType CPU-side split.
+            // dirs[i] (16-byte vec4) ??per LightType CPU-side split.
             // xyz + .w = float(LightType). Point/Spot branches land
             // at zero CPU cost (the switch is a jump table).
             float lightVecX = 0.0f, lightVecY = 0.0f, lightVecZ = 0.0f;
@@ -1304,7 +1288,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                 lightVecX = -L.direction.x;
                 lightVecY = -L.direction.y;
                 lightVecZ = -L.direction.z;
-                // params[] + spotDir[] stay at default — Directional
+                // params[] + spotDir[] stay at default ??Directional
                 // branch never reads them.
                 break;
             case ayt::render::LightType::Point:
@@ -1313,7 +1297,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                 lightVecZ = L.position.z;
                 paramRange    = L.range;
                 paramIntensity = L.intensity;
-                // spotDir[] stays at default — Point branch never reads it.
+                // spotDir[] stays at default ??Point branch never reads it.
                 break;
             case ayt::render::LightType::Spot:
                 lightVecX = L.position.x;
@@ -1328,27 +1312,27 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                 spotDirZ = L.spotDirection.z;
                 break;
             }
-            // dirs[i] (16-byte vec4) — xyz + float(LightType).
+            // dirs[i] (16-byte vec4) ??xyz + float(LightType).
             lightsBlock[i * 4 + 0] = lightVecX;
             lightsBlock[i * 4 + 1] = lightVecY;
             lightsBlock[i * 4 + 2] = lightVecZ;
             lightsBlock[i * 4 + 3] =
                 static_cast<float>(L.type);
-            // colors[i] (16-byte vec4) — same for all light types.
+            // colors[i] (16-byte vec4) ??same for all light types.
             lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 0] = L.color.x;
             lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 1] = L.color.y;
             lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 2] = L.color.z;
             lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 3] = 0.0f;
-            // params[i] (16-byte vec4) — B: per-light (range, intensity,
+            // params[i] (16-byte vec4) ??B: per-light (range, intensity,
             // coneCosInner, coneCosOuter). Directional leaves them at
-            // (0, 1, 0, 0) — the FS Directional branch never reads this
+            // (0, 1, 0, 0) ??the FS Directional branch never reads this
             // array, but the upload is unconditional so any stray FS
             // code that does (e.g. debug viz) sees the right values.
             lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 0] = paramRange;
             lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 1] = paramIntensity;
             lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 2] = paramConeInner;
             lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 3] = paramConeOuter;
-            // spotDir[i] (16-byte vec4) — B: Spot direction (xyz) + 0
+            // spotDir[i] (16-byte vec4) ??B: Spot direction (xyz) + 0
             // padding. Directional/Point leave (0, -1, 0, 0) default
             // (their FS branches never read this array).
             lightsBlock[(ayt::render::kMaxSceneLights * 3 + i) * 4 + 0] = spotDirX;
@@ -1360,7 +1344,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         // B5 single-light fallback mirrors the FrameContext values
         // into dirs[0] + colors[0]. The remaining 7 slots stay zero.
         // B widens the layout to 4 arrays but the fallback only writes
-        // the first 2 (params + spotDir stay zero — Directional branch
+        // the first 2 (params + spotDir stay zero ??Directional branch
         // never reads them, and the legacy single-light contract is
         // preserved byte-for-byte at the first 32 bytes of lightsBlock).
         lightsBlock[0] = -frame.lightDirection.x;
@@ -1373,11 +1357,11 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         lightsBlock[ayt::render::kMaxSceneLights * 4 + 3] = 0.0f;
     }
 
-    // §P5.5 B (2026-07-23) — force single field-split upload path,
-    // REMOVE the setUniformBlock fallback. Reasoning (cutsheet §P5.5 B
+    // �P5.5 B (2026-07-23) ??force single field-split upload path,
+    // REMOVE the setUniformBlock fallback. Reasoning (cutsheet �P5.5 B
     // dual-path decision):
     //   - A's dual-path was a workaround when the UBO field rename
-    //     `dirs→record` broke HLSL/bgfx uniform wiring. Field-split
+    //     `dirs?record` broke HLSL/bgfx uniform wiring. Field-split
     //     (`setUniform` per vec4 array) is the path that's actually
     //     stable today.
     //   - B adds 2 more vec4 arrays (`params[8]` + `spotDir[8]`); a
@@ -1387,8 +1371,8 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     //
     // 4 setUniform calls (one per array), all 128 bytes each.
     // Logged-once message confirms we're on the B field-split path.
-    // §P5.5 A — field name stays `dirs` (xyz = light vector, w = type).
-    // Do NOT rename to `record` — that broke HLSL/bgfx uniform wiring.
+    // �P5.5 A ??field name stays `dirs` (xyz = light vector, w = type).
+    // Do NOT rename to `record` ??that broke HLSL/bgfx uniform wiring.
     const shader::BindingId dirsBinding   = _program.getUniformBinding("dirs");
     const shader::BindingId colorsBinding = _program.getUniformBinding("colors");
     const shader::BindingId paramsBinding = _program.getUniformBinding("params");
@@ -1397,7 +1381,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         && colorsBinding != shader::InvalidBinding
         && paramsBinding != shader::InvalidBinding
         && spotDirBinding != shader::InvalidBinding) {
-        // §P5.5 B (2026-07-23) — field-split path: 4 separate
+        // �P5.5 B (2026-07-23) ??field-split path: 4 separate
         // `setUniform` calls, each writing one vec4 array.
         _program.setUniform(dirsBinding,   lightsBlock,
                             ayt::render::kMaxSceneLights * 4u * sizeof(float));
@@ -1416,11 +1400,11 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             std::fprintf(stderr,
                          "[LightingPass] lights via field uniforms "
                          "dirs+colors+params+spotDir (HLSL/bgfx, "
-                         "§P5.5 B field-split path)\n");
+                         "�P5.5 B field-split path)\n");
         }
     } else {
-        // ABORT: the program should have all 4 arrays — Phoskia
-        // §P5.5 B source declares them as top-level uniformblock
+        // ABORT: the program should have all 4 arrays ??Phoskia
+        // �P5.5 B source declares them as top-level uniformblock
         // fields. If any binding is missing, the cache key was bumped
         // without updating the Phoskia source (or vice versa). Loud
         // fail so we don't silently ship a black image.
@@ -1429,12 +1413,12 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             s_loggedMissing = true;
             std::fprintf(stderr,
                          "[LightingPass] FATAL: missing one of "
-                         "dirs/colors/params/spotDir uniforms — "
+                         "dirs/colors/params/spotDir uniforms ??"
                          "check Phoskia source vs cache-key bump\n");
         }
     }
 
-    // §P5.5 C (2026-07-23) — per-light shadow atlas array uniforms.
+    // �P5.5 C (2026-07-23) ??per-light shadow atlas array uniforms.
     // Three vec4[8] + one mat4[8] arrays + one vec4 count uniform.
     // Source: ctx.shadowPass (atlas sub-rects + per-slot LVP + per-slot
     // bias) + ctx.perLightShadows (count, via ctx.shadowPass's derived
@@ -1444,14 +1428,14 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     //
     // When ctx.shadowPass is null (e.g. host on Forward path with no
     // shadow producer), perLightShadowCount uploads 0 and the FS
-    // collapses all perLightShadow{i} = vec4(1.0) — pre-C byte-
+    // collapses all perLightShadow{i} = vec4(1.0) ??pre-C byte-
     // equivalent. The atlas-rect / LVP / bias packs still ship
     // (all-zero / identity) so the binding contract is satisfied on
     // every host.
     {
-        float atlasRects[8 * 4] = {};   // 8 × vec4 = 32 floats
-        float atlasBiases[8 * 4] = {};  // 8 × vec4 = 32 floats (.x used)
-        float atlasLvp[8 * 16] = {};    // 8 × mat4 col-major
+        float atlasRects[8 * 4] = {};   // 8 � vec4 = 32 floats
+        float atlasBiases[8 * 4] = {};  // 8 � vec4 = 32 floats (.x used)
+        float atlasLvp[8 * 16] = {};    // 8 � mat4 col-major
 
         uint32_t perLightCount = 0;
         if (ctx.shadowPass != nullptr) {
@@ -1476,7 +1460,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             perLightCount = ctx.shadowPass->perLightShadowCount();
         }
         // else: all-zero / identity baseline; perLightCount stays 0
-        // — the FS collapses every perLightShadow{i} to vec4(1.0).
+        // ??the FS collapses every perLightShadow{i} to vec4(1.0).
 
         if (_uShadowAtlasRects != ayt::shader::InvalidBinding) {
             _program.setUniform(_uShadowAtlasRects, atlasRects,
@@ -1500,7 +1484,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         }
     }
 
-    // §P5 B5.5 (2026-07-22) — consume ctx.shadowPass->shadowMap
+    // �P5 B5.5 (2026-07-22) ??consume ctx.shadowPass->shadowMap
     // via the shared `tryBindShadowSampler` helper (mirror the
     // FO / Trans call sites at ForwardOpaquePass.cpp:105-106 +
     // TransparentPass.cpp:170-171). The helper uploads 4 shadow
@@ -1513,31 +1497,31 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // key-light only and we don't branch on per-mesh flags. The
     // helper's internal `wantSample = shouldSampleShadowMap(flags)`
     // short-circuits to `false` only when `ctx.shadowPass ==
-    // nullptr` or `!hasSampleableShadow()` — both equal `false`
+    // nullptr` or `!hasSampleableShadow()` ??both equal `false`
     // here. So the helper always uploads uniforms + binds the
     // sampler on stage 1 (or, on the Noop path, falls back to the
     // adapter's lit-white texture + identity LVP so the FS reads
     // still sample valid data without UB).
     //
-    // Same shared-shadow contract for all 8 lights (cutsheet §10
-    // pass-lessons-from-deferred.md:300 — "LightingPass 共用
-    // ShadowPass 只读借用"): only lights[0] gets the shadow
-    // attenuation. Fill / rim lights (1..7) stay unshadowed —
+    // Same shared-shadow contract for all 8 lights (cutsheet �10
+    // pass-lessons-from-deferred.md:300 ??"LightingPass ??
+    // ShadowPass ????"): only lights[0] gets the shadow
+    // attenuation. Fill / rim lights (1..7) stay unshadowed ??
     // they don't have their own shadow map in v0. Per-light CSM
     // is a separate future cut.
     tryBindShadowSampler(_program, ctx.adapter, ctx.shadowPass,
                          kShadowCastAndReceive, frame.shadowBias);
 
-    // §P5 B5.5 v15 — worldPos comes from gbufferMotion (RT2), already
+    // �P5 B5.5 v15 ??worldPos comes from gbufferMotion (RT2), already
     // bound above with the other GBuffer color attachments. No depth
     // reconstruct / u_depthToClip / gbufferDepth bind.
 
-    // §P5 B5 (2026-07-22) — fullscreen triangle dispatch. B5
+    // �P5 B5 (2026-07-22) ??fullscreen triangle dispatch. B5
     // submits exactly 1 draw (the fullscreen triangle), not N.
     // `_program.submit()` writes viewId + draws using the
     // Adapter-set state. setTransform is a no-op for a fullscreen
     // post-process pass (no model matrix), but the API still wants
-    // a valid identity; cheaper to skip — the FS only reads the
+    // a valid identity; cheaper to skip ??the FS only reads the
     // viewId and the state.
     ctx.adapter.setTransform(ayt::math::Float4x4::identity());
     ctx.adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);

@@ -454,18 +454,39 @@ RendererSubSystem* RendererSubSystem::findRegistered()
 
 
 
+void RendererSubSystem::setCameraLookAt(const ayt::math::FVector3& eye,
+                                        const ayt::math::FVector3& at,
+                                        const ayt::math::FVector3& up,
+                                        float fovYDegrees)
+{
+    _camEye = eye;
+    _camAt = at;
+    _camUp = up;
+    _camFovYDegrees = fovYDegrees;
+    _cameraOverride = true;
+}
+
+void RendererSubSystem::clearCameraOverride()
+{
+    _cameraOverride = false;
+}
+
 void RendererSubSystem::renderScenePass()
 {
     const float aspect = static_cast<float>(_viewportW) / static_cast<float>(_viewportH);
 
-    // Elevated 3/4 view so the ground plane reads as a square and the
-    // cube sits on top (eye at y=0 made the ground a thin diamond and
-    // put the near ground edge in front of the cube).
-    _renderer.setMainCameraLookAtPerspective(
-        ayt::math::FVector3(4.0f, 3.0f, 5.0f),
-        ayt::math::FVector3(0.0f, 0.0f, 0.0f),
-        ayt::math::FVector3(0.0f, 1.0f, 0.0f),
-        50.0f, aspect, 0.1f, 100.0f);
+    if (_cameraOverride) {
+        _renderer.setMainCameraLookAtPerspective(
+            _camEye, _camAt, _camUp,
+            _camFovYDegrees, aspect, 0.1f, 100.0f);
+    } else {
+        // Default elevated 3/4 view (Editor freecam replaces via setCameraLookAt).
+        _renderer.setMainCameraLookAtPerspective(
+            ayt::math::FVector3(4.0f, 3.0f, 5.0f),
+            ayt::math::FVector3(0.0f, 0.0f, 0.0f),
+            ayt::math::FVector3(0.0f, 1.0f, 0.0f),
+            50.0f, aspect, 0.1f, 100.0f);
+    }
 
     _scene.clear();
     if (_sceneBuilder) {
