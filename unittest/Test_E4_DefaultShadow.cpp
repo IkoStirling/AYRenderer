@@ -70,25 +70,28 @@ namespace shader = ayt::shader;
 
 namespace {
 
-// Shared "default has 7 slots, slot 0 is Shadow" check.
+// Shared "default has 8 slots, slot 0 is Shadow" check.
 // S1a (2026-07-23) added BloomExtract between Transparent and
 // PostProcess; S1b (2026-07-23) added BloomBlur between
-// BloomExtract and PostProcess — slot index shifts for
-// PostProcess/UI only.
+// BloomExtract and PostProcess; S4b (2026-07-23) added
+// DepthHaze between BloomBlur and PostProcess — slot index
+// shifts for PostProcess/UI only.
 void checkCanonicalDefaultDesc(const RenderPipelineDesc& desc)
 {
-    CHECK(desc.passes.size() == 7u);
+    CHECK(desc.passes.size() == 8u);
     CHECK(desc.contains(RenderPassSlot::Shadow));
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
-    // Pre-E4 ordering of the remaining 6 preserved (S1a BloomExtract
+    // Pre-E4 ordering of the remaining 7 preserved (S1a BloomExtract
     // appended between Transparent and PostProcess; S1b BloomBlur
-    // appended between BloomExtract and PostProcess).
+    // appended between BloomExtract and PostProcess; S4b DepthHaze
+    // appended between BloomBlur and PostProcess).
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::Transparent);
     CHECK(desc.passes[3] == RenderPassSlot::BloomExtract);   // S1a (2026-07-23)
     CHECK(desc.passes[4] == RenderPassSlot::BloomBlur);      // S1b (2026-07-23)
-    CHECK(desc.passes[5] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[6] == RenderPassSlot::UI);
+    CHECK(desc.passes[5] == RenderPassSlot::DepthHaze);      // S4b (2026-07-23)
+    CHECK(desc.passes[6] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[7] == RenderPassSlot::UI);
 }
 
 } // namespace

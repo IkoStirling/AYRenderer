@@ -72,12 +72,13 @@ TEST_CASE(b1_make_default_path_is_forward)
     const RenderPipelineDesc def = RenderPipelineDesc::makeDefault();
     CHECK(def.path == RenderPath::Forward);
     CHECK(def.isDeferred() == false);
-    CHECK(def.passes.size() == 7u);   // S1b (2026-07-23): +1 BloomBlur
+    CHECK(def.passes.size() == 8u);   // S4b (2026-07-23): +1 DepthHaze (after S1b's +1 BloomBlur)
     CHECK(def.contains(RenderPassSlot::Shadow));
     CHECK(def.contains(RenderPassSlot::ForwardOpaque));
     CHECK(def.contains(RenderPassSlot::Transparent));
     CHECK(def.contains(RenderPassSlot::BloomExtract));   // S1a (2026-07-23)
     CHECK(def.contains(RenderPassSlot::BloomBlur));      // S1b (2026-07-23)
+    CHECK(def.contains(RenderPassSlot::DepthHaze));      // S4b (2026-07-23)
     CHECK(def.contains(RenderPassSlot::PostProcess));
     CHECK(def.contains(RenderPassSlot::UI));
 }
@@ -89,10 +90,11 @@ TEST_CASE(b1_make_forward_with_shadows_path_is_forward)
     const RenderPipelineDesc fws = RenderPipelineDesc::makeForwardWithShadows();
     CHECK(fws.path == RenderPath::Forward);
     CHECK(fws.isDeferred() == false);
-    CHECK(fws.passes.size() == 7u);   // S1b (2026-07-23): +1 BloomBlur
+    CHECK(fws.passes.size() == 8u);   // S4b (2026-07-23): +1 DepthHaze
     CHECK(fws.contains(RenderPassSlot::Shadow));
     CHECK(fws.contains(RenderPassSlot::BloomExtract));   // S1a (2026-07-23)
     CHECK(fws.contains(RenderPassSlot::BloomBlur));      // S1b (2026-07-23)
+    CHECK(fws.contains(RenderPassSlot::DepthHaze));      // S4b (2026-07-23)
 }
 
 TEST_CASE(b1_make_deferred_factory_path_is_deferred_passes_unchanged)

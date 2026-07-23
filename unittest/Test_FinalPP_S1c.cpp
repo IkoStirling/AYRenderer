@@ -431,17 +431,19 @@ TEST_CASE(s1c_finalpp_phoskia_compile_when_shaderc_available) {
 
 TEST_CASE(s1c_make_default_slot_table_postprocess_after_bloomblur) {
     // Cutsheet §S1 sub-cut 3: S1c doesn't add a slot — PostProcess
-    // stays at index 5 (Forward) and 7 (Deferred). BloomBlur
-    // remains at index 4 / 6. Pin that S1c's PassExecContext field
-    // addition did not reorder the slot tables (K3 invariant #3:
-    // ABI append-only; RenderPassSlot enum unchanged).
+    // stays at index 6 (Forward, +1 for S4b DepthHaze inserted
+    // before) and 8 (Deferred). BloomBlur remains at index 4 / 6.
+    // Pin that S1c's PassExecContext field addition did not
+    // reorder the slot tables (K3 invariant #3: ABI append-only;
+    // RenderPassSlot enum unchanged).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 7);
+    CHECK(desc.passes.size() == 8);    // S4b (2026-07-23): +1 DepthHaze
     CHECK(desc.passes[3] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[4] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[5] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[6] == RenderPassSlot::UI);
+    CHECK(desc.passes[5] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
+    CHECK(desc.passes[6] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[7] == RenderPassSlot::UI);
     // S1c does NOT add a RenderPassSlot enum value (no slot in the
     // table for "FinalPP" — the composite lives in PostProcessPass
     // and reads ctx.bloomBlurPass via borrowed pointer). Future
@@ -451,14 +453,16 @@ TEST_CASE(s1c_make_default_slot_table_postprocess_after_bloomblur) {
 }
 
 TEST_CASE(s1c_make_deferred_slot_table_postprocess_after_bloomblur) {
-    // Deferred path also unchanged: PostProcess at index 7.
+    // Deferred path also unchanged: PostProcess at index 8
+    // (+1 for S4b DepthHaze).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 9);
+    CHECK(desc.passes.size() == 10);   // S4b (2026-07-23): +1 DepthHaze
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[8] == RenderPassSlot::UI);
+    CHECK(desc.passes[7] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
+    CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[9] == RenderPassSlot::UI);
 }
 
 // === H. setEnabled(false) on PostProcessPass skips dispatch =========

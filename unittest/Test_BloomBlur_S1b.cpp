@@ -273,27 +273,30 @@ TEST_CASE(s1b_renderpassslot_bloomblur_value_is_9) {
 TEST_CASE(s1b_make_default_includes_bloomblur_after_bloomextract) {
     // Cutsheet §S1 sub-cut 2: BloomBlur sits between BloomExtract
     // and PostProcess in the dispatch order. makeDefault() forward
-    // path now has 7 slots (was 6 after S1a; +1 BloomBlur).
+    // path now has 8 slots (was 6 after S1a; +1 BloomBlur; +1
+    // DepthHaze from S4b).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 7);
+    CHECK(desc.passes.size() == 8);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::Transparent);
     CHECK(desc.passes[3] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[4] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[5] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[6] == RenderPassSlot::UI);
+    CHECK(desc.passes[5] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
+    CHECK(desc.passes[6] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[7] == RenderPassSlot::UI);
     CHECK(desc.contains(RenderPassSlot::BloomBlur));
 }
 
 TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
     // The Deferred path also gets BloomBlur at the same dispatch
-    // position (after BloomExtract, before PostProcess). Now 9
-    // slots total (was 8 after S1a; +1 BloomBlur).
+    // position (after BloomExtract, before PostProcess). Now 10
+    // slots total (was 8 after S1a; +1 BloomBlur; +1 DepthHaze
+    // from S4b).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 9);
+    CHECK(desc.passes.size() == 10);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
@@ -301,8 +304,9 @@ TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
     CHECK(desc.passes[4] == RenderPassSlot::Transparent);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[8] == RenderPassSlot::UI);
+    CHECK(desc.passes[7] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
+    CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[9] == RenderPassSlot::UI);
 }
 
 // === C. View id constants ===========================================

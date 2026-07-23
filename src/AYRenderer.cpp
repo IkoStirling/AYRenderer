@@ -5,6 +5,7 @@
 #include "detail/BgfxMatrix.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
+#include "detail/DepthHazePass.h"  // S4b (2026-07-23) — borrowed-ptr source for PassExecContext::depthHazePass + destroyResources.
 #include "detail/DebugOverlay.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/GBufferPass.h"
@@ -59,6 +60,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::Transparent,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
+        RenderPassSlot::DepthHaze,      // S4b (2026-07-23) — half-res exponential depth-aware haze; hazeEnabled=false default ⇒ zero FBO + zero write (K3 invariant #2).
         RenderPassSlot::PostProcess,
         RenderPassSlot::UI,
     }};
@@ -101,6 +103,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::Transparent,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
+        RenderPassSlot::DepthHaze,      // S4b (2026-07-23) — half-res exponential depth-aware haze; hazeEnabled=false default ⇒ zero FBO + zero write.
         RenderPassSlot::PostProcess,
         RenderPassSlot::UI,
     }, RenderPath::Deferred};
@@ -165,6 +168,16 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
     // visually identical to pre-S1 renders.
     case RenderPassSlot::BloomBlur:
         return std::make_unique<detail::BloomBlurPass>();
+    // S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — half-
+    // resolution exponential depth-aware haze pass. Default-
+    // enabled in both Forward and Deferred pipelines. View 14
+    // claim (cutsheet §S4 view map lock). K3 invariant #2:
+    // frame.hazeEnabled=false ⇒ execute() early-returns BEFORE
+    // ensureFbo ⇒ no FBO allocation ⇒ zero cost when the host
+    // has not opted in. Mirrors BloomExtractPass / BloomBlurPass
+    // per-cutsheet slot-table reservation philosophy.
+    case RenderPassSlot::DepthHaze:
+        return std::make_unique<detail::DepthHazePass>();
     }
     return nullptr;
 }
@@ -448,6 +461,22 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     if (detail::RenderPass* bloomBlurPass = pipeline.findPass("BloomBlur")) {
         if (adapter.isInitialized()) {
             static_cast<detail::BloomBlurPass*>(bloomBlurPass)->destroyResources(adapter);
+        }
+    }
+
+    // S4b (2026-07-23, short-term-plan §S4 sub-cut 2) —
+    // DepthHazePass destroyResources mirror (mirror BloomExtractPass /
+    // BloomBlurPass destroy blocks above). DepthHazePass owns a
+    // half-resolution RGBA8 FBO (no depth, lazy-ensured only when
+    // hazeEnabled=true + hazeStrength>0) + fullscreen-triangle
+    // VB/IB + Phoskia haze program; all three must be released
+    // BEFORE pipeline.clear() for the same handle-rotation reason.
+    // When the host has not opted in (hazeEnabled=false ⇒ ensureFbo
+    // never ran ⇒ _fbo is invalid), destroyResources is a no-op
+    // (K3 invariant #2 holds: zero allocation ⇒ zero release work).
+    if (detail::RenderPass* depthHazePass = pipeline.findPass("DepthHaze")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::DepthHazePass*>(depthHazePass)->destroyResources(adapter);
         }
     }
 
@@ -825,6 +854,21 @@ void Renderer::render(const RenderScene& scene)
         bloomBlurPassPtr = static_cast<const detail::BloomBlurPass*>(bloomBlurSlot);
     }
 
+    // §S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — borrowed
+    // pointer to the DepthHazePass in the pipeline. nullptr when the
+    // host built a custom desc that omitted the DepthHaze slot
+    // (cutsheet §S4 "omit slot = opt out"). PostProcessPass (after
+    // §S4c) reads `ctx.depthHazePass->halfResFbo()` (RT0 of the haze
+    // result) and binds it as the `hazeTexture` sampler on the
+    // fullscreen composite draw. nullptr ⇒ PostProcessPass falls
+    // back to binding sceneColor on slot 2 (FS branchless composite
+    // collapses to `raw * (1 - 0) = raw` — byte-equivalent to
+    // hazeEnabled=false). Mirrors bloomBlurPassPtr above.
+    const detail::DepthHazePass* depthHazePassPtr = nullptr;
+    if (detail::RenderPass* depthHazeSlot = _impl->pipeline.findPass("DepthHaze")) {
+        depthHazePassPtr = static_cast<const detail::DepthHazePass*>(depthHazeSlot);
+    }
+
     // §P5.5 C (2026-07-23) — wire the per-frame SceneLights ref
     // into ShadowPass so its multi-caster loop can read
     // `lights[i].castShadow` and build the per-slot LVP matrices.
@@ -905,6 +949,15 @@ void Renderer::render(const RenderScene& scene)
         // above (lifetime contract: pointer must remain valid for
         // the duration of pipeline::executeAll(ctx)).
         bloomBlurPassPtr,
+        // §S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — borrowed
+        // pointer to the DepthHazePass in the pipeline. PostProcessPass
+        // (after §S4c) reads the producer's halfResFbo() through this
+        // ptr; nullptr ⇒ PostProcessPass binds sceneColor on slot 2
+        // (FS branchless composite collapses to `raw * (1 - 0) = raw`
+        // = zero haze, no GLSL sampler-not-set warning). Mirrors
+        // bloomBlurPassPtr above (lifetime contract: pointer must
+        // remain valid for the duration of pipeline::executeAll(ctx)).
+        depthHazePassPtr,
     };
 
     static uint32_t s_compositeLog = 0;
@@ -1012,6 +1065,18 @@ void Renderer::resize(uint32_t width, uint32_t height)
     if (detail::RenderPass* bloomBlurPass = _impl->pipeline.findPass("BloomBlur")) {
         if (_impl->adapter.isInitialized()) {
             static_cast<detail::BloomBlurPass*>(bloomBlurPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+    // §S4b (2026-07-23) — DepthHazePass destroyResources mirror
+    // (mirror BloomBlurPass destroy block above). The half-res FBO
+    // must release before bgfx::reset invalidates the attachments.
+    // When hazeEnabled=false (host default), ensureFbo never ran
+    // ⇒ _fbo is invalid ⇒ destroyResources is a no-op (K3
+    // invariant #2 holds: zero allocation ⇒ zero release work).
+    if (detail::RenderPass* depthHazePass = _impl->pipeline.findPass("DepthHaze")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::DepthHazePass*>(depthHazePass)
                 ->destroyResources(_impl->adapter);
         }
     }
