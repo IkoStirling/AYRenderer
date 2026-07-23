@@ -190,10 +190,11 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
 
     _mapResources.bindShadowView(adapter, viewId, effectiveSize);
     // §P5.5 C — scissor the view to each sub-rect and re-draw
-    // casters. Pre-C path has one caster pass into the full
-    // atlas-sized sub-rect[0] (no scissor — covers the entire
-    // atlas, byte-equivalent to a 2048×2048 FBO when
-    // effectiveSize==2048).
+    // casters per atlas slot. Pre-C path has one caster pass into
+    // the full atlas-sized sub-rect[0] (no scissor — covers the
+    // entire atlas, byte-equivalent to a 2048×2048 FBO when
+    // effectiveSize==2048). stats.atlasSlots reports slot count,
+    // NOT draw-call count (see §S2-3).
     if (useAtlas) {
         // Disable scissor for slot 0 (covers the entire first
         // sub-rect because atlas size = slot0 size when N=8
@@ -257,7 +258,10 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     const float maxCoord = static_cast<float>(effectiveSize > 1 ? effectiveSize - 1 : 0);
     ayt::render::ShadowFrameStats stats{};
     stats.frameIndex  = _frameCounter;
-    stats.casterDraws = activeCount;  // count of sub-rect caster passes
+    stats.atlasSlots = activeCount;  // §S2-3 — renamed from casterDraws:
+                                       // count of atlas sub-rect slots used
+                                       // (= lit-light count, up to 8).
+                                       // NOT mesh draw-call count.
     stats.casterReady = casterReady;
     stats.fboValid    = _mapResources.isValid();
     stats.blitOk      = lastBlitOk();

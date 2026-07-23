@@ -42,7 +42,7 @@ TEST_CASE(frame_stats_pod_defaults)
 {
     ShadowFrameStats s{};
     CHECK(s.frameIndex == 0u);
-    CHECK(s.casterDraws == 0u);
+    CHECK(s.atlasSlots == 0u);  // §S2-3 — renamed from casterDraws
     CHECK(s.casterReady == false);
     CHECK(s.sampleReady == false);
 }

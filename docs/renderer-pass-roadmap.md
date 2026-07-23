@@ -32,7 +32,7 @@ Deferred: Shadow → Skybox → GBuffer → Lighting → Transparent → PostPro
 | Pass | 状态 | 说明 |
 |------|------|------|
 | **ForwardOpaque** | 可用 | 含阴影采样；Alpha skip 给 Transparent |
-| **Shadow** | 表现通过 | key-only + sampleReady；atlas 槽位日志 `draws`≠网格绘制数 |
+| **Shadow** | 表现通过 | key-only + sampleReady；atlas 槽位日志 `atlasSlots`≠网格绘制数 (§S2-3,2026-07-23 重命名) |
 | **Skybox** | Deferred 可用 | equirect + 独立 IBL cube |
 | **GBuffer** | Deferred 可用 | RT2 = worldPos RGBA16F（`gbuffer_v7`） |
 | **Lighting** | Deferred 可用 | `lighting_v26`；点/聚光 + IBL |

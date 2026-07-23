@@ -96,8 +96,19 @@ FrameGraph     — addPass / importExternal / compile / execute
 
 满足 **任意两条** 再开 FG 代码：
 
-1. 已存在 ≥2 个独立 fullscreen 效果 Pass（不含 Final）。  
-2. 第三次手写 half-res FBO + ping-pong。  
-3. 画质选项需要「关效果即不分配 RT」。  
+1. ✅ **已存在 ≥2 个独立 fullscreen 效果 Pass（不含 Final）** — BloomExtractPass(§S1a) + BloomBlurPass(§S1b) 已 ship，2 个。
+2. ✅ **第三次手写 half-res FBO + ping-pong** — BloomBlurPass 内部 half-res `_pingFbo` + `_pongFbo` 两块 + horizontal→vertical 真 ping-pong（§S1b,2026-07-23）。
+3. ❌ **画质选项需要「关效果即不分配 RT」** — 当前 `bloomStrength=0` 仍执行 pass + FBO ensure（虽字节一致但 RT 仍分配）。下一刀候选 = Depth-aware Haze（半分辨率 FS，读 scene depth，可选挂载），把"关效果即不分配 RT"做出来。
 
-在此之前：只维护本文档，代码走 [`short-term-plan.md`](short-term-plan.md)。
+**当前状态**：1 ✅ + 2 ✅（已满足「任意两条」最低门槛）。
+
+**决策（2026-07-23）**：
+
+- ⚠️ **仍不立刻开 FG**。理由：
+  - FG MVP 的目的 = 替多组"手写 FBO + ping-pong"的 boilerplate；目前只有 Bloom 一族，重复模板不够痛。
+  - **先做第 3 条**（Depth-aware Haze 或其它新效果）再开 FG，可以让 FG MVP 直接面对"≥3 个 Pass 共享同一中间 RT"这个真实需求，而不是先造 FG 再去找需求（违反 [`short-term-plan.md` §0 北极星](../short-term-plan.md)）。
+  - 中期 FG 范围严格按 [`short-term-plan.md` §6](../short-term-plan.md) 限定：**只迁 Lighting 之后 → Final**，Shadow/GBuffer/Lighting 不动。
+
+**下一刀推荐 = 短期的 §S4：再做一个半分辨率效果**（如简单 Depth-aware Haze）。**做完后再回来开 FG MVP**。
+
+> 在此之前：只维护本文档，代码走 [`short-term-plan.md`](../short-term-plan.md)。

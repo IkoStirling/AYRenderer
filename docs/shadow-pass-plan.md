@@ -13,7 +13,7 @@
 | Shadow RT | BGRA8 + D32F，正常 depth test | RGBA8 + DEPTH_TEST_ALWAYS | 深度 buffer 不参与 |
 | 物体过滤 | 全部 caster | 按 scale 跳过 ground | 不可扩展 |
 
-日志 `draws=1 blitOk=1` 全绿但 map 仍为 clear 1.0 → **caster 未 rasterize**，不是 compare 小错。
+日志 `atlasSlots=1 blitOk=1` 全绿但 map 仍为 clear 1.0 → **caster 未 rasterize**，不是 compare 小错。 (§S2-3 — 字段名重命名,语义不变)
 
 ## 二、目标架构
 

@@ -36,14 +36,18 @@ inline void logShadowFrameStatsIfNeeded(const ayt::render::ShadowFrameStats& s)
     if (s.frameIndex > ayt::render::ShadowDiagnostics::kFrameSummaryLimit) {
         return;
     }
+    // §S2-3 (2026-07-23) — `atlasSlots` (was `draws`). The number
+    // is the count of atlas sub-rect slots used this frame
+    // (pre-§P5.5 C always 1; post-§P5.5 C is the lit-light count,
+    // up to kMaxShadowCasters=8 in the standard spec).
     std::fprintf(stderr,
-                 "[ShadowPass] frame=%u build=%s casterReady=%d draws=%u "
+                 "[ShadowPass] frame=%u build=%s casterReady=%d atlasSlots=%u "
                  "fboValid=%d rt.idx=%u resolve.idx=%u blitOk=%d "
                  "sampleReady=%d probeUv=(%.4f,%.4f) expectEnc=%.4f probePx=(%u,%u)\n",
                  s.frameIndex,
                  ayt::render::kShadowPipelineBuildStamp,
                  s.casterReady ? 1 : 0,
-                 s.casterDraws,
+                 s.atlasSlots,
                  s.fboValid ? 1 : 0,
                  static_cast<unsigned>(s.rtIdx),
                  static_cast<unsigned>(s.resolveIdx),

@@ -63,7 +63,7 @@ property shadowPcf      = vec4(1.0, 0.0, 0.0, 0.0)
 |-------|------|
 | **L0** | 静默 |
 | **L1** | 启动一次：`build=` + caps（默认） |
-| **L2** | 前 N 帧：`[ShadowPass] frame=... draws=... sampleReady=...` |
+| **L2** | 前 N 帧：`[ShadowPass] frame=... atlasSlots=... sampleReady=...` (§S2-3,2026-07-23) |
 | **L3** | CPU LVP 探针：`cubeCenter` / `groundUnderCube` 的 `refN` / `uv` |
 | **L4** | 逐 draw：`cast draw#`、`[ShadowBind]` |
 

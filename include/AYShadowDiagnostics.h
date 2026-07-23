@@ -22,7 +22,11 @@ enum class ShadowLogLevel : uint8_t {
 
 struct ShadowFrameStats {
     uint32_t frameIndex   = 0;
-    uint32_t casterDraws  = 0;
+    uint32_t atlasSlots   = 0;  // §S2-3 — renamed from casterDraws:
+                                // the count is "atlas sub-rect slots
+                                // used", NOT mesh draw-call count.
+                                // (pre-C was always 1, post-§P5.5 C
+                                // can be N up to kMaxShadowCasters.)
     bool     casterReady  = false;
     bool     fboValid     = false;
     bool     blitOk       = false;
@@ -42,7 +46,10 @@ struct ShadowDiagnostics {
     static constexpr uint32_t kVerboseLogLimit   = 8;
 
     // Default L2 so Editor always prints the first-N-frame ShadowPass summary
-    // (draws / sampleReady / probe) without requiring AY_SHADOW_LOG.
+    // (atlasSlots / sampleReady / probe) without requiring AY_SHADOW_LOG.
+    // §S2-3 (2026-07-23) — "atlasSlots" replaces "draws" in the summary
+    // log key to avoid the long-running misconception that the number
+    // is mesh-draw-call count.
     static ShadowLogLevel levelFromEnv() noexcept
     {
         const char* env = std::getenv("AY_SHADOW_LOG");

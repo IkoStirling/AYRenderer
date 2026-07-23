@@ -89,7 +89,7 @@ Shadow → Skybox → GBuffer → Lighting → Transparent → PostProcess(Final
 
 1. Exposure 微调默认（ACES 下若偏暗/偏亮）  
 2. Final 轻微 vignette **或** contrast（仍在 Final 一个 FS，禁止新 Pass）  
-3. Shadow 日志：`draws=` 改名为 `atlasSlots=`（避免再误解；**不改阴影算法**）
+3. Shadow 日志：`draws=` **已改名为** `atlasSlots=`（§S2-3,2026-07-23；避免再误解；**不改阴影算法**）
 
 **完成标准**：观感更稳；无新大系统。
 
@@ -97,11 +97,11 @@ Shadow → Skybox → GBuffer → Lighting → Transparent → PostProcess(Final
 
 ### 刀 S3 — 短期收口（0.5–1 天）
 
-- [ ] 更新 `post-process.md`：真 Bloom 链 + Final 合成契约  
-- [ ] 在 `frame-graph-mvp.md` §7 打勾：是否已满足「≥2 效果 Pass / 第三次 half FBO」  
-- [ ] 决定下一阶段：再做一个效果（仍短期）**或**开工 FG MVP  
+- [x] 更新 [`post-process.md`](post-process.md)：真 Bloom 链 + Final 合成契约（§S1a/S1b/S1c/S1d 全部反映,K3 不变量锁死）
+- [x] 在 [`frame-graph-mvp.md` §7](frame-graph-mvp.md) 打勾：BloomExtract + BloomBlur = 2 个效果 Pass ✅;半分辨率 ping-pong = 第三次 half FBO ✅;**已满足"任意两条"门**
+- [x] 决定下一阶段：**先做 S4（Depth-aware Haze）再做 FG MVP**
 
-**默认建议**：S1 完成后若只做一个 Bloom 族，**先不要开 FG**；再做一个半分辨率效果（如简单 SSAO 前的「仅 depth-aware haze」也算）或第三次 ping-pong 时再开 FG。
+**结论（2026-07-23）**：S3 收口完成。**下一刀 = S4 Depth-aware Haze 半分辨率效果 Pass**（理由见 [`frame-graph-mvp.md` §7 决策](../frame-graph-mvp.md)）。FG MVP 推到 S4 完成后再开。
 
 ---
 
