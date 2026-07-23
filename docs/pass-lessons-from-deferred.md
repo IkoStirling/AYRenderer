@@ -428,3 +428,96 @@ code,留 §Skybox0-B 接 samplerCube)。
 | SkyboxPass depth 写 | sky = at infinity, no depth write (cutsheet 同意) |
 | 双 cubemap (左右眼 VR) | VR cut,not in MVP |
 | Fog (sky tint by fog) | post-§Skybox0 |
+
+---
+
+## §P5.5 B — Point + Spot light types (2026-07-23, ships)
+
+Post-A ship (1172/1172 → post-§Skybox0 1231/1231), B 刀接通
+Point + Spot 真光路径 ── host 设 `Light{ type=Point/Spot, ... }`
+后,LightingPass FS 用正确 attenuation + cone math 出图。
+
+### 设计契约
+
+| 维度 | 决策 |
+|---|---|
+| **Light POD widen** | 加 `float range` + `float intensity` + `float coneCosInner` + `float coneCosOuter` + `FVector3 spotDirection` (5 个新字段)。`sizeof(Light)` 从 ~40B 升到 ~68B。`static_assert` ≤ 64 → ≤ 96 (留 headroom 给 future Spot 扩展)。 |
+| **UBO 宽** | `uniformblock Lights { vec4 dirs[8]; vec4 colors[8]; vec4 params[8]; vec4 spotDir[8]; } binding 0` ── 4 vec4 arrays × 8 lights × 16B = 512B。`params[]` = (range, intensity, coneCosInner, coneCosOuter);`spotDir[].xyz` = Spot direction。 |
+| **dual-path upload 处理** | **砍** ── 只留 field-split (`setUniform` per-array × 4 calls)。删 `setUniformBlock` fallback (A 的 dual-path 在 4-array 上会变 2^4 组合)。 |
+| **FS per-type 分支** | 8 unrolled `if / else if` 链,按 `dirs[i].w = float(LightType)` 分 3 路 (Directional < 0.5, Point < 1.5, Spot otherwise)。Phoskia `fn` helper 不依赖 ── 保持 converter 路径简单。 |
+| **Shadow 仍只乘 lights[0]** | key light 唯一;fill/rim 1..7 不 shadow。B 不改 shadow 路径,Per-light shadow = §P5.5 C 范围。 |
+| **default byte-equivalent invariant** | 默认构造 `Light{ type=Directional, ... }` 仍跟 pre-B 完全一致 ── 新字段都 default (range=0, intensity=1, coneCos=0, spotDirection=default);FS Directional branch 忽略 `params[]` / `spotDir[]`。 |
+
+### Bug fix #3 — Test_B5 cache-key 自比自 false green
+
+**真 Bug**(不是 silent red ── 是 false green):
+- Pre-B, `kLightingCacheKey` 是 `LightingPass.cpp` 的 `static constexpr`,无法外部访问。
+- `Test_B5_LightingDirectional.cpp::b5_lighting_cache_key_and_build_stamp_pinned`
+  只能 self-compare (`mirror == mirror` = "mine"),drift 检测失效。
+- 自 B7 bump (v3 → v10 → v16 → v18 → v20) 一直在 silent drift,
+  test 仍然 pass ── false green。
+
+**修法**:
+- `LightingPass.h` 加 `extern const char* const kLightingCacheKeyCStr;`
+  (其定义在 `LightingPass.cpp`)。
+- `Test_B5` / `Test_B5p5` / `Test_B7` 都改:
+  `CHECK(localMirror == kLightingCacheKeyCStr)` 而不是 self-compare。
+- 任何 `kLightingCacheKey` 漂移立刻 fail,不再 false green。
+
+### 触碰面 (6 文件, ≤ 8 红线内)
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `include/AYRenderScene.h` | Light POD widen + `static_assert ≤ 96` + `Light::point()` / `Light::spot()` factory |
+| 2 | `src/detail/LightingPass.h` | `extern const char* const kLightingCacheKeyCStr;` |
+| 3 | `src/detail/LightingPass.cpp` | `kLightingCacheKey` v20 → v21 + `lightsBlock[64]` → `[128]` (512B) + 删 dual-path fallback + Phoskia FS 重写 (8 段 per-type 分支) + `kLightingCacheKeyCStr` 定义 |
+| 4 | `unittest/Test_B5_LightingDirectional.cpp` | cache-key mirror v3 → v21 + `CHECK(localMirror == kLightingCacheKeyCStr)` + 删 `shadowMap` forbidden + mirror FS 改 (4-array UBO + per-type 分支) |
+| 5 | `unittest/Test_B5p5_LightingShadow.cpp` | cache-key v20 → v21 + extern live + 删 `gbufferDepth` sampler (B 后从 FS 退役) + substring pin 加 `Lights.params[0]` / `Lights.spotDir[0]` / `let keyContrib =` / `let fillContrib =` + shadow-key-only-fill-unshadowed case 改打 fillContrib 分支 substring |
+| 6 | `unittest/Test_B7_MultiLightAccumulation.cpp` | cache-key v20 → v21 + extern live + mirror FS 改 (4-array + per-type branch) + `b7_lights_block_layout_dirs_then_colors` 改 512B + **5 新 case** (Point factory / Spot factory / size assert / 4-array layout / live cache-key) |
+| 7 | `docs/pass-lessons-from-deferred.md` | 本节 |
+
+### K1 (P5.5 B) 关键 invariants
+
+1. **dual-path 砍 → 单一 field-split 路径** ── 4 `setUniform`
+   calls × 128B each;删 `setUniformBlock` fallback。**未来
+   D3D 3-run 验证后再迁回 UBO 单路径**。
+2. **Light POD ≤ 96** ── static_assert 从 ≤ 64 升 ≤ 96,实际 68B。
+3. **default `LightType = Directional` byte-equivalent** ── 新
+   字段全 default,FS Directional branch 走 `ltype < 0.5` 时
+   忽略 `params[]` / `spotDir[]`,跟 pre-B A ship 行为 1:1。
+4. **Shadow 只乘 lights[0]** ── key-only shadow multiply,在
+   `keyContrib` 的 Directional 分支内 (`* shadowKey *`)。fill/
+   rim 1..7 永不乘 shadow。
+5. **`b5p5_key_light_shadow_only_fill_unshadowed` 仍绿** ──
+   shadowKey 只乘 lights[0] 不变。
+6. **§Skybox0 路径不动** ── `mix(skyColor, lit, coverage)` +
+   `gbufferSky` sampler + `skyMix.x = 1.0` 全保留。
+7. **3-array unroll** ── 8 段 `if/else if` inlined,per-light
+   分支不依赖 Phoskia `fn`(降低 converter 路径风险)。
+8. **Forward host 0 行为变化** ── A ship 已 ship 8 unroll
+   dir-only;B 后 Forward host (默认 setDirectionalLight →
+   FrameContext single-light fallback) FS 走 `ltype == 0.0`
+   (Directional),`params[]` 全 0,行为等价。
+
+### 复用既有 utilities
+
+| 已有 | 用法 |
+|---|---|
+| `Light::directional()` factory (AYRenderScene.h:147) | `Light::point()` + `Light::spot()` 镜像 |
+| `SceneLights::add(const Light&)` (AYRenderScene.h:220) | B 不改 ── 已能装新 POD |
+| `PassExecContext::sceneLights` borrowed ptr (PassExecContext.h:219) | B 不加新 field ── 复用 |
+| `LightingPass::kFullscreenTriangle` + `kFullscreenIndices` | B 不改 ── 几何不变 |
+| `LightingPass::tryBindShadowSampler` (LightingPass.cpp:797) | B 不改 ── shadow 仍只乘 lights[0] |
+| `_program.getUniformBinding / setUniform` (GpuResources pattern) | B 加 2 个 calls (params + spotDir) |
+| `B7+` 8 tap unroll + `Lights.dirs[i].w = float(LightType)` (A ship) | B 在 FS per-type 分支内 dispatch `ltype` ── A 已 ship 死代码, B 激活 |
+
+### 不在 §P5.5 B scope (deferred 到 future)
+
+| Item | Reason |
+|---|---|
+| Per-light shadow (Point/Spot 各自 shadow map) | §P5.5 C 范围 ── cutsheet 已预留 PassExecContext::perLightShadows borrowed ptr 位 |
+| IBL (ambient cube / irradiance / radiance) | 独立 roadmap,不是 Deferred Pass 自身的事 |
+| Spot light shadow | 跟 Point shadow 一并进 §P5.5 C |
+| Phoskia `fn` 性能优化(避免 fn call 边界) | Phoskia converter 自决;若不支持,降级到 8 段 inlined if/else if |
+| `setUniformBlock` 单路径迁回 | D3D 3-run 验证 B ship 稳后,future cut 再迁 |
+| Light POD 字段重排 (把 type 字段挪到底) | 当前布局已 4-byte align,没必要 |

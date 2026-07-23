@@ -55,8 +55,21 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
  // upload / reflection mismatch left light vectors uninitialized
  // (flickering cyan fill, unstable key, missing shadows) while
  // `colors[]` still updated. `.w` still carries float(LightType).
+ // §P5.5 B (2026-07-23) — bump to v21: Light POD widened with
+ // Point/Spot per-light params (range/intensity/coneCosInner/
+ // coneCosOuter) + spotDirection; Phoskia FS rewritten with
+ // per-type attenuation + cone math (see fragment body below).
+ // UBO widened to 4 vec4 arrays (dirs/colors/params/spotDir).
+ // Bug fix #3 (Test_B5 cache-key false-green) is resolved by
+ // `kLightingCacheKeyCStr` extern declared in LightingPass.h —
+ // see definition below.
 static constexpr const char* kLightingCacheKey =
-    "lighting_v20_sky0_equirect_backdrop";
+    "lighting_v21_p5p5b_point_spot_atten_cone";
+
+// §P5.5 B (2026-07-23) — Bug fix #3: single source of truth for
+// cache-key string equality tests. The extern is declared in
+// LightingPass.h; this is its definition.
+const char* const kLightingCacheKeyCStr = kLightingCacheKey;
 
 // §P5 B5 (2026-07-22) — fullscreen-triangle vertex data, duplicated
 // from PostProcessPass.cpp:27-33 (private state there — coupling
@@ -114,10 +127,36 @@ constexpr uint16_t kLightingFullscreenIndices[3] = { 0, 1, 2 };
 // (not MRT) so no Phoskia MRT extension needed — falls back to the
 // legacy `return → gl_FragColor` path (verified at AYShader/
 // unittest/Test_MRT_Fragment.cpp::mrt_legacy_return_still_emits_fragcolor).
+//
+// §P5.5 B (2026-07-23) — Phoskia source rewritten for Point + Spot
+// per-type math. UBO `Lights` widened from 2 vec4 arrays to 4
+// (`dirs[8]` + `colors[8]` + `params[8]` + `spotDir[8]`). Each of
+// the 8 light slots dispatches per-type inside an `if/else if`
+// chain (Phoskia `fn` support not relied on — keeps the converter
+// path simple). `params[]` carries (range, intensity, coneCosInner,
+// coneCosOuter); `spotDir[].xyz` carries Spot direction (Point /
+// Directional leave it zero — never read by their FS branches).
+//
+// Branch taxonomy (mirrors cutsheet §P5.5 B):
+//   - Directional (w < 0.5):  NdotL * shadow (key only) * color
+//   - Point (0.5 ≤ w < 1.5):  NdotL * (intensity / max(dist², 0.01))
+//                              * (1 - smoothstep(0, range, dist))
+//                              * color
+//   - Spot (w ≥ 1.5):         same as Point PLUS
+//                              smoothstep(coneCosOuter, coneCosInner, cosθ)
+//                              where cosθ = dot(L_to_frag, spotDir)
+//
+// Shadow attenuation: ONLY lights[0] (key) gets shadowKey multiply,
+// regardless of LightType. Fill / rim 1..7 stay unshadowed — mirror
+// A's cutsheet §10 contract. If a host puts Point/Spot in slot 0,
+// they get shadow attenuation for free (v0 simplification; per-light
+// shadow is §P5.5 C scope).
 constexpr const char* kLightingPhoskiaSource = R"(
 uniformblock Lights {
     vec4 dirs[8]
     vec4 colors[8]
+    vec4 params[8]
+    vec4 spotDir[8]
 } binding 0
 material Lighting {
     texture2d gbufferAlbedo
@@ -146,46 +185,15 @@ material Lighting {
         let normalSample = sample(gbufferNormal, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
         let ambient = vec3(0.1, 0.1, 0.1)
-        // Empty slots are zero dirs — never normalize(0) (D3D hangs / NaN).
-        // dirs[i].xyz = TO-light (Directional) or light position (Point/Spot);
-        // dirs[i].w = float(LightType). A only ships Directional.
-        let L0 = Lights.dirs[0].xyz * (1.0 / max(length(Lights.dirs[0].xyz), 0.0001))
-        let L1 = Lights.dirs[1].xyz * (1.0 / max(length(Lights.dirs[1].xyz), 0.0001))
-        let L2 = Lights.dirs[2].xyz * (1.0 / max(length(Lights.dirs[2].xyz), 0.0001))
-        let L3 = Lights.dirs[3].xyz * (1.0 / max(length(Lights.dirs[3].xyz), 0.0001))
-        let L4 = Lights.dirs[4].xyz * (1.0 / max(length(Lights.dirs[4].xyz), 0.0001))
-        let L5 = Lights.dirs[5].xyz * (1.0 / max(length(Lights.dirs[5].xyz), 0.0001))
-        let L6 = Lights.dirs[6].xyz * (1.0 / max(length(Lights.dirs[6].xyz), 0.0001))
-        let L7 = Lights.dirs[7].xyz * (1.0 / max(length(Lights.dirs[7].xyz), 0.0001))
-        let f0 = max(dot(N, L0), 0.0)
-        let f1 = max(dot(N, L1), 0.0)
-        let f2 = max(dot(N, L2), 0.0)
-        let f3 = max(dot(N, L3), 0.0)
-        let f4 = max(dot(N, L4), 0.0)
-        let f5 = max(dot(N, L5), 0.0)
-        let f6 = max(dot(N, L6), 0.0)
-        let f7 = max(dot(N, L7), 0.0)
-        // §P5 B5.5 (2026-07-22) — Shadow attenuation for the **key
-        // light** only (Lights.dirs[0] / colors[0], shared with the
-        // single ShadowPass producer — cutsheet pass-lessons-from-
-        // deferred.md:300 "LightingPass 共用 ShadowPass 只读借用").
-        // Fill / rim lights (Lights.dirs[1..7]) get NO shadow
-        // attenuation — they don't carry their own shadow map in
-        // v0. Per-light shadow maps is a separate cut.
-        //
-        // Wire (mirrors AYShadowShaderSources.h simple_lit_shadow
-        // PCF contract):
         // §P5 B5.5 v16 — worldPos from GBuffer RT2 (RGBA16F raw xyz).
-        // Key-light-only PCF vs shared ShadowPass map.
         let worldPos = sample(gbufferMotion, baseUv).xyz
-        // Project into shadow space.
+        // §P5 B5.5 — Key-light shadow 9-tap PCF (cutsheet §10
+        // "LightingPass 共用 ShadowPass 只读借用"). Fill / rim
+        // lights (1..7) stay unshadowed — see per-type branches below.
         let clipPos = u_lightViewProj * vec4(worldPos, 1.0)
         let invW = 1.0 / max(clipPos.w, 0.0001)
         let ndcX = clipPos.x * invW
         let ndcY = clipPos.y * invW
-        // MUST match simple_lit_shadow / ShadowDepthCodec: occluder
-        // is stored as ndc01 ∈ [0,1]. clip.z/w alone is wrong and
-        // makes PCF always-lit (no visible cube shadow).
         let refNdc01 = clipPos.z * invW * 0.5 + 0.5
         let uy = ndcY * 0.5 + 0.5
         let shadowUv = vec2(ndcX * 0.5 + 0.5, 1.0 - uy)
@@ -218,17 +226,209 @@ material Lighting {
         let shadowHard = s11
         let shadowFilt = mix(shadowHard, shadowSoft, shadowPcf.x)
         let shadowKey = mix(1.0, shadowFilt, inMap)
-        // Key-light multiplication: only lights[0] gets the shadow
-        // attenuation. Fill / rim lights (1..7) stay unshadowed.
-        let keyContribution = f0 * shadowKey * Lights.colors[0].xyz
-        let fillContribution = f1 * Lights.colors[1].xyz
-                            + f2 * Lights.colors[2].xyz
-                            + f3 * Lights.colors[3].xyz
-                            + f4 * Lights.colors[4].xyz
-                            + f5 * Lights.colors[5].xyz
-                            + f6 * Lights.colors[6].xyz
-                            + f7 * Lights.colors[7].xyz
-        let directionalSum = keyContribution + fillContribution
+        // §P5.5 B (2026-07-23) — per-light contribution. Each light
+        // dispatches per-type via `dirs[i].w = float(LightType)`:
+        //   - Directional: NdotL * shadow (key only) * color
+        //   - Point:       NdotL * intensity / dist² * range-falloff * color
+        //   - Spot:        Point path * cone (smoothstep coneCosOuter→inner) * color
+        //
+        // Empty slots have all-zero dirs[].xyz ⇒ toLight = (0,0,0) for
+        // Point branch ⇒ dist = 0 ⇒ atten = 0 / 0.01 = 0 (safe — the
+        // `max(..., 0.01)` divisor clamps). Directional branch reads
+        // dirs[i].xyz directly; normalize(dirs[i].xyz) safely returns 0
+        // because the `1.0 / max(length, 0.0001)` divisor clamps.
+        //
+        // Phoskia grammar note (2026-07-23): `if` is a *statement*, not
+        // an expression — `let x = if (...) { ... } else { ... }` is
+        // rejected by parsePrimary. Per-light contributions are
+        // computed as 3 separate `let` values (dirContrib, pointContrib,
+        // spotContrib), then selected via the GLSL `step(edge, x)`
+        // builtin multiplied by the appropriate contribution. This is
+        // a single multiply-add per light — same ALU cost as the
+        // if-branched version on every backend, no assign-into-let
+        // (which Phoskia doesn't support).
+        // step(edge, x) returns 0 if x < edge else 1. So
+        //   - isDir   = step(0.5, t0)  = 0 when t0 < 0.5  → Dir flag
+        //                          (note: A uses LT-style; Phoskia
+        //                          `step(edge, x)` is GE-style here
+        //                          so we use 1.0 - step(...) for LT)
+        //   - isPoint = step(0.5, t0) - step(1.5, t0)
+        //   - isSpot  = step(1.5, t0)
+        // Wait — verify: GLSL `step(edge, x) = (x < edge) ? 0 : 1`.
+        // Actually: GLSL `step(genType edge, genType x)` returns
+        // `0.0` if `x < edge`, else `1.0`. So:
+        //   - t0 < 0.5:  step(0.5, t0) = 0
+        //   - 0.5 ≤ t0 < 1.5: step(0.5,t0)=1, step(1.5,t0)=0
+        //   - t0 ≥ 1.5: step(1.5, t0) = 1
+        // So: isDir = 1.0 - step(0.5, t0)
+        //     isPoint = step(0.5, t0) - step(1.5, t0)
+        //     isSpot  = step(1.5, t0)
+        // (sum to 1.0 exactly when t0 is one of 0.0/1.0/2.0, which is
+        //  the only values `dirs[i].w = float(LightType)` ever takes.)
+        //
+        // §P5.5 B (2026-07-23) — shadowKey multiply stays on the
+        // Directional key-light contribution only (lights[0]).
+        // Fill/rim 1..7 stay unshadowed. To apply shadowKey to the
+        // Dir branch but not the others, we compute:
+        //   keyShadowMul = isDir  (so Point/Spot branches collapse
+        //                          the shadowKey multiply to 0)
+        // ... and apply shadowKey * keyShadowMul in the final mix.
+        //
+        // --- light 0 (key — gets shadowKey via isDir gate) ---
+        let Ld0 = Lights.dirs[0].xyz * (1.0 / max(length(Lights.dirs[0].xyz), 0.0001))
+        let toL0 = Lights.dirs[0].xyz - worldPos
+        let d0 = length(toL0)
+        let Lp0 = toL0 * (1.0 / max(d0, 0.0001))
+        let sdn0 = Lights.spotDir[0].xyz * (1.0 / max(length(Lights.spotDir[0].xyz), 0.0001))
+        let cosT0 = dot(Lp0, sdn0)
+        let cone0 = smoothstep(Lights.params[0].w, Lights.params[0].z, cosT0)
+        let falloff0 = 1.0 - smoothstep(0.0, Lights.params[0].x, d0)
+        let attenPoint0 = Lights.params[0].y * falloff0 / max(d0 * d0, 0.01)
+        let attenSpot0  = Lights.params[0].y * falloff0 * cone0 / max(d0 * d0, 0.01)
+        let NdotDir0  = max(dot(N, Ld0), 0.0)
+        let NdotPos0  = max(dot(N, Lp0), 0.0)
+        let dirPart0  = NdotDir0 * shadowKey * Lights.colors[0].xyz
+        let pointPart0 = NdotPos0 * attenPoint0 * Lights.colors[0].xyz
+        let spotPart0  = NdotPos0 * attenSpot0  * Lights.colors[0].xyz
+        let isDir0  = 1.0 - step(0.5, Lights.dirs[0].w)
+        let isPoint0 = step(0.5, Lights.dirs[0].w) - step(1.5, Lights.dirs[0].w)
+        let isSpot0 = step(1.5, Lights.dirs[0].w)
+        let keyContrib = dirPart0 * isDir0 + pointPart0 * isPoint0 + spotPart0 * isSpot0
+        // --- lights 1..7 (fill/rim — no shadow multiply) ---
+        let Ld1 = Lights.dirs[1].xyz * (1.0 / max(length(Lights.dirs[1].xyz), 0.0001))
+        let toL1 = Lights.dirs[1].xyz - worldPos
+        let d1 = length(toL1)
+        let Lp1 = toL1 * (1.0 / max(d1, 0.0001))
+        let sdn1 = Lights.spotDir[1].xyz * (1.0 / max(length(Lights.spotDir[1].xyz), 0.0001))
+        let cosT1 = dot(Lp1, sdn1)
+        let cone1 = smoothstep(Lights.params[1].w, Lights.params[1].z, cosT1)
+        let falloff1 = 1.0 - smoothstep(0.0, Lights.params[1].x, d1)
+        let attenPoint1 = Lights.params[1].y * falloff1 / max(d1 * d1, 0.01)
+        let attenSpot1  = Lights.params[1].y * falloff1 * cone1 / max(d1 * d1, 0.01)
+        let NdotDir1 = max(dot(N, Ld1), 0.0)
+        let NdotPos1 = max(dot(N, Lp1), 0.0)
+        let dirPart1 = NdotDir1 * Lights.colors[1].xyz
+        let pointPart1 = NdotPos1 * attenPoint1 * Lights.colors[1].xyz
+        let spotPart1 = NdotPos1 * attenSpot1 * Lights.colors[1].xyz
+        let isDir1 = 1.0 - step(0.5, Lights.dirs[1].w)
+        let isPoint1 = step(0.5, Lights.dirs[1].w) - step(1.5, Lights.dirs[1].w)
+        let isSpot1 = step(1.5, Lights.dirs[1].w)
+        let f1 = dirPart1 * isDir1 + pointPart1 * isPoint1 + spotPart1 * isSpot1
+        let Ld2 = Lights.dirs[2].xyz * (1.0 / max(length(Lights.dirs[2].xyz), 0.0001))
+        let toL2 = Lights.dirs[2].xyz - worldPos
+        let d2 = length(toL2)
+        let Lp2 = toL2 * (1.0 / max(d2, 0.0001))
+        let sdn2 = Lights.spotDir[2].xyz * (1.0 / max(length(Lights.spotDir[2].xyz), 0.0001))
+        let cosT2 = dot(Lp2, sdn2)
+        let cone2 = smoothstep(Lights.params[2].w, Lights.params[2].z, cosT2)
+        let falloff2 = 1.0 - smoothstep(0.0, Lights.params[2].x, d2)
+        let attenPoint2 = Lights.params[2].y * falloff2 / max(d2 * d2, 0.01)
+        let attenSpot2  = Lights.params[2].y * falloff2 * cone2 / max(d2 * d2, 0.01)
+        let NdotDir2 = max(dot(N, Ld2), 0.0)
+        let NdotPos2 = max(dot(N, Lp2), 0.0)
+        let dirPart2 = NdotDir2 * Lights.colors[2].xyz
+        let pointPart2 = NdotPos2 * attenPoint2 * Lights.colors[2].xyz
+        let spotPart2 = NdotPos2 * attenSpot2 * Lights.colors[2].xyz
+        let isDir2 = 1.0 - step(0.5, Lights.dirs[2].w)
+        let isPoint2 = step(0.5, Lights.dirs[2].w) - step(1.5, Lights.dirs[2].w)
+        let isSpot2 = step(1.5, Lights.dirs[2].w)
+        let f2 = dirPart2 * isDir2 + pointPart2 * isPoint2 + spotPart2 * isSpot2
+        let Ld3 = Lights.dirs[3].xyz * (1.0 / max(length(Lights.dirs[3].xyz), 0.0001))
+        let toL3 = Lights.dirs[3].xyz - worldPos
+        let d3 = length(toL3)
+        let Lp3 = toL3 * (1.0 / max(d3, 0.0001))
+        let sdn3 = Lights.spotDir[3].xyz * (1.0 / max(length(Lights.spotDir[3].xyz), 0.0001))
+        let cosT3 = dot(Lp3, sdn3)
+        let cone3 = smoothstep(Lights.params[3].w, Lights.params[3].z, cosT3)
+        let falloff3 = 1.0 - smoothstep(0.0, Lights.params[3].x, d3)
+        let attenPoint3 = Lights.params[3].y * falloff3 / max(d3 * d3, 0.01)
+        let attenSpot3  = Lights.params[3].y * falloff3 * cone3 / max(d3 * d3, 0.01)
+        let NdotDir3 = max(dot(N, Ld3), 0.0)
+        let NdotPos3 = max(dot(N, Lp3), 0.0)
+        let dirPart3 = NdotDir3 * Lights.colors[3].xyz
+        let pointPart3 = NdotPos3 * attenPoint3 * Lights.colors[3].xyz
+        let spotPart3 = NdotPos3 * attenSpot3 * Lights.colors[3].xyz
+        let isDir3 = 1.0 - step(0.5, Lights.dirs[3].w)
+        let isPoint3 = step(0.5, Lights.dirs[3].w) - step(1.5, Lights.dirs[3].w)
+        let isSpot3 = step(1.5, Lights.dirs[3].w)
+        let f3 = dirPart3 * isDir3 + pointPart3 * isPoint3 + spotPart3 * isSpot3
+        let Ld4 = Lights.dirs[4].xyz * (1.0 / max(length(Lights.dirs[4].xyz), 0.0001))
+        let toL4 = Lights.dirs[4].xyz - worldPos
+        let d4 = length(toL4)
+        let Lp4 = toL4 * (1.0 / max(d4, 0.0001))
+        let sdn4 = Lights.spotDir[4].xyz * (1.0 / max(length(Lights.spotDir[4].xyz), 0.0001))
+        let cosT4 = dot(Lp4, sdn4)
+        let cone4 = smoothstep(Lights.params[4].w, Lights.params[4].z, cosT4)
+        let falloff4 = 1.0 - smoothstep(0.0, Lights.params[4].x, d4)
+        let attenPoint4 = Lights.params[4].y * falloff4 / max(d4 * d4, 0.01)
+        let attenSpot4  = Lights.params[4].y * falloff4 * cone4 / max(d4 * d4, 0.01)
+        let NdotDir4 = max(dot(N, Ld4), 0.0)
+        let NdotPos4 = max(dot(N, Lp4), 0.0)
+        let dirPart4 = NdotDir4 * Lights.colors[4].xyz
+        let pointPart4 = NdotPos4 * attenPoint4 * Lights.colors[4].xyz
+        let spotPart4 = NdotPos4 * attenSpot4 * Lights.colors[4].xyz
+        let isDir4 = 1.0 - step(0.5, Lights.dirs[4].w)
+        let isPoint4 = step(0.5, Lights.dirs[4].w) - step(1.5, Lights.dirs[4].w)
+        let isSpot4 = step(1.5, Lights.dirs[4].w)
+        let f4 = dirPart4 * isDir4 + pointPart4 * isPoint4 + spotPart4 * isSpot4
+        let Ld5 = Lights.dirs[5].xyz * (1.0 / max(length(Lights.dirs[5].xyz), 0.0001))
+        let toL5 = Lights.dirs[5].xyz - worldPos
+        let d5 = length(toL5)
+        let Lp5 = toL5 * (1.0 / max(d5, 0.0001))
+        let sdn5 = Lights.spotDir[5].xyz * (1.0 / max(length(Lights.spotDir[5].xyz), 0.0001))
+        let cosT5 = dot(Lp5, sdn5)
+        let cone5 = smoothstep(Lights.params[5].w, Lights.params[5].z, cosT5)
+        let falloff5 = 1.0 - smoothstep(0.0, Lights.params[5].x, d5)
+        let attenPoint5 = Lights.params[5].y * falloff5 / max(d5 * d5, 0.01)
+        let attenSpot5  = Lights.params[5].y * falloff5 * cone5 / max(d5 * d5, 0.01)
+        let NdotDir5 = max(dot(N, Ld5), 0.0)
+        let NdotPos5 = max(dot(N, Lp5), 0.0)
+        let dirPart5 = NdotDir5 * Lights.colors[5].xyz
+        let pointPart5 = NdotPos5 * attenPoint5 * Lights.colors[5].xyz
+        let spotPart5 = NdotPos5 * attenSpot5 * Lights.colors[5].xyz
+        let isDir5 = 1.0 - step(0.5, Lights.dirs[5].w)
+        let isPoint5 = step(0.5, Lights.dirs[5].w) - step(1.5, Lights.dirs[5].w)
+        let isSpot5 = step(1.5, Lights.dirs[5].w)
+        let f5 = dirPart5 * isDir5 + pointPart5 * isPoint5 + spotPart5 * isSpot5
+        let Ld6 = Lights.dirs[6].xyz * (1.0 / max(length(Lights.dirs[6].xyz), 0.0001))
+        let toL6 = Lights.dirs[6].xyz - worldPos
+        let d6 = length(toL6)
+        let Lp6 = toL6 * (1.0 / max(d6, 0.0001))
+        let sdn6 = Lights.spotDir[6].xyz * (1.0 / max(length(Lights.spotDir[6].xyz), 0.0001))
+        let cosT6 = dot(Lp6, sdn6)
+        let cone6 = smoothstep(Lights.params[6].w, Lights.params[6].z, cosT6)
+        let falloff6 = 1.0 - smoothstep(0.0, Lights.params[6].x, d6)
+        let attenPoint6 = Lights.params[6].y * falloff6 / max(d6 * d6, 0.01)
+        let attenSpot6  = Lights.params[6].y * falloff6 * cone6 / max(d6 * d6, 0.01)
+        let NdotDir6 = max(dot(N, Ld6), 0.0)
+        let NdotPos6 = max(dot(N, Lp6), 0.0)
+        let dirPart6 = NdotDir6 * Lights.colors[6].xyz
+        let pointPart6 = NdotPos6 * attenPoint6 * Lights.colors[6].xyz
+        let spotPart6 = NdotPos6 * attenSpot6 * Lights.colors[6].xyz
+        let isDir6 = 1.0 - step(0.5, Lights.dirs[6].w)
+        let isPoint6 = step(0.5, Lights.dirs[6].w) - step(1.5, Lights.dirs[6].w)
+        let isSpot6 = step(1.5, Lights.dirs[6].w)
+        let f6 = dirPart6 * isDir6 + pointPart6 * isPoint6 + spotPart6 * isSpot6
+        let Ld7 = Lights.dirs[7].xyz * (1.0 / max(length(Lights.dirs[7].xyz), 0.0001))
+        let toL7 = Lights.dirs[7].xyz - worldPos
+        let d7 = length(toL7)
+        let Lp7 = toL7 * (1.0 / max(d7, 0.0001))
+        let sdn7 = Lights.spotDir[7].xyz * (1.0 / max(length(Lights.spotDir[7].xyz), 0.0001))
+        let cosT7 = dot(Lp7, sdn7)
+        let cone7 = smoothstep(Lights.params[7].w, Lights.params[7].z, cosT7)
+        let falloff7 = 1.0 - smoothstep(0.0, Lights.params[7].x, d7)
+        let attenPoint7 = Lights.params[7].y * falloff7 / max(d7 * d7, 0.01)
+        let attenSpot7  = Lights.params[7].y * falloff7 * cone7 / max(d7 * d7, 0.01)
+        let NdotDir7 = max(dot(N, Ld7), 0.0)
+        let NdotPos7 = max(dot(N, Lp7), 0.0)
+        let dirPart7 = NdotDir7 * Lights.colors[7].xyz
+        let pointPart7 = NdotPos7 * attenPoint7 * Lights.colors[7].xyz
+        let spotPart7 = NdotPos7 * attenSpot7 * Lights.colors[7].xyz
+        let isDir7 = 1.0 - step(0.5, Lights.dirs[7].w)
+        let isPoint7 = step(0.5, Lights.dirs[7].w) - step(1.5, Lights.dirs[7].w)
+        let isSpot7 = step(1.5, Lights.dirs[7].w)
+        let f7 = dirPart7 * isDir7 + pointPart7 * isPoint7 + spotPart7 * isSpot7
+        let directionalSum = keyContrib + f1 + f2 + f3 + f4 + f5 + f6 + f7
         let lit = albedo.rgb * (ambient + directionalSum)
         // §Skybox0 (2026-07-23) — backdrop blend: sky only shows
         // where lit is near zero (so geometry keeps its color;
@@ -615,66 +815,62 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         _program.setUniform(cameraPosBinding, cameraPos, sizeof(cameraPos));
     }
 
-    // §P5 B7+ (2026-07-22) + §P5.5 A (2026-07-23) — multi-light
-    // DataSource upload via the host-supplied `ctx.sceneLights`
-    // borrowed pointer. The Phoskia FS unrolls 8 light taps
-    // unconditionally. We pack per-light GPU-side data + color
-    // into the `uniformblock Lights { vec4 record[8]; vec4 colors[8];
-    // } binding 0` UBO every frame.
+    // §P5 B7+ (2026-07-22) + §P5.5 A (2026-07-23) + §P5.5 B (2026-07-23)
+    // — multi-light DataSource upload via the host-supplied
+    // `ctx.sceneLights` borrowed pointer. The Phoskia FS unrolls 8
+    // light taps with per-type dispatch (`dirs[i].w = LightType`).
+    // We pack per-light GPU-side data into the
+    // `uniformblock Lights { vec4 dirs[8]; vec4 colors[8]; vec4 params[8];
+    // vec4 spotDir[8]; } binding 0` UBO every frame.
     //
-    // A introduces `LightType { Directional, Point, Spot }`. The
-    // CPU pack fans out per-type so the FS's `record[i].xyz` is the
-    // correct GPU-side light vector regardless of type:
-    //   - Directional : xyz = -direction (FROM-light negated; same as B7)
-    //   - Point       : xyz = +position (B will toggle from `-` to `+`
-    //                            by switching the negation below)
-    //   - Spot        : xyz = +position (same as Point; B adds spot
-    //                            direction in a separate UBO array)
-    //   - record[i].w = float(LightType) so the FS can branch on it
+    // B widens the UBO from 2 vec4 arrays (256B) to 4 vec4 arrays
+    // (512B). The new arrays carry per-light attenuation / cone
+    // params (`params[]`) and Spot direction (`spotDir[]`); the
+    // `dirs[]` + `colors[]` array shapes stay byte-identical to A
+    // (cutsheet §P5.5 B #3 invariant: default LightType = Directional
+    // ⇒ byte-equivalent to pre-B).
     //
-    // A only ships Directional paths (every default-constructed
-    // `Light` is `type=Directional`) — the Point/Spot branches
-    // below are dead code today but trivially reachable. B will
-    // widen the UBO with `params[8]` + `spotDir[8]` and the FS
-    // with attenuation + cone math; record pack-shape stays the
-    // same. This CPU-side per-type split is the §P5.5 B.7 #1
-    // footgun's fix (forward-declared so B doesn't have to revisit
-    // the packing code).
+    // Per-type CPU pack (cutsheet §P5.5 B):
+    //   - Directional : dirs[].xyz = -direction (FROM-light negated)
+    //                   params[] = default (range=0, intensity=1,
+    //                                       coneCosInner=0, coneCosOuter=0)
+    //                   spotDir[] = default (0, -1, 0, 0)
+    //   - Point       : dirs[].xyz = +position (FS does
+    //                                 `worldPos - lightPos`)
+    //                   params[] = (range, intensity, 0, 0)
+    //                   spotDir[] = default (Point branch never reads)
+    //   - Spot        : dirs[].xyz = +position (same as Point)
+    //                   params[] = (range, intensity, coneCosInner, coneCosOuter)
+    //                   spotDir[] = (spotDirection.xyz, 0)
     //
     // Mirrors Test_ShaderResource.cpp:392 (Camera UBO upload via
-    // `setUniformBlock`) — one std140-compatible buffer, one
-    // binding, no per-light state churn on the CPU.
+    // `setUniformBlock`) — one std140-compatible buffer, one binding.
     //
     // Layout (kMaxSceneLights = 8, defined in include/AYRenderScene.h):
-    //   - bytes [0,    128): record[8] * vec4 = 8 * 16 = 128 bytes
-    //                         (xyz = light vector, w = float(LightType))
+    //   - bytes [0,   128): dirs[8] * vec4 = 8 * 16 = 128 bytes
+    //                       (xyz = light vector, w = float(LightType))
     //   - bytes [128, 256): colors[8] * vec4 = 8 * 16 = 128 bytes
-    //                     ↳ note we always upload the full
-    //                       std140-aligned block regardless of
-    //                       lights.count (Phoskia unroll uses
-    //                       unused slots as zero-vectors, so a
-    //                       count=2 light source still benefits
-    //                       from the same 256-byte layout).
-    //
-    // Negate TO-light convention is identical to the B5 single-
-    // light uniform above for *directional* lights (FrameContext
-    // stores FROM-light; Phoskia NdotL expects TO-light). Point /
-    // Spot write `+position` so `L = normalize(record.xyz)` resolves
-    // to the TO-frag-from-light vector after we subtract
-    // `worldPos` at compute time — but B will lift `worldPos` into
-    // the FS loop so the receiver does `worldPos - lightPos`
-    // directly without a negation.
+    //   - bytes [256, 384): params[8] * vec4 = 8 * 16 = 128 bytes (B new)
+    //                       (x = range, y = intensity, z = coneCosInner,
+    //                        w = coneCosOuter)
+    //   - bytes [384, 512): spotDir[8] * vec4 = 8 * 16 = 128 bytes (B new)
+    //                       (xyz = spotDirection, w = 0)
+    // Always upload the full 512-byte layout regardless of
+    // lights.count — Phoskia unroll uses unused slots as zero-vectors.
     //
     // Fallback: ctx.sceneLights == nullptr or count == 0 → upload
-    // one "lights.record[0] = -frame.lightDirection" + "colors[0] =
-    // frame.lightColor" pair so the unrolled FS still produces a
-    // reasonable image (matches B5 behavior). This avoids the
+    // one "dirs[0] = -frame.lightDirection, colors[0] = frame.lightColor"
+    // pair so the unrolled FS still produces a reasonable image
+    // (matches B5 single-light behavior). Params + spotDir slots stay
+    // zero — Directional branch never reads them. This avoids the
     // "FS unrolls 8 lights but UBO has all zero → black picture"
     // failure mode when the host hasn't called setSceneLights yet.
     static_assert(ayt::render::kMaxSceneLights == 8,
                   "LightingPass B7 UBO assumes kMaxSceneLights == 8");
 
-    alignas(16) float lightsBlock[ayt::render::kMaxSceneLights * 8] = {};  // 8 vec4 record + 8 vec4 colors
+    alignas(16) float lightsBlock[ayt::render::kMaxSceneLights * 16] = {};
+    // 8 vec4 dirs + 8 vec4 colors + 8 vec4 params + 8 vec4 spotDir
+    // = 32 floats × 4 bytes = 512 bytes total
     const ayt::render::SceneLights* sceneLights = ctx.sceneLights;
     const bool useMulti = (sceneLights != nullptr) && (sceneLights->count > 0u);
 
@@ -683,89 +879,145 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         for (uint32_t i = 0; i < n && i < ayt::render::kMaxSceneLights; ++i) {
             const ayt::render::Light& L = sceneLights->lights[i];
             // dirs[i] (16-byte vec4) — per LightType CPU-side split.
-            // A: only Directional reaches here; the Point/Spot
-            // branches land at zero CPU cost (the conditionals are
-            // mapped by the compiler to the right branch since `type`
-            // is a POD enum; emit-once-compile choice below).
+            // xyz + .w = float(LightType). Point/Spot branches land
+            // at zero CPU cost (the switch is a jump table).
+            float lightVecX = 0.0f, lightVecY = 0.0f, lightVecZ = 0.0f;
+            float paramRange = 0.0f, paramIntensity = 1.0f;
+            float paramConeInner = 0.0f, paramConeOuter = 0.0f;
+            float spotDirX = 0.0f, spotDirY = -1.0f, spotDirZ = 0.0f;
             switch (L.type) {
             case ayt::render::LightType::Directional:
                 // Negate FrameContext convention.
-                lightsBlock[i * 4 + 0] = -L.direction.x;
-                lightsBlock[i * 4 + 1] = -L.direction.y;
-                lightsBlock[i * 4 + 2] = -L.direction.z;
-                lightsBlock[i * 4 + 3] =
-                    static_cast<float>(ayt::render::LightType::Directional);
+                lightVecX = -L.direction.x;
+                lightVecY = -L.direction.y;
+                lightVecZ = -L.direction.z;
+                // params[] + spotDir[] stay at default — Directional
+                // branch never reads them.
                 break;
             case ayt::render::LightType::Point:
-                lightsBlock[i * 4 + 0] =  L.position.x;
-                lightsBlock[i * 4 + 1] =  L.position.y;
-                lightsBlock[i * 4 + 2] =  L.position.z;
-                lightsBlock[i * 4 + 3] =
-                    static_cast<float>(ayt::render::LightType::Point);
+                lightVecX = L.position.x;
+                lightVecY = L.position.y;
+                lightVecZ = L.position.z;
+                paramRange    = L.range;
+                paramIntensity = L.intensity;
+                // spotDir[] stays at default — Point branch never reads it.
                 break;
             case ayt::render::LightType::Spot:
-                lightsBlock[i * 4 + 0] =  L.position.x;
-                lightsBlock[i * 4 + 1] =  L.position.y;
-                lightsBlock[i * 4 + 2] =  L.position.z;
-                lightsBlock[i * 4 + 3] =
-                    static_cast<float>(ayt::render::LightType::Spot);
+                lightVecX = L.position.x;
+                lightVecY = L.position.y;
+                lightVecZ = L.position.z;
+                paramRange     = L.range;
+                paramIntensity = L.intensity;
+                paramConeInner = L.coneCosInner;
+                paramConeOuter = L.coneCosOuter;
+                spotDirX = L.spotDirection.x;
+                spotDirY = L.spotDirection.y;
+                spotDirZ = L.spotDirection.z;
                 break;
             }
-            // colors[i] (16-byte vec4) — same for all light types today
+            // dirs[i] (16-byte vec4) — xyz + float(LightType).
+            lightsBlock[i * 4 + 0] = lightVecX;
+            lightsBlock[i * 4 + 1] = lightVecY;
+            lightsBlock[i * 4 + 2] = lightVecZ;
+            lightsBlock[i * 4 + 3] =
+                static_cast<float>(L.type);
+            // colors[i] (16-byte vec4) — same for all light types.
             lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 0] = L.color.x;
             lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 1] = L.color.y;
             lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 2] = L.color.z;
             lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 3] = 0.0f;
+            // params[i] (16-byte vec4) — B: per-light (range, intensity,
+            // coneCosInner, coneCosOuter). Directional leaves them at
+            // (0, 1, 0, 0) — the FS Directional branch never reads this
+            // array, but the upload is unconditional so any stray FS
+            // code that does (e.g. debug viz) sees the right values.
+            lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 0] = paramRange;
+            lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 1] = paramIntensity;
+            lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 2] = paramConeInner;
+            lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 3] = paramConeOuter;
+            // spotDir[i] (16-byte vec4) — B: Spot direction (xyz) + 0
+            // padding. Directional/Point leave (0, -1, 0, 0) default
+            // (their FS branches never read this array).
+            lightsBlock[(ayt::render::kMaxSceneLights * 3 + i) * 4 + 0] = spotDirX;
+            lightsBlock[(ayt::render::kMaxSceneLights * 3 + i) * 4 + 1] = spotDirY;
+            lightsBlock[(ayt::render::kMaxSceneLights * 3 + i) * 4 + 2] = spotDirZ;
+            lightsBlock[(ayt::render::kMaxSceneLights * 3 + i) * 4 + 3] = 0.0f;
         }
     } else {
         // B5 single-light fallback mirrors the FrameContext values
-        // into lights[0]. The remaining 7 slots stay zero.
-        // B5.5 forwards FF -> user `vec4 record[0].w = 0.0` for the
-        // directional default.
+        // into dirs[0] + colors[0]. The remaining 7 slots stay zero.
+        // B widens the layout to 4 arrays but the fallback only writes
+        // the first 2 (params + spotDir stay zero — Directional branch
+        // never reads them, and the legacy single-light contract is
+        // preserved byte-for-byte at the first 32 bytes of lightsBlock).
         lightsBlock[0] = -frame.lightDirection.x;
         lightsBlock[1] = -frame.lightDirection.y;
         lightsBlock[2] = -frame.lightDirection.z;
-        lightsBlock[3] = 0.0f;
+        lightsBlock[3] = 0.0f;  // w = float(LightType::Directional) = 0
         lightsBlock[ayt::render::kMaxSceneLights * 4 + 0] = frame.lightColor.x;
         lightsBlock[ayt::render::kMaxSceneLights * 4 + 1] = frame.lightColor.y;
         lightsBlock[ayt::render::kMaxSceneLights * 4 + 2] = frame.lightColor.z;
         lightsBlock[ayt::render::kMaxSceneLights * 4 + 3] = 0.0f;
     }
 
+    // §P5.5 B (2026-07-23) — force single field-split upload path,
+    // REMOVE the setUniformBlock fallback. Reasoning (cutsheet §P5.5 B
+    // dual-path decision):
+    //   - A's dual-path was a workaround when the UBO field rename
+    //     `dirs→record` broke HLSL/bgfx uniform wiring. Field-split
+    //     (`setUniform` per vec4 array) is the path that's actually
+    //     stable today.
+    //   - B adds 2 more vec4 arrays (`params[8]` + `spotDir[8]`); a
+    //     dual-path on 4 arrays would explode to 2^4 = 16 combinations.
+    //   - When to migrate to setUniformBlock: post-B ship, on D3D
+    //     3-run validate, then a future cut can collapse.
+    //
+    // 4 setUniform calls (one per array), all 128 bytes each.
+    // Logged-once message confirms we're on the B field-split path.
     // §P5.5 A — field name stays `dirs` (xyz = light vector, w = type).
     // Do NOT rename to `record` — that broke HLSL/bgfx uniform wiring.
-    const shader::BindingId dirsBinding = _program.getUniformBinding("dirs");
+    const shader::BindingId dirsBinding   = _program.getUniformBinding("dirs");
     const shader::BindingId colorsBinding = _program.getUniformBinding("colors");
-    if (dirsBinding != shader::InvalidBinding
-        && colorsBinding != shader::InvalidBinding) {
-        // HLSL field-split path: `uniform vec4 dirs[8]` + `colors[8]`.
+    const shader::BindingId paramsBinding = _program.getUniformBinding("params");
+    const shader::BindingId spotDirBinding = _program.getUniformBinding("spotDir");
+    if (dirsBinding   != shader::InvalidBinding
+        && colorsBinding != shader::InvalidBinding
+        && paramsBinding != shader::InvalidBinding
+        && spotDirBinding != shader::InvalidBinding) {
+        // §P5.5 B (2026-07-23) — field-split path: 4 separate
+        // `setUniform` calls, each writing one vec4 array.
+        _program.setUniform(dirsBinding,   lightsBlock,
+                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
+        _program.setUniform(colorsBinding,
+                            lightsBlock + ayt::render::kMaxSceneLights * 4u,
+                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
+        _program.setUniform(paramsBinding,
+                            lightsBlock + ayt::render::kMaxSceneLights * 8u,
+                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
+        _program.setUniform(spotDirBinding,
+                            lightsBlock + ayt::render::kMaxSceneLights * 12u,
+                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
         static bool s_loggedSplit = false;
         if (!s_loggedSplit) {
             s_loggedSplit = true;
             std::fprintf(stderr,
                          "[LightingPass] lights via field uniforms "
-                         "dirs+colors (HLSL/bgfx)\n");
+                         "dirs+colors+params+spotDir (HLSL/bgfx, "
+                         "§P5.5 B field-split path)\n");
         }
-        _program.setUniform(dirsBinding, lightsBlock,
-                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
-        _program.setUniform(colorsBinding,
-                            lightsBlock + ayt::render::kMaxSceneLights * 4u,
-                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
     } else {
-        const shader::BindingId lightsUboBinding =
-            _program.getUniformBlockBinding("Lights");
-        if (lightsUboBinding != shader::InvalidBinding) {
-            _program.setUniformBlock(lightsUboBinding,
-                                     lightsBlock,
-                                     sizeof(lightsBlock));
-        } else {
-            static bool s_loggedMissing = false;
-            if (!s_loggedMissing) {
-                s_loggedMissing = true;
-                std::fprintf(stderr,
-                             "[LightingPass] WARNING: no dirs/colors uniforms "
-                             "and no Lights UBO — directional lighting skipped\n");
-            }
+        // ABORT: the program should have all 4 arrays — Phoskia
+        // §P5.5 B source declares them as top-level uniformblock
+        // fields. If any binding is missing, the cache key was bumped
+        // without updating the Phoskia source (or vice versa). Loud
+        // fail so we don't silently ship a black image.
+        static bool s_loggedMissing = false;
+        if (!s_loggedMissing) {
+            s_loggedMissing = true;
+            std::fprintf(stderr,
+                         "[LightingPass] FATAL: missing one of "
+                         "dirs/colors/params/spotDir uniforms — "
+                         "check Phoskia source vs cache-key bump\n");
         }
     }
 

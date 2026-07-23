@@ -79,6 +79,7 @@ using ayt::render::detail::GBufferPass;
 using ayt::render::detail::GpuMaterial;
 using ayt::render::detail::GpuMesh;
 using ayt::render::detail::GpuTexture;
+using ayt::render::detail::kLightingCacheKeyCStr;
 using ayt::render::detail::LightingPass;
 using ayt::render::detail::PassExecContext;
 using ayt::render::detail::RenderPipeline;
@@ -94,8 +95,14 @@ namespace {
 // key + build stamp + expected source substrings. Drift between
 // LightingPass.cpp's literals and these mirrors = test fails.
 // Same pattern as Test_B4c_MotionVector.cpp kExpectedGBufferCacheKey.
+//
+// §P5.5 B (2026-07-23) — Bug fix #3: `kLightingCacheKey` was a
+// `.cpp` static pre-B, so the only way to compare was self-compare
+// (mirror == mirror), which is a no-op. B externalizes the live
+// key via `kLightingCacheKeyCStr` in LightingPass.h, so this test
+// compares the mirror against the live key — drift now fails.
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v3_b5_hlsl_vec_ctors";
+    "lighting_v21_p5p5b_point_spot_atten_cone";
 inline constexpr const char* kExpectedLightingBuildStamp =
     "b5-2026-07-22";
 
@@ -109,31 +116,49 @@ inline const char* kExpectedSourceSubstrings[] = {
     "sample(gbufferAlbedo, baseUv)",
     "sample(gbufferNormal, baseUv)",
     "let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)",  // HLSL-safe
-    "let NdotL = max(dot(N, L), 0.0)",            // Lambert dot
+    "let NdotDir0  = max(dot(N, Ld0), 0.0)",      // §P5.5 B: per-type NdotL (2-space `=`)
+    "let NdotPos0  = max(dot(N, Lp0), 0.0)",
     "let ambient = vec3(0.1, 0.1, 0.1)",          // HLSL-safe ambient
-    "return vec4(lit, albedo.a)",                 // single-output
+    "return vec4(mix(skyColor, lit, coverage), albedo.a)",  // §Skybox0 backdrop blend
 };
 
-// Forbidden substrings — pins "no MRT (no `out ... : color`)" and
-// "no shadow terms (B5.5 boundary)".
+// Forbidden substrings — pins "no MRT (no `out ... : color`)".
+// `shadowMap` is no longer forbidden — B5.5+ shadow consumption is
+// in scope (Test_B5p5 covers the actual shadow contract).
 inline const char* kForbiddenSourceSubstrings[] = {
     "out gbuffer",        // B5 is single-output (legacy return), NOT MRT
-    "shadowMap",          // B5 boundary: shadow terms → B5.5
 };
 
-// Mirror of kLightingPhoskiaSource at LightingPass.cpp:80-115.
-// Kept in sync by code review (string-search contract pinned by
-// the substring tests above).
+// Mirror of kLightingPhoskiaSource at LightingPass.cpp (the
+// §P5.5 B-bumped variant — 4-array Lights UBO + per-type branches).
+// Simplified to the contract-critical lines (the full source has
+// 8 unrolled per-type branches; mirror shows one Directional + one
+// Point + one Spot branch shape to keep size manageable while still
+// pinning the shape).
 std::string mirrorLightingPhoskiaSource()
 {
     return std::string(R"(
+uniformblock Lights {
+    vec4 dirs[8]
+    vec4 colors[8]
+    vec4 params[8]
+    vec4 spotDir[8]
+} binding 0
 material Lighting {
     texture2d gbufferAlbedo
     texture2d gbufferNormal
     texture2d gbufferMotion
+    texture2d shadowMap
+    texture2d gbufferSky
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
+    uniform mat4 u_lightViewProj
+    uniform vec4 shadowBias
+    uniform vec4 shadowMapTexel
+    uniform vec4 shadowPcf
+    uniform vec4 skyMix
+    property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -145,11 +170,32 @@ material Lighting {
         let albedo = sample(gbufferAlbedo, baseUv)
         let normalSample = sample(gbufferNormal, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
-        let L = normalize(u_lightDirection.xyz)
-        let NdotL = max(dot(N, L), 0.0)
         let ambient = vec3(0.1, 0.1, 0.1)
-        let lit = albedo.rgb * (ambient + NdotL * u_lightColor.xyz)
-        return vec4(lit, albedo.a)
+        let worldPos = sample(gbufferMotion, baseUv).xyz
+        let Ld0 = Lights.dirs[0].xyz * (1.0 / max(length(Lights.dirs[0].xyz), 0.0001))
+        let toL0 = Lights.dirs[0].xyz - worldPos
+        let d0 = length(toL0)
+        let Lp0 = toL0 * (1.0 / max(d0, 0.0001))
+        let sdn0 = Lights.spotDir[0].xyz * (1.0 / max(length(Lights.spotDir[0].xyz), 0.0001))
+        let cosT0 = dot(Lp0, sdn0)
+        let cone0 = smoothstep(Lights.params[0].w, Lights.params[0].z, cosT0)
+        let falloff0 = 1.0 - smoothstep(0.0, Lights.params[0].x, d0)
+        let attenPoint0 = Lights.params[0].y * falloff0 / max(d0 * d0, 0.01)
+        let attenSpot0  = Lights.params[0].y * falloff0 * cone0 / max(d0 * d0, 0.01)
+        let NdotDir0  = max(dot(N, Ld0), 0.0)
+        let NdotPos0  = max(dot(N, Lp0), 0.0)
+        let dirPart0 = NdotDir0 * Lights.colors[0].xyz
+        let pointPart0 = NdotPos0 * attenPoint0 * Lights.colors[0].xyz
+        let spotPart0 = NdotPos0 * attenSpot0 * Lights.colors[0].xyz
+        let isDir0 = 1.0 - step(0.5, Lights.dirs[0].w)
+        let isPoint0 = step(0.5, Lights.dirs[0].w) - step(1.5, Lights.dirs[0].w)
+        let isSpot0 = step(1.5, Lights.dirs[0].w)
+        let keyContrib = dirPart0 * isDir0 + pointPart0 * isPoint0 + spotPart0 * isSpot0
+        let directionalSum = keyContrib
+        let lit = albedo.rgb * (ambient + directionalSum)
+        let skyColor = sample(gbufferSky, baseUv).xyz * skyMix.x
+        let coverage = step(0.001, max(max(lit.r, lit.g), lit.b))
+        return vec4(mix(skyColor, lit, coverage), albedo.a)
     }
 }
 )");
@@ -234,13 +280,16 @@ TEST_CASE(b5_lighting_pass_is_ready_requires_both_fbo_and_program) {
 }
 
 TEST_CASE(b5_lighting_cache_key_and_build_stamp_pinned) {
-    // B5.3 + B5.6 — Cache-key + build-stamp first lock.
-    //   kLightingCacheKey   = "lighting_v3_b5_hlsl_vec_ctors"
-    //   kLightingBuildStamp = "b5-2026-07-22"
-    // Drift between LightingPass.cpp literals and these mirrors =
-    // test fails. Same pattern as Test_B4c_MotionVector.cpp.3/6.
+    // B5.3 + B5.6 + §P5.5 B (2026-07-23) — Cache-key + build-stamp
+    // pin. Pre-B this asserted "mine == mine" (false green — the
+    // literal lived in a `.cpp` static so the mirror could only
+    // self-compare). B externalized the live cache-key via
+    // `kLightingCacheKeyCStr` in LightingPass.h, so the mirror now
+    // must match the live literal or this test fails.
+    //   kLightingCacheKey (live) = "lighting_v21_p5p5b_point_spot_atten_cone"
+    //   kLightingBuildStamp      = "b5-2026-07-22"
     CHECK(std::string(kExpectedLightingCacheKey)
-          == std::string("lighting_v3_b5_hlsl_vec_ctors"));
+          == std::string(kLightingCacheKeyCStr));
     CHECK(std::string(kExpectedLightingBuildStamp)
           == std::string("b5-2026-07-22"));
 
@@ -251,6 +300,7 @@ TEST_CASE(b5_lighting_cache_key_and_build_stamp_pinned) {
     // same key is a cache hit; bumping the literal forces a
     // rebuild. Length sanity:
     CHECK(std::string(kExpectedLightingCacheKey).size() >= 10u);
+    CHECK(std::string(kLightingCacheKeyCStr).size() >= 10u);
 }
 
 TEST_CASE(b5_phoskia_lighting_source_contract) {

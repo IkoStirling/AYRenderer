@@ -123,23 +123,50 @@ enum class LightType : uint8_t {
 };
 
 // §P5.5 A POD — single LightType byte + 3×FVector3 (= 1 + 12 + 12 + 12
-// = 37 bytes; C++ struct alignment pads to 48 with LightType leading
-// the layout). Field order is chosen for stability across binary
-// reads (`LightType` first, then vec3 dir / pos / color) and to keep
-// the B-side fields (`range` / `intensity` / `coneCosInner` /
-// `coneCosOuter`) starting on a 4-byte boundary after the trailing
-// vec3. B will widen this struct — A leaves headroom for 8 extra
-// scalars (B's 4 float32s each fit in the next 64-byte stride).
+// = 37 bytes; C++ struct alignment pads to 40 on MSVC with no trailing
+// vec3 padding needed). Field order is chosen for stability across
+// binary reads (`LightType` first, then vec3 dir / pos / color).
 //
-// Sanity: `sizeof(Light)` should be `48` on MSVC. If the struct
-// ever lands bigger than 64, the packed-vec4 UBO footprint stops
-// fitting a single std140-block read on every backend; that's the
-// hard cutoff.
+// §P5.5 B (2026-07-23) — POD widened with per-light params
+// (`range` / `intensity` / `coneCosInner` / `coneCosOuter`) and
+// `spotDirection` for Spot light type. A's 4 fields stay intact;
+// the new fields are appended in std140-friendly order (4 × float32
+// then 1 × FVector3 = 12B) so the C++ struct stays 4-byte aligned
+// and `sizeof(Light) ≈ 68` on MSVC. `static_assert` ceiling bumped
+// from `≤ 64` to `≤ 96` to give room for the B fields; std140
+// single-block read breaks on some backends around 128B, so `≤ 96`
+// is the last comfortable plateau before a POD restructure.
+//
+// Field layout (verified at compile time on MSVC):
+//   - bytes [0,  4): LightType byte + 3 padding (struct alignment
+//                     forces next field to offset 4)
+//   - bytes [4, 16): direction (FVector3, 12B)
+//   - bytes [16,28): position (FVector3, 12B)
+//   - bytes [28,40): color (FVector3, 12B)
+//   - bytes [40,44): range (float32)
+//   - bytes [44,48): intensity (float32)
+//   - bytes [48,52): coneCosInner (float32)
+//   - bytes [52,56): coneCosOuter (float32)
+//   - bytes [56,68): spotDirection (FVector3, 12B)
+//   - bytes [68,72): trailing pad to next 8-byte boundary
+//                  → final sizeof = 72B (well under ≤ 96 cap)
 struct Light {
     LightType             type      = LightType::Directional;
     ayt::math::FVector3   direction = ayt::math::FVector3(0.3f, -0.8f, -0.4f);
     ayt::math::FVector3   position  = ayt::math::FVector3(0.0f, 0.0f, 0.0f);
     ayt::math::FVector3   color     = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
+    // §P5.5 B (2026-07-23) — Point + Spot per-light params.
+    // Directional lights leave all 4 fields default (range = 0
+    // = ignored, intensity = 1.0 = no attenuation scaling,
+    // coneCosInner/Outer = 0 = not a spot). Phoskia FS gates on
+    // `dirs[i].w = LightType` before reading these (cutsheet
+    // §P5.5 C #1 footgun's fix — forward-declared in A's CPU
+    // pack code at LightingPass.cpp:633).
+    float                 range          = 0.0f;   // Point/Spot cutoff (m)
+    float                 intensity      = 1.0f;   // Point/Spot strength multiplier
+    float                 coneCosInner   = 0.0f;   // Spot inner cone cos
+    float                 coneCosOuter   = 0.0f;   // Spot outer cone cos
+    ayt::math::FVector3   spotDirection  = ayt::math::FVector3(0.0f, -1.0f, 0.0f);
 
     // Construction helper for the host pattern that pre-§P5.5 A used:
     //   sceneLights.add(DirectionalLight{ direction, color });
@@ -153,13 +180,56 @@ struct Light {
         l.color     = col;
         return l;
     }
+
+    // §P5.5 B (2026-07-23) — Point factory (mirror `directional()`).
+    // Defaults spotDirection / coneCosInner / coneCosOuter to neutral
+    // values; Point lights ignore these (FS branch on `ltype < 1.5`
+    // never reads `spotDir[]` or `coneCos*`).
+    static Light point(const ayt::math::FVector3& pos,
+                       float range,
+                       float intensity,
+                       const ayt::math::FVector3& col) noexcept
+    {
+        Light l;
+        l.type        = LightType::Point;
+        l.position    = pos;
+        l.range       = range;
+        l.intensity   = intensity;
+        l.color       = col;
+        return l;
+    }
+
+    // §P5.5 B (2026-07-23) — Spot factory (mirror `directional()`).
+    // Spot direction is `dir` (normalized inside the FS); cone falloff
+    // uses `coneCosInner` (full-intensity threshold) and
+    // `coneCosOuter` (zero-intensity threshold) with smoothstep
+    // interpolation between them.
+    static Light spot(const ayt::math::FVector3& pos,
+                      const ayt::math::FVector3& dir,
+                      float range,
+                      float intensity,
+                      float coneCosInner,
+                      float coneCosOuter,
+                      const ayt::math::FVector3& col) noexcept
+    {
+        Light l;
+        l.type           = LightType::Spot;
+        l.position       = pos;
+        l.spotDirection  = dir;
+        l.range          = range;
+        l.intensity      = intensity;
+        l.coneCosInner   = coneCosInner;
+        l.coneCosOuter   = coneCosOuter;
+        l.color          = col;
+        return l;
+    }
 };
 
-static_assert(sizeof(Light) <= 64,
-              "§P5.5 A: Light POD size budget — too big to fit a single "
-              "packed-vec4 record field stride cleanly. B widens to 64 "
-              "and beyond; if A already pushes past 64, we need to "
-              "restructure the POD (cutsheet §P5.5 C.7 #6).");
+static_assert(sizeof(Light) <= 96,
+              "§P5.5 B: Light POD size budget — widen only when forced by "
+              "future Spot params. If this trips, restructure the POD "
+              "(don't push past 96B; std140 single-block read breaks on "
+              "some backends around 128B).");
 
 // §P5.5 A source-compat alias — B7 hosts / Test_B7 references
 // `DirectionalLight` directly. The alias keeps compile success

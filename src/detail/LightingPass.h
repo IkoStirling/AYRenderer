@@ -174,4 +174,18 @@ private:
     bool _programAcquireFailed = false;  // mirror GBufferPass _acquireFailed
 };
 
+// §P5.5 B (2026-07-23) — Bug fix #3: externalize the cache-key
+// literal so unit tests can include this header and compare their
+// mirror string against the live literal. Pre-B, kLightingCacheKey
+// was a `.cpp` static (not addressable from outside), so tests
+// fell back to string self-comparison ("mine == mine") and the
+// drift detection was a no-op (false green — Test_B5 had been
+// drifting silently since B7). The extern declaration here gives
+// every test a single source of truth; drift = test fails immediately.
+//
+// Naming: `kLightingCacheKeyCStr` (CStr suffix = "raw C-string"
+// per the AY naming rules). The actual string literal lives in
+// LightingPass.cpp as the canonical definition.
+extern const char* const kLightingCacheKeyCStr;
+
 } // namespace ayt::render::detail
