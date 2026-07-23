@@ -98,6 +98,8 @@ using ayt::render::detail::GpuMaterial;
 using ayt::render::detail::GpuMesh;
 using ayt::render::detail::GpuTexture;
 using ayt::render::detail::GBufferPass;
+using ayt::render::detail::kGBufferBuildStampCStr;
+using ayt::render::detail::kGBufferCacheKeyCStr;
 using ayt::render::detail::LightingPass;
 using ayt::render::detail::PassExecContext;
 using ayt::render::detail::RenderPipeline;
@@ -120,6 +122,7 @@ namespace {
 // (one side bumped, the other not) the test catches it. This is
 // the standard "golden value" pattern Test_BGFXConverter uses for
 // the builtin names.
+// Live pins (GBufferPass.h externs) — never self-compare a local mirror.
 inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v7_worldpos_rgba16f";
 inline constexpr const char* kExpectedGBufferBuildStamp = "b5p5-2026-07-23-rgba16f-rt2";
 
@@ -308,25 +311,17 @@ TEST_CASE(b4c_gbuffer_pass_default_identity_prev) {
 }
 
 TEST_CASE(b4c_gbuffer_cache_key_bumped_for_motion_cut) {
-    // HR-literal-pin: kGBufferCacheKey =
-    // `gbuffer_fill_v5_albedo_times_base`. The static
-    // `s_acquiredCacheKey` guard inside ensureProgram uses
-    // pointer-equal compare (Issue 1 fix) so any drift between
-    // the source and the mirror would fail compilation or
-    // silently reuse the old program.
-    //
-    // The literal lives in a TU-scope constexpr in GBufferPass.cpp;
-    // we mirror it here and assert equality. This is the same
-    // pattern Test_B4_GBufferRealDraw uses for cache-key semantics
-    // — no `CHECK(true)` antipattern, the assertion pins the
-    // string content.
-    CHECK(std::string(CacheKeyMirror::value())
+    // HR-literal-pin: live export must match golden expected string.
+    // Self-compare of a local mirror is forbidden (acceptance contract).
+    CHECK(std::string(kGBufferCacheKeyCStr)
           == std::string(kExpectedGBufferCacheKey));
+    CHECK(std::string(CacheKeyMirror::value())
+          == std::string(kGBufferCacheKeyCStr));
     // Sanity: the new key differs from the old key.
-    CHECK(std::string(kExpectedGBufferCacheKey)
+    CHECK(std::string(kGBufferCacheKeyCStr)
           != std::string("gbuffer_fill_v1_b4b_mrt3"));
     // Length sanity (>= 10 — concrete cache key tokens).
-    CHECK(std::string(kExpectedGBufferCacheKey).size() >= 10u);
+    CHECK(std::string(kGBufferCacheKeyCStr).size() >= 10u);
 }
 
 TEST_CASE(b4c_phoskia_gbuffer_source_motion_contract) {
@@ -409,10 +404,10 @@ TEST_CASE(b4c_shader_resource_program_uniform_path) {
 TEST_CASE(b4c_gbuffer_build_stamp_worldpos_rgba16f) {
     // Deferred-shadow cut bumps the stamp so createGbufferFrameBuffer
     // rebuilds with RT2 = RGBA16F (was RGBA8 motion).
-    CHECK(std::string(kExpectedGBufferBuildStamp)
-          == std::string("b5p5-2026-07-23-rgba16f-rt2"));
-    CHECK(std::string(kExpectedGBufferCacheKey)
-          == std::string("gbuffer_fill_v7_worldpos_rgba16f"));
+    CHECK(std::string(kGBufferBuildStampCStr)
+          == std::string(kExpectedGBufferBuildStamp));
+    CHECK(std::string(kGBufferCacheKeyCStr)
+          == std::string(kExpectedGBufferCacheKey));
 
     GBufferPass pass;
     CHECK(pass.buildStamp()[0] == '\0');

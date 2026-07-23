@@ -65,6 +65,8 @@ material GBufferFill {
 
 // Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
 static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v7_worldpos_rgba16f";
+const char* const kGBufferCacheKeyCStr = kGBufferCacheKey;
+const char* const kGBufferBuildStampCStr = kGBufferBuildStamp;
 
 GBufferPass::~GBufferPass() = default;
 

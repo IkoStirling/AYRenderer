@@ -113,6 +113,12 @@ public:
     // (GBufferPass.cpp:240-266) — drops the FBO + fullscreen VB/IB
     // + program handle, resets all state.
     void setOutputSize(uint16_t width, uint16_t height) noexcept;
+
+    // §P5.5 D — IBL ambient cube strength (uploaded as ambientStrength.x).
+    void setAmbientStrength(float strength) noexcept {
+        _ambientStrength = strength;
+    }
+    float ambientStrength() const noexcept { return _ambientStrength; }
     void destroyResources(BGFXAdapter& adapter);
 
     // §P5 B5 (2026-07-22) — lazy Phoskia Lighting VS/FS acquire.
@@ -186,6 +192,10 @@ private:
     ayt::shader::BindingId _tEnvCube         = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uCubeActive      = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uAmbientStrength = ayt::shader::InvalidBinding;
+
+    // §P5.5 D — IBL ambient cube strength (.x of ambientStrength vec4).
+    // Host: Renderer::setAmbientStrength → per-frame broadcast in render().
+    float _ambientStrength = 0.6f;
 };
 
 // §P5.5 B (2026-07-23) — Bug fix #3: externalize the cache-key

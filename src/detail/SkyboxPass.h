@@ -121,11 +121,10 @@ public:
     bool hasCubeTexture() const noexcept {
         return _skyCubeTexture.isValid();
     }
-    // Combined predicate: cube handle valid AND host wants CubeMap
-    // kind. SkyboxPass::execute and LightingPass::execute both call
-    // this with the same arg; the resulting bool drives both FS
-    // branches (SkyboxPass skyKind upload + LightingPass cubeActive
-    // upload) so they can never disagree per frame.
+    // Combined predicate for **Skybox backdrop** CubeMap path:
+    // cube handle valid AND host kind == CubeMap. Drives skyKind.
+    // IBL ambient uses hasCubeTexture() alone (equirect backdrop +
+    // envCube can coexist — Editor default).
     bool hasCubeActive(ayt::render::SkySourceKind kind) const noexcept {
         return _skyCubeTexture.isValid()
             && kind == ayt::render::SkySourceKind::CubeMap;

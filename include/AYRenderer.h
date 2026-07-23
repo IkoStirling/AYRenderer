@@ -199,6 +199,11 @@ public:
     void setSkySourceCube(TextureHandle cube);
     TextureHandle skySourceCube() const noexcept;
 
+    // §P5.5 D — IBL ambient cube strength (LightingPass ambientStrength.x).
+    // Default 0.6; Editor acceptance uses ~0.85 for visible env tint.
+    void  setAmbientStrength(float strength);
+    float ambientStrength() const noexcept;
+
     // Quality / style knobs (safe to call after initialize).
     // msaa: 0=off, 2/4/8/16. Applies via bgfx::reset (backbuffer).
     void setMsaaSampleCount(uint32_t samples);

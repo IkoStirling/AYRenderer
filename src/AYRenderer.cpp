@@ -258,6 +258,8 @@ struct Renderer::Impl {
     float                          postProcessBloomStrength  = 0.0f;
     float                          postProcessExposure       = 1.0f;
     float                          postProcessGamma          = 2.2f;
+    // §P5.5 D — IBL ambient cube strength (.x uploaded as vec4).
+    float                          ambientStrength           = 0.6f;
     detail::FrameContext::TonemapMode postProcessTonemapMode = detail::FrameContext::TonemapMode::None;
 
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias in ndc01
@@ -663,11 +665,13 @@ void Renderer::render(const RenderScene& scene)
     // when Lighting isn't in the configured pipeline (Forward path)
     // — cutsheet §4.1 red line #4.
     if (detail::RenderPass* lightingSlot = _impl->pipeline.findPass("Lighting")) {
+        auto* lighting = static_cast<detail::LightingPass*>(lightingSlot);
         if (_impl->viewportW > 0 && _impl->viewportH > 0) {
-            static_cast<detail::LightingPass*>(lightingSlot)
-                ->setOutputSize(static_cast<uint16_t>(_impl->viewportW),
-                                static_cast<uint16_t>(_impl->viewportH));
+            lighting->setOutputSize(static_cast<uint16_t>(_impl->viewportW),
+                                    static_cast<uint16_t>(_impl->viewportH));
         }
+        // §P5.5 D — host IBL ambient knob (survives configurePipeline).
+        lighting->setAmbientStrength(_impl->ambientStrength);
     }
 
     // §Skybox0 (2026-07-23) — broadcast viewport size to SkyboxPass
@@ -1234,6 +1238,25 @@ void Renderer::setSkySourceCube(ayt::render::TextureHandle cube)
 ayt::render::TextureHandle Renderer::skySourceCube() const noexcept
 {
     return _impl ? _impl->skyCubeTexture : ayt::render::TextureHandle{};
+}
+
+void Renderer::setAmbientStrength(float strength)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->ambientStrength = strength;
+    // Eager push when Lighting is mounted; render() also broadcasts
+    // so configurePipeline recreation cannot drop the host knob.
+    if (detail::RenderPass* lightingSlot = _impl->pipeline.findPass("Lighting")) {
+        static_cast<detail::LightingPass*>(lightingSlot)
+            ->setAmbientStrength(strength);
+    }
+}
+
+float Renderer::ambientStrength() const noexcept
+{
+    return _impl ? _impl->ambientStrength : 0.6f;
 }
 
 void Renderer::setMsaaSampleCount(uint32_t samples)

@@ -812,29 +812,15 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     }
 
     // §P5.5 D (2026-07-23) — IBL MVP cube path: bind envCube
-    // sampler + upload cubeActive / ambientStrength uniforms. The
-    // cube handle is read from the SkyboxPass producer state
-    // (ctx.skyboxPass->cubeTexture()) — same producer-state
-    // pattern as the SkyboxPass owns the FBO. The `cubeActive`
-    // gate is the same predicate SkyboxPass::execute uses for
-    // `skyKind` — hard rule: cube valid + CubeMap kind ⇒ cube
-    // path wins; otherwise equirect / pre-D flat ambient (never
-    // "each draws half").
-    //
-    // cubeActive=0 (host never called setSkySourceCube OR
-    // SkySource::kind != CubeMap OR no SkyboxPass slot mounted)
-    // ⇒ FS `ambientCube * cubeActive` contributes 0 ⇒ byte-
-    // equivalent pre-D flat ambient. cubeActive=1 ⇒ FS evaluates
-    // `sample(envCube, N) * ambientStrength` for normal-driven
-    // diffuse.
+    // sampler + upload cubeActive / ambientStrength uniforms.
+    // cube handle comes from SkyboxPass producer state
+    // (setSkySourceCube). IBL is independent of SkySource::kind:
+    // equirect can remain the backdrop (skyKind=0) while envCube
+    // still feeds ambientCube. cubeActive=0 only when no cube
+    // handle / no SkyboxPass / texture missing from ctx.textures.
     bool cubeActive = false;
     if (ctx.skyboxPass != nullptr
-        && ctx.skySource != nullptr
-        && ctx.skyboxPass->hasCubeActive(ctx.skySource->kind)) {
-        // Bind the cube sampler to the cube handle's underlying
-        // bgfx::TextureHandle via ctx.textures (mirror equirect
-        // / sky lookup; the cube handle is a TextureHandle
-        // resource, same lifetime contract).
+        && ctx.skyboxPass->hasCubeTexture()) {
         const auto cubeIt = ctx.textures.find(
             ctx.skyboxPass->cubeTexture().id);
         if (cubeIt != ctx.textures.end()
@@ -882,7 +868,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     const shader::BindingId ambientStrengthBinding =
         _program.getUniformBinding("ambientStrength");
     if (ambientStrengthBinding != shader::InvalidBinding) {
-        const float ambientStrengthPad[4] = { 0.6f, 0.0f, 0.0f, 0.0f };
+        const float ambientStrengthPad[4] = { _ambientStrength, 0.0f, 0.0f, 0.0f };
         _program.setUniform(ambientStrengthBinding, ambientStrengthPad,
                             sizeof(ambientStrengthPad));
     }
