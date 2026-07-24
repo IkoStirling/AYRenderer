@@ -2,6 +2,7 @@
 
 #include "detail/BloomBlurPass.h"  // §S1c (2026-07-23) — PongFbo access
 #include "detail/DepthHazePass.h"  // §S4c (2026-07-23) — halfResFbo() access
+#include "detail/FgResource.h"    // §F5 (2026-07-24) — BloomSource / HazeSource semantic
 #include "detail/GpuResources.h"
 #include "detail/GBufferPass.h"
 #include "detail/LightingPass.h"
@@ -330,22 +331,28 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
 
     const ayt::shader::TextureHandle texHandle =
         ayt::render::detail::toShaderTexture(fboColor);
-    // §S1c (2026-07-23) — second sampler (bloomTexture). Bound to
-    // ctx.bloomBlurPass->pongFbo() RT0 when the producer is mounted
-    // AND its pongFbo is valid (first-frame race → pongFbo invalid
-    // ⇒ we bind sceneColor as a no-op fallback so the FS branchless
-    // composite collapses to `raw * (1 + 0) = raw`). When the
-    // producer is absent entirely (custom desc omits BloomBlur),
-    // bind sceneColor to the bloom slot too — same byte-equivalent
-    // result, no GLSL sampler-not-set warning. S1c K3 invariant #1.
+    // §F5 (2026-07-24, mid-term FG MVP sub-cut 5) — second sampler
+    // (bloomTexture). Read via `ctx.frameGraph->resolveSemantic(
+    // FgSemantic::BloomSource)`, replacing the pre-F5
+    // `ctx.bloomBlurPass->pongFbo()` producer-pointer pattern. The
+    // FG's semantic layer is the single source of truth for which
+    // physical RT feeds the bloom sampler; render() central wiring
+    // resolves BloomSource → BloomBlurB (when bloomEnabled) →
+    // invalid fallback to sceneColor. Falls back to sceneColor
+    // (sentinel) when the semantic physical is invalid — same
+    // shape as the pre-F5 `pongFbo() invalid ⇒ fallback` pattern.
     ayt::shader::TextureHandle bloomTexHandle = texHandle;  // fallback
-    if (ctx.bloomBlurPass != nullptr
-        && BGFXAdapter::isValid(ctx.bloomBlurPass->pongFbo())) {
-        const bgfx::TextureHandle pongColor =
-            adapter.getFboAttachment(ctx.bloomBlurPass->pongFbo(), 0);
-        if (BGFXAdapter::isValid(pongColor)) {
+    bgfx::FrameBufferHandle bloomSourceFbo = BGFX_INVALID_HANDLE;
+    if (ctx.frameGraph != nullptr) {
+        bloomSourceFbo = ctx.frameGraph->resolveSemantic(
+            ayt::render::detail::FgSemantic::BloomSource);
+    }
+    if (BGFXAdapter::isValid(bloomSourceFbo)) {
+        const bgfx::TextureHandle bloomColor =
+            adapter.getFboAttachment(bloomSourceFbo, 0);
+        if (BGFXAdapter::isValid(bloomColor)) {
             bloomTexHandle =
-                ayt::render::detail::toShaderTexture(pongColor);
+                ayt::render::detail::toShaderTexture(bloomColor);
         }
     }
     // bgfx Vec4 slots — pad scalars into .x (lessons §3.1).
@@ -373,19 +380,24 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     // not override compile-time units — see AYShaderResource.h).
     _program.setTexture(0, _tSceneColor, texHandle);
     _program.setTexture(0, _tBloomTexture, bloomTexHandle);
-    // §S4c (2026-07-23) — third sampler on the fullscreen composite
-    // draw, bound to ctx.depthHazePass->halfResFbo() RT0 when the
-    // producer is mounted AND its halfResFbo() is valid (mirror §S1c
-    // bloomTexture bind shape above). When the producer is absent
-    // entirely (custom desc omits DepthHaze) OR first-frame race,
-    // bind sceneColor as a no-op fallback so the FS branchless
-    // strength gate collapses the mix to `raw * (1 - 0) = raw` — no
-    // GLSL sampler-not-set warning (K3 invariant #3).
+    // §F5 (2026-07-24) — third sampler now read through
+    // `ctx.frameGraph->resolveSemantic(FgSemantic::HazeSource)`,
+    // replacing the pre-F5 `ctx.depthHazePass->halfResFbo()` shape.
+    // FG's semantic layer is the single source of truth; render()
+    // central wiring resolves HazeSource → HazeHalf (when
+    // hazePassEnabled) → invalid fallback to sceneColor. Same
+    // fallback contract as S4c: invalid ⇒ sceneColor on the slot
+    // ⇒ branchless strength gate collapses haze mix to 0
+    // (K3 invariant #3).
     ayt::shader::TextureHandle hazeTexHandle = texHandle;  // fallback
-    if (ctx.depthHazePass != nullptr
-        && BGFXAdapter::isValid(ctx.depthHazePass->halfResFbo())) {
+    bgfx::FrameBufferHandle hazeSourceFbo = BGFX_INVALID_HANDLE;
+    if (ctx.frameGraph != nullptr) {
+        hazeSourceFbo = ctx.frameGraph->resolveSemantic(
+            ayt::render::detail::FgSemantic::HazeSource);
+    }
+    if (BGFXAdapter::isValid(hazeSourceFbo)) {
         const bgfx::TextureHandle hazeRtColor =
-            adapter.getFboAttachment(ctx.depthHazePass->halfResFbo(), 0);
+            adapter.getFboAttachment(hazeSourceFbo, 0);
         if (BGFXAdapter::isValid(hazeRtColor)) {
             hazeTexHandle =
                 ayt::render::detail::toShaderTexture(hazeRtColor);
@@ -413,16 +425,16 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
 
     static bool s_loggedSubmit = false;
     if (!s_loggedSubmit) {
-        const bool bloomFromPong = (ctx.bloomBlurPass != nullptr)
-            && BGFXAdapter::isValid(ctx.bloomBlurPass->pongFbo())
+        const bool bloomFromPong =
+            BGFXAdapter::isValid(bloomSourceFbo)
             && (bloomTexHandle.id != texHandle.id);
-        // §S4c (2026-07-23) — log the haze slot source too (mirror
-        // bloomFromPong shape). `hazeFromHalf` = the haze tex came
-        // from ctx.depthHazePass->halfResFbo() RT0; otherwise it's
-        // the fallback (sceneColor) and the FS haze mix collapses
-        // to raw via the branchless strength gate.
-        const bool hazeFromHalf = (ctx.depthHazePass != nullptr)
-            && BGFXAdapter::isValid(ctx.depthHazePass->halfResFbo())
+        // §F5 (2026-07-24) — haze slot log mirror shape: "hazeFromHalf"
+        // = the haze tex came from FG.resolveSemantic(HazeSource)
+        // and that physical differs from sceneColor; otherwise
+        // it's the fallback (sceneColor) and the FS haze mix
+        // collapses to raw via the branchless strength gate.
+        const bool hazeFromHalf =
+            BGFXAdapter::isValid(hazeSourceFbo)
             && (hazeTexHandle.id != texHandle.id);
         std::fprintf(stderr,
             "[PostProcessPass] blit ok view=%u rect=(%u,%u,%u,%u) "
@@ -625,15 +637,43 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
 // PostProcessPass.h for the priority ordering. Static, not a
 // member of PostProcessPass, so tests can call it directly
 // without spinning up execute() / ensure path.
+//
+// §F5 (2026-07-24, mid-term FG MVP sub-cut 5) — internal
+// resolution switches to `ctx.frameGraph->resolveSemantic(
+// FgSemantic::FinalColorSource)` first; the FG compile step
+// has already decided whether FinalColorSource points at
+// LightingPass::lightingOutputFbo() (Deferred path), the
+// Renderer's sceneFbo (Forward path), or invalid. Pre-F5
+// priority order is preserved through the FG's compile-time
+// resolve (the FG itself walks the B6 priority via the
+// `gbufferPass` / `lightingPass` borrowed pointers at the
+// resolveSemantic call site). Falls back to the pre-F5
+// inspection of `ctx.sceneFbo` when `ctx.frameGraph == nullptr`
+// so legacy test sites still work (C++14 trailing-default for
+// frameGraph field).
 bgfx::FrameBufferHandle PostProcessPass::selectSourceFbo(
     const PassExecContext& ctx) noexcept
 {
-    // 1) Deferred path — LightingPass is mounted AND its
-    //    `lightingOutputFbo()` is valid (B5 ensure ran this frame).
-    //    cutsheet pass-lessons-from-deferred.md:169 anchor.
-    //    Returned through ctx.gbufferPass's borrowed pointer so
-    //    PostProcessPass never owns the FBO (mirror FO/Trans
-    //    ownership discipline).
+    // 1) F5 — FinalColorSource semantic from the FrameGraph.
+    //    When the frameGraph is wired, the FG compile step
+    //    already resolved FinalColorSource to a physical handle
+    //    (Deferred ⇒ LightingOutput; Forward ⇒ sceneFbo). Returns
+    //    invalid when neither is available so the caller can
+    //    short-circuit.
+    if (ctx.frameGraph != nullptr) {
+        const bgfx::FrameBufferHandle fgSource = ctx.frameGraph->resolveSemantic(
+            ayt::render::detail::FgSemantic::FinalColorSource);
+        if (BGFXAdapter::isValid(fgSource)) {
+            return fgSource;
+        }
+    }
+
+    // 2) Legacy fallback (frameGraph not wired OR FG returned
+    //    invalid) — the B6 priority walk as documented pre-F5:
+    //    Deferred's LightingOutputFbo (when LightingPass is
+    //    mounted AND its ensure ran this frame), else the P2
+    //    sceneFbo, else invalid. Keeps the cut-1 bisect / §5.3
+    //    test sites compiling without edits.
     if (ctx.gbufferPass != nullptr && ctx.lightingPass != nullptr) {
         const bgfx::FrameBufferHandle lightingFbo =
             ctx.lightingPass->lightingOutputFbo();
@@ -642,15 +682,10 @@ bgfx::FrameBufferHandle PostProcessPass::selectSourceFbo(
         }
     }
 
-    // 2) Forward path / fallback — P2 default (PR-D, 2026-07-20).
-    //    Renderer-owned color+depth FBO that FO + Transparent wrote
-    //    into. Validated by BGFXAdapter::isValid (cutsheet §1.7
-    //    "no FBO/work" signal).
     if (BGFXAdapter::isValid(ctx.sceneFbo)) {
         return ctx.sceneFbo;
     }
 
-    // 3) Neither valid → caller (execute) early-returns 0.
     return BGFX_INVALID_HANDLE;
 }
 

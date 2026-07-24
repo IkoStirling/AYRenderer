@@ -169,15 +169,28 @@ bool FrameGraph::compile()
 
     // Resolve semantic → physical (FG owned / external 借用,都不
     // 重新创建)。F6 才做"physical not live ⇒ fallback" 决策。
+    //
+    // §F5 (2026-07-24) — semantic resolution also treats external
+    // borrowed resources as resolvable even when no pass reads them.
+    // The semantic itself is the "consumer" of the resource (e.g.
+    // FinalColorSource → SceneColor externalized from the renderer
+    // sceneFbo / LightingOutputFbo). Without this relaxation the
+    // FinalColorSource semantic would never resolve on the very
+    // common case "host defaults → only SceneColor imported, no
+    // bloom or haze passes registered yet", which is the F5 ship
+    // path. Owned (non-external) resources still require `live`
+    // because resolve() never creates them on its own (the lazy
+    // create-on-resolve path is F6's job) — this prevents a
+    // semantic from kicking off a transient RT creation that the
+    // pass graph never asked for.
     for (size_t i = 0; i < static_cast<size_t>(FgSemantic::Count); ++i) {
         SemanticEntry& s = _semantics[i];
         if (!s.hasLogical) continue;
         const ResourceEntry& r = _resources[static_cast<size_t>(s.logical)];
-        // semantic 引用的 logical 必须 live;否则该 semantic 不可解析。
-        // 物理 handle = r.physical(可能是 invalid ── 由 resolveSemantic
-        // 调用方短路)。
-        s.physical = r.live ? r.physical
-                             : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+        const bool resolvable = r.live || r.isExternal;
+        s.physical = resolvable
+                         ? r.physical
+                         : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
 
     // F1 不做物理 FBO 创建(create-on-resolve 延后) ── 也不做 alias

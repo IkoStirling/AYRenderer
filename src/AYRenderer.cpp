@@ -1021,6 +1021,38 @@ void Renderer::render(const RenderScene& scene)
     // Compile locks the live set; F6 will add alias decisions on
     // top of this same compile step. F2 only needs the live set
     // so resolve() can return invalid for not-live resources.
+    //
+    // §F5 (2026-07-24, mid-term FG MVP sub-cut 5) — semantic
+    // resolution for the 3 final-PP source slots. Each semantic
+    // points to a logical resource; if that resource isn't live
+    // (compile culled it because the host disabled the effect)
+    // the semantic resolves to invalid ⇒ PostProcessPass binds
+    // `sceneColor` on the sampler slot and the FS branchless
+    // strength gate collapses the contribution to zero.
+    //
+    //   FinalColorSource → SceneColor (always; the Base color
+    //                       handed to PostProcessPass — Deferred
+    //                       ⇒ LightingOutput; Forward ⇒ sceneFbo,
+    //                       both routed through the same external
+    //                       SceneColor borrow imported above).
+    //   BloomSource      → BloomBlurB (when bloomEnabled); else
+    //                       invalid ⇒ fallback to sceneColor +
+    //                       branchless strength gate (FS sees 0
+    //                       bloom contribution).
+    //   HazeSource       → HazeHalf (when hazePassEnabled); else
+    //                       invalid ⇒ fallback to sceneColor +
+    //                       branchless strength gate.
+    fg.setResolvedSemantic(detail::FgSemantic::FinalColorSource,
+                           detail::FgResourceId::SceneColor);
+    if (bloomEnabled) {
+        fg.setResolvedSemantic(detail::FgSemantic::BloomSource,
+                               detail::FgResourceId::BloomBlurB);
+    }
+    if (hazePassEnabled) {
+        fg.setResolvedSemantic(detail::FgSemantic::HazeSource,
+                               detail::FgResourceId::HazeHalf);
+    }
+
     fg.compile();
 
     detail::PassExecContext ctx{
