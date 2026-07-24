@@ -112,3 +112,145 @@ FrameGraph     — addPass / importExternal / compile / execute
 **下一刀推荐 = 短期的 §S4：再做一个半分辨率效果**（如简单 Depth-aware Haze）。**做完后再回来开 FG MVP**。
 
 > 在此之前：只维护本文档，代码走 [`short-term-plan.md`](../short-term-plan.md)。
+
+## §S2 SSAO shipped (MVP verification Gate, 2026-07-24)
+
+§A1–§A3 SSAO MVP (mid-term cutsheet SSAO Gate) is now
+**shipped**. This is the third mid-term effect to land on the FG
+(after Bloom + DepthHaze); it serves as a verification gate that
+the FG 套路 works for a brand-new Pass without requiring any
+changes to `FrameGraph` core.
+
+### Append-only ABI (no F1–F6 baseline churn)
+
+- `FgResourceId::SSAOTexture = 5` — append before `Count` (now 6)
+- `FgSemantic::SSAOSource = 3` — append before `Count` (now 4)
+- `RenderPassSlot::SSAO = 11` — append before `Count` (now 12)
+- `FrameContext` tail: `ssaoEnabled = false` / `ssaoStrength = 0`
+  / `ssaoRadius = 0.5` / `ssaoBias = 0.025` — 4 default-zero knobs
+
+### View-id reservation (single-point bump)
+
+```
+BloomExtract = 10   ← A0 (S1a), 不动
+BloomBlurH   = 11   ← S1b, 不动
+BloomBlurV   = 12   ← S1b, 不动
+DepthHaze    = 13   ← S4b, 不动
+SSAO         = 14   ← §A1 新增
+PostProcess  = 15   ← §A2 单点 bump (10–13 不动)
+UI           = 255  ← 不动
+```
+
+cutsheet guard: 10–13 不动（cutsheet §FG MVP append-only）。
+A2 单点 bump `kBlitViewId` 14→15 一处常量（mirror S4b→S1c
+单点 bump 模式）。
+
+### Cutsheet §S2 用户拍板 (locked decisions)
+
+| 维度        | 决策                                | 备注 |
+|-------------|-------------------------------------|------|
+| Scope       | A — MVP 3 刀（A1 契约/A2 wire/A3 composite） | 默认启用 + Editor 推到 v1 |
+| 算法        | A — 8-tap worldPos sphere           | 不重建 normal、不 GTAO |
+| 零分配      | A — `!enabled` \|\| `strength<=0` ⇒ 0 alloc | 对齐 Bloom/Haze 套路 |
+| 文档        | A — 只动本 cutsheet                 | 不写独立 `docs/ssao.md` |
+| saturate    | `clamp(1.0 - x, 0.0, 1.0)`           | Phoskia 无 `saturate` builtin |
+| inverse     | 用 builtin `viewProjectionMatrix * vec4(samplePos, 1.0)` 直算 UV | Phoskia 无 `inverse()` |
+| composite   | `clamp(1 - aoFactor * strength * step(0.0001, strength), 0, 1)` | branchless 折叠 |
+| view id     | Haze=13 → SSAO=14 → PP=15 → UI=255  | PP 单点 bump 一次 |
+| Pipeline    | 只挂 Deferred（makeDefault 不插）   | Forward 静默落空 |
+
+### Pipeline position
+
+```
+... → BloomExtract → BloomBlur → DepthHaze → SSAO → PostProcess → UI
+```
+
+NOTE: composite order = haze-then-AO（DepthHazePass 已 ship
+pre-mixed haze RT，S4c 现状；v2 raw-before-haze 需要开新 cutsheet
+改 DepthHaze 输出契约 — **不在 MVP 范围**）。
+
+### K-SSAO invariants
+
+| # | Invariant 主题 | 主守位置 | 次守位置 |
+|---|---|---|---|
+| 1 | ssaoEnabled=false / strength=0 / gbufferPtr=null ⇒ 0 alloc | render() 7 条件 gate | SSAOPass::execute resolve(SSAOTexture) invalid |
+| 2 | worldPos.w==0（天空）跳过 occ | SSAOPass FS `step(0.0001, w)` | ── |
+| 3 | composite `clamp(1-x, 0, 1)` 而非 `saturate` | PostProcessPass FS | Test pin 字符串 |
+
+### Composite FS contract (Phoskia strings pin)
+
+`PostProcessPass::kPostProcessCacheKey` v6 —
+`postprocess_tonemap_aces_v6_prehazed_bloom_ssao_fs`：
+
+```phoskia
+material PostProcess {
+    texture2d sceneColor
+    texture2d bloomTexture
+    texture2d hazeTexture
+    texture2d ssaoTexture         // ← §A3 第 4 个 sampler (slot 3)
+    uniform vec4 ssaoStrength     // ← §A3 strength gate (.x carry)
+    ...
+    fragment {
+        let hazeWeight = step(0.0001, hazeStrength.x)
+        let rawHaze = mix(raw, hazeSample.xyz * exposure.x, hazeWeight)
+        let ssaoSample = sample(ssaoTexture, uv)
+        let aoFactor = clamp(ssaoSample.r, 0.0, 1.0)
+        let aoGate = step(0.0001, ssaoStrength.x)
+        let aoMul = clamp(1.0 - aoFactor * ssaoStrength.x * aoGate, 0.0, 1.0)
+        let rawOccluded = rawHaze * aoMul
+        let withBloom = rawOccluded + bloomSample.xyz * bloomStrength.x
+        ...
+    }
+}
+```
+
+### SSAOPass FS contract (Phoskia strings pin)
+
+`SSAOPass::kSSAOCacheKey` v1 — `ssao_v1_8tap_worldpos_sphere_fs`：
+
+```phoskia
+material SSAO {
+    texture2d sceneColor
+    texture2d worldPosition     // ← GBuffer RT2 RGBA16F
+    texture2d noiseTexture      // ← 4×4 RGBA8 LUT (lazy)
+    uniform vec4 ssaoStrength
+    uniform vec4 ssaoRadius
+    uniform vec4 ssaoBias
+    uniform vec4 projection
+    uniform vec4 viewportTexel
+    fragment {
+        let centerWorld = sample(worldPosition, uv)
+        let skyGate = step(0.0001, centerWorld.w)
+        // 8 taps unrolled (Phoskia no for-loop)
+        // let dxN, pN = viewProjectionMatrix * vec4(...), uvN, wN, occN ...
+        let occSum = occ0 + ... + occ7
+        let occFraction = clamp(occSum * 0.125, 0.0, 1.0)
+        let aoOcclusion = clamp(1.0 - pow(clamp(1.0 - occFraction, 0.0, 1.0), 4.0), 0.0, 1.0)
+        return vec4(aoOcclusion * skyGate, 0.0, 0.0, 1.0)
+    }
+}
+```
+
+### 验证（每 sub-cut 必跑 3-run stable）
+
+| Sub-cut | 描述 | 3-run stable PASS count |
+|---|---|---|
+| A1     | SSAO 契约 / 骨架（enum append + 空跑） | **2045/2045 PASS × 3** |
+| A2     | Pipeline + FG wire + view id bump 14→15 | **2105/2105 PASS × 3** |
+| A3     | Final PostProcess composite | **2127/2127 PASS × 3** |
+
+累计 +82 测试从 F6 baseline 1977（+12 + 60 + 22 = +82/82 PASS）。
+
+### 完成定义
+
+SSAO MVP Gate ship 完成：
+- ✅ A1–A3 全部独立 commit landed (3 个独立 commit + 2 个 root pin bump)
+- ✅ `frame-graph-mvp.md` §S2 SSAO shipped 段（不新建 `docs/ssao.md`）
+- ✅ Default `ssaoEnabled = false` / `ssaoStrength = 0` ⇒ zero alloc verified (K-SSAO-1)
+- ✅ View id reservation 钉死：Haze=13 → SSAO=14 → PP=15 → UI=255
+- ✅ Composite 用 `clamp(1 - x, 0, 1)` 而非 `saturate` builtin (K-SSAO-3)
+- ✅ 2 个 root pin bump commits landed (§A2 后 + §A3 后)
+- ✅ memory `ay-renderer.md` 更新
+
+→ 主人另指定 v1 真船（Default enabled + Editor knob +
+`docs/ssao.md` 独立 cutsheet）/ 别的工作。
