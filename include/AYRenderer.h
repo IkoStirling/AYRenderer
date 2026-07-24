@@ -292,6 +292,21 @@ public:
     // Convenience: density + fog color (does not change enabled/strength).
     void setDepthHazeParams(float density, const ayt::math::FVector3& fogColor);
 
+    // §S2 v1 — SSAO knobs → FrameContext each frame.
+    // Renderer defaults: enabled=false, strength=0 (K-SSAO-1 zero alloc).
+    // Editor may enable (Deferred-only; Forward remains no-op).
+    // Pass / FG cull when !enabled OR strength<=0.
+    void setSsaoEnabled(bool enabled);
+    bool ssaoEnabled() const noexcept;
+    void setSsaoStrength(float strength);
+    float ssaoStrength() const noexcept;
+    void setSsaoRadius(float radius);
+    float ssaoRadius() const noexcept;
+    void setSsaoBias(float bias);
+    float ssaoBias() const noexcept;
+    // Convenience: radius + bias (does not change enabled/strength).
+    void setSsaoParams(float radius, float bias);
+
     // Rebuild the RenderPipeline from an ordered pass-slot list.
     // Default ctor builds makeDefault() which mounts Shadow at slot 0
     // *enabled* (E5 §5.4, 2026-07-22). To opt out, pass a custom desc

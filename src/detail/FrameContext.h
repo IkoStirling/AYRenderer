@@ -109,10 +109,8 @@ struct FrameContext {
     // FrameContext brace-init keeps the pre-SSAO byte-identical
     // behavior on every existing test site. Hosts enable SSAO by
     // writing ssaoEnabled=true + a non-zero ssaoStrength +
-    // ensuring a Deferred pipeline is mounted. The Editor §S2 v1
-    // polish push (deferred to a separate cutsheet) will wrap
-    // this with setSSAOStrength(); A1 just wires the storage +
-    // default state.
+    // ensuring a Deferred pipeline is mounted. Editor §S2 v1
+    // wraps this with Renderer::setSsaoEnabled / setSsaoStrength.
     //
     // Why these live on FrameContext (not PassExecContext): POD
     // knobs analogous to the P4.2 shadowBias / §S4b hazeEnabled

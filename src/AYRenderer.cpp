@@ -326,6 +326,12 @@ struct Renderer::Impl {
     ayt::math::FVector3            depthHazeColor    =
         ayt::math::FVector3(0.55f, 0.65f, 0.78f);
 
+    // §S2 v1 — SSAO host knobs (FrameContext defaults stay off).
+    bool                           ssaoEnabled  = false;
+    float                          ssaoStrength = 0.0f;
+    float                          ssaoRadius   = 0.5f;
+    float                          ssaoBias     = 0.025f;
+
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias in ndc01
     // units. Mirrored into FrameContext::shadowBias each render so
     // tryBindShadowSampler() (ForwardOpaquePass + TransparentPass
@@ -721,6 +727,11 @@ void Renderer::render(const RenderScene& scene)
     frame.hazeStrength     = _impl->depthHazeStrength;
     frame.hazeDensity      = _impl->depthHazeDensity;
     frame.hazeColor        = _impl->depthHazeColor;
+    // §S2 v1 — SSAO knobs (Editor / host). Defaults keep SSAO off.
+    frame.ssaoEnabled      = _impl->ssaoEnabled;
+    frame.ssaoStrength     = _impl->ssaoStrength;
+    frame.ssaoRadius       = _impl->ssaoRadius;
+    frame.ssaoBias         = _impl->ssaoBias;
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias copied
     // into FrameContext each frame; tryBindShadowSampler reads it.
     frame.shadowBias       = _impl->shadowBias;
@@ -1986,6 +1997,64 @@ void Renderer::setDepthHazeParams(float density, const ayt::math::FVector3& fogC
 {
     setDepthHazeDensity(density);
     setDepthHazeColor(fogColor);
+}
+
+void Renderer::setSsaoEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->ssaoEnabled = enabled;
+}
+
+bool Renderer::ssaoEnabled() const noexcept
+{
+    return _impl != nullptr && _impl->ssaoEnabled;
+}
+
+void Renderer::setSsaoStrength(float strength)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->ssaoStrength = strength;
+}
+
+float Renderer::ssaoStrength() const noexcept
+{
+    return _impl ? _impl->ssaoStrength : 0.0f;
+}
+
+void Renderer::setSsaoRadius(float radius)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->ssaoRadius = radius;
+}
+
+float Renderer::ssaoRadius() const noexcept
+{
+    return _impl ? _impl->ssaoRadius : 0.5f;
+}
+
+void Renderer::setSsaoBias(float bias)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->ssaoBias = bias;
+}
+
+float Renderer::ssaoBias() const noexcept
+{
+    return _impl ? _impl->ssaoBias : 0.025f;
+}
+
+void Renderer::setSsaoParams(float radius, float bias)
+{
+    setSsaoRadius(radius);
+    setSsaoBias(bias);
 }
 
 void Renderer::configurePipeline(const RenderPipelineDesc& desc)

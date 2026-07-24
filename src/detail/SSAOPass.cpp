@@ -34,38 +34,33 @@ constexpr FullscreenVertex kFullscreenTriangle[3] = {
 
 constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 
-// §A3 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) — 8-tap
-// worldPos-sphere Phoskia source.
+// §A3 SSAO MVP — 8-tap worldPos Phoskia source.
 //
-// Algorithm (主人拍板 B = 8-tap worldPos sphere; cutsheet §S2):
-//   1) Reconstruct the SCREEN-space tangent basis from a small
-//      tile of a 4×4 RGBA8 noise texture (Phoskia has no for-loop
-//      / array-indexing, so the 8 sphere directions are unrolled
-//      to literal expressions).
-//   2) For each of the 8 directions, sample the worldPos GBuffer
-//      RT at `viewProjectionMatrix * samplePos` ⇒ reject if the
-//      sample's `.w > 0` (sky) or the depth-difference exceeds
-//      `ssaoBias.x` ⇒ add to `occSum`.
-//   3) `aoOcclusion = clamp(1 - pow(1 - occFraction, 4), 0, 1)`
-//      (cutsheet §S2 visibility → occlusion conversion).
-//   4) Sky reject via `step(0.0001, worldPos.w)` (Phoskia has no
-//      `if` expression).
+// v4 quality fix (2026-07-24) — v3 still false-darkened every
+// shaded pixel: perspective makes nearby coplanar ground look
+// "closer", so center-depth compare fires everywhere geometry
+// exists (matches user report: sky clean, ground/cube speckled,
+// fills viewport when close). Fixes:
+//   1) Off-plane gate: reject occluders with
+//      |dot(occluder-center, N)| < bias (kills coplanar hits).
+//   2) Relative depth bias: bias + 1% of cam distance.
+//   3) Fixed kernel (no noise rotation) — noise was the "dot
+//      texture"; weak residual AO is thresholded away.
+//   4) Keep hemi flip + soft range + skyGate.
 //
-// Phoskia constraints (lessons §3.1, §S4 cutsheet):
-//   - All scalars as `uniform vec4` with `.x` carry (bgfx Vec4).
-//   - No `saturate` builtin — use `clamp(1.0 - x, 0.0, 1.0)`.
-//   - No `inverse()` builtin — use `viewProjectionMatrix * vec4
-//     (samplePos, 1.0)` directly, then divide by `.w`.
-//   - 8 taps unrolled explicitly.
+// Phoskia constraints (lessons §3.1):
+//   - Scalars as `uniform vec4` with `.x` carry.
+//   - No `saturate` — use `clamp`.
+//   - No `inverse()` — `viewProjectionMatrix * vec4` then /w.
+//   - 8 taps unrolled.
 constexpr const char* kSSAOPhoskiaSource = R"(
 material SSAO {
-    texture2d sceneColor
     texture2d worldPosition
-    texture2d noiseTexture
+    texture2d worldNormal
     uniform vec4 ssaoStrength
     uniform vec4 ssaoRadius
     uniform vec4 ssaoBias
-    uniform vec4 projection
+    uniform vec4 camPos
     uniform vec4 viewportTexel
     vertex {
         in  pos : position
@@ -75,102 +70,141 @@ material SSAO {
     fragment {
         in  vUv : texcoord
         let uv = vec2(vUv.x, 1.0 - vUv.y)
-        // Center world position from GBuffer RT2 (RGBA16F; w=1 for geometry, w=0 for sky)
         let centerWorld = sample(worldPosition, uv)
-        // Reject sky pre-emptively (return occlusion=0 ⇒ no darkening)
         let skyGate = step(0.0001, centerWorld.w)
-        let noise = sample(noiseTexture, uv * vec2(viewportTexel.x * 0.25, viewportTexel.y * 0.25))
-        let rot = (noise.rg - vec2(0.5)) * 6.2831853
-        let c = cos(rot.x)
-        let s = sin(rot.x)
-        // 8 sphere-tap directions unrolled. Each direction is a
-        // 3D vector scaled by ssaoRadius; samples get converted to
-        // NDC via the camera viewProjectionMatrix; then the depth-
-        // difference gate decides if that sample is "occluded".
-        // Phoskia forbids for-loops in the FS so this is literal.
-        let dx0 = vec3(c * 0.4, s * 0.4, 0.6)
-        let p0 = viewProjectionMatrix * vec4(centerWorld.xyz + dx0 * ssaoRadius.x, 1.0)
-        let uv0 = (p0.xyz / p0.w) * 0.5 + vec3(0.5, 0.5, 0.5)
-        let w0 = sample(worldPosition, vec2(uv0.x, 1.0 - uv0.y))
-        let occ0 = step(0.0001, w0.w) * step(ssaoBias.x, abs(p0.w - w0.w))
+        let nEnc = sample(worldNormal, uv)
+        let Nraw = nEnc.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
+        let Nn = Nraw * (1.0 / max(length(Nraw), 0.0001))
+        let distC = length(centerWorld.xyz - camPos.xyz)
+        let rad = max(ssaoRadius.x, 0.0001)
+        let depthBias = ssaoBias.x + distC * 0.01
 
-        let dx1 = vec3(s * 0.6, c * 0.6, 0.4)
-        let p1 = viewProjectionMatrix * vec4(centerWorld.xyz + dx1 * ssaoRadius.x, 1.0)
-        let uv1 = (p1.xyz / p1.w) * 0.5 + vec3(0.5, 0.5, 0.5)
-        let w1 = sample(worldPosition, vec2(uv1.x, 1.0 - uv1.y))
-        let occ1 = step(0.0001, w1.w) * step(ssaoBias.x, abs(p1.w - w1.w))
+        let dx0raw = vec3(0.4, 0.4, 0.6)
+        let dx0 = mix(dx0raw * -1.0, dx0raw, step(0.0, dot(dx0raw, Nn)))
+        let sampleWorld0 = centerWorld.xyz + dx0 * rad
+        let p0 = viewProjectionMatrix * vec4(sampleWorld0, 1.0)
+        let ndc0 = p0.xyz / max(p0.w, 0.0001)
+        let uv0 = vec2(ndc0.x * 0.5 + 0.5, 1.0 - (ndc0.y * 0.5 + 0.5))
+        let w0 = sample(worldPosition, uv0)
+        let to0 = w0.xyz - centerWorld.xyz
+        let distS0 = length(w0.xyz - camPos.xyz)
+        let range0 = clamp(1.0 - length(to0) / rad, 0.0, 1.0)
+        let offPlane0 = step(ssaoBias.x, abs(dot(to0, Nn)))
+        let bound0 = step(0.0, uv0.x) * step(uv0.x, 1.0) * step(0.0, uv0.y) * step(uv0.y, 1.0)
+        let occ0 = step(0.0001, p0.w) * step(0.0001, w0.w) * bound0 * range0 * offPlane0 * step(distS0 + depthBias, distC)
 
-        let dx2 = vec3(-c * 0.4, -s * 0.4, -0.6)
-        let p2 = viewProjectionMatrix * vec4(centerWorld.xyz + dx2 * ssaoRadius.x, 1.0)
-        let uv2 = (p2.xyz / p2.w) * 0.5 + vec3(0.5, 0.5, 0.5)
-        let w2 = sample(worldPosition, vec2(uv2.x, 1.0 - uv2.y))
-        let occ2 = step(0.0001, w2.w) * step(ssaoBias.x, abs(p2.w - w2.w))
+        let dx1raw = vec3(0.6, -0.4, 0.5)
+        let dx1 = mix(dx1raw * -1.0, dx1raw, step(0.0, dot(dx1raw, Nn)))
+        let sampleWorld1 = centerWorld.xyz + dx1 * rad
+        let p1 = viewProjectionMatrix * vec4(sampleWorld1, 1.0)
+        let ndc1 = p1.xyz / max(p1.w, 0.0001)
+        let uv1 = vec2(ndc1.x * 0.5 + 0.5, 1.0 - (ndc1.y * 0.5 + 0.5))
+        let w1 = sample(worldPosition, uv1)
+        let to1 = w1.xyz - centerWorld.xyz
+        let distS1 = length(w1.xyz - camPos.xyz)
+        let range1 = clamp(1.0 - length(to1) / rad, 0.0, 1.0)
+        let offPlane1 = step(ssaoBias.x, abs(dot(to1, Nn)))
+        let bound1 = step(0.0, uv1.x) * step(uv1.x, 1.0) * step(0.0, uv1.y) * step(uv1.y, 1.0)
+        let occ1 = step(0.0001, p1.w) * step(0.0001, w1.w) * bound1 * range1 * offPlane1 * step(distS1 + depthBias, distC)
 
-        let dx3 = vec3(-s * 0.6, -c * 0.6, -0.4)
-        let p3 = viewProjectionMatrix * vec4(centerWorld.xyz + dx3 * ssaoRadius.x, 1.0)
-        let uv3 = (p3.xyz / p3.w) * 0.5 + vec3(0.5, 0.5, 0.5)
-        let w3 = sample(worldPosition, vec2(uv3.x, 1.0 - uv3.y))
-        let occ3 = step(0.0001, w3.w) * step(ssaoBias.x, abs(p3.w - w3.w))
+        let dx2raw = vec3(-0.5, 0.5, 0.5)
+        let dx2 = mix(dx2raw * -1.0, dx2raw, step(0.0, dot(dx2raw, Nn)))
+        let sampleWorld2 = centerWorld.xyz + dx2 * rad
+        let p2 = viewProjectionMatrix * vec4(sampleWorld2, 1.0)
+        let ndc2 = p2.xyz / max(p2.w, 0.0001)
+        let uv2 = vec2(ndc2.x * 0.5 + 0.5, 1.0 - (ndc2.y * 0.5 + 0.5))
+        let w2 = sample(worldPosition, uv2)
+        let to2 = w2.xyz - centerWorld.xyz
+        let distS2 = length(w2.xyz - camPos.xyz)
+        let range2 = clamp(1.0 - length(to2) / rad, 0.0, 1.0)
+        let offPlane2 = step(ssaoBias.x, abs(dot(to2, Nn)))
+        let bound2 = step(0.0, uv2.x) * step(uv2.x, 1.0) * step(0.0, uv2.y) * step(uv2.y, 1.0)
+        let occ2 = step(0.0001, p2.w) * step(0.0001, w2.w) * bound2 * range2 * offPlane2 * step(distS2 + depthBias, distC)
 
-        let dx4 = vec3(c * 0.7, -s * 0.7, 0.3)
-        let p4 = viewProjectionMatrix * vec4(centerWorld.xyz + dx4 * ssaoRadius.x, 1.0)
-        let uv4 = (p4.xyz / p4.w) * 0.5 + vec3(0.5, 0.5, 0.5)
-        let w4 = sample(worldPosition, vec2(uv4.x, 1.0 - uv4.y))
-        let occ4 = step(0.0001, w4.w) * step(ssaoBias.x, abs(p4.w - w4.w))
+        let dx3raw = vec3(-0.4, -0.6, 0.4)
+        let dx3 = mix(dx3raw * -1.0, dx3raw, step(0.0, dot(dx3raw, Nn)))
+        let sampleWorld3 = centerWorld.xyz + dx3 * rad
+        let p3 = viewProjectionMatrix * vec4(sampleWorld3, 1.0)
+        let ndc3 = p3.xyz / max(p3.w, 0.0001)
+        let uv3 = vec2(ndc3.x * 0.5 + 0.5, 1.0 - (ndc3.y * 0.5 + 0.5))
+        let w3 = sample(worldPosition, uv3)
+        let to3 = w3.xyz - centerWorld.xyz
+        let distS3 = length(w3.xyz - camPos.xyz)
+        let range3 = clamp(1.0 - length(to3) / rad, 0.0, 1.0)
+        let offPlane3 = step(ssaoBias.x, abs(dot(to3, Nn)))
+        let bound3 = step(0.0, uv3.x) * step(uv3.x, 1.0) * step(0.0, uv3.y) * step(uv3.y, 1.0)
+        let occ3 = step(0.0001, p3.w) * step(0.0001, w3.w) * bound3 * range3 * offPlane3 * step(distS3 + depthBias, distC)
 
-        let dx5 = vec3(s * 0.3, c * 0.3, -0.7)
-        let p5 = viewProjectionMatrix * vec4(centerWorld.xyz + dx5 * ssaoRadius.x, 1.0)
-        let uv5 = (p5.xyz / p5.w) * 0.5 + vec3(0.5, 0.5, 0.5)
-        let w5 = sample(worldPosition, vec2(uv5.x, 1.0 - uv5.y))
-        let occ5 = step(0.0001, w5.w) * step(ssaoBias.x, abs(p5.w - w5.w))
+        let dx4raw = vec3(0.7, 0.0, 0.3)
+        let dx4 = mix(dx4raw * -1.0, dx4raw, step(0.0, dot(dx4raw, Nn)))
+        let sampleWorld4 = centerWorld.xyz + dx4 * rad
+        let p4 = viewProjectionMatrix * vec4(sampleWorld4, 1.0)
+        let ndc4 = p4.xyz / max(p4.w, 0.0001)
+        let uv4 = vec2(ndc4.x * 0.5 + 0.5, 1.0 - (ndc4.y * 0.5 + 0.5))
+        let w4 = sample(worldPosition, uv4)
+        let to4 = w4.xyz - centerWorld.xyz
+        let distS4 = length(w4.xyz - camPos.xyz)
+        let range4 = clamp(1.0 - length(to4) / rad, 0.0, 1.0)
+        let offPlane4 = step(ssaoBias.x, abs(dot(to4, Nn)))
+        let bound4 = step(0.0, uv4.x) * step(uv4.x, 1.0) * step(0.0, uv4.y) * step(uv4.y, 1.0)
+        let occ4 = step(0.0001, p4.w) * step(0.0001, w4.w) * bound4 * range4 * offPlane4 * step(distS4 + depthBias, distC)
 
-        let dx6 = vec3(-c * 0.5, s * 0.5, 0.5)
-        let p6 = viewProjectionMatrix * vec4(centerWorld.xyz + dx6 * ssaoRadius.x, 1.0)
-        let uv6 = (p6.xyz / p6.w) * 0.5 + vec3(0.5, 0.5, 0.5)
-        let w6 = sample(worldPosition, vec2(uv6.x, 1.0 - uv6.y))
-        let occ6 = step(0.0001, w6.w) * step(ssaoBias.x, abs(p6.w - w6.w))
+        let dx5raw = vec3(0.0, 0.7, 0.3)
+        let dx5 = mix(dx5raw * -1.0, dx5raw, step(0.0, dot(dx5raw, Nn)))
+        let sampleWorld5 = centerWorld.xyz + dx5 * rad
+        let p5 = viewProjectionMatrix * vec4(sampleWorld5, 1.0)
+        let ndc5 = p5.xyz / max(p5.w, 0.0001)
+        let uv5 = vec2(ndc5.x * 0.5 + 0.5, 1.0 - (ndc5.y * 0.5 + 0.5))
+        let w5 = sample(worldPosition, uv5)
+        let to5 = w5.xyz - centerWorld.xyz
+        let distS5 = length(w5.xyz - camPos.xyz)
+        let range5 = clamp(1.0 - length(to5) / rad, 0.0, 1.0)
+        let offPlane5 = step(ssaoBias.x, abs(dot(to5, Nn)))
+        let bound5 = step(0.0, uv5.x) * step(uv5.x, 1.0) * step(0.0, uv5.y) * step(uv5.y, 1.0)
+        let occ5 = step(0.0001, p5.w) * step(0.0001, w5.w) * bound5 * range5 * offPlane5 * step(distS5 + depthBias, distC)
 
-        let dx7 = vec3(-s * 0.5, -c * 0.5, -0.5)
-        let p7 = viewProjectionMatrix * vec4(centerWorld.xyz + dx7 * ssaoRadius.x, 1.0)
-        let uv7 = (p7.xyz / p7.w) * 0.5 + vec3(0.5, 0.5, 0.5)
-        let w7 = sample(worldPosition, vec2(uv7.x, 1.0 - uv7.y))
-        let occ7 = step(0.0001, w7.w) * step(ssaoBias.x, abs(p7.w - w7.w))
+        let dx6raw = vec3(-0.6, 0.2, 0.5)
+        let dx6 = mix(dx6raw * -1.0, dx6raw, step(0.0, dot(dx6raw, Nn)))
+        let sampleWorld6 = centerWorld.xyz + dx6 * rad
+        let p6 = viewProjectionMatrix * vec4(sampleWorld6, 1.0)
+        let ndc6 = p6.xyz / max(p6.w, 0.0001)
+        let uv6 = vec2(ndc6.x * 0.5 + 0.5, 1.0 - (ndc6.y * 0.5 + 0.5))
+        let w6 = sample(worldPosition, uv6)
+        let to6 = w6.xyz - centerWorld.xyz
+        let distS6 = length(w6.xyz - camPos.xyz)
+        let range6 = clamp(1.0 - length(to6) / rad, 0.0, 1.0)
+        let offPlane6 = step(ssaoBias.x, abs(dot(to6, Nn)))
+        let bound6 = step(0.0, uv6.x) * step(uv6.x, 1.0) * step(0.0, uv6.y) * step(uv6.y, 1.0)
+        let occ6 = step(0.0001, p6.w) * step(0.0001, w6.w) * bound6 * range6 * offPlane6 * step(distS6 + depthBias, distC)
+
+        let dx7raw = vec3(0.2, -0.6, 0.5)
+        let dx7 = mix(dx7raw * -1.0, dx7raw, step(0.0, dot(dx7raw, Nn)))
+        let sampleWorld7 = centerWorld.xyz + dx7 * rad
+        let p7 = viewProjectionMatrix * vec4(sampleWorld7, 1.0)
+        let ndc7 = p7.xyz / max(p7.w, 0.0001)
+        let uv7 = vec2(ndc7.x * 0.5 + 0.5, 1.0 - (ndc7.y * 0.5 + 0.5))
+        let w7 = sample(worldPosition, uv7)
+        let to7 = w7.xyz - centerWorld.xyz
+        let distS7 = length(w7.xyz - camPos.xyz)
+        let range7 = clamp(1.0 - length(to7) / rad, 0.0, 1.0)
+        let offPlane7 = step(ssaoBias.x, abs(dot(to7, Nn)))
+        let bound7 = step(0.0, uv7.x) * step(uv7.x, 1.0) * step(0.0, uv7.y) * step(uv7.y, 1.0)
+        let occ7 = step(0.0001, p7.w) * step(0.0001, w7.w) * bound7 * range7 * offPlane7 * step(distS7 + depthBias, distC)
 
         let occSum = occ0 + occ1 + occ2 + occ3 + occ4 + occ5 + occ6 + occ7
         let occFraction = clamp(occSum * 0.125, 0.0, 1.0)
-        // cutsheet §S2 visibility → occlusion: clamp(1 - pow(1 - v, 4), 0, 1)
-        let aoOcclusion = clamp(1.0 - pow(clamp(1.0 - occFraction, 0.0, 1.0), 4.0), 0.0, 1.0)
+        // Kill weak residual hits (flat-surface / edge noise).
+        let aoOcclusion = clamp((occFraction - 0.2) * 1.25, 0.0, 1.0)
         return vec4(aoOcclusion * skyGate, 0.0, 0.0, 1.0)
     }
 }
 )";
 
-// §A3 SSAO MVP (2026-07-24) — cache-key bump v0 placeholder → v1
-// real 8-tap sphere shader. Bug-fix-#3 mirror: any future FS
-// changes that forget to bump the cache key would be caught by
-// the extern-from-test drift detection in `kSSAOCacheKeyCStr`.
-constexpr const char* kSSAOCacheKey = "ssao_v1_8tap_worldpos_sphere_fs";
-
-// §A3 SSAO MVP (2026-07-24) — noise table (tangent-rotation
-// look-up). RGBA8 4×4 = 64 bytes lazy-uploaded once on first
-// execute() after adapter init. Per-pixel noise.rg is sampled
-// by the SSAO FS at `uv * viewportTexel * 0.25` (so the noise
-// tiles every 4 pixels regardless of viewport size).
-const uint8_t kSSAONoiseData[4 * 4 * 4] = {
-    0xC8, 0x29, 0x54, 0xFF, 0xA4, 0x0E, 0xF1, 0xC0, 0x76, 0xE5, 0x10, 0xA0, 0x39, 0xC2, 0x88, 0xFF,
-    0x1A, 0xA1, 0xB7, 0xC0, 0x6F, 0x82, 0xD1, 0xFF, 0x39, 0x0E, 0x55, 0xA4, 0xE8, 0x76, 0x29, 0xFF,
-    0xE7, 0xC5, 0x96, 0xC0, 0xA4, 0x76, 0x10, 0xFF, 0x73, 0x39, 0xD2, 0xC0, 0x40, 0x55, 0x88, 0xFF,
-    0xB1, 0xE1, 0x29, 0xC0, 0x6F, 0xC2, 0x54, 0xFF, 0x39, 0x96, 0x10, 0xA0, 0xE7, 0x29, 0x76, 0xFF
-};
+// v4: off-plane gate + fixed kernel (no noise).
+constexpr const char* kSSAOCacheKey = "ssao_v4_8tap_offplane_fixed_fs";
 
 } // namespace
 
-// §A1 (2026-07-24) — cache-key externalize (mirror DepthHazePass /
-// BloomExtractPass / BloomBlurPass / SkyboxPass / LightingPass
-// Bug-fix-#3 pattern). The header's `extern const char* const
-// kSSAOCacheKeyCStr` is bound to this literal so tests can
-// `assert(kSSAOCacheKeyCStr == mirror)` and drift breaks
-// immediately.
 const char* const kSSAOCacheKeyCStr = kSSAOCacheKey;
 
 uint32_t SSAOPass::execute(PassExecContext& ctx)
@@ -179,8 +213,6 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
     shader::ShaderResourcePool& pool = ctx.pool;
     const FrameContext& frame = ctx.frame;
 
-    // Mirror Noop + uninit short-circuits (mirror DepthHazePass /
-    // BloomExtractPass contract).
     if (!adapter.isInitialized()) {
         return 0;
     }
@@ -198,35 +230,18 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // §A2 FG gate (2026-07-24) — render() central ssaoPassEnabled
-    // is the canonical "this pass should run" signal. When it is
-    // false, FG compile culls SSAOTexture ⇒ resolve returns
-    // invalid ⇒ execute early-returns 0 (0 draw, 0 alloc).
     const bgfx::FrameBufferHandle target =
         ctx.frameGraph->resolve(FgResourceId::SSAOTexture);
     if (!BGFXAdapter::isValid(target)) {
         return 0;
     }
 
-    // Source FBO priority — mirror DepthHazePass S4b pattern.
-    const bgfx::FrameBufferHandle sourceFbo = PostProcessPass::selectSourceFbo(ctx);
-    if (!BGFXAdapter::isValid(sourceFbo)) {
-        return 0;
-    }
-    const bgfx::TextureHandle fboColor = adapter.getFboAttachment(sourceFbo, 0);
-    if (!BGFXAdapter::isValid(fboColor)) {
-        return 0;
-    }
-
-    // Deferred: GBuffer RT2 (gbufferMotionRt) holds RGBA16F
-    // worldPos. Forward / no-gbuffer case is already filtered
-    // out by render() central ssaoPassEnabled (gbufferPassPtr
-    // null ⇒ gate false ⇒ resolve invalid ⇒ execute returns 0).
     if (ctx.gbufferPass == nullptr) {
         return 0;
     }
     const bgfx::TextureHandle worldPosRt = ctx.gbufferPass->gbufferMotionRt();
-    if (!BGFXAdapter::isValid(worldPosRt)) {
+    const bgfx::TextureHandle worldNrmRt = ctx.gbufferPass->gbufferNormalRt();
+    if (!BGFXAdapter::isValid(worldPosRt) || !BGFXAdapter::isValid(worldNrmRt)) {
         return 0;
     }
 
@@ -241,40 +256,32 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
         && _uSSAOStrength   != ayt::shader::InvalidBinding
         && _uSSAORadius     != ayt::shader::InvalidBinding
         && _uSSAOBias       != ayt::shader::InvalidBinding
-        && _uProjection     != ayt::shader::InvalidBinding
-        && _tSceneColor     != ayt::shader::InvalidBinding
+        && _uCamPos         != ayt::shader::InvalidBinding
+        && _uViewportTexel  != ayt::shader::InvalidBinding
         && _tWorldPosition  != ayt::shader::InvalidBinding
-        && _tNoise          != ayt::shader::InvalidBinding;
+        && _tWorldNormal    != ayt::shader::InvalidBinding;
     if (!programReady) {
         return 0;
     }
 
-    ensureNoise(adapter);
-    if (!BGFXAdapter::isValid(_noiseTex) || !_noiseUploaded) {
-        return 0;
-    }
-
-    // Bound the SSAOTexture FBO as the draw target.
     constexpr uint8_t viewId = kSsaoViewId;
-    const ayt::math::Float4x4 identity = ayt::math::Float4x4::identity();
 
     adapter.setViewFrameBuffer(viewId, target);
     adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
-    adapter.setViewTransform(viewId, identity, identity);
+    adapter.setViewTransform(viewId, frame.view, frame.projection);
     adapter.setViewClearRaw(viewId, BGFX_CLEAR_NONE, 0, 1.0f, 0);
 
-    const ayt::shader::TextureHandle sceneTexHandle =
-        ayt::render::detail::toShaderTexture(fboColor);
     const ayt::shader::TextureHandle worldPosHandle =
         ayt::render::detail::toShaderTexture(worldPosRt);
-    const ayt::shader::TextureHandle noiseHandle =
-        ayt::render::detail::toShaderTexture(_noiseTex);
+    const ayt::shader::TextureHandle worldNrmHandle =
+        ayt::render::detail::toShaderTexture(worldNrmRt);
 
-    // bgfx Vec4 slots — pad scalars into .x (lessons §3.1).
     const float strengthPad[4] = {frame.ssaoStrength, 0.0f, 0.0f, 0.0f};
     const float radiusPad[4]   = {frame.ssaoRadius,   0.0f, 0.0f, 0.0f};
     const float biasPad[4]     = {frame.ssaoBias,     0.0f, 0.0f, 0.0f};
-    const float projPad[4]     = {0.0f, 0.0f, 0.0f, 0.0f};
+    const float camPosPad[4]   = {
+        frame.cameraPosition.x, frame.cameraPosition.y,
+        frame.cameraPosition.z, 0.0f};
     const float vpTexelPad[4]  = {
         1.0f / static_cast<float>(viewportWidth),
         1.0f / static_cast<float>(viewportHeight),
@@ -284,18 +291,16 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
     adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
     adapter.setIndexBuffer(_fullscreenIB, 0, 3);
     {
-        const uint8_t stageColor = _program.getTextureStage(_tSceneColor);
         const uint8_t stageWorld = _program.getTextureStage(_tWorldPosition);
-        const uint8_t stageNoise = _program.getTextureStage(_tNoise);
-        _program.setTexture(stageColor, _tSceneColor,    sceneTexHandle);
+        const uint8_t stageNrm   = _program.getTextureStage(_tWorldNormal);
         _program.setTexture(stageWorld, _tWorldPosition, worldPosHandle);
-        _program.setTexture(stageNoise, _tNoise,         noiseHandle);
+        _program.setTexture(stageNrm,   _tWorldNormal,   worldNrmHandle);
     }
-    (void)projPad;   // reserved for a future cut; current FS uses viewProjectionMatrix builtin.
-    _program.setUniform(_uSSAOStrength, strengthPad, sizeof(strengthPad));
-    _program.setUniform(_uSSAORadius,   radiusPad,   sizeof(radiusPad));
-    _program.setUniform(_uSSAOBias,     biasPad,     sizeof(biasPad));
-    _program.setUniform(_uProjection,   vpTexelPad,  sizeof(vpTexelPad));
+    _program.setUniform(_uSSAOStrength,  strengthPad, sizeof(strengthPad));
+    _program.setUniform(_uSSAORadius,    radiusPad,   sizeof(radiusPad));
+    _program.setUniform(_uSSAOBias,      biasPad,     sizeof(biasPad));
+    _program.setUniform(_uCamPos,        camPosPad,   sizeof(camPosPad));
+    _program.setUniform(_uViewportTexel, vpTexelPad,  sizeof(vpTexelPad));
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
@@ -364,29 +369,18 @@ void SSAOPass::ensureProgram(shader::ShaderResourcePool& pool)
     _uSSAOStrength     = _program.getUniformBinding("ssaoStrength");
     _uSSAORadius       = _program.getUniformBinding("ssaoRadius");
     _uSSAOBias         = _program.getUniformBinding("ssaoBias");
-    _uProjection       = _program.getUniformBinding("projection");
-    _tSceneColor       = _program.getTextureBinding("sceneColor");
+    _uCamPos           = _program.getUniformBinding("camPos");
+    _uViewportTexel    = _program.getUniformBinding("viewportTexel");
     _tWorldPosition    = _program.getTextureBinding("worldPosition");
-    _tNoise            = _program.getTextureBinding("noiseTexture");
+    _tWorldNormal      = _program.getTextureBinding("worldNormal");
+    _tNoise            = ayt::shader::InvalidBinding;  // v4: fixed kernel, no noise
 }
 
 void SSAOPass::ensureNoise(BGFXAdapter& adapter)
 {
-    if (BGFXAdapter::isValid(_noiseTex) && _noiseUploaded) {
-        return;
-    }
-    if (!adapter.isInitialized() || adapter.isNoopBackend()) {
-        return;
-    }
-    // createTexture2D(width, height, rgba8Data, flags) — the
-    // overload requires RGBA8 layout. Mirror SkyboxPass's noise
-    // upload; the Phoskia FS binds this as a tile lookup.
-    _noiseTex = adapter.createTexture2D(4, 4,
-                                        kSSAONoiseData,
-                                        BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
-    if (BGFXAdapter::isValid(_noiseTex)) {
-        _noiseUploaded = true;
-    }
+    // v4: fixed kernel — noise texture unused. Keep stub so destroy /
+    // field layout stay stable.
+    (void)adapter;
 }
 
 void SSAOPass::destroyResources(BGFXAdapter& adapter)
@@ -407,13 +401,14 @@ void SSAOPass::destroyResources(BGFXAdapter& adapter)
     if (_program.isValid()) {
         _program.reset();
     }
-    _uSSAOStrength   = ayt::shader::InvalidBinding;
-    _uSSAORadius     = ayt::shader::InvalidBinding;
-    _uSSAOBias       = ayt::shader::InvalidBinding;
-    _uProjection     = ayt::shader::InvalidBinding;
-    _tSceneColor     = ayt::shader::InvalidBinding;
-    _tWorldPosition  = ayt::shader::InvalidBinding;
-    _tNoise          = ayt::shader::InvalidBinding;
+    _uSSAOStrength    = ayt::shader::InvalidBinding;
+    _uSSAORadius      = ayt::shader::InvalidBinding;
+    _uSSAOBias        = ayt::shader::InvalidBinding;
+    _uCamPos          = ayt::shader::InvalidBinding;
+    _uViewportTexel   = ayt::shader::InvalidBinding;
+    _tWorldPosition   = ayt::shader::InvalidBinding;
+    _tWorldNormal     = ayt::shader::InvalidBinding;
+    _tNoise           = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
 }
 

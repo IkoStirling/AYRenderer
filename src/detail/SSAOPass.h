@@ -79,11 +79,11 @@ public:
 
     uint32_t execute(PassExecContext& ctx) override;
 
-    // §A1 (2026-07-24) — readiness probe. Skeleton ships with no
-    // program + no noise texture uploaded ⇒ isReady() constant false
-    // for now. A3 lifts this to `_program.isValid() && _noiseUploaded`.
-    // Not virtual on the base class (mirror DepthHazePass pattern).
-    bool isReady() const noexcept { return false; }
+    // §A3/v4 — ready when Phoskia program acquired (noise optional; v4
+    // uses a fixed kernel). Not virtual on the base class.
+    bool isReady() const noexcept {
+        return _program.isValid();
+    }
 
     // Destructor-side release — call BEFORE pipeline.clear() /
     // adapter.shutdown(). A1 ships with no real GPU work yet:
@@ -112,9 +112,10 @@ private:
     ayt::shader::BindingId      _uSSAOStrength    = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uSSAORadius      = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uSSAOBias        = ayt::shader::InvalidBinding;
-    ayt::shader::BindingId      _uProjection      = ayt::shader::InvalidBinding;
-    ayt::shader::BindingId      _tSceneColor      = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uCamPos          = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uViewportTexel   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tWorldPosition   = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _tWorldNormal     = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tNoise           = ayt::shader::InvalidBinding;
 
     // Latch so a failed acquire does not re-run shaderc every frame.

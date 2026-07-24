@@ -10,7 +10,8 @@
 //          pin, not AST)
 //        - viewProjectionMatrix builtin used (no `inverse()`)
 //        - pow(1 - occFraction, 4.0) visibility → occlusion
-//   2) SSAO cache-key bumped v0 → v1 (kSSAOCacheKeyCStr)
+//        - center-depth + hemi flip (v3 quality; not kernel-depth)
+//   2) SSAO cache-key bumped v2 → v3 (kSSAOCacheKeyCStr)
 //   3) PostProcessPass FS composite clamp(1 - aoFactor * strength
 //      * step(0.0001, strength), 0, 1) — byte-equivalent to v5
 //      when strength = 0
@@ -47,22 +48,17 @@ TEST_SUITE(AYRenderer_SSAO_A3)
 
 // ─── A. SSAO cache-key + isReady bump pin ───────────────────────────
 
-TEST_CASE(a3_ssao_cache_key_bumped_v1) {
-    // §A3 (2026-07-24) — v0 placeholder bumped to v1 real
-    // 8-tap worldPos sphere shader. Future FS changes must bump
-    // again (v2, v3, ...) — drift detection guard.
+TEST_CASE(a3_ssao_cache_key_bumped_v4) {
+    // §A3 — v3 hemi → v4 off-plane + fixed kernel.
     const std::string key(ayt::render::detail::kSSAOCacheKeyCStr);
     CHECK(key.find("ssao") != std::string::npos);
-    CHECK(key.find("_v1_") != std::string::npos);
+    CHECK(key.find("_v4_") != std::string::npos);
 }
 
-TEST_CASE(a3_post_process_cache_key_bumped_v6) {
-    // §A3 (2026-07-24) — v5 (pre-A3 baseline) bumped to v6 to
-    // incorporate ssaoTexture + ssaoStrength composite. The cache
-    // key MUST bump when a new sampler or uniform is added so
-    // Phoskia re-acquires the updated FS.
+TEST_CASE(a3_post_process_cache_key_bumped_v7) {
+    // §A3 — v6 SSAO sample → v7 5-tap SSAO blur in composite.
     const std::string key(ayt::render::detail::kPostProcessCacheKeyCStr);
-    CHECK(key.find("v6_") != std::string::npos);
+    CHECK(key.find("v7_") != std::string::npos);
     CHECK(key.find("ssao") != std::string::npos);
 }
 

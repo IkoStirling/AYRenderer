@@ -113,7 +113,11 @@ material PostProcess {
         // builtin ⇒ collapse via `clamp(1 - x, 0, 1)` per K-SSAO-3
         // (cutsheet §S2 hard line).
         let ssaoSample = sample(ssaoTexture, uv)
-        let aoFactor = clamp(ssaoSample.r, 0.0, 1.0)
+        let ssaoL = sample(ssaoTexture, uv + vec2(-ssaoStrength.y, 0.0))
+        let ssaoR = sample(ssaoTexture, uv + vec2(ssaoStrength.y, 0.0))
+        let ssaoD = sample(ssaoTexture, uv + vec2(0.0, -ssaoStrength.z))
+        let ssaoU = sample(ssaoTexture, uv + vec2(0.0, ssaoStrength.z))
+        let aoFactor = clamp((ssaoSample.r + ssaoL.r + ssaoR.r + ssaoD.r + ssaoU.r) * 0.2, 0.0, 1.0)
         let aoGate = step(0.0001, ssaoStrength.x)
         let aoMul = clamp(1.0 - aoFactor * ssaoStrength.x * aoGate, 0.0, 1.0)
         let rawOccluded = rawHaze * aoMul
@@ -141,7 +145,7 @@ material PostProcess {
 }
 )";
 
-constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v6_prehazed_bloom_ssao_fs";
+constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v7_ssao_blur5_fs";
 
 // Fallback if primary program fails to acquire — same tonemap+gamma
 // contract so Editor composite does not go black / linear-washed.
@@ -202,7 +206,11 @@ material PostProcessBlit {
         // builtin ⇒ collapse via `clamp(1 - x, 0, 1)` per K-SSAO-3
         // (cutsheet §S2 hard line).
         let ssaoSample = sample(ssaoTexture, uv)
-        let aoFactor = clamp(ssaoSample.r, 0.0, 1.0)
+        let ssaoL = sample(ssaoTexture, uv + vec2(-ssaoStrength.y, 0.0))
+        let ssaoR = sample(ssaoTexture, uv + vec2(ssaoStrength.y, 0.0))
+        let ssaoD = sample(ssaoTexture, uv + vec2(0.0, -ssaoStrength.z))
+        let ssaoU = sample(ssaoTexture, uv + vec2(0.0, ssaoStrength.z))
+        let aoFactor = clamp((ssaoSample.r + ssaoL.r + ssaoR.r + ssaoD.r + ssaoU.r) * 0.2, 0.0, 1.0)
         let aoGate = step(0.0001, ssaoStrength.x)
         let aoMul = clamp(1.0 - aoFactor * ssaoStrength.x * aoGate, 0.0, 1.0)
         let rawOccluded = rawHaze * aoMul
@@ -229,7 +237,7 @@ material PostProcessBlit {
     }
 }
 )";
-constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v6_prehazed_bloom_ssao_fs";
+constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v7_ssao_blur5_fs";
 
 } // namespace
 
@@ -481,7 +489,12 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     // §A3 SSAO MVP (2026-07-24) — ssaoStrength vec4 uniform on the
     // strength gate. Background fill (ssao enabled but slot fallback)
     // ⇒ 0 — FS gate collapses. Mirror haze-strength pattern.
-    const float ssaoStrengthPad[4] = {frame.ssaoStrength, 0.0f, 0.0f, 0.0f};
+    const float ssaoTexelX = (viewportWidth  > 0)
+        ? (1.0f / static_cast<float>(viewportWidth)) : 0.0f;
+    const float ssaoTexelY = (viewportHeight > 0)
+        ? (1.0f / static_cast<float>(viewportHeight)) : 0.0f;
+    const float ssaoStrengthPad[4] = {
+        frame.ssaoStrength, ssaoTexelX, ssaoTexelY, 0.0f};
     _program.setUniform(_uSSAOStrength, ssaoStrengthPad, sizeof(ssaoStrengthPad));
 
     ayt::shader::DrawCallContext sub;
@@ -507,10 +520,14 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         const bool hazeFromHalf =
             BGFXAdapter::isValid(hazeSourceFbo)
             && (hazeTexHandle.id != texHandle.id);
+        const bool ssaoFromPass =
+            BGFXAdapter::isValid(ssaoSourceFbo)
+            && (ssaoTexHandle.id != texHandle.id);
         std::fprintf(stderr,
             "[PostProcessPass] blit ok view=%u rect=(%u,%u,%u,%u) "
             "gamma=%.1f exposure=%.2f tonemap=%.0f bloom=%.2f "
-            "bloomSrc=%s haze=%.2f density=%.3f hazeSrc=%s time=%.2f\n",
+            "bloomSrc=%s haze=%.2f density=%.3f hazeSrc=%s "
+            "ssao=%.2f ssaoSrc=%s time=%.2f\n",
             static_cast<unsigned>(viewId),
             static_cast<unsigned>(viewportX),
             static_cast<unsigned>(viewportY),
@@ -524,6 +541,8 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
             frame.hazeStrength,
             frame.hazeDensity,
             hazeFromHalf ? "hazeHalf" : "fallback(scene)",
+            frame.ssaoStrength,
+            ssaoFromPass ? "ssao" : "fallback(scene)",
             frame.timeSeconds);
         s_loggedSubmit = true;
     }
