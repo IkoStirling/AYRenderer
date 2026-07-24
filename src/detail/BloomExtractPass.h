@@ -91,38 +91,57 @@ public:
     // (e.g. backend was initialized but the Phoskia program is
     // not in the pool). Today "ready" once execute() has built the
     // FBO at least once.
-    bool isReady() const noexcept { return bgfx::isValid(_fbo); }
+    // §F2 (2026-07-24) — F2 ships with FG 物理创建延后到 F6;isReady
+    // 反映"FG 是否真创建了 BloomBright" ── 当前恒 false,直到 F6
+    // 真打开物理 RT 创建。Pass::execute() 不依赖 isReady() 决定
+    // 0/non-0 draw ── 它直接看 ctx.frameGraph->resolve(BloomBright)
+    // 的返值。
+    bool isReady() const noexcept { return false; }
 
-    // Host-facing half-resolution size getter (for tests + future
-    // S1b blur that needs to know input size).
-    uint16_t halfWidth()  const noexcept { return _fboWidth;  }
-    uint16_t halfHeight() const noexcept { return _fboHeight; }
+    // §F2 (2026-07-24) — halfWidth/halfHeight 退化为"FG 物理尺寸
+    // getter"。F2 阶段 FG 物理创建未开 ⇒ 返 0。F6 真打开后,这些
+    // getter 改读 ctx.frameGraph 的 live physicalW/H(F6 自己定
+    // 细节,不是 F2)。
+    uint16_t halfWidth()  const noexcept { return 0; }
+    uint16_t halfHeight() const noexcept { return 0; }
 
-    // §S1b (2026-07-23) — consumer entry point. The downstream
-    // BloomBlurPass reads this FBO (its RT0 attachment is sampled
-    // as the blur source) and ping-pongs into two of its own
-    // halfW × halfH FBOs. Mirrors LightingPass::lightingOutputFbo()
-    // / SkyboxPass::skyFbo() / GBufferPass::gbufferFbo() producer-
-    // state pattern. Returns BGFX_INVALID_HANDLE when the FBO
-    // hasn't been ensured yet (first frame race; S1b gates on
-    // bgfx::isValid).
-    bgfx::FrameBufferHandle halfResFbo() const noexcept { return _fbo; }
+    // §S1b (2026-07-23, §F2 updated 2026-07-24) — consumer entry
+    // point. The downstream BloomBlurPass reads this FBO (its RT0
+    // attachment is sampled as the blur source) and ping-pongs into
+    // two of its own halfW × halfH FBOs. Mirrors LightingPass::
+    // lightingOutputFbo() producer-state pattern.
+    //
+    // §F2 update:halfResFbo() 之前返 `_fbo`(Pass own);现在需 ctx
+    // 才能问 FG ── 但 consumer (BloomBlurPass) 只在 F3 才迁入
+    // FG,这一帧(2026-07-24 F2)BloomBlurPass 仍按旧约定调
+    // halfResFbo(),所以保持一个 stateless getter 返 invalid 占位。
+    // F3 会改 BloomBlurPass 走 ctx.frameGraph->resolvePingPong,
+    // 并删除本 getter。
+    //
+    // 返回 BGFX_INVALID_HANDLE 当 FG 物理创建未开(F2 阶段 ── 字节
+    // 与 host bloomStrength=0 一致);F6 真打开后此 getter 被移除
+    // (consumer 改问 FG)。
+    bgfx::FrameBufferHandle halfResFbo() const noexcept {
+        return BGFX_INVALID_HANDLE;
+    }
 
-    // Destructor-side release — call BEFORE pipeline.clear() /
-    // adapter.shutdown(). Mirror PostProcessPass::destroyResources
-    // contract. Idempotent (BGFXAdapter::destroy on invalid handle
-    // is a no-op).
+    // §F2 (2026-07-24) — destroyResources 保留,但只释放 program +
+    // VB + IB。FG own 的 transient RT 由 FrameGraph::shutdown 释
+    // 放(在 Impl shutdown 路径调 fg.shutdown())。调用者 (Render
+    // Pipeline teardown) 仍先调 destroyResources,确保 program
+    // handle 计数归零后再让 ShaderResourcePool dtor 释放底层
+    // GPU program。
     void destroyResources(BGFXAdapter& adapter);
 
 private:
-    // Lazy FBO — half-resolution RGBA8, no depth. BGFXAdapter owns
-    // the bgfx handle; this class owns the cache + size tracking +
-    // destroy decision.
-    bgfx::FrameBufferHandle    _fbo = BGFX_INVALID_HANDLE;
+    // §F2 (2026-07-24) — `_fbo/_fboWidth/_fboHeight` 已迁出到
+    // FrameGraph。BloomExtract 不再 own 自己的 transient RT。Pass
+    // 只 own:Phoskia program / fullscreen VB / IB。物理 RT 走
+    // ctx.frameGraph->resolve(FgResourceId::BloomBright)。
+    //
+    // 仍有私有字段:VB / IB(program 是 ShaderResource 包装类)。
     bgfx::VertexBufferHandle   _fullscreenVB = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle    _fullscreenIB = BGFX_INVALID_HANDLE;
-    uint16_t                   _fboWidth  = 0;
-    uint16_t                   _fboHeight = 0;
 
     // Phoskia program for the bright-extract effect. Acquired lazily
     // on first execute() after adapter init. Acquire may fail

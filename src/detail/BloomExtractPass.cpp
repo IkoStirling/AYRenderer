@@ -1,6 +1,7 @@
 #include "detail/BloomExtractPass.h"
 
 #include "detail/BGFXAdapter.h"
+#include "detail/FgResource.h"          // §F2 (2026-07-24) — FrameGraph FgResourceId::BloomBright
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
@@ -122,15 +123,41 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
         return 0;
     }
 
+    // §F2 (2026-07-24) — BloomBright target RT now owned by
+    // FrameGraph instead of this Pass. resolve() returns a
+    // borrowed physical handle when the resource is live AND
+    // the FrameGraph has created it; otherwise returns invalid.
+    //
+    // F2 ship-path: host bloomStrength == 0 ⇒ FG compile marks
+    // BloomExtract pass disabled ⇒ BloomBright not live ⇒
+    // resolve() returns invalid ⇒ this pass returns 0 draws.
+    // Byte-equivalent to today's "extract writes zeros into the
+    // half-res FBO + Final PP folds bloomStrength=0 into no-op"
+    // path. F6 will make FrameGraph actually create the physical
+    // RT so host bloomStrength > 0 lights the bloom chain back up.
+    if (ctx.frameGraph == nullptr) {
+        // Pre-F2 callers (legacy test sites) never wire frameGraph
+        // ⇒ early-return 0. Byte-equivalent to today's path only
+        // when host bloomStrength == 0; for bloomStrength > 0
+        // callers must update to wire FrameGraph (Renderer::render
+        // does this — pre-F2 caller means a hand-rolled test).
+        return 0;
+    }
+    const bgfx::FrameBufferHandle target =
+        ctx.frameGraph->resolve(FgResourceId::BloomBright);
+    if (!BGFXAdapter::isValid(target)) {
+        return 0;
+    }
+
     // Half-resolution size — (W+1)/2 rounds UP so we never sample
     // outside [0,W) on the source texture. Mirror conventional
     // half-res chain math (S1 cutsheet §S1 "ensure(w/2, h/2)").
+    // F2 NOTE: F6 will read the actual physical size from FG; for
+    // now we still compute half-res locally because FrameGraph
+    // physical creation is deferred — and the resulting target
+    // is currently invalid, so this draw is skipped anyway.
     const uint16_t halfW = static_cast<uint16_t>((viewportWidth  + 1u) / 2u);
     const uint16_t halfH = static_cast<uint16_t>((viewportHeight + 1u) / 2u);
-    ensureFbo(adapter, halfW, halfH);
-    if (!BGFXAdapter::isValid(_fbo)) {
-        return 0;
-    }
 
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
@@ -156,7 +183,7 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
     constexpr uint8_t viewId = kBloomExtractViewId;
     const ayt::math::Float4x4 identity = ayt::math::Float4x4::identity();
 
-    adapter.setViewFrameBuffer(viewId, _fbo);
+    adapter.setViewFrameBuffer(viewId, target);
     adapter.setViewRect(viewId, 0, 0, halfW, halfH);
     adapter.setViewTransform(viewId, identity, identity);
     // Don't clear — we always overwrite every pixel via fullscreen
@@ -205,34 +232,6 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
         s_loggedFirst = true;
     }
     return 1;
-}
-
-void BloomExtractPass::ensureFbo(BGFXAdapter& adapter, uint16_t width, uint16_t height)
-{
-    if (BGFXAdapter::isValid(_fbo) && _fboWidth == width && _fboHeight == height) {
-        return;
-    }
-    // Size changed (or first call): destroy the old FBO then
-    // recreate at the new dimensions. BGFXAdapter::destroy handles
-    // invalid handles cleanly (no-op).
-    if (BGFXAdapter::isValid(_fbo)) {
-        adapter.destroy(_fbo);
-        _fbo = BGFX_INVALID_HANDLE;
-    }
-    _fbo = adapter.createFrameBuffer(width, height,
-                                      bgfx::TextureFormat::RGBA8,
-                                      /*withDepth=*/false);
-    if (BGFXAdapter::isValid(_fbo)) {
-        _fboWidth  = width;
-        _fboHeight = height;
-    } else {
-        _fboWidth  = 0;
-        _fboHeight = 0;
-        std::fprintf(stderr,
-                     "[BloomExtractPass] FBO create failed at %ux%u; "
-                     "bloom-extract disabled for this run\n",
-                     width, height);
-    }
 }
 
 void BloomExtractPass::ensureFullscreenQuad(BGFXAdapter& adapter)
@@ -289,10 +288,9 @@ void BloomExtractPass::ensureProgram(shader::ShaderResourcePool& pool)
 
 void BloomExtractPass::destroyResources(BGFXAdapter& adapter)
 {
-    if (BGFXAdapter::isValid(_fbo)) {
-        adapter.destroy(_fbo);
-        _fbo = BGFX_INVALID_HANDLE;
-    }
+    // §F2 (2026-07-24) — Pass 不再 own `_fbo`(迁出到 FrameGraph);
+    // 这里只释放 program / VB / IB。FG own 的 transient RT 由
+    // FrameGraph::shutdown() 释放(在 Impl shutdown 路径调)。
     if (BGFXAdapter::isValid(_fullscreenVB)) {
         adapter.destroy(_fullscreenVB);
         _fullscreenVB = BGFX_INVALID_HANDLE;
@@ -315,8 +313,6 @@ void BloomExtractPass::destroyResources(BGFXAdapter& adapter)
     _uBloomStrength  = ayt::shader::InvalidBinding;
     _tSceneColor     = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
-    _fboWidth = 0;
-    _fboHeight = 0;
 }
 
 } // namespace ayt::render::detail

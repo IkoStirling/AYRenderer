@@ -7,6 +7,7 @@
 #include "detail/BloomBlurPass.h"
 #include "detail/DepthHazePass.h"  // S4b (2026-07-23) — borrowed-ptr source for PassExecContext::depthHazePass + destroyResources.
 #include "detail/DebugOverlay.h"
+#include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
 #include "detail/ForwardOpaquePass.h"
 #include "detail/GBufferPass.h"
 #include "detail/FrameContext.h"
@@ -214,6 +215,15 @@ struct Renderer::Impl {
     // B4 / B5 wire real GPU on top.
     detail::RenderPipeline        pipeline;
     RenderPipelineDesc            pipelineDesc = RenderPipelineDesc::makeDefault();
+
+    // §F2 (2026-07-24, mid-term FG MVP) — FrameGraph owns the
+    // post-process chain transient resources (BloomBright /
+    // BloomBlurA/B / HazeHalf). Lives here (Impl member) so its
+    // lifetime matches the Renderer; borrowed via
+    // PassExecContext::frameGraph for each render() call.
+    // Constructed with the adapter reference (it queries the
+    // adapter's isInitialized/isNoopBackend per-frame).
+    detail::FrameGraph            frameGraph{adapter};
 
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
@@ -900,6 +910,53 @@ void Renderer::render(const RenderScene& scene)
             _impl->sceneLights);
     }
 
+    // §F2 (2026-07-24, mid-term FG MVP) — FrameGraph is the
+    // post-process chain resource pool. build-graph site lives
+    // HERE (not in Pass::execute) so the compile pass sees the
+    // full pass list before any Resolve() fires. F2 wires
+    // BloomExtract only; F3-F5 migrate BloomBlur / DepthHaze /
+    // PostProcess incrementally.
+    //
+    // bloomEnabled is the unified gate for the whole bloom
+    // chain (extract + blur) — host's bloomStrength > 0 enables
+    // it; otherwise the chain is fully culled at compile time
+    // and no transient RTs are created (cutsheet §7 row 3).
+    detail::FrameGraph& fg = _impl->frameGraph;
+    const uint16_t fgW = _impl->viewportW;
+    const uint16_t fgH = _impl->viewportH;
+    fg.beginFrame(fgW, fgH);
+    // Import SceneColor as an external resource (borrowed, not
+    // owned). The physical source is decided per frame based on
+    // which pipeline path is active: Deferred ⇒ Lighting output;
+    // Forward ⇒ the renderer's sceneFbo.
+    bgfx::FrameBufferHandle sceneColorHandle = sceneFbo;
+    if (lightingPassPtr != nullptr
+        && detail::BGFXAdapter::isValid(lightingPassPtr->lightingOutputFbo())) {
+        sceneColorHandle = lightingPassPtr->lightingOutputFbo();
+    }
+    fg.importExternal(detail::FgResourceId::SceneColor, sceneColorHandle);
+
+    const bool bloomEnabled = (frame.bloomStrength > 0.0f);
+    if (bloomEnabled) {
+        // F2 ships with the physical RT path still gated on FG
+        // resolve() returning invalid (FG physical creation
+        // deferred to F6). The compile-time declaration still
+        // happens so enabled-vs-disabled visibility is correct.
+        fg.addResource(detail::FgResourceId::BloomBright,
+                       {bgfx::TextureFormat::RGBA8,
+                        detail::FgTextureScale::Half,
+                        /*transient=*/true,
+                        /*withDepth=*/false});
+        fg.addPass({"BloomExtract",
+                    {detail::FgResourceId::SceneColor},
+                    {detail::FgResourceId::BloomBright},
+                    /*enabled=*/true});
+    }
+    // Compile locks the live set; F6 will add alias decisions on
+    // top of this same compile step. F2 only needs the live set
+    // so resolve() can return invalid for not-live resources.
+    fg.compile();
+
     detail::PassExecContext ctx{
         _impl->adapter,
         _impl->shaderPool,
@@ -970,6 +1027,19 @@ void Renderer::render(const RenderScene& scene)
         // bloomBlurPassPtr above (lifetime contract: pointer must
         // remain valid for the duration of pipeline::executeAll(ctx)).
         depthHazePassPtr,
+        // §F2 (2026-07-24, mid-term FG MVP) — borrowed pointer to
+        // the FrameGraph that owns the post-process chain transient
+        // resources (BloomBright / BloomBlurA/B / HazeHalf). F2
+        // wires this for BloomExtract only; F3-F5 migrate BloomBlur /
+        // DepthHaze / PostProcess. nullptr ⇒ those passes early-
+        // return 0 (byte-equivalent to today's host-default path
+        // where bloomStrength=0 ⇒ no bloom contribution).
+        //
+        // The FrameGraph is owned by `_impl->frameGraph`; its
+        // lifetime is Renderer lifetime. The pass uses it to resolve
+        // a logical FgResourceId (e.g. BloomBright) to a physical
+        // bgfx::FrameBufferHandle.
+        &_impl->frameGraph,
     };
 
     static uint32_t s_compositeLog = 0;

@@ -112,6 +112,28 @@ class BloomBlurPass;
 // shader + FBO ensure land in §S4b).
 class DepthHazePass;
 
+// §F2 (2026-07-24, mid-term cutsheet `docs/frame-graph-mvp.md`
+// F2 sub-cut) — FrameGraph is the post-process chain resource
+// pool (BloomExtract / BloomBlur / DepthHaze / Final). Forward
+// declaration mirrors the LightingPass / BloomBlurPass / etc.
+// pattern above; PassExecContext carries the borrowed pointer so
+// Pass::execute() can resolve a logical resource (FgResourceId)
+// to a physical bgfx::FrameBufferHandle.
+//
+// Lifetime: the FrameGraph is owned by Renderer::Impl (single
+// instance, lifetime = Renderer lifetime). PassExecContext holds
+// a borrowed, non-owning pointer; safe across dispatch (FG
+// outlives any single render() call).
+//
+// Default-init = nullptr so existing 23-/24-field brace-init
+// test sites (Test_F2_ForwardShadow, Test_BloomExtract_S1a, ...,
+// Test_FgResource_F1) keep compiling without edits via C++14
+// trailing-default behavior. Pre-F2 callers that never wired
+// `frameGraph` see early-return 0 in BloomExtract / BloomBlur /
+// DepthHaze / PostProcess consume paths (F2-F5 migrate those
+// one at a time; F1 leaves everything nullptr-compatible).
+class FrameGraph;
+
 
 
 struct PassExecContext {
@@ -398,6 +420,23 @@ struct PassExecContext {
     // All existing 20-/21-/22-field brace-init test sites keep
     // compiling without edits via C++14 trailing-default behavior.
     const DepthHazePass* depthHazePass = nullptr;
+
+    // §F2 (2026-07-24, mid-term FG MVP F2) — borrowed, non-owning
+    // pointer to the FrameGraph that owns the post-process chain
+    // transient resources (BloomBright / BloomBlurA/B / HazeHalf).
+    // BloomExtract (F2) / BloomBlur (F3) / DepthHaze (F4) /
+    // PostProcess (F5) read this to resolve a logical FgResourceId
+    // to a physical bgfx::FrameBufferHandle. The FrameGraph is
+    // owned by Renderer::Impl; its lifetime is the Renderer.
+    //
+    // Default-init = nullptr preserves the C++14 trailing-default
+    // behavior for every existing 22-/23-field brace-init test
+    // site. F1 doesn't wire frameGraph anywhere; F2-F5 wire it
+    // inside Renderer::render() right before pipeline.executeAll.
+    // Pre-F2 callers that never set frameGraph see early-return 0
+    // in the consuming Pass paths (the same byte-equivalent
+    // behavior as the F2 "host bloomStrength=0" path).
+    FrameGraph*          frameGraph     = nullptr;
 };
 
 } // namespace ayt::render::detail
