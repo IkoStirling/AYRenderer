@@ -300,7 +300,7 @@ TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
     // from S4b; +1 SSAO from §A2).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 11);
+    CHECK(desc.passes.size() == 12);   // V1 GBuffer Debug (2026-07-24): +1 GBufferDebug appended last
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);

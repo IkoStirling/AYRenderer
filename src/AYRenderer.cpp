@@ -9,6 +9,7 @@
 #include "detail/DebugOverlay.h"
 #include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
 #include "detail/ForwardOpaquePass.h"
+#include "detail/GBufferDebugPass.h"   // V1 (2026-07-24) — GBufferDebugPass factory + PassExecContext::gbufferDebugFbo.
 #include "detail/GBufferPass.h"
 #include "detail/FrameContext.h"
 #include "detail/LightingPass.h"
@@ -109,6 +110,14 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::SSAO,           // §A2 SSAO MVP (2026-07-24) — full-res 8-tap worldPos SSAO. Deferred-only (cutsheet §S2 hard line: makeDefault() does NOT include this slot). ssaoEnabled=false / ssaoStrength<=0 / gbufferPass==nullptr ⇒ 0 alloc.
         RenderPassSlot::PostProcess,
         RenderPassSlot::UI,
+        // V1 GBuffer Debug (2026-07-24) — view 250 second viewport.
+        // Appended LAST so bgfx ascending view-id dispatch places
+        // view 250 strictly after view 15, keeping the 0..15
+        // main-frame stream byte-identical. Central gate
+        // (gbufferDebugEnabled = false default) further ensures
+        // zero alloc when the host has not opted in. Forward
+        // makeDefault() does NOT include this slot.
+        RenderPassSlot::GBufferDebug,
     }, RenderPath::Deferred};
 }
 
@@ -191,6 +200,18 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
     // SSAOTexture and SSAOPass::execute returns 0.
     case RenderPassSlot::SSAO:
         return std::make_unique<detail::SSAOPass>();
+    // V1 GBuffer Debug (2026-07-24) — GBuffer debug pass factory.
+    // Only mounted when the pipeline desc includes
+    // RenderPassSlot::GBufferDebug (i.e. makeDeferred() or a
+    // custom desc that opts in). makeDefault() does NOT include
+    // this slot ⇒ Forward hosts see 0 behavior change. render()
+    // central `gbufferDebugEnabled` further gates the FBO lazy-
+    // ensure — when gbufferDebugEnabled=false (default), the
+    // gbufferDebugFbo is NEVER created (zero alloc) and the
+    // GBufferDebugPass::execute early-returns 0 (K-GBD-1
+    // invariant, cutsheet §G1 V1).
+    case RenderPassSlot::GBufferDebug:
+        return std::make_unique<detail::GBufferDebugPass>();
     }
     return nullptr;
 }
@@ -332,6 +353,15 @@ struct Renderer::Impl {
     float                          ssaoRadius   = 0.5f;
     float                          ssaoBias     = 0.025f;
 
+    // V1 GBuffer Debug (2026-07-24) — host knobs (FrameContext
+    // defaults stay off). Mirror SSAO host-knob pattern (lines
+    // 329-333). Channel 0 = Albedo default; host may set 1..4 for
+    // Normal / WorldPos / Motion / Depth. Motion(3) aliases
+    // gbufferMotionRt() in V1 (K-GBD-3 — lifted in V2 when a
+    // real motion RT is added to GBufferPass).
+    bool                           gbufferDebugEnabled  = false;
+    uint8_t                        gbufferDebugChannel  = 0;
+
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias in ndc01
     // units. Mirrored into FrameContext::shadowBias each render so
     // tryBindShadowSampler() (ForwardOpaquePass + TransparentPass
@@ -383,6 +413,17 @@ struct Renderer::Impl {
     bgfx::FrameBufferHandle        sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     uint16_t                       sceneFboW = 0;
     uint16_t                       sceneFboH = 0;
+
+    // V1 GBuffer Debug (2026-07-24) — host-owned offscreen RT for
+    // the option-B second viewport on view 250. Lazy-ensured in
+    // render() central gate (mirror sceneFbo ensureSceneFbo at
+    // line 387); destroyed in resize() (line 1299+). NOT in FG
+    // (deliberately — debug target survives frames for V3 Editor
+    // read-back and does not need compile-time culling since the
+    // gate already short-circuits zero alloc when disabled).
+    bgfx::FrameBufferHandle        gbufferDebugFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    uint16_t                       gbufferDebugFboW = 0;
+    uint16_t                       gbufferDebugFboH = 0;
 
     // P2 — ensure sceneFbo matches the current viewport. Returns
     // BGFX_INVALID_HANDLE when the adapter is uninitialized or size=0
@@ -732,6 +773,13 @@ void Renderer::render(const RenderScene& scene)
     frame.ssaoStrength     = _impl->ssaoStrength;
     frame.ssaoRadius       = _impl->ssaoRadius;
     frame.ssaoBias         = _impl->ssaoBias;
+    // V1 GBuffer Debug (2026-07-24) — host knobs (Editor / host).
+    // Defaults keep GBufferDebug off (K-GBD-1 zero alloc). When
+    // the host enables + channel != 0, the central gate
+    // lazy-ensures the gbufferDebugFbo and GBufferDebugPass
+    // renders the chosen channel to view 250.
+    frame.gbufferDebugEnabled = _impl->gbufferDebugEnabled;
+    frame.gbufferDebugChannel = _impl->gbufferDebugChannel;
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias copied
     // into FrameContext each frame; tryBindShadowSampler reads it.
     frame.shadowBias       = _impl->shadowBias;
@@ -1141,6 +1189,52 @@ void Renderer::render(const RenderScene& scene)
                                detail::FgResourceId::SSAOTexture);
     }
 
+    // V1 GBuffer Debug (2026-07-24) — central `gbufferDebugEnabled`
+    // gate. Mirrors ssaoPassEnabled (lines 1109-1116) but does NOT
+    // touch the FrameGraph (debug RT is host-owned, not in FG).
+    // The 5-condition gate enforces K-GBD-1: when false, the FBO
+    // is NOT created (zero alloc) and ctx.gbufferDebugFbo is
+    // BGFX_INVALID_HANDLE ⇒ GBufferDebugPass::execute early-
+    // returns 0 (zero draw).
+    //
+    // Why Deferred-only: gbufferPassPtr==nullptr in the gate means
+    // Forward hosts see the pass mounted (if they opt in via custom
+    // desc) but the gate is hard-false ⇒ zero alloc + zero draw.
+    // This matches the SSAO "Forward path never sees SSAO" hard
+    // line (cutsheet §S2 red line #4) at the gate level.
+    const bool gbufferDebugEnabledGate =
+        frame.gbufferDebugEnabled
+        && (gbufferPassPtr != nullptr)
+        && (_impl->viewportW > 0)
+        && (_impl->viewportH > 0)
+        && _impl->adapter.isInitialized()
+        && !_impl->adapter.isNoopBackend();
+    if (gbufferDebugEnabledGate) {
+        // Lazy ensure (mirror ensureSceneFbo at line 387). Only
+        // runs when the gate fires AND the FBO is invalid (first
+        // enable, or post-resize invalidation). Size matches
+        // viewport at the moment of the first enable — V1 ships
+        // a static-size debug RT; V2 may add viewport-relative
+        // scaling if a quarter-res thumbnail is preferable for
+        // V3 Editor bandwidth.
+        if (!detail::BGFXAdapter::isValid(_impl->gbufferDebugFbo)
+            || _impl->gbufferDebugFboW != _impl->viewportW
+            || _impl->gbufferDebugFboH != _impl->viewportH) {
+            if (detail::BGFXAdapter::isValid(_impl->gbufferDebugFbo)) {
+                _impl->adapter.destroy(_impl->gbufferDebugFbo);
+                _impl->gbufferDebugFbo =
+                    bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+            }
+            _impl->gbufferDebugFbo =
+                _impl->adapter.createFrameBuffer(
+                    _impl->viewportW, _impl->viewportH,
+                    bgfx::TextureFormat::RGBA8,
+                    /*withDepth=*/false);
+            _impl->gbufferDebugFboW = _impl->viewportW;
+            _impl->gbufferDebugFboH = _impl->viewportH;
+        }
+    }
+
     fg.compile();
 
     detail::PassExecContext ctx{
@@ -1226,6 +1320,15 @@ void Renderer::render(const RenderScene& scene)
         // a logical FgResourceId (e.g. BloomBright) to a physical
         // bgfx::FrameBufferHandle.
         &_impl->frameGraph,
+        // V1 GBuffer Debug (2026-07-24) — Renderer::Impl-owned
+        // offscreen RT (view 250). When the central gate fired
+        // AND lazy-ensure succeeded, _impl->gbufferDebugFbo is
+        // a valid FrameBufferHandle; otherwise it stays at the
+        // default-constructed INVALID sentinel (mirror sceneFbo
+        // at line 1159). The GBufferDebugPass::execute checks
+        // `BGFXAdapter::isValid()` and early-returns 0 on the
+        // INVALID case (K-GBD-1 invariant, cutsheet §G1 V1).
+        _impl->gbufferDebugFbo,
     };
 
     static uint32_t s_compositeLog = 0;
@@ -1302,6 +1405,15 @@ void Renderer::resize(uint32_t width, uint32_t height)
     }
     _impl->sceneFboW = 0;
     _impl->sceneFboH = 0;
+    // V1 GBuffer Debug (2026-07-24) — invalidate the host-owned
+    // debug FBO so the next render() central gate re-ensures at
+    // the new viewport size. Mirror sceneFbo block above.
+    if (detail::BGFXAdapter::isValid(_impl->gbufferDebugFbo)) {
+        _impl->adapter.destroy(_impl->gbufferDebugFbo);
+        _impl->gbufferDebugFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    }
+    _impl->gbufferDebugFboW = 0;
+    _impl->gbufferDebugFboH = 0;
     // Full destroyResources also drops Phoskia programs — fine on
     // rare window resize; MSAA change already does the same.
     if (detail::RenderPass* gbufferPass = _impl->pipeline.findPass("GBuffer")) {
@@ -2055,6 +2167,43 @@ void Renderer::setSsaoParams(float radius, float bias)
 {
     setSsaoRadius(radius);
     setSsaoBias(bias);
+}
+
+// V1 GBuffer Debug (2026-07-24) — host setter quartet. Mirror
+// SSAO setter pattern (lines 2002-2057) — null-guard on _impl,
+// store in Impl, expose getter with sensible default for the
+// "renderer not yet initialized" case. Channel is clamped to
+// [0, GBufferDebugChannel::Count) so a host with a stale UI
+// value can't trigger an out-of-range FS branch in V2.
+void Renderer::setGBufferDebugEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->gbufferDebugEnabled = enabled;
+}
+
+bool Renderer::gbufferDebugEnabled() const noexcept
+{
+    return _impl != nullptr && _impl->gbufferDebugEnabled;
+}
+
+void Renderer::setGBufferDebugChannel(uint8_t channel)
+{
+    if (!_impl) {
+        return;
+    }
+    // Clamp into valid range; a stray slider / combobox value
+    // must not propagate into the FS (V2 channel select will
+    // branch on .x via step() chain).
+    constexpr uint8_t kMax = static_cast<uint8_t>(
+        detail::GBufferDebugChannel::Count) - 1;
+    _impl->gbufferDebugChannel = (channel > kMax) ? 0 : channel;
+}
+
+uint8_t Renderer::gbufferDebugChannel() const noexcept
+{
+    return _impl ? _impl->gbufferDebugChannel : 0u;
 }
 
 void Renderer::configurePipeline(const RenderPipelineDesc& desc)

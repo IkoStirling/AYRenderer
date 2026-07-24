@@ -122,6 +122,27 @@ struct FrameContext {
     float             ssaoStrength     = 0.0f;
     float             ssaoRadius       = 0.5f;   // world-units; sample-sphere radius
     float             ssaoBias         = 0.025f; // depth-compare epsilon (world-units)
+
+    // V1 GBuffer Debug (2026-07-24) — host knobs for the
+    // independent GBuffer channel debug pass (option-B second
+    // viewport on view 250, not main-frame replacement). Default
+    // OFF so pre-V1 brace-init sites keep byte-identical behavior;
+    // hosts opt in via Renderer::setGBufferDebugEnabled/Channel
+    // (mirror SSAO setters in AYRenderer.h:299-308).
+    //
+    // K-GBD-1: enabled=false OR gbufferPass==nullptr OR
+    // uninit/Noop ⇒ render() central gate false ⇒ FBO NOT
+    // created (zero alloc) ⇒ ctx.gbufferDebugFbo invalid ⇒
+    // execute() returns 0 (zero draw). Enforced at host central
+    // gate + execute step-4 (double-check).
+    //
+    // K-GBD-3 (V1 only, will be lifted in V2): gbufferDebugChannel
+    // WorldPos(2) / Motion(3) BOTH alias gbufferMotionRt() because
+    // GBufferPass has not split a real motion RT from worldPos
+    // (RT2 = worldPos RGBA16F per GBufferPass.cpp:49-60). V2 will
+    // add a real Motion RT and re-route channel 3 to it.
+    bool              gbufferDebugEnabled  = false;
+    uint8_t           gbufferDebugChannel  = 0;     // GBufferDebugChannel 0=Albedo..4=Depth
 };
 
 } // namespace ayt::render::detail

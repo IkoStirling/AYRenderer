@@ -279,7 +279,7 @@ TEST_CASE(render_pass_slot_skybox_enum_index) {
     // We test the Skybox value directly; downstream tests verify
     // the relative order.
     CHECK(static_cast<uint8_t>(RenderPassSlot::Skybox) == 1u);
-    CHECK(RenderPipelineDesc::makeDeferred().passes.size() == 11u);   // S4b (2026-07-23): +1 DepthHaze; §A2 SSAO MVP (2026-07-24): +1 SSAO between DepthHaze and PostProcess
+    CHECK(RenderPipelineDesc::makeDeferred().passes.size() == 12u);   // S4b (2026-07-23): +1 DepthHaze; §A2 SSAO MVP (2026-07-24): +1 SSAO; V1 GBuffer Debug (2026-07-24): +1 GBufferDebug appended last
 }
 
 TEST_CASE(deferred_pipeline_skybox_slot_order) {

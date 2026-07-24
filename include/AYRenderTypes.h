@@ -259,6 +259,28 @@ enum class RenderPassSlot : uint8_t {
     //      slot values. Test pin: static_cast<uint8_t>(
     //      RenderPassSlot::SSAO) == 11.
     SSAO = 11,
+
+    // V1 GBuffer Debug (2026-07-24) — append-only ABI value 12
+    // (SSAO=11 was the previous max). Independent second viewport
+    // on view 250; does NOT touch main render order; PostProcess
+    // composite byte-equivalent. Default-OFF (host knob).
+    // makeDefault() does NOT include this slot — Forward path
+    // never sees it. makeDeferred() appends it as the LAST entry
+    // (after UI) so the bgfx ascending view-id dispatch places
+    // view 250 strictly after view 15, keeping the 0..15
+    // main-frame stream byte-identical.
+    //
+    // K-GBD invariants (must survive V2 real-shader cut + V3
+    // Editor widget cut):
+    //   1. gbufferDebugEnabled=false OR gbufferPass==nullptr OR
+    //      uninit/Noop ⇒ render() central gate false ⇒ FBO not
+    //      created (zero alloc) ⇒ ctx FBO invalid ⇒ execute()
+    //      returns 0 (zero draw). Double-checked at host gate +
+    //      execute step-4.
+    //   2. ABI: append-only. NEVER reorder or repurpose existing
+    //      slot values. Test pin: static_cast<uint8_t>(
+    //      RenderPassSlot::GBufferDebug) == 12.
+    GBufferDebug = 12,
 };
 
 // §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was

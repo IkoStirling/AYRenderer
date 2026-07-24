@@ -437,6 +437,17 @@ struct PassExecContext {
     // in the consuming Pass paths (the same byte-equivalent
     // behavior as the F2 "host bloomStrength=0" path).
     FrameGraph*          frameGraph     = nullptr;
+
+    // V1 GBuffer Debug (2026-07-24) — Renderer::Impl-owned
+    // offscreen RT (view 250). Mirrors sceneFbo (line 180):
+    // host-owned, borrowed, NOT in FG. Default INVALID ⇒
+    // GBufferDebugPass early-returns 0 (zero draw, zero alloc).
+    // Set in render() ctx brace-init only when gbufferDebugEnabled
+    // is true AND the FBO lazy-ensure succeeded. Append-only
+    // trailing default ⇒ all existing 23-field brace-init test
+    // sites keep compiling without edits.
+    bgfx::FrameBufferHandle gbufferDebugFbo =
+        bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
 };
 
 } // namespace ayt::render::detail

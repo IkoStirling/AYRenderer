@@ -251,7 +251,7 @@ TEST_CASE(s1a_make_deferred_includes_bloomextract_after_transparent) {
     // and PostProcess — PostProcess/UI shift by another +1.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 11);   // S4b (2026-07-23): +1 DepthHaze; §A2 SSAO MVP (2026-07-24): +1 SSAO between DepthHaze and PostProcess
+    CHECK(desc.passes.size() == 12);   // S4b (2026-07-23): +1 DepthHaze; §A2 SSAO MVP (2026-07-24): +1 SSAO; V1 GBuffer Debug (2026-07-24): +1 GBufferDebug appended last
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);

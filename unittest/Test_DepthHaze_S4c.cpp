@@ -509,7 +509,7 @@ TEST_CASE(s4c_make_deferred_slot_table_depthhaze_before_postprocess) {
     // and PostProcess), PostProcess at index 9.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 11);    // §A2 SSAO MVP (2026-07-24): +1 SSAO
+    CHECK(desc.passes.size() == 12);    // §A2 SSAO MVP (2026-07-24): +1 SSAO; V1 GBuffer Debug (2026-07-24): +1 GBufferDebug appended last
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::DepthHaze);

@@ -307,6 +307,18 @@ public:
     // Convenience: radius + bias (does not change enabled/strength).
     void setSsaoParams(float radius, float bias);
 
+    // V1 GBuffer Debug (2026-07-24) — host knobs for the
+    // independent GBuffer channel debug pass (option-B second
+    // viewport on view 250, not main-frame replacement). Renderer
+    // defaults: enabled=false, channel=Albedo(0) (K-GBD-1 zero
+    // alloc, K-GBD-3 default channel = WorldPos base).
+    // Editor may enable on the Deferred path; Forward path always
+    // no-ops (gbufferPass==nullptr gate).
+    void setGBufferDebugEnabled(bool enabled);
+    bool gbufferDebugEnabled() const noexcept;
+    void setGBufferDebugChannel(uint8_t channel);
+    uint8_t gbufferDebugChannel() const noexcept;
+
     // Rebuild the RenderPipeline from an ordered pass-slot list.
     // Default ctor builds makeDefault() which mounts Shadow at slot 0
     // *enabled* (E5 §5.4, 2026-07-22). To opt out, pass a custom desc
