@@ -2,6 +2,7 @@
 
 #include "detail/BGFXAdapter.h"
 #include "detail/BloomExtractPass.h"
+#include "detail/FgResource.h"        // §F3 (2026-07-24) — FrameGraph resolvePingPong
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
@@ -55,7 +56,7 @@ constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 // `mad` chains — no control flow. Source-image / ping-image
 // binding is the SAME `texture2d source` slot; the host binds
 // different textures per submit (RT0 of BloomExtract for pass A,
-// RT0 of _pingFbo for pass B).
+// RT0 of BloomBlurA for pass B).
 constexpr const char* kBloomBlurPhoskiaSource = R"(
 material BloomBlur {
     texture2d source
@@ -113,7 +114,7 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
     // Mirror S1a BloomExtractPass + PostProcessPass / ShadowPass /
     // LightingPass / SkyboxPass — Noop + uninit short-circuits must
     // come FIRST so headless tests run clean. The FBO create path
-    // inside ensurePingPongFbos would otherwise race against
+    // inside the FG resolve() (F6) would otherwise race against
     // bgfx::createFrameBuffer with no init context.
     if (!adapter.isInitialized()) {
         return 0;
@@ -128,30 +129,63 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // §S1b K2 invariant #1 — borrowed pointer must be present.
-    // Forward custom desc that omits the BloomExtract slot OR a
-    // pipeline without BloomExtract mounted (e.g. host on a
-    // pre-S1a pipeline that hasn't been rebuilt) ⇒ no source FBO
-    // to read ⇒ early-return 0. Same byte-equivalent behavior as
-    // bloomStrength=0 default (zero contribution to final image).
-    if (ctx.bloomExtractPass == nullptr) {
+    // §F3 (2026-07-24) — FrameGraph must be wired (post-F2 contract).
+    // Legacy callers (Pre-F2 test sites) never set frameGraph ⇒
+    // early-return 0 (mirror BloomExtractPass F2 contract). The
+    // PostProcessPass consumer-side wiring (S1c) still uses
+    // `ctx.bloomBlurPass` borrowed ptr for its own producer
+    // lookup, but this Pass's own resource resolution goes via FG
+    // now. F5 will move PostProcessPass's bloom/blur sampler reads
+    // to FG resolveSemantic too.
+    if (ctx.frameGraph == nullptr) {
         return 0;
     }
 
-    const uint16_t halfW = ctx.bloomExtractPass->halfWidth();
-    const uint16_t halfH = ctx.bloomExtractPass->halfHeight();
-    if (halfW == 0 || halfH == 0) {
-        // Producer FBO not yet ensured (first frame race; S1a
-        // BloomExtract early-returned this frame too). Skip —
-        // visually identical to bloomStrength=0 default.
+    // Half-res size — (W+1)/2 rounds UP so we never sample outside
+    // [0,W) on the source texture (mirror BloomExtract / S1 §S1).
+    // Pre-F6 we compute halfW/halfH locally — F6 will replace this
+    // with a FG-backed physical size getter. With resolvePingPong
+    // returning invalid in the F3-skeleton phase, the same
+    // early-return below triggers on the uninitialized adapter,
+    // so this computation is unused today but correctly expresses
+    // the post-F6 shape.
+    const uint16_t viewportWidth  = ctx.viewportWidth;
+    const uint16_t viewportHeight = ctx.viewportHeight;
+    if (viewportWidth == 0 || viewportHeight == 0) {
+        return 0;
+    }
+    const uint16_t halfW = static_cast<uint16_t>((viewportWidth  + 1u) / 2u);
+    const uint16_t halfH = static_cast<uint16_t>((viewportHeight + 1u) / 2u);
+
+    // §F3 (2026-07-24) — Resolve BOTH ping-pong FBOs from the
+    // FrameGraph instead of asking `this` to keep them. The two
+    // resources are declared distinct (BloomBlurA / BloomBlurB)
+    // so FG physically creates (or will physically create, in F6)
+    // two separate transient RTs and **must not alias them**
+    // (alias rules: F6 interval `lastRead < nextFirstWrite` keeps
+    // H-write-A and V-read-A-write-B in the right order).
+    //
+    // On Noop / uninitialized adapter the resolvePingPong returns
+    // {invalid, invalid} and the pass early-returns 0 (K2 #1
+    // propagated through FG). On a future F6-compiled pipeline
+    // that didn't include BloomBright (bloomEnabled=false ⇒ no
+    // BloomExtract pass registered ⇒ BloomBright not live ⇒ no
+    // consumer of BloomBlurA/B ⇒ FG compile culls them ⇒ resolve
+    // returns {invalid, invalid} ⇒ this pass returns 0 with ZERO
+    // allocations — K2 invariant #4 "关效果即不分配 RT").
+    const FgPingPong pp = ctx.frameGraph->resolvePingPong(
+        FgResourceId::BloomBlurA, FgResourceId::BloomBlurB);
+    if (!BGFXAdapter::isValid(pp.first)
+        || !BGFXAdapter::isValid(pp.second)) {
         return 0;
     }
 
-    // Read the producer's RT0 attachment. BloomExtract owns the
-    // FBO; we sample it as a texture but never bind it as our
+    // Read the producer's RT0 attachment. BloomBright lives on FG
+    // (F2 migration resolved BloomExtract's write target through
+    // FG too); we sample it as a texture but never bind it as our
     // draw target (would clear/black the upstream buffer).
     const bgfx::FrameBufferHandle sourceFbo =
-        ctx.bloomExtractPass->halfResFbo();
+        ctx.frameGraph->resolve(FgResourceId::BloomBright);
     if (!BGFXAdapter::isValid(sourceFbo)) {
         return 0;
     }
@@ -160,15 +194,10 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    ensurePingPongFbos(adapter, halfW, halfH);
-    if (!BGFXAdapter::isValid(_pingFbo)
-        || !BGFXAdapter::isValid(_pongFbo)) {
-        return 0;
-    }
     // Refresh attachment handles lazily (mirror LightingPass
     // ::cacheAttachments pattern). Cheap; cache only invalidates
-    // when ensurePingPongFbos rebuilds the FBO (size change).
-    _pingRt = adapter.getFboAttachment(_pingFbo, 0);
+    // when FG lazily recreates the RT (F6 size change).
+    _pingRt = adapter.getFboAttachment(pp.first, 0);
 
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
@@ -183,7 +212,7 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
         && _tSource    != ayt::shader::InvalidBinding;
     if (!programReady) {
         // Acquire failed (shaderc missing on CI). Skip the draw so
-        // both ping-pong FBOs stay clear (S1c consumer samples zero
+        // BloomBlurA/B RTs stay clear (S1c consumer samples zero
         // and produces no bloom; visually identical to
         // bloomStrength=0 host).
         return 0;
@@ -213,8 +242,8 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
     // submit had geometry → pong stayed black → Final bloom looked dead.
 
     // === Pass A: horizontal blur (view 11) ===
-    // Source = BloomExtract's RT0; target = _pingFbo.
-    adapter.setViewFrameBuffer(kBloomBlurHorizontalViewId, _pingFbo);
+    // Source = BloomBright's RT0; target = BloomBlurA (FG ping).
+    adapter.setViewFrameBuffer(kBloomBlurHorizontalViewId, pp.first);
     adapter.setViewRect(kBloomBlurHorizontalViewId, 0, 0, halfW, halfH);
     adapter.setViewTransform(kBloomBlurHorizontalViewId, identity, identity);
     adapter.setViewClearRaw(kBloomBlurHorizontalViewId,
@@ -234,8 +263,8 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
     _program.submit(subH);
 
     // === Pass B: vertical blur (view 12) ===
-    // Source = _pingFbo's RT0; target = _pongFbo.
-    adapter.setViewFrameBuffer(kBloomBlurVerticalViewId, _pongFbo);
+    // Source = BloomBlurA's RT0; target = BloomBlurB (FG pong).
+    adapter.setViewFrameBuffer(kBloomBlurVerticalViewId, pp.second);
     adapter.setViewRect(kBloomBlurVerticalViewId, 0, 0, halfW, halfH);
     adapter.setViewTransform(kBloomBlurVerticalViewId, identity, identity);
     adapter.setViewClearRaw(kBloomBlurVerticalViewId,
@@ -266,53 +295,13 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
             static_cast<unsigned>(kBloomBlurHorizontalViewId),
             static_cast<unsigned>(kBloomBlurVerticalViewId),
             static_cast<unsigned>(sourceFbo.idx),
-            static_cast<unsigned>(_pingFbo.idx),
-            static_cast<unsigned>(_pongFbo.idx),
+            static_cast<unsigned>(pp.first.idx),
+            static_cast<unsigned>(pp.second.idx),
             static_cast<unsigned>(halfW),
             static_cast<unsigned>(halfH));
         s_loggedFirst = true;
     }
     return 2;  // 2 submits: 1 horizontal + 1 vertical.
-}
-
-void BloomBlurPass::ensurePingPongFbos(BGFXAdapter& adapter,
-                                       uint16_t width, uint16_t height)
-{
-    const bool sizeMatch = (BGFXAdapter::isValid(_pingFbo)
-                            && BGFXAdapter::isValid(_pongFbo)
-                            && _fboWidth == width
-                            && _fboHeight == height);
-    if (sizeMatch) {
-        return;
-    }
-    // Size changed (or first call): destroy both FBOs then recreate
-    // at the new dimensions. BGFXAdapter::destroy handles invalid
-    // handles cleanly (no-op).
-    if (BGFXAdapter::isValid(_pingFbo)) {
-        adapter.destroy(_pingFbo);
-        _pingFbo = BGFX_INVALID_HANDLE;
-    }
-    if (BGFXAdapter::isValid(_pongFbo)) {
-        adapter.destroy(_pongFbo);
-        _pongFbo = BGFX_INVALID_HANDLE;
-    }
-    _pingFbo = adapter.createFrameBuffer(width, height,
-                                         bgfx::TextureFormat::RGBA8,
-                                         /*withDepth=*/false);
-    _pongFbo = adapter.createFrameBuffer(width, height,
-                                         bgfx::TextureFormat::RGBA8,
-                                         /*withDepth=*/false);
-    if (BGFXAdapter::isValid(_pingFbo) && BGFXAdapter::isValid(_pongFbo)) {
-        _fboWidth  = width;
-        _fboHeight = height;
-    } else {
-        _fboWidth  = 0;
-        _fboHeight = 0;
-        std::fprintf(stderr,
-                     "[BloomBlurPass] FBO create failed at %ux%u; "
-                     "bloom-blur disabled for this run\n",
-                     width, height);
-    }
 }
 
 void BloomBlurPass::ensureFullscreenQuad(BGFXAdapter& adapter)
@@ -369,14 +358,12 @@ void BloomBlurPass::ensureProgram(shader::ShaderResourcePool& pool)
 
 void BloomBlurPass::destroyResources(BGFXAdapter& adapter)
 {
-    if (BGFXAdapter::isValid(_pingFbo)) {
-        adapter.destroy(_pingFbo);
-        _pingFbo = BGFX_INVALID_HANDLE;
-    }
-    if (BGFXAdapter::isValid(_pongFbo)) {
-        adapter.destroy(_pongFbo);
-        _pongFbo = BGFX_INVALID_HANDLE;
-    }
+    // §F3 (2026-07-24) — FBO destroy block removed. The ping/pong
+    // RTs live on the FrameGraph now and are released by
+    // FrameGraph::shutdown / FrameGraph::resize (Renderer::Impl
+    // shutdown path calls fg.shutdown()). This Pass only owns:
+    // fullscreen VB/IB + Phoskia program. Mirror BloomExtractPass
+    // F2 contract.
     if (BGFXAdapter::isValid(_fullscreenVB)) {
         adapter.destroy(_fullscreenVB);
         _fullscreenVB = BGFX_INVALID_HANDLE;
@@ -395,10 +382,8 @@ void BloomBlurPass::destroyResources(BGFXAdapter& adapter)
     _uTexelSize = ayt::shader::InvalidBinding;
     _tSource    = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
-    _fboWidth  = 0;
-    _fboHeight = 0;
-    _sourceRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
-    _pingRt    = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    _sourceRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    _pingRt   = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
 }
 
 } // namespace ayt::render::detail

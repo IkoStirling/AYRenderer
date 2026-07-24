@@ -951,6 +951,36 @@ void Renderer::render(const RenderScene& scene)
                     {detail::FgResourceId::SceneColor},
                     {detail::FgResourceId::BloomBright},
                     /*enabled=*/true});
+
+        // §F3 (2026-07-24) — BloomBlur ping-pong targets. Two
+        // distinct logical resources (BloomBlurA / BloomBlurB);
+        // aliasing is forbidden by design — cutsheet §4 "BloomBlur
+        // A/B 显式禁止 alias". The FG compile step keeps them in
+        // separate physical RTs even when their FgTextureDesc
+        // matches (the resolvePingPong() path through FgResourceId
+        // does the bookkeeping). Both declared inside the
+        // `bloomEnabled` gate so bloomStrength=0 ⇒ no transient
+        // RTs allocated (K2 #1 invariant).
+        fg.addResource(detail::FgResourceId::BloomBlurA,
+                       {bgfx::TextureFormat::RGBA8,
+                        detail::FgTextureScale::Half,
+                        /*transient=*/true,
+                        /*withDepth=*/false});
+        fg.addResource(detail::FgResourceId::BloomBlurB,
+                       {bgfx::TextureFormat::RGBA8,
+                        detail::FgTextureScale::Half,
+                        /*transient=*/true,
+                        /*withDepth=*/false});
+        // H pass (view 11): BloomBright → BloomBlurA.
+        fg.addPass({"BloomBlurH",
+                    {detail::FgResourceId::BloomBright},
+                    {detail::FgResourceId::BloomBlurA},
+                    /*enabled=*/true});
+        // V pass (view 12): BloomBlurA → BloomBlurB.
+        fg.addPass({"BloomBlurV",
+                    {detail::FgResourceId::BloomBlurA},
+                    {detail::FgResourceId::BloomBlurB},
+                    /*enabled=*/true});
     }
     // Compile locks the live set; F6 will add alias decisions on
     // top of this same compile step. F2 only needs the live set
