@@ -4,20 +4,29 @@
 // real implementation. The S4a skeleton cut reserved the
 // RenderPassSlot + PassExecContext borrowed ptr + class shape; S4b
 // lands the exponential fog shader (主人拍板 B), the half-resolution
-// RGBA8 FBO ensure, Deferred GBuffer-RT2 worldPos distance
-// (`length(worldPos - camPos)`), Forward safe no-haze when
-// gbufferMotionRt is missing, and the hazeEnabled/hazeStrength
-// zero-cost gate (K3 invariant #2: frame.hazeEnabled=false ⇒
-// ensureFbo NOT called ⇒ no FBO allocation; mirrors
-// frame-graph-mvp.md §7 第 3 条).
+// RGBA8 FBO ensure (later deferred to FrameGraph in F4), Deferred
+// GBuffer-RT2 worldPos distance (`length(worldPos - camPos)`),
+// Forward safe no-haze when gbufferMotionRt is missing, and the
+// hazeEnabled/hazeStrength zero-cost gate (K3 invariant #2:
+// frame.hazeEnabled=false ⇒ HazeHalf 不 live ⇒ resolve 返 invalid
+// ⇒ no FBO allocation; mirrors frame-graph-mvp.md §7 第 3 条).
+//
+// §F4 (2026-07-24, mid-term FG MVP sub-cut 4) — HazeHalf migration:
+// DepthHazePass no longer owns its private `_fbo`; it reads the
+// half-resolution FBO through `ctx.frameGraph->resolve(
+// FgResourceId::HazeHalf)`. The "关效果即不分配 RT" gate is
+// now a compile-time decision (render() builds the FG once per
+// frame; bloomStrength=0 / hazeEnabled=false ⇒ the DepthHaze
+// pass is not added ⇒ FG compile culls HazeHalf ⇒ resolve returns
+// invalid ⇒ pass early-returns 0).
 //
 // Pipeline position (short-term-plan §S4 决策 2026-07-23):
 //   ... Lighting → Transparent → BloomExtract → BloomBlur → DepthHaze → PostProcess
 // haze only modifies the raw scene color (exponential
 // `1 - exp(-density * dist)`); bloom stays independent (per
 // 决策 "haze 只改 raw, bloom 独立"). PostProcessPass S4c will sample
-// `_fbo` (RT0 of haze result) as the `hazeTexture` sampler on the
-// fullscreen composite draw — S4c owns that wire.
+// the haze RT as the `hazeTexture` sampler on the fullscreen
+// composite draw — S4c owns that wire (S4c stays).
 //
 // View id allocation: BloomBlur V=12 → DepthHaze=13 → PostProcess=14.
 // Haze MUST sort before Final PP (bgfx ascending view id) so the
@@ -28,29 +37,38 @@
 //
 // Noop-backend safety: dual guard `!isInitialized() || isNoopBackend()`
 // (mirror BloomExtractPass / PostProcessPass / BloomBlurPass /
-// ShadowPass / GBufferPass / LightingPass / SkyboxPass). K3 invariant
-// #2 + #3 still hold under the real implementation.
+// ShadowPass / GBufferPass / LightingPass / SkyboxPass). F4 also
+// gates on `ctx.frameGraph == nullptr` (legacy caller pattern) and
+// on `ctx.frameGraph->resolve(HazeHalf)` returning invalid (which
+// subsumes the pre-F4 "hazeEnabled=false" check — the host's knob
+// is folded into the render()-central `hazePassEnabled` boolean,
+// so by the time execute() runs we either have a valid HazeHalf
+// RT or we early-return 0).
 //
 // K3 invariants (must survive §S4c PostProcessPass haze sampler wire
-// + §S4d Editor default-knob polish):
+// + §S4d Editor default-knob polish + §F4 FrameGraph migration):
 //   1. hazeStrength <= 0 OR hazeEnabled == false ⇒ DepthHazePass
-//      early-returns 0 BEFORE ensureFbo; PostProcessPass S4c haze
-//      sampler path binds sceneColor on the haze slot; FS branchless
-//      composite collapses to `raw * (1 - 0) = raw` — byte-equivalent
-//      to pre-S4 renders.
-//   2. hazeEnabled == false ⇒ ensureFbo NEVER called (no half-res
-//      RT allocation, no view id collision). Mirrors
+//      early-returns 0; FG compile culls HazeHalf ⇒ resolve
+//      returns invalid ⇒ no FS work. PostProcessPass S4c haze
+//      sampler path binds sceneColor on the haze slot; FS
+//      branchless composite collapses to `raw * (1 - 0) = raw` —
+//      byte-equivalent to pre-S4 renders.
+//   2. hazeEnabled == false ⇒ ensureFbo NEVER called (F4: the FG
+//      never even created HazeHalf ⇒ 0 alloc). Mirrors
 //      frame-graph-mvp.md §7 第 3 条.
 //   3. depthHazePass == nullptr (custom desc omits DepthHaze slot) ⇒
-//      PostProcessPass haze sampler path binds sceneColor; FS branchless
-//      composite collapses to `raw * (1 - 0) = raw`. Mirror
-//      §S1c bloomBlurPass==nullptr invariant.
+//      PostProcessPass haze sampler path binds sceneColor; FS
+//      branchless composite collapses to `raw * (1 - 0) = raw`.
+//      Mirror §S1c bloomBlurPass==nullptr invariant.
 //   4. Deferred: dist = length(GBuffer RT2 worldPos - camPos);
-//      Forward / no gbufferMotionRt ⇒ execute returns 0 (safe
-//      no-haze). Avoids the failed D3D invVP reconstruct path.
-//   5. ABI: append-only — RenderPassSlot::DepthHaze = 10 (was unused
-//      in §S1 cutsheet). View ids: Haze=13, Final PP=14 (Haze before
-//      PP so same-frame sampling works).
+//      Forward / no gbufferMotionRt ⇒ render() central
+//      `hazePassEnabled` is false ⇒ FG compile doesn't add
+//      HazeHalf ⇒ resolve() returns invalid ⇒ execute returns 0.
+//      Avoids the failed D3D invVP reconstruct path.
+//   5. ABI: append-only — RenderPassSlot::DepthHaze = 10
+//      (unchanged from S4b). View ids: Haze=13, Final PP=14 (Haze
+//      before PP so same-frame sampling works). FG does NOT
+//      allocate view ids.
 
 #include "AYShaderResource.h"
 
@@ -81,53 +99,56 @@ public:
 
     uint32_t execute(PassExecContext& ctx) override;
 
-    // R5+ mirror — query whether the pass has a real FBO + program
-    // wired. S4b: true after first execute() has built the FBO
-    // (gated on hazeEnabled + hazeStrength > 0). False when the
-    // host has not opted in OR the Phoskia program couldn't be
-    // acquired (shaderc missing on CI). Useful for hosts that want
-    // to skip the slot via setEnabled(false) on a stuck state.
-    bool isReady() const noexcept { return bgfx::isValid(_fbo); }
+    // §F4 (2026-07-24) — readiness probe. F4 ships with FG 物理创建
+    // 延后到 F6;isReady() 反映 "HazeHalf 是否真 live + valid"。
+    // 当前恒 false ── 与 BloomExtractPass F2 + BloomBlurPass F3 守
+    // 同样占位。F6 真打开后会从 FG 读。
+    bool isReady() const noexcept { return false; }
 
-    // Host-facing half-resolution size getter (mirror BloomExtractPass).
-    // Returns 0 until ensureFbo runs at least once (only happens
-    // when hazeEnabled && hazeStrength > 0).
-    uint16_t halfWidth()  const noexcept { return _fboWidth;  }
-    uint16_t halfHeight() const noexcept { return _fboHeight; }
-
-    // §S4c (2026-07-23) consumer entry point. PostProcessPass will
-    // read this FBO (RT0 of the haze result) and bind it as the
-    // `hazeTexture` sampler on the fullscreen composite draw,
-    // applying `mix(raw, fogColor, fogFactor)` over the un-bloomed
-    // raw scene color (haze does NOT touch the bloom chain —
-    // mirrors BloomExtractPass::halfResFbo() producer-state pattern).
-    // Returns BGFX_INVALID_HANDLE when ensureFbo was skipped
-    // (hazeEnabled=false ⇒ no allocation, K3 invariant #2).
-    bgfx::FrameBufferHandle halfResFbo() const noexcept { return _fbo; }
+    // §F4 deprecated (2026-07-24) — halfResFbo() getter used to
+    // hand the bloom chain's haze result to PostProcessPass (S4c
+    // pattern). After F4 / F5 migration, the consumer pathway goes
+    // through `ctx.frameGraph->resolveSemantic(
+    // FgSemantic::HazeSource)` (F5); halfResFbo() becomes a legacy
+    // shim returning BGFX_INVALID_HANDLE, and F5 removes it.
+    //
+    // halfWidth()/halfHeight() likewise reflect that this Pass no
+    // longer owns a private FBO — F4 ships them as 0 because the
+    // FrameGraph owns HazeHalf's physical size. F5 will let them
+    // re-read FG (or remove the getter entirely if no test still
+    // pins them).
+    uint16_t halfWidth()  const noexcept { return 0; }
+    uint16_t halfHeight() const noexcept { return 0; }
+    bgfx::FrameBufferHandle halfResFbo() const noexcept {
+        return BGFX_INVALID_HANDLE;
+    }
 
     // Destructor-side release — call BEFORE pipeline.clear() /
-    // adapter.shutdown(). Mirror BloomExtractPass::destroyResources
-    // contract. Idempotent (BGFXAdapter::destroy on invalid handle
-    // is a no-op).
+    // adapter.shutdown(). §F4 — F4 ships with no FBO to release;
+    // destroyResources only releases the Phoskia program + the
+    // fullscreen VB/IB. FG-owned HazeHalf is released by
+    // FrameGraph::shutdown / FrameGraph::resize (Renderer's Impl
+    // shutdown path calls fg.shutdown()).
     void destroyResources(BGFXAdapter& adapter);
 
 private:
-    // Lazy FBO — half-resolution RGBA8, no depth. Stays invalid
-    // when hazeEnabled=false (K3 invariant #2: execute() short-
-    // circuits BEFORE ensureFbo). Mirror BloomExtractPass contract.
-    bgfx::FrameBufferHandle    _fbo = BGFX_INVALID_HANDLE;
+    // §F4 (2026-07-24) — `_fbo` / `_fboWidth` / `_fboHeight`
+    // migrated out to FrameGraph.HazeHalf. DepthHazePass no longer
+    // owns a private FBO. The only per-Pass state that remains is:
+    // the fullscreen VB/IB + the Phoskia program. Mirror
+    // BloomExtractPass F2 + BloomBlurPass F3 contract.
     bgfx::VertexBufferHandle   _fullscreenVB = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle    _fullscreenIB = BGFX_INVALID_HANDLE;
-    uint16_t                   _fboWidth  = 0;
-    uint16_t                   _fboHeight = 0;
 
-    // Phoskia program for the exponential haze effect. Acquired
-    // lazily on first execute() after adapter init. Acquire may
-    // fail (shaderc missing on CI / disk cache miss + parse
-    // error); in that case isReady() stays false and execute()
-    // degrades to "early-return 0" (PostProcessPass S4c haze sampler
-    // path then binds sceneColor ⇒ byte-equivalent to
-    // hazeEnabled=false ⇒ K3 invariant #2).
+    // §S4b (2026-07-23) — Phoskia program for the exponential haze
+    // effect. Acquired lazily on first execute() after adapter init.
+    // Acquire may fail (shaderc missing on CI / disk cache miss +
+    // parse error); in that case isReady() stays false and
+    // execute() degrades to "early-return 0" (PostProcessPass S4c
+    // haze sampler path then binds sceneColor ⇒ byte-equivalent to
+    // hazeEnabled=false ⇒ K3 invariant #2 — F4: the resolve() also
+    // returns invalid in that case so the early-return path is
+    // crossed twice).
     ayt::shader::ShaderResource _program;
 
     // Cached binding IDs. Resolved on first acquire; InvalidBinding
@@ -143,10 +164,8 @@ private:
     // (mirror BloomExtractPass / BloomBlurPass).
     bool                        _programAcquireFailed = false;
 
-    // R5+ helpers — gated on hazeEnabled + hazeStrength at the
-    // execute() entry. BGFXAdapter gates on isInitialized(), so
-    // headless tests run clean.
-    void ensureFbo(BGFXAdapter& adapter, uint16_t viewportW, uint16_t viewportH);
+    // R5+ helpers — only VB/IB + program. ensureFbo removed (F4
+    // migration; FG owns HazeHalf now).
     void ensureFullscreenQuad(BGFXAdapter& adapter);
     void ensureProgram(shader::ShaderResourcePool& pool);
 };

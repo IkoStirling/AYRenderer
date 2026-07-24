@@ -1,6 +1,7 @@
 #include "detail/DepthHazePass.h"
 
 #include "detail/BGFXAdapter.h"
+#include "detail/FgResource.h"        // §F4 (2026-07-24) — FrameGraph HazeHalf resolve
 #include "detail/FrameContext.h"
 #include "detail/GBufferPass.h"
 #include "detail/GpuResources.h"
@@ -51,7 +52,12 @@ constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 //
 // dist = length(worldPos.xyz - camPos.xyz) — §S4 决策:
 //   Deferred: sample GBuffer RT2 (gbufferMotionRt, RGBA16F worldPos)
-//   Forward (no gbuffer): safe no-haze (execute early-returns 0).
+//   Forward (no gbuffer): safe no-haze (handled at the host side
+//   in render() — render() central `hazePassEnabled` is computed
+//   from `frame.hazeEnabled && frame.hazeStrength > 0 &&
+//   gbufferPass != nullptr`; haze on + Forward ⇒ hazePassEnabled
+//   false ⇒ HazeHalf not declared ⇒ this Pass early-returns 0 in
+//   execute()).
 //   FS depth reconstruct is intentionally NOT used here — the D3D
 //   invVP reconstruct path already failed once in Lighting (B5.5)
 //   and is why RT2 stores raw worldPos. Keep Forward at no-haze
@@ -117,8 +123,8 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
     // Mirror BloomExtractPass / PostProcessPass / ShadowPass /
     // LightingPass / SkyboxPass — Noop + uninit short-circuits must
     // come FIRST so headless tests run clean. The FBO create path
-    // inside ensureFbo would otherwise race against bgfx::createFrameBuffer
-    // with no init context.
+    // inside the FG resolve() (F6) would otherwise race against
+    // bgfx::createFrameBuffer with no init context.
     if (!adapter.isInitialized()) {
         return 0;
     }
@@ -132,23 +138,10 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // §S4b K3 invariant #2 — hazeEnabled=false ⇒ no FBO allocation
-    // (守 frame-graph-mvp.md §7 第 3 条: 关效果即不分配 RT). Short-
-    // circuit BEFORE ensureFbo so the half-res RT never gets created
-    // when the host has not opted in. Mirror BloomExtractPass
-    // viewport-zero guard — same shape, different gate source.
-    if (!frame.hazeEnabled) {
-        return 0;
-    }
-
-    // §S4b K3 invariant #1 — hazeStrength <= 0 ⇒ haze is logically
-    // off (host set the knob but kept strength at 0). Pre-S4 byte-
-    // equivalent: PostProcessPass S4c sampler wire binds sceneColor
-    // on the haze slot; FS branchless composite collapses to
-    // `raw * (1 - 0) = raw`. We could still allocate the FBO here
-    // (cheap, but not free), so we explicitly early-return — keeps
-    // the "host enabled + strength=0 ⇒ no work" contract crisp.
-    if (frame.hazeStrength <= 0.0f) {
+    // §F4 (2026-07-24) — FrameGraph must be wired (post-F2 contract).
+    // Legacy callers (Pre-F2 test sites) never set frameGraph ⇒
+    // early-return 0 (mirror BloomExtractPass F2 contract).
+    if (ctx.frameGraph == nullptr) {
         return 0;
     }
 
@@ -158,14 +151,28 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // Source-FBO priority — identical to BloomExtractPass / PostProcessPass
-    // (cutsheet §P5 B6 lock — deferred LightingOutput wins over
-    // forward sceneFbo; both invalid ⇒ no work). We need the same
-    // FBO the Final PP composite will read so the haze result is a
-    // haze OF the post-lighting scene color (matches S4b decision
-    // "haze only modifies raw, bloom stays independent"). Reusing
-    // the static helper keeps the priority decision a single source
-    // of truth.
+    // §F4 (2026-07-24) — Render-time gate replaces the old
+    // "frame.hazeEnabled && frame.hazeStrength > 0" check inside
+    // this Pass. The render() central code computes
+    // `hazePassEnabled` and only adds the HazeHalf resource + the
+    // DepthHaze pass when enabled; the compile step marks HazeHalf
+    // as live ONLY when the pass is in the graph. Hence
+    // resolve(HazeHalf) here is the canonical "this pass should
+    // run" signal: invalid ⇒ 0 draw + 0 alloc (K3 #2 hold).
+    const bgfx::FrameBufferHandle target =
+        ctx.frameGraph->resolve(FgResourceId::HazeHalf);
+    if (!BGFXAdapter::isValid(target)) {
+        return 0;
+    }
+
+    // Source-FBO priority — identical to BloomExtractPass /
+    // PostProcessPass (cutsheet §P5 B6 lock — deferred
+    // LightingOutput wins over forward sceneFbo; both invalid ⇒
+    // no work). We need the same FBO the Final PP composite will
+    // read so the haze result is a haze OF the post-lighting
+    // scene color (matches S4b decision "haze only modifies raw,
+    // bloom stays independent"). Reusing the static helper keeps
+    // the priority decision a single source of truth.
     const bgfx::FrameBufferHandle sourceFbo = PostProcessPass::selectSourceFbo(ctx);
     if (!BGFXAdapter::isValid(sourceFbo)) {
         return 0;
@@ -176,9 +183,11 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // Deferred: GBuffer RT2 (gbufferMotionRt) holds RGBA16F worldPos.
-    // Forward / no-gbuffer: safe no-haze BEFORE ensureFbo so we do
-    // not allocate a half-res RT we will never sample (K3 #2 spirit).
+    // Deferred: GBuffer RT2 (gbufferMotionRt) holds RGBA16F
+    // worldPos. Forward / no-gbuffer case: render() central
+    // `hazePassEnabled` already excluded this frame (so HazeHalf
+    // isn't live ⇒ resolve returned invalid above). K3 #4 holds:
+    // FS depth reconstruct path is NOT used.
     bgfx::TextureHandle worldPosRt = BGFX_INVALID_HANDLE;
     if (ctx.gbufferPass != nullptr) {
         worldPosRt = ctx.gbufferPass->gbufferMotionRt();
@@ -192,10 +201,6 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
     // half-res chain math (S1 cutsheet §S1 "ensure(w/2, h/2)").
     const uint16_t halfW = static_cast<uint16_t>((viewportWidth  + 1u) / 2u);
     const uint16_t halfH = static_cast<uint16_t>((viewportHeight + 1u) / 2u);
-    ensureFbo(adapter, viewportWidth, viewportHeight);
-    if (!BGFXAdapter::isValid(_fbo)) {
-        return 0;
-    }
 
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
@@ -213,11 +218,8 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
         && _tWorldPosOrDepth  != ayt::shader::InvalidBinding;
     if (!programReady) {
         // Acquire failed (shaderc missing on CI). Skip the draw so
-        // the half-res FBO stays clear (any S4c consumer would then
-        // sample zero ⇒ PostProcessPass haze sampler branchless
-        // composite collapses to `raw * (1 - 0) = raw` — visually
-        // identical to hazeEnabled=false). Mirror BloomExtractPass
-        // contract.
+        // HazeHalf RT stays clear (PostProcessPass S4c haze sampler
+        // branchless composite then binds sceneColor ⇒ no-op).
         return 0;
     }
 
@@ -227,7 +229,7 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
     constexpr uint8_t viewId = kDepthHazeViewId;
     const ayt::math::Float4x4 identity = ayt::math::Float4x4::identity();
 
-    adapter.setViewFrameBuffer(viewId, _fbo);
+    adapter.setViewFrameBuffer(viewId, target);
     adapter.setViewRect(viewId, 0, 0, halfW, halfH);
     adapter.setViewTransform(viewId, identity, identity);
     // Don't clear — we always overwrite every pixel via fullscreen
@@ -300,38 +302,6 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
     return 1;
 }
 
-void DepthHazePass::ensureFbo(BGFXAdapter& adapter, uint16_t viewportW, uint16_t viewportH)
-{
-    // Half-res, computed from the full viewport (mirror BloomExtractPass).
-    const uint16_t halfW = static_cast<uint16_t>((viewportW  + 1u) / 2u);
-    const uint16_t halfH = static_cast<uint16_t>((viewportH + 1u) / 2u);
-
-    if (BGFXAdapter::isValid(_fbo) && _fboWidth == halfW && _fboHeight == halfH) {
-        return;
-    }
-    // Size changed (or first call): destroy the old FBO then
-    // recreate at the new dimensions. BGFXAdapter::destroy handles
-    // invalid handles cleanly (no-op).
-    if (BGFXAdapter::isValid(_fbo)) {
-        adapter.destroy(_fbo);
-        _fbo = BGFX_INVALID_HANDLE;
-    }
-    _fbo = adapter.createFrameBuffer(halfW, halfH,
-                                     bgfx::TextureFormat::RGBA8,
-                                     /*withDepth=*/false);
-    if (BGFXAdapter::isValid(_fbo)) {
-        _fboWidth  = halfW;
-        _fboHeight = halfH;
-    } else {
-        _fboWidth  = 0;
-        _fboHeight = 0;
-        std::fprintf(stderr,
-                     "[DepthHazePass] FBO create failed at %ux%u; "
-                     "depth-haze disabled for this run\n",
-                     halfW, halfH);
-    }
-}
-
 void DepthHazePass::ensureFullscreenQuad(BGFXAdapter& adapter)
 {
     if (BGFXAdapter::isValid(_fullscreenVB)
@@ -389,10 +359,12 @@ void DepthHazePass::ensureProgram(shader::ShaderResourcePool& pool)
 
 void DepthHazePass::destroyResources(BGFXAdapter& adapter)
 {
-    if (BGFXAdapter::isValid(_fbo)) {
-        adapter.destroy(_fbo);
-        _fbo = BGFX_INVALID_HANDLE;
-    }
+    // §F4 (2026-07-24) — FBO destroy block removed. The HazeHalf
+    // RT lives on the FrameGraph now and is released by
+    // FrameGraph::shutdown / FrameGraph::resize (Renderer::Impl
+    // shutdown path calls fg.shutdown()). This Pass only owns:
+    // fullscreen VB/IB + Phoskia program. Mirror BloomExtractPass
+    // F2 + BloomBlurPass F3 contract.
     if (BGFXAdapter::isValid(_fullscreenVB)) {
         adapter.destroy(_fullscreenVB);
         _fullscreenVB = BGFX_INVALID_HANDLE;
@@ -414,8 +386,6 @@ void DepthHazePass::destroyResources(BGFXAdapter& adapter)
     _tSceneColor      = ayt::shader::InvalidBinding;
     _tWorldPosOrDepth = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
-    _fboWidth  = 0;
-    _fboHeight = 0;
 }
 
 } // namespace ayt::render::detail

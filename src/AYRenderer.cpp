@@ -982,6 +982,42 @@ void Renderer::render(const RenderScene& scene)
                     {detail::FgResourceId::BloomBlurB},
                     /*enabled=*/true});
     }
+
+    // §F4 (2026-07-24, mid-term FG MVP sub-cut 4) — DepthHazePass
+    // HazeHalf target. Centralized `hazePassEnabled` gate:
+    //   - frame.hazeEnabled (host knob)
+    //   - frame.hazeStrength > 0 (otherwise fogFactor
+    //     collapses to 0; no point allocating the RT)
+    //   - gbufferPass != nullptr (Deferred-only MVP; the haze
+    //     distance proxy reads GBuffer RT2 worldPos ── Forward
+    //     has no GBuffer so safe-no-haze at the host side)
+    //
+    // When `hazePassEnabled` is false, the DepthHaze pass is not
+    // added to the FG, HazeHalf is not declared, and the
+    // FrameGraph compile culls it entirely. K3 invariant #2
+    // ("hazeEnabled == false ⇒ no FBO allocation") is enforced
+    // at compile time, not per-pass. The DepthHazePass::execute
+    // path checks `ctx.frameGraph->resolve(HazeHalf)` and early-
+    // returns 0 when the resource is not live — byte-equivalent
+    // to the pre-F4 `if (!frame.hazeEnabled) return 0` short-
+    // circuit.
+    const bool hazePassEnabled =
+        frame.hazeEnabled
+        && frame.hazeStrength > 0.0f
+        && (gbufferPassPtr != nullptr)
+        && (_impl->viewportW > 0)
+        && (_impl->viewportH > 0);
+    if (hazePassEnabled) {
+        fg.addResource(detail::FgResourceId::HazeHalf,
+                       {bgfx::TextureFormat::RGBA8,
+                        detail::FgTextureScale::Half,
+                        /*transient=*/true,
+                        /*withDepth=*/false});
+        fg.addPass({"DepthHaze",
+                    {detail::FgResourceId::SceneColor},
+                    {detail::FgResourceId::HazeHalf},
+                    /*enabled=*/true});
+    }
     // Compile locks the live set; F6 will add alias decisions on
     // top of this same compile step. F2 only needs the live set
     // so resolve() can return invalid for not-live resources.
