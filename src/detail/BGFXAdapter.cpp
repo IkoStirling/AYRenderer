@@ -752,6 +752,27 @@ void BGFXAdapter::setStateDepthOnlyWrite()
                  | BGFX_STATE_DEPTH_TEST_LESS);
 }
 
+void BGFXAdapter::setStateOutlineHull()
+{
+    // Front-face cull (CCW front → CULL_CCW). Depth LESS so the hull
+    // only shows where it is in front of existing geometry (silhouette).
+    bgfx::setState(BGFX_STATE_WRITE_RGB
+                 | BGFX_STATE_WRITE_A
+                 | BGFX_STATE_DEPTH_TEST_LESS
+                 | BGFX_STATE_CULL_CCW);
+}
+
+bgfx::FrameBufferHandle BGFXAdapter::createBorrowedColorDepthFrameBuffer(
+    bgfx::TextureHandle color,
+    bgfx::TextureHandle depth)
+{
+    if (!_initialized || !bgfx::isValid(color) || !bgfx::isValid(depth)) {
+        return BGFX_INVALID_HANDLE;
+    }
+    const bgfx::TextureHandle attachments[2] = { color, depth };
+    return bgfx::createFrameBuffer(2, attachments, /*destroyTextures=*/false);
+}
+
 bgfx::VertexLayout BGFXAdapter::vertexLayoutPosUv()
 {
     // PostProcessPass fullscreen triangle — Position 2 floats +

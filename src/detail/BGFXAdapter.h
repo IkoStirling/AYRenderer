@@ -189,7 +189,16 @@ public:
     void setStateAlphaBlend();
     void setStateDepthTestAlways();
     void setStateDepthOnlyWrite();
+    // Selection inverted-hull: cull front faces (CCW), depth LESS,
+    // no blend — rim stays outside the already-drawn mesh.
+    void setStateOutlineHull();
 
+    // Borrow existing color + depth textures into a transient FBO
+    // (destroyTextures=false). Caller must destroy() the returned
+    // handle; textures stay owned by their original FBOs.
+    bgfx::FrameBufferHandle createBorrowedColorDepthFrameBuffer(
+        bgfx::TextureHandle color,
+        bgfx::TextureHandle depth);
     // P6.5 — bgfx::VertexLayout preset for the PostProcessPass
     // fullscreen triangle (Position 2 floats + TexCoord0 2 floats).
     // The returned layout is a freshly-built bgfx::VertexLayout each

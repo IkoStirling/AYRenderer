@@ -2,6 +2,7 @@
 #include "detail/GpuResources.h"
 #include "detail/ShadowPass.h"
 #include "detail/LightingPass.h"
+#include "detail/GBufferPass.h"
 
 #include "AYShaderResource.h"  // for ShaderResource::setUniform
 
@@ -69,9 +70,25 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     // (no depth attachment) — LESS would discard all glass; use
     // ALWAYS so Alpha composites over lit opaques until B5.5 shares
     // GBuffer depth with the lighting RT.
+    //
+    // Selection inverted-hull needs depth LESS against the opaque
+    // scene. On Deferred we borrow Lighting color + GBuffer depth
+    // into a transient FBO so outlineHull draws only the silhouette.
     bgfx::FrameBufferHandle compositeFbo = ctx.sceneFbo;
+    bgfx::FrameBufferHandle outlineDepthFbo = BGFX_INVALID_HANDLE;
+    bool ownsOutlineDepthFbo = false;
     if (deferredLitComposite) {
         compositeFbo = ctx.lightingPass->lightingOutputFbo();
+        if (ctx.gbufferPass != nullptr) {
+            const bgfx::TextureHandle color =
+                adapter.getFboAttachment(compositeFbo, 0);
+            const bgfx::TextureHandle depth = ctx.gbufferPass->gbufferDepthRt();
+            if (BGFXAdapter::isValid(color) && BGFXAdapter::isValid(depth)) {
+                outlineDepthFbo =
+                    adapter.createBorrowedColorDepthFrameBuffer(color, depth);
+                ownsOutlineDepthFbo = BGFXAdapter::isValid(outlineDepthFbo);
+            }
+        }
         adapter.setState(BGFX_STATE_WRITE_RGB
                        | BGFX_STATE_WRITE_A
                        | BGFX_STATE_BLEND_ALPHA
@@ -128,9 +145,32 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 
         // U1 tag check — only Alpha materials enter this pass.
         // ForwardOpaquePass draws the Opaque ones (default for all
-        // pre-existing materials).
+        // pre-existing materials). Outline hull is also tagged Alpha
+        // by the host; state is overridden per-item below.
         if (material.blendMode != ayt::render::BlendMode::Alpha) {
             continue;
+        }
+
+        if (item.outlineHull) {
+            // Prefer GBuffer-depth borrowed FBO on Deferred; else
+            // composite (Forward sceneFbo already carries FO depth).
+            if (ownsOutlineDepthFbo) {
+                adapter.setViewFrameBuffer(viewId, outlineDepthFbo);
+            } else {
+                adapter.setViewFrameBuffer(viewId, compositeFbo);
+            }
+            adapter.setStateOutlineHull();
+        } else {
+            adapter.setViewFrameBuffer(viewId, compositeFbo);
+            if (deferredLitComposite) {
+                adapter.setState(BGFX_STATE_WRITE_RGB
+                               | BGFX_STATE_WRITE_A
+                               | BGFX_STATE_BLEND_ALPHA
+                               | BGFX_STATE_DEPTH_TEST_ALWAYS
+                               | BGFX_STATE_CULL_CW);
+            } else {
+                adapter.setStateAlphaBlend();
+            }
         }
 
         adapter.setTransform(item.world);
@@ -205,6 +245,10 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
                           // of execute() below).
         material.shader.submit(ctx);
         ++drawCount;
+    }
+
+    if (ownsOutlineDepthFbo) {
+        adapter.destroy(outlineDepthFbo);
     }
 
     return drawCount;

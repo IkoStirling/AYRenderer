@@ -25,6 +25,9 @@ struct DrawItem {
     uint32_t                   jointCount   = 0;
     int32_t                    sortKey      = 0;
     ShadowFlags                shadowFlags  = kShadowCastAndReceive;
+    // When true, TransparentPass draws with inverted-hull state
+    // (front-face cull) for selection outline.
+    bool                       outlineHull  = false;
 };
 
 class RenderScene {
