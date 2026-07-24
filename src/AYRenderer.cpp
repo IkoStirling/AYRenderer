@@ -15,6 +15,7 @@
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPipeline.h"
+#include "detail/SSAOPass.h"        // §A1 SSAO MVP (2026-07-24) — SSAOPass factory + FrameGraph SSAOTexture resolve gate.
 #include "detail/RenderResourceManager.h"
 #include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
@@ -179,6 +180,16 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
     // per-cutsheet slot-table reservation philosophy.
     case RenderPassSlot::DepthHaze:
         return std::make_unique<detail::DepthHazePass>();
+    // §A1 SSAO MVP (2026-07-24) — SSAO pass factory. Only mounted
+    // when the pipeline desc includes RenderPassSlot::SSAO (i.e.
+    // a Deferred desc or a custom desc that opts in). makeDefault()
+    // does NOT include this slot ⇒ Forward hosts see 0 behavior
+    // change (cutsheet §S2 hard line). render() central
+    // `ssaoPassEnabled` further gates the FG resource add/addPass
+    // — when ssaoEnabled=false (default), the FG compile culls
+    // SSAOTexture and SSAOPass::execute returns 0.
+    case RenderPassSlot::SSAO:
+        return std::make_unique<detail::SSAOPass>();
     }
     return nullptr;
 }

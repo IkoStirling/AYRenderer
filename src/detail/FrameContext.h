@@ -87,6 +87,43 @@ struct FrameContext {
     float             hazeStrength     = 0.0f;
     float             hazeDensity      = 0.02f;  // exp falloff (1/units)
     ayt::math::FVector3 hazeColor      = ayt::math::FVector3(0.55f, 0.65f, 0.78f);
+
+    // §A1 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) — SSAO
+    // knobs. Eight-tap worldPos-sphere occlusion pass (simplified;
+    // no normal reconstruction, no GTAO). Visible only on the
+    // Deferred pipeline (render() central `ssaoPassEnabled` also
+    // gates on `gbufferPass != nullptr` so Forward never sees it).
+    //
+    // K-SSAO-1 invariant (must survive A2 wire + A3 composite):
+    //   ssaoEnabled=false OR ssaoStrength<=0 ⇒ render() central
+    //   `ssaoPassEnabled = false` ⇒ FG compile culls SSAOTexture
+    //   ⇒ FrameGraph::resolve returns invalid ⇒ SSAOPass::execute
+    //   early-returns 0 ⇒ zero draw, zero alloc. PostProcessPass
+    //   composite gate (A3) then binds sceneColor on the SSAO
+    //   sampler slot (semantic invalid → fallback path) and the
+    //   FS branchless `step(0.0001, ssaoStrength.x)` collapses
+    //   the contribution to 0 — byte-equivalent composite to
+    //   pre-A3 renders.
+    //
+    // Default = ALL OFF (enabled=false / strength=0) so
+    // FrameContext brace-init keeps the pre-SSAO byte-identical
+    // behavior on every existing test site. Hosts enable SSAO by
+    // writing ssaoEnabled=true + a non-zero ssaoStrength +
+    // ensuring a Deferred pipeline is mounted. The Editor §S2 v1
+    // polish push (deferred to a separate cutsheet) will wrap
+    // this with setSSAOStrength(); A1 just wires the storage +
+    // default state.
+    //
+    // Why these live on FrameContext (not PassExecContext): POD
+    // knobs analogous to the P4.2 shadowBias / §S4b hazeEnabled
+    // precedent. SSAOPass reads them via ctx.frame.ssao* once per
+    // frame. ABI-lock the trailing-default so pre-A1 / A2 /
+    // A3 tests stay compiling without edits via C++14 trailing-
+    // default behavior.
+    bool              ssaoEnabled      = false;
+    float             ssaoStrength     = 0.0f;
+    float             ssaoRadius       = 0.5f;   // world-units; sample-sphere radius
+    float             ssaoBias         = 0.025f; // depth-compare epsilon (world-units)
 };
 
 } // namespace ayt::render::detail

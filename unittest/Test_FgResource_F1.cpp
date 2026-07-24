@@ -75,16 +75,23 @@ TEST_CASE(f1_fgresource_id_enum_unique_and_count) {
     CHECK(static_cast<uint8_t>(FgResourceId::BloomBlurA)  == 2);
     CHECK(static_cast<uint8_t>(FgResourceId::BloomBlurB)  == 3);
     CHECK(static_cast<uint8_t>(FgResourceId::HazeHalf)    == 4);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count)       == 5);
+    // §A1 SSAO MVP (2026-07-24) — append-only: SSAOTexture = 5
+    // ⇒ Count sentinel bumps to 6. pinned here so future appends
+    // without bumping the sentinel would fail loudly.
+    CHECK(static_cast<uint8_t>(FgResourceId::SSAOTexture) == 5);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count)       == 6);
 }
 
 TEST_CASE(f1_fgsemantic_enum_values_locked) {
     // FgSemantic 也 append-only;FinalColorSource=0、BloomSource=1、
-    // HazeSource=2 ── 后续若加 SSAO source 等只能 append。
+    // HazeSource=2 ── §A1 SSAO MVP (2026-07-24) appends SSAOSource=3
+    // ⇒ Count sentinel bumps to 4. pinned here so future appends
+    // without bumping the sentinel would fail loudly.
     CHECK(static_cast<uint8_t>(FgSemantic::FinalColorSource) == 0);
     CHECK(static_cast<uint8_t>(FgSemantic::BloomSource)      == 1);
     CHECK(static_cast<uint8_t>(FgSemantic::HazeSource)       == 2);
-    CHECK(static_cast<uint8_t>(FgSemantic::Count)            == 3);
+    CHECK(static_cast<uint8_t>(FgSemantic::SSAOSource)       == 3);
+    CHECK(static_cast<uint8_t>(FgSemantic::Count)            == 4);
 }
 
 // ─── B. external import + resolve 借用语义 ─────────────────────────

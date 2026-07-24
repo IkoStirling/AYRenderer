@@ -55,8 +55,17 @@ enum class FgResourceId : uint8_t {
     BloomBlurA   = 2,
     BloomBlurB   = 3,
     HazeHalf     = 4,
+    // §A1 SSAO MVP (2026-07-24, mid-term plan `frame-graph-mvp.md`
+    // §S2 / cutsheet SSAO MVP Gate) — append-only ABI value 5.
+    // SSAOPass writes the full-resolution RGBA8 occlusion RT
+    // (R = aoOcclusion ∈ [0,1]; G/B/A pad). Resolve stays invalid
+    // when the host has `ssaoEnabled=false || ssaoStrength<=0 ||
+    // gbufferPass==nullptr` ⇒ 0 alloc. Never reorder or repurpose
+    // existing values. Test pin:
+    //   static_cast<uint8_t>(FgResourceId::SSAOTexture) == 5
+    SSAOTexture  = 5,
     // Sentinel ── 测试和实现都靠它做数组大小 / 上界判断。
-    Count        = 5,
+    Count        = 6,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。
@@ -94,7 +103,16 @@ enum class FgSemantic : uint8_t {
     FinalColorSource = 0,
     BloomSource      = 1,
     HazeSource       = 2,
-    Count            = 3,
+    // §A1 SSAO MVP (2026-07-24) — append-only ABI value 3.
+    // PostProcessPass reads `resolveSemantic(FgSemantic::SSAOSource)`
+    // for the `ssaoTexture` sampler slot 3. When the SSAOPass is
+    // not in the graph, FG resolveSemantic returns invalid ⇒
+    // PostProcessPass fallback binds sceneColor on the SSAO slot
+    // and FS gate `step(0.0001, ssaoStrength.x)` collapses the
+    // composite to rawHaze (byte-equivalent to pre-A3 composite).
+    // Never reorder or repurpose existing values.
+    SSAOSource       = 3,
+    Count            = 4,
 };
 
 // `physicalTargets` 是 compile 期预计的 owned 物理 FBO 数
