@@ -194,6 +194,13 @@ private:
     ayt::shader::BindingId      _uHazeDensity   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uHazeStrength  = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uHazeColor     = ayt::shader::InvalidBinding;
+    // §A3 SSAO MVP (2026-07-24) — new vec4 uniform on the SSAO
+    // composite slot. Shape: vec4 + .x for the strength knob
+    // (cutsheet §S2 lock; mirror the haze-strength uniform).
+    // Used by the FS gate `step(0.0001, ssaoStrength.x)` to
+    // branchlessly fold the occlusion contribution to zero when
+    // the host has not opted in (K-SSAO-1 + K-SSAO-3 hold).
+    ayt::shader::BindingId      _uSSAOStrength  = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tSceneColor    = ayt::shader::InvalidBinding;
     // §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — second
     // sampler on the fullscreen-triangle composite draw, bound to
@@ -210,6 +217,18 @@ private:
     // branchless strength gate collapses the haze mix to zero
     // (K3 invariant #3). Mirrors _tSceneColor / _tBloomTexture.
     ayt::shader::BindingId      _tHazeTexture   = ayt::shader::InvalidBinding;
+    // §A3 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) —
+    // fourth sampler on the fullscreen-triangle composite draw,
+    // bound to `ctx.frameGraph->resolveSemantic(
+    // FgSemantic::SSAOSource)` RT0 when SSAOPass is mounted and
+    // enabled. When the semantic physical is invalid (K-SSAO-1
+    // case: ssaoEnabled=false ⇒ FG compile culls SSAOTexture
+    // ⇒ resolve returns invalid), execute() falls back to
+    // binding sceneColor and the FS gate `step(0.0001,
+    // ssaoStrength.x)` collapses the AO contribution to zero
+    // — byte-equivalent to pre-A3 composite (K-SSAO-3 hold).
+    // Mirrors _tSceneColor / _tBloomTexture / _tHazeTexture.
+    ayt::shader::BindingId      _tSSAOTexture   = ayt::shader::InvalidBinding;
     // Latch so a failed acquire does not re-run shaderc every frame
     // (was the main stutter source when Phoskia→HLSL rejected).
     bool                        _programAcquireFailed = false;

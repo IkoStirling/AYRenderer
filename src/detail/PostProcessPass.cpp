@@ -61,6 +61,7 @@ material PostProcess {
     texture2d sceneColor
     texture2d bloomTexture
     texture2d hazeTexture
+    texture2d ssaoTexture
     uniform vec4 bloomStrength
     uniform vec4 exposure
     uniform vec4 tonemapMode
@@ -69,6 +70,7 @@ material PostProcess {
     uniform vec4 hazeDensity
     uniform vec4 hazeStrength
     uniform vec4 hazeColor
+    uniform vec4 ssaoStrength
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -98,7 +100,24 @@ material PostProcess {
         // haze slot falls back to sceneColor the mix is a no-op.
         let hazeWeight = step(0.0001, hazeStrength.x)
         let rawHaze = mix(raw, hazeSample.xyz * exposure.x, hazeWeight)
-        let withBloom = rawHaze + bloomSample.xyz * bloomStrength.x
+        // §A3 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) —
+        // occlusion factor sample. SSAOPass writes R = occlusion
+        // ∈ [0,1] onto SSAOTexture. Composite applies multiplicative
+        // darkening `rawHaze * (1 - occlusion)`. When the SSAO slot
+        // falls back to sceneColor (K-SSAO-1: ssaoEnabled=false ⇒
+        // FG compile culls SSAOTexture ⇒ resolve returns invalid ⇒
+        // sampler bound to sceneColor), the .r sample is NOT 1.0
+        // (it's `raw.r * exposure.x`), so the `step(0.0001,
+        // ssaoStrength.x)` strength gate MUST be the folding
+        // mechanism, not the sampler. Phoskia has no `saturate`
+        // builtin ⇒ collapse via `clamp(1 - x, 0, 1)` per K-SSAO-3
+        // (cutsheet §S2 hard line).
+        let ssaoSample = sample(ssaoTexture, uv)
+        let aoFactor = clamp(ssaoSample.r, 0.0, 1.0)
+        let aoGate = step(0.0001, ssaoStrength.x)
+        let aoMul = clamp(1.0 - aoFactor * ssaoStrength.x * aoGate, 0.0, 1.0)
+        let rawOccluded = rawHaze * aoMul
+        let withBloom = rawOccluded + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -122,7 +141,7 @@ material PostProcess {
 }
 )";
 
-constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v5_prehazed_bloom_fs";
+constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v6_prehazed_bloom_ssao_fs";
 
 // Fallback if primary program fails to acquire — same tonemap+gamma
 // contract so Editor composite does not go black / linear-washed.
@@ -131,6 +150,7 @@ material PostProcessBlit {
     texture2d sceneColor
     texture2d bloomTexture
     texture2d hazeTexture
+    texture2d ssaoTexture
     uniform vec4 bloomStrength
     uniform vec4 exposure
     uniform vec4 tonemapMode
@@ -139,6 +159,7 @@ material PostProcessBlit {
     uniform vec4 hazeDensity
     uniform vec4 hazeStrength
     uniform vec4 hazeColor
+    uniform vec4 ssaoStrength
     vertex {
         in  pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -168,7 +189,24 @@ material PostProcessBlit {
         // haze slot falls back to sceneColor the mix is a no-op.
         let hazeWeight = step(0.0001, hazeStrength.x)
         let rawHaze = mix(raw, hazeSample.xyz * exposure.x, hazeWeight)
-        let withBloom = rawHaze + bloomSample.xyz * bloomStrength.x
+        // §A3 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) —
+        // occlusion factor sample. SSAOPass writes R = occlusion
+        // ∈ [0,1] onto SSAOTexture. Composite applies multiplicative
+        // darkening `rawHaze * (1 - occlusion)`. When the SSAO slot
+        // falls back to sceneColor (K-SSAO-1: ssaoEnabled=false ⇒
+        // FG compile culls SSAOTexture ⇒ resolve returns invalid ⇒
+        // sampler bound to sceneColor), the .r sample is NOT 1.0
+        // (it's `raw.r * exposure.x`), so the `step(0.0001,
+        // ssaoStrength.x)` strength gate MUST be the folding
+        // mechanism, not the sampler. Phoskia has no `saturate`
+        // builtin ⇒ collapse via `clamp(1 - x, 0, 1)` per K-SSAO-3
+        // (cutsheet §S2 hard line).
+        let ssaoSample = sample(ssaoTexture, uv)
+        let aoFactor = clamp(ssaoSample.r, 0.0, 1.0)
+        let aoGate = step(0.0001, ssaoStrength.x)
+        let aoMul = clamp(1.0 - aoFactor * ssaoStrength.x * aoGate, 0.0, 1.0)
+        let rawOccluded = rawHaze * aoMul
+        let withBloom = rawOccluded + bloomSample.xyz * bloomStrength.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -191,7 +229,7 @@ material PostProcessBlit {
     }
 }
 )";
-constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v5_prehazed_bloom_fs";
+constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v6_prehazed_bloom_ssao_fs";
 
 } // namespace
 
@@ -295,9 +333,11 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         && _uHazeDensity   != ayt::shader::InvalidBinding
         && _uHazeStrength  != ayt::shader::InvalidBinding
         && _uHazeColor     != ayt::shader::InvalidBinding
+        && _uSSAOStrength  != ayt::shader::InvalidBinding
         && _tSceneColor    != ayt::shader::InvalidBinding
         && _tBloomTexture  != ayt::shader::InvalidBinding
-        && _tHazeTexture   != ayt::shader::InvalidBinding;
+        && _tHazeTexture   != ayt::shader::InvalidBinding
+        && _tSSAOTexture   != ayt::shader::InvalidBinding;
 
     const bgfx::TextureHandle fboColor = adapter.getFboAttachment(sourceFbo, 0);
     if (!BGFXAdapter::isValid(fboColor)) {
@@ -404,6 +444,32 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         }
     }
     _program.setTexture(0, _tHazeTexture, hazeTexHandle);
+    // §A3 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) —
+    // fourth sampler on the fullscreen-triangle composite draw.
+    // Read via `ctx.frameGraph->resolveSemantic(
+    // FgSemantic::SSAOSource)` — mirror of the haze/bloom pattern
+    // (F5-shipped). When SSAOPass is mounted AND enabled AND the
+    // render() central ssaoPassEnabled gate is true, the SSAOTexture
+    // is live and `resolveSemantic` returns the physical handle.
+    // Otherwise the FG compile culled SSAOTexture ⇒ invalid ⇒
+    // fallback to `texHandle` (sceneColor); the FS gate
+    // `step(0.0001, ssaoStrength.x)` collapses the AO contribution
+    // to zero (K-SSAO-1 + K-SSAO-3 hold).
+    ayt::shader::TextureHandle ssaoTexHandle = texHandle;  // fallback
+    bgfx::FrameBufferHandle ssaoSourceFbo = BGFX_INVALID_HANDLE;
+    if (ctx.frameGraph != nullptr) {
+        ssaoSourceFbo = ctx.frameGraph->resolveSemantic(
+            ayt::render::detail::FgSemantic::SSAOSource);
+    }
+    if (BGFXAdapter::isValid(ssaoSourceFbo)) {
+        const bgfx::TextureHandle ssaoRtColor =
+            adapter.getFboAttachment(ssaoSourceFbo, 0);
+        if (BGFXAdapter::isValid(ssaoRtColor)) {
+            ssaoTexHandle =
+                ayt::render::detail::toShaderTexture(ssaoRtColor);
+        }
+    }
+    _program.setTexture(0, _tSSAOTexture, ssaoTexHandle);
     _program.setUniform(_uBloomStrength, bloomPad, sizeof(bloomPad));
     _program.setUniform(_uExposure, exposurePad, sizeof(exposurePad));
     _program.setUniform(_uTonemapMode, tonemapPad, sizeof(tonemapPad));
@@ -412,6 +478,11 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     _program.setUniform(_uHazeDensity, hazeDensityPad, sizeof(hazeDensityPad));
     _program.setUniform(_uHazeStrength, hazeStrengthPad, sizeof(hazeStrengthPad));
     _program.setUniform(_uHazeColor, hazeColorPad, sizeof(hazeColorPad));
+    // §A3 SSAO MVP (2026-07-24) — ssaoStrength vec4 uniform on the
+    // strength gate. Background fill (ssao enabled but slot fallback)
+    // ⇒ 0 — FS gate collapses. Mirror haze-strength pattern.
+    const float ssaoStrengthPad[4] = {frame.ssaoStrength, 0.0f, 0.0f, 0.0f};
+    _program.setUniform(_uSSAOStrength, ssaoStrengthPad, sizeof(ssaoStrengthPad));
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
@@ -584,6 +655,17 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
     // matches what `execute()` uploads at slot 2 (after
     // ctx.depthHazePass->halfResFbo() RT0, or sceneColor fallback).
     _tHazeTexture   = _program.getTextureBinding("hazeTexture");
+    // §A3 SSAO MVP (2026-07-24) — fourth sampler for the SSAO
+    // composite. Phoskia source declares `texture2d ssaoTexture`
+    // (v6 cache-key bump forces re-acquire); execute() uploads at
+    // slot 3 from `ctx.frameGraph->resolveSemantic(FgSemantic::
+    // SSAOSource)` RT0, or sceneColor fallback when FG culled
+    // SSAOTexture (K-SSAO-1 hold).
+    _tSSAOTexture   = _program.getTextureBinding("ssaoTexture");
+    // §A3 SSAO MVP (2026-07-24) — vec4 uniform for the SSAO strength
+    // gate. .x carries strength; the FS gates `step(0.0001, .x)` so a
+    // 0 strength produces a no-op AO contribution (K-SSAO-3).
+    _uSSAOStrength  = _program.getUniformBinding("ssaoStrength");
 }
 
 void PostProcessPass::destroyResources(BGFXAdapter& adapter)
@@ -628,6 +710,12 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
     _tSceneColor    = ayt::shader::InvalidBinding;
     _tBloomTexture  = ayt::shader::InvalidBinding;
     _tHazeTexture   = ayt::shader::InvalidBinding;
+    // §A3 SSAO MVP (2026-07-24) — reset the new vec4 SSAO uniform
+    // + the ssaoTexture sampler binding so a stale resolved id from
+    // the previous program acquire doesn't poison the next acquire
+    // (mirror _uBloomStrength reset above).
+    _uSSAOStrength  = ayt::shader::InvalidBinding;
+    _tSSAOTexture   = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
     _fboWidth = 0;
     _fboHeight = 0;
