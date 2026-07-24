@@ -68,10 +68,8 @@ TEST_CASE(f6_compile_stats_declared_live_logical) {
     //   declaredPasses = 3
     //   livePasses     = 3 (全开)
     //   logicalResources ≥ 3 (BloomBright + BloomBlurA + BloomBlurB)
-    //
-    // NOTE: 在未初始化 adapter 上,alias 决策跳过 → physicalTargets
-    // 留 0;aliasHits 留 0。本测试只校验 declared/live/logical 三个字段
-    // 在各种 enabled 组合下正确。
+    //   physicalTargets  = 3 (F6.1: no auto-alias)
+    //   aliasHits        = 0
     BGFXAdapter adapter;
     FrameGraph fg(adapter);
     fg.beginFrame(1280, 720);
@@ -90,9 +88,11 @@ TEST_CASE(f6_compile_stats_declared_live_logical) {
                 {FgResourceId::BloomBlurA},  {FgResourceId::BloomBlurB}, true});
     fg.compile();
 
-    CHECK(fg.stats().declaredPasses == 3);
-    CHECK(fg.stats().livePasses     == 3);
+    CHECK(fg.stats().declaredPasses   == 3);
+    CHECK(fg.stats().livePasses       == 3);
     CHECK(fg.stats().logicalResources >= 3);
+    CHECK(fg.stats().physicalTargets  == 3);
+    CHECK(fg.stats().aliasHits        == 0);
 }
 
 TEST_CASE(f6_compile_stats_zero_when_all_disabled) {
@@ -175,8 +175,9 @@ TEST_CASE(f6_alias_forbidden_bloomblur_ab) {
 }
 
 TEST_CASE(f6_alias_decision_skipped_on_uninitialized_adapter) {
-    // 合同守住:未初始化 adapter 上 alias 决策跳过(stats.aliasHits
-    // = 0),不报错亦不强制 alias。
+    // F6.1 — no auto-alias even when shapes match. On uninitialized
+    // adapter resolve() still returns invalid for owned RTs, but
+    // compile still counts expected physicalTargets (= owned live).
     BGFXAdapter adapter;
     FrameGraph fg(adapter);
     fg.beginFrame(1280, 720);
@@ -195,7 +196,77 @@ TEST_CASE(f6_alias_decision_skipped_on_uninitialized_adapter) {
                 {FgResourceId::SceneColor}, {FgResourceId::HazeHalf}, true});
     fg.compile();
     CHECK(fg.stats().aliasHits        == 0);
-    CHECK(fg.stats().physicalTargets  == 0);
+    // Bright + BlurA + HazeHalf = 3 owned live ⇒ 3 physical targets.
+    CHECK(fg.stats().physicalTargets  == 3);
+}
+
+TEST_CASE(f61_no_auto_alias_bloom_chain_unique_groups) {
+    // F6.1 hotfix — BloomBright / BloomBlurA / BloomBlurB share
+    // format+half size but must NOT collapse to one alias group
+    // (pre-hotfix bug). physicalTargets == 3, aliasHits == 0.
+    BGFXAdapter adapter;
+    FrameGraph fg(adapter);
+    fg.beginFrame(1280, 720);
+    fg.importExternal(FgResourceId::SceneColor, makeFakeHandle(0x50));
+    fg.addResource(FgResourceId::BloomBright,
+                   {bgfx::TextureFormat::RGBA8, FgTextureScale::Half, true, false});
+    fg.addResource(FgResourceId::BloomBlurA,
+                   {bgfx::TextureFormat::RGBA8, FgTextureScale::Half, true, false});
+    fg.addResource(FgResourceId::BloomBlurB,
+                   {bgfx::TextureFormat::RGBA8, FgTextureScale::Half, true, false});
+    fg.addPass({"BloomExtract",
+                {FgResourceId::SceneColor}, {FgResourceId::BloomBright}, true});
+    fg.addPass({"BloomBlurH",
+                {FgResourceId::BloomBright}, {FgResourceId::BloomBlurA}, true});
+    fg.addPass({"BloomBlurV",
+                {FgResourceId::BloomBlurA}, {FgResourceId::BloomBlurB}, true});
+    fg.compile();
+    CHECK(fg.stats().aliasHits       == 0);
+    CHECK(fg.stats().physicalTargets == 3);
+    CHECK(fg.stats().livePasses      == 3);
+}
+
+TEST_CASE(f61_resolve_semantic_follows_resolve_not_compile_cache) {
+    // F6.1 hotfix — resolveSemantic must call resolve(logical),
+    // not return a compile-time cached physical. SceneColor
+    // external with NO effect passes still resolves for Final.
+    BGFXAdapter adapter;
+    FrameGraph fg(adapter);
+    fg.beginFrame(1280, 720);
+    fg.importExternal(FgResourceId::SceneColor, makeFakeHandle(0x60));
+    fg.setResolvedSemantic(FgSemantic::FinalColorSource,
+                           FgResourceId::SceneColor);
+    fg.compile();
+    const bgfx::FrameBufferHandle viaSemantic =
+        fg.resolveSemantic(FgSemantic::FinalColorSource);
+    const bgfx::FrameBufferHandle viaResolve =
+        fg.resolve(FgResourceId::SceneColor);
+    CHECK(BGFXAdapter::isValid(viaSemantic));
+    CHECK(BGFXAdapter::isValid(viaResolve));
+    CHECK(viaSemantic.idx == viaResolve.idx);
+    CHECK(viaSemantic.idx == 0x60);
+}
+
+TEST_CASE(f61_resolve_semantic_bloom_matches_resolve_after_compile) {
+    // BloomSource → BloomBlurB external: semantic and resolve
+    // must agree same-frame (the bug was owned lazy-create +
+    // stale semantic cache; external path pins the contract).
+    BGFXAdapter adapter;
+    FrameGraph fg(adapter);
+    fg.beginFrame(1280, 720);
+    fg.importExternal(FgResourceId::SceneColor, makeFakeHandle(0x70));
+    fg.importExternal(FgResourceId::BloomBlurB, makeFakeHandle(0x71));
+    fg.addPass({"BloomBlurV",
+                {FgResourceId::SceneColor}, {FgResourceId::BloomBlurB}, true});
+    fg.setResolvedSemantic(FgSemantic::BloomSource, FgResourceId::BloomBlurB);
+    fg.compile();
+    const bgfx::FrameBufferHandle sem =
+        fg.resolveSemantic(FgSemantic::BloomSource);
+    const bgfx::FrameBufferHandle res =
+        fg.resolve(FgResourceId::BloomBlurB);
+    CHECK(BGFXAdapter::isValid(sem));
+    CHECK(sem.idx == res.idx);
+    CHECK(sem.idx == 0x71);
 }
 
 // ─── C. 尺寸计算 ──────────────────────────────────────────────

@@ -22,52 +22,14 @@ uint16_t scaledDim(uint16_t viewport, FgTextureScale scale)
     return viewport;
 }
 
-// §F6 (2026-07-24) — alias 决策。两块 logical 资源可共享同一
-// 物理 RT 当且仅当:
-//   1. 同样的 format
-//   2. 同样的 withDepth flag
-//   3. 同样的实际尺寸(WxH)
-//   4. interval 不重叠 — 此 Pass 的 `lastRead` < 另一 Pass 的
-//      `nextFirstWrite`,即 H 阶段写 A,V 阶段读 A 写 B 的
-//      ping-pong 互不 alias(因为 H 写 A 期间 V 已经要读 A)。
-//
-// §F6 简化模型 ── cutsheet "physically different
-// lifetimes/transitions" 是 overlap 的根因;本 MVP 不做完整
-// interval analysis(那需要 pass DAG),而是显式禁两组 alias:
-//   - BloomBlurA / BloomBlurB (H-write-A / V-read-A-write-B
-//     lifecycle overlap → K invariant #7 显式禁 ── F6 守)
-//   - BloomBright + BloomBlurA (形状同但 lifecycle 不同:
-//     Extract-write-Bright / BlurH-read-Bright-write-A,顺序
-//     相邻 ── 不重叠 → 可 alias;但 plan 写保守禁,避免
-//     第一次 ship 走 alias 路径意外)
-//
-// 任何新引入的 logical 资源 F6 默认不 alias(不在 aliasWhiteList
-// 中的两块 → 各自物理 RT)。这是 "compile-to-correct-by-default"
-// 策略:cutsheet §4 第 3 条要求先保守再优化。
-// ─── Alias whitelist (F6 ship scope) ─────────────────────────────
-//
-// §F6 显式禁 alias(默认 conservative 安全模型):
-//   - BloomBlurA / BloomBlurB ── lifecycle overlap (F3 K #7)
-//
-// §F6 保守不 alias(alias-eligible 但本期不打开):
-//   - BloomBright / BloomBlurA ── 形状同,顺序写-读同,但
-//     F6 不开 alias 避免首次 ship 意外路径。如果未来 cutsheet
-//     决定打开,这里改 aliasWhiteList 一行即可。
-//
-// F6 实现:两份 fgPass read / write 通过 (FgResourceId)排序,
-// 然后同一个 aliasGroup 集合内任两块:在 aliasWhitelist 中
-// (本期只 BloomBlur A/B)的禁止 alias;都不在 whitelist 中的
-// 允 alias(格式 + 尺寸 + withDepth 匹配时)。这样既守住 K #7
-// 又留口子给未来 cutsheet。
-constexpr bool isAliasForbiddenPair(FgResourceId a, FgResourceId b)
-{
-    const bool aBlkA = (a == FgResourceId::BloomBlurA);
-    const bool aBlkB = (a == FgResourceId::BloomBlurB);
-    const bool bBlkA = (b == FgResourceId::BloomBlurA);
-    const bool bBlkB = (b == FgResourceId::BloomBlurB);
-    // BloomBlur A 和 BloomBlur B 互为 forbidden alias 对。
-    return (aBlkA && bBlkB) || (aBlkB && bBlkA);
-}
+// §F6.1 (2026-07-24 hotfix) — MVP alias policy = **never share**.
+// Pre-hotfix F6 auto-aliased any same-shape pair except BloomBlur
+// A↔B, which incorrectly grouped BloomBright + A + B into one
+// group. resolve() also ignored aliasGroup, so the bug was latent
+// until someone "fixed" sharing. Conservative ship: each owned
+// live resource gets a unique aliasGroup; aliasHits stays 0.
+// Future cutsheets may add an explicit whitelist once interval
+// analysis exists.
 
 } // namespace
 
@@ -195,77 +157,33 @@ bool FrameGraph::compile()
         }
     }
 
-    // 2) Logical resources 统计。
+    // 2) Logical resources 统计 + owned live 物理尺寸 / 独立
+    //    aliasGroup（F6.1：永不共享）。
+    int16_t nextAliasGroup = 0;
     for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
-        if (_resources[i].live || _resources[i].isExternal) {
+        ResourceEntry& r = _resources[i];
+        if (r.live || r.isExternal) {
             ++_stats.logicalResources;
         }
-    }
-
-    // 3) Alias 决策 ── §F6 ── 在 compile 期对 owned (non-external)
-    //    live logical 资源决策 aliasGroup。规则:
-    //      - external 不参与 alias(它已经由 owner 管)
-    //      - 同 format + 同 物理尺寸 + 同 withDepth + 不在 forbidden
-    //        whitelist(BloomBlur A/B) ⇒ 同一 aliasGroup
-    //
-    //    实现先算每块 owned live 资源的物理尺寸,然后 O(N^2) 配对
-    //    设 aliasGroup(N ≤ 5 个 enum 值,常数级,无负担)。
-    if (_adapter != nullptr && _adapter->isInitialized()
-        && !_adapter->isNoopBackend()
-        && _viewportW > 0 && _viewportH > 0) {
-        // 先填 physicalW/H(external 跳过)。
-        for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
-            ResourceEntry& r = _resources[i];
-            if (r.isExternal || !r.live) continue;
-            r.physicalW = scaledDim(_viewportW, r.desc.scale);
-            r.physicalH = scaledDim(_viewportH, r.desc.scale);
-        }
-        // alias 配对:按 logicalId 顺序遍历,若两块 alias-eligible
-        // 且 format + 尺寸 + withDepth 都匹配且不在 forbidden pair,
-        // 设同一 aliasGroup(后续 resolve 期间只第一块 lazy create,
-        // 后续块复制物理 handle)。
-        int16_t nextAliasGroup = 0;
-        for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
-            ResourceEntry& ri = _resources[i];
-            if (ri.isExternal || !ri.live) continue;
-            // 已经有 aliasGroup(maybe from earlier pair)跳过。
-            if (ri.aliasGroup >= 0) continue;
-            ri.aliasGroup = nextAliasGroup;
-            ++nextAliasGroup;
-            for (size_t j = i + 1; j < static_cast<size_t>(FgResourceId::Count); ++j) {
-                ResourceEntry& rj = _resources[j];
-                if (rj.isExternal || !rj.live) continue;
-                if (rj.aliasGroup >= 0) continue;
-                const auto id_i = static_cast<FgResourceId>(i);
-                const auto id_j = static_cast<FgResourceId>(j);
-                if (isAliasForbiddenPair(id_i, id_j)) continue;
-                // format / scale / withDepth / WxH 全匹配才 alias。
-                if (ri.desc.format   != rj.desc.format)   continue;
-                if (ri.desc.withDepth != rj.desc.withDepth) continue;
-                if (ri.desc.scale    != rj.desc.scale)    continue;
-                if (ri.physicalW     != rj.physicalW)      continue;
-                if (ri.physicalH     != rj.physicalH)      continue;
-                // Alias!
-                rj.aliasGroup = ri.aliasGroup;
-                ++_stats.aliasHits;
-            }
-        }
-    }
-
-    // 4) Semantic → physical 解析(external borrow 或 owned
-    //    live)。owned 但 aliasGroup == -1(resolve 失败路径)返 invalid。
-    for (size_t i = 0; i < static_cast<size_t>(FgSemantic::Count); ++i) {
-        SemanticEntry& s = _semantics[i];
-        if (!s.hasLogical) continue;
-        const ResourceEntry& r = _resources[static_cast<size_t>(s.logical)];
-        const bool resolvable = r.live || r.isExternal;
-        if (!resolvable) {
-            s.physical = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+        if (r.isExternal || !r.live) {
             continue;
         }
-        // External ⇒ borrow；owned ⇒ alias 决策后第一块 lazy create
-        // 期间 actual handle 才生成,这里先搬 r.physical(若已创建)。
-        s.physical = r.physical;
+        r.physicalW = scaledDim(_viewportW, r.desc.scale);
+        r.physicalH = scaledDim(_viewportH, r.desc.scale);
+        // Unique group per owned live RT — no auto-alias (F6.1).
+        r.aliasGroup = nextAliasGroup;
+        ++nextAliasGroup;
+        ++_stats.physicalTargets;
+    }
+    // aliasHits stays 0 under the conservative policy.
+
+    // 3) Semantic 只锁 logical 映射。physical 不在 compile 缓存
+    //    （F6.1 hotfix）：owned RT 是 resolve() lazy create 的，
+    //    compile 时拷贝 r.physical 会让 Final 首帧采到 invalid。
+    //    resolveSemantic() 改走 resolve(logical)。
+    for (size_t i = 0; i < static_cast<size_t>(FgSemantic::Count); ++i) {
+        _semantics[i].physical =
+            bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
 
     _compiled = true;
@@ -280,15 +198,19 @@ bgfx::FrameBufferHandle FrameGraph::resolve(FgResourceId id) const
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
     const ResourceEntry& r = _resources[static_cast<size_t>(id)];
-    // Noop / adapter 未初始化 / 未 compile / 不 live → invalid。
-    if (_adapter == nullptr || !r.live) {
+    if (_adapter == nullptr) {
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
-    // external 直接返 physical(borrow,不 create)。
+    // External borrow first — SceneColor may be imported for
+    // FinalColorSource without any enabled effect Pass reading it,
+    // so `live` can still be false. Never create/destroy externals.
     if (r.isExternal) {
         return r.physical;
     }
-    // owned transient:lazy create-on-first-resolve ── §F6 ──
+    if (!r.live) {
+        return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    }
+    // owned transient: lazy create-on-first-resolve.
     // Noop / 未初始化 / 零 viewport ⇒ 不创建。
     if (!_adapter->isInitialized() || _adapter->isNoopBackend()) {
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
@@ -296,14 +218,30 @@ bgfx::FrameBufferHandle FrameGraph::resolve(FgResourceId id) const
     if (_viewportW == 0 || _viewportH == 0) {
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
-    // alias 处理:同 aliasGroup 的两块共享(handle 由第一块创建
-    // 后,后续块 copy 同一物理 handle)。F6 信任 (W,H,format,
-    // withDepth) 严格 equal 触发 bgfx handle 复用 ── 若未来要
-    // 严格 "首块创建、后续 alias" 的集中维护,改 aliasGroup 表。
-    // `ResourceEntry::physical` 标 mutable 后此处可写。
+    uint16_t w = r.physicalW;
+    uint16_t h = r.physicalH;
+    if (w == 0 || h == 0) {
+        w = scaledDim(_viewportW, r.desc.scale);
+        h = scaledDim(_viewportH, r.desc.scale);
+        r.physicalW = w;
+        r.physicalH = h;
+    }
+    // F6.1: each owned live RT has a unique aliasGroup — create
+    // per logical entry. If a future whitelist shares groups,
+    // scan for an existing valid handle in the same group first.
+    if (!BGFXAdapter::isValid(r.physical) && r.aliasGroup >= 0) {
+        for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
+            const ResourceEntry& other = _resources[i];
+            if (other.aliasGroup == r.aliasGroup
+                && BGFXAdapter::isValid(other.physical)) {
+                r.physical = other.physical;
+                break;
+            }
+        }
+    }
     if (!BGFXAdapter::isValid(r.physical)) {
         r.physical = _adapter->createFrameBuffer(
-            r.physicalW, r.physicalH, r.desc.format, r.desc.withDepth);
+            w, h, r.desc.format, r.desc.withDepth);
     }
     return r.physical;
 }
@@ -322,7 +260,13 @@ bgfx::FrameBufferHandle FrameGraph::resolveSemantic(FgSemantic sem) const
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
     const SemanticEntry& s = _semantics[static_cast<size_t>(sem)];
-    return s.physical;
+    // F6.1 hotfix — never return compile-time cached physical.
+    // Owned Bloom/Haze RTs are created in Pass::execute via
+    // resolve(); Final must see those same handles same-frame.
+    if (!s.hasLogical) {
+        return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    }
+    return resolve(s.logical);
 }
 
 // ─── 生命周期 ─────────────────────────────────────────────────
@@ -331,24 +275,26 @@ void FrameGraph::resize(uint16_t width, uint16_t height)
 {
     _viewportW = width;
     _viewportH = height;
-    // §F6 ── 集中 resize:在 resize 时销毁所有 owned RT(external
-    // 不动,跟 F1 一样)。下一次 compile + resolve 触发 lazy
-    // recreate at 新的 W,H。
-    //
-    // 尺寸匹配检查挪到 lazy resolve 端(createOwnedTransient 内部
-    // 比较 physicalW/H;若仍相等则 skip destroy)。但 F6 ship 简化
-    // 路径:resize 直接无脑 destroy owned RT,下一帧 lazy create。
-    // 这是 "保守重启" 路径 ── 即使尺寸实际上未变也重建 ──
-    // 简单可靠;Resizable 频繁 resize 的 host 仍可以接受 (一次
-    // destroy + create 是 bgfx O(1) 操作)。
+    // §F6 / F6.1 ── 集中 resize: destroy owned RT once per unique
+    // handle (defensive if a future alias whitelist shares).
+    // External 不动。下一帧 compile + resolve lazy recreate。
     if (_adapter != nullptr && _adapter->isInitialized()) {
         for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
             ResourceEntry& r = _resources[i];
-            if (!r.isExternal && BGFXAdapter::isValid(r.physical)) {
-                _adapter->destroy(r.physical);
-                r.physical   = BGFX_INVALID_HANDLE;
-                r.physicalW  = 0;
-                r.physicalH  = 0;
+            if (r.isExternal || !BGFXAdapter::isValid(r.physical)) {
+                continue;
+            }
+            const bgfx::FrameBufferHandle handle = r.physical;
+            _adapter->destroy(handle);
+            for (size_t j = 0; j < static_cast<size_t>(FgResourceId::Count); ++j) {
+                ResourceEntry& other = _resources[j];
+                if (!other.isExternal
+                    && BGFXAdapter::isValid(other.physical)
+                    && other.physical.idx == handle.idx) {
+                    other.physical  = BGFX_INVALID_HANDLE;
+                    other.physicalW = 0;
+                    other.physicalH = 0;
+                }
             }
         }
     }
@@ -356,32 +302,37 @@ void FrameGraph::resize(uint16_t width, uint16_t height)
 
 void FrameGraph::shutdown()
 {
-    // §F6 ── 释放所有 FG owned RT;external 不动。
-    if (_adapter != nullptr) {
+    // §F6 / F6.1 ── 释放所有 FG owned RT（unique handle once）;
+    // external 不动。
+    if (_adapter != nullptr && _adapter->isInitialized()) {
         for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
             ResourceEntry& r = _resources[i];
-            if (!r.isExternal && BGFXAdapter::isValid(r.physical)) {
-                if (_adapter->isInitialized()) {
-                    _adapter->destroy(r.physical);
+            if (r.isExternal || !BGFXAdapter::isValid(r.physical)) {
+                continue;
+            }
+            const bgfx::FrameBufferHandle handle = r.physical;
+            _adapter->destroy(handle);
+            for (size_t j = 0; j < static_cast<size_t>(FgResourceId::Count); ++j) {
+                ResourceEntry& other = _resources[j];
+                if (!other.isExternal
+                    && BGFXAdapter::isValid(other.physical)
+                    && other.physical.idx == handle.idx) {
+                    other.physical  = BGFX_INVALID_HANDLE;
+                    other.physicalW = 0;
+                    other.physicalH = 0;
                 }
             }
-            r.physical   = BGFX_INVALID_HANDLE;
-            r.physicalW  = 0;
-            r.physicalH  = 0;
-            r.declared   = false;
-            r.live       = false;
-            r.aliasGroup = -1;
         }
-    } else {
-        for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
-            ResourceEntry& r = _resources[i];
-            r.physical   = BGFX_INVALID_HANDLE;
-            r.physicalW  = 0;
-            r.physicalH  = 0;
-            r.declared   = false;
-            r.live       = false;
-            r.aliasGroup = -1;
-        }
+    }
+    for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
+        ResourceEntry& r = _resources[i];
+        r.physical   = BGFX_INVALID_HANDLE;
+        r.physicalW  = 0;
+        r.physicalH  = 0;
+        r.declared   = false;
+        r.live       = false;
+        r.isExternal = false;
+        r.aliasGroup = -1;
     }
     _passes.clear();
     for (size_t i = 0; i < static_cast<size_t>(FgSemantic::Count); ++i) {

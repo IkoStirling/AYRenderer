@@ -97,9 +97,10 @@ enum class FgSemantic : uint8_t {
     Count            = 3,
 };
 
-// Compile 摘要 ── F6 接入;F1 字段已定但统计只填 0。`declaredPasses`
-// 是声明数,`livePasses` 是 enabled + 被消费链命中的数,`physicalTargets`
-// 是 FG 实际创建的物理 FBO 数(若 alias 命中则 < logicalResources)。
+// `physicalTargets` 是 compile 期预计的 owned 物理 FBO 数
+// (F6.1：无 auto-alias ⇒ 等于 owned live 数；若将来 whitelist
+// alias 则 physicalTargets ≤ logical owned)。`aliasHits` 在
+// F6.1 保守策略下恒为 0。
 struct FgCompileStats {
     uint16_t declaredPasses   = 0;
     uint16_t livePasses       = 0;
@@ -170,17 +171,17 @@ public:
 
     // 拿 logical 资源的物理 handle。**首次调用触发物理 FBO 创建**
     // (lazy);后续返已缓存 handle。compile 后该资源若不在 live
-    // set ⇒ 返 invalid。
+    // set ⇒ 返 invalid。external 即使未 live 也可 resolve（供
+    // FinalColorSource 在无效果 Pass 时仍能读 SceneColor）。
     bgfx::FrameBufferHandle resolve(FgResourceId id) const;
 
     // F3 ── 拿 ping-pong 对。两块资源都必须 live;否则返 {invalid,
-    // invalid}。两块间 alias 由 F6 决定(MVP 默认不 alias ──
-    // BloomBlur A/B 显式禁止)。
+    // invalid}。F6.1：A/B 永不 alias（各有独立物理 RT）。
     FgPingPong resolvePingPong(FgResourceId a, FgResourceId b) const;
 
-    // F5 ── 拿 semantic 解析后的物理 handle。`FinalColorSource` 永
-    // 远 = full-res SceneColor(由 importExternal 提供);BloomSource /
-    // HazeSource 旁路 sampler,引用对应 RT(若未 live 返 invalid)。
+    // F5 / F6.1 ── 拿 semantic 对应 logical 的**即时** resolve()
+    // 结果（不读 compile 缓存）。BloomSource / HazeSource 在
+    // Pass 已 resolve 创建 RT 后，同帧 Final 才能采到有效 handle。
     bgfx::FrameBufferHandle resolveSemantic(FgSemantic sem) const;
 
     // ─── 生命周期 / 统计 ───────────────────────────────────────
@@ -217,10 +218,13 @@ private:
         mutable bgfx::FrameBufferHandle physical =
             bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
         // F6 才填 ── 物理尺寸 / alias 索引
-        uint16_t                  physicalW   = 0;
-        uint16_t                  physicalH   = 0;
-        // F6 才填 ── 与哪个 logical alias 到同一物理 RT
-        int16_t                   aliasGroup  = -1;
+        // `mutable`: resolve() is const but may fill size on first
+        // lazy create when compile left zeros (defensive).
+        mutable uint16_t              physicalW   = 0;
+        mutable uint16_t              physicalH   = 0;
+        // F6.1 ── unique per owned live RT (no auto-alias). Shared
+        // groups reserved for a future explicit whitelist.
+        int16_t                       aliasGroup  = -1;
     };
     ResourceEntry _resources[static_cast<size_t>(FgResourceId::Count)];
 
@@ -231,9 +235,10 @@ private:
     };
     std::vector<PassEntry> _passes;
 
-    // F5 ── 每个 semantic 指向哪个 logical;hasLogical=false 表示
-    // 该 semantic 无可解析源(resolveSemantic 返 invalid)。logical
-    // 字段在 hasLogical=true 时才有意义。
+    // F5 ── 每个 semantic 指向哪个 logical。physical 字段保留但
+    // F6.1 起不再由 compile 缓存 —— resolveSemantic() 直接
+    // resolve(logical)，避免 owned RT lazy-create 后 Final 读到
+    // 过期 invalid handle。
     struct SemanticEntry {
         bool                       hasLogical = false;
         FgResourceId               logical    = FgResourceId::SceneColor;
