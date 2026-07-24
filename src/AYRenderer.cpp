@@ -612,6 +612,12 @@ void Renderer::shutdown()
         _impl->sceneFboH = 0;
     }
 
+    // §F6 (2026-07-24) — release FrameGraph-owned transient RTs
+    // before tearing down the adapter. Mirrors the sceneFbo block
+    // above. fg.shutdown() iterates all owned resources and
+    // destroys each (externals are skipped). Idempotent.
+    _impl->frameGraph.shutdown();
+
     _impl->resources.shutdown();
     _impl->shaderPool.shutdown();
     _impl->adapter.shutdown();
@@ -1228,38 +1234,26 @@ void Renderer::resize(uint32_t width, uint32_t height)
         static_cast<detail::ShadowPass*>(shadowPass)
             ->destroyResources(_impl->adapter);
     }
-    // §S1a (2026-07-23) — BloomExtractPass destroyResources mirror
-    // (mirror Shadow destroy block above). bgfx::reset (triggered
-    // by resize) drops view attachments, so the half-res FBO must
-    // rebuild on next execute().
-    if (detail::RenderPass* bloomExtractPass = _impl->pipeline.findPass("BloomExtract")) {
-        if (_impl->adapter.isInitialized()) {
-            static_cast<detail::BloomExtractPass*>(bloomExtractPass)
-                ->destroyResources(_impl->adapter);
-        }
-    }
-    // §S1b (2026-07-23) — BloomBlurPass destroyResources mirror
-    // (mirror BloomExtractPass destroy block above). Both ping-
-    // pong FBOs must release before bgfx::reset invalidates the
-    // attachments.
-    if (detail::RenderPass* bloomBlurPass = _impl->pipeline.findPass("BloomBlur")) {
-        if (_impl->adapter.isInitialized()) {
-            static_cast<detail::BloomBlurPass*>(bloomBlurPass)
-                ->destroyResources(_impl->adapter);
-        }
-    }
-    // §S4b (2026-07-23) — DepthHazePass destroyResources mirror
-    // (mirror BloomBlurPass destroy block above). The half-res FBO
-    // must release before bgfx::reset invalidates the attachments.
-    // When hazeEnabled=false (host default), ensureFbo never ran
-    // ⇒ _fbo is invalid ⇒ destroyResources is a no-op (K3
-    // invariant #2 holds: zero allocation ⇒ zero release work).
-    if (detail::RenderPass* depthHazePass = _impl->pipeline.findPass("DepthHaze")) {
-        if (_impl->adapter.isInitialized()) {
-            static_cast<detail::DepthHazePass*>(depthHazePass)
-                ->destroyResources(_impl->adapter);
-        }
-    }
+    // §F6 (2026-07-24, mid-term FG MVP sub-cut 6) — PostProcessPass
+    // FBO destroy block removed. PostProcessPass is a thin blit pass
+    // and FBO lifecycle was historical (pre-P2 the pass had its own
+    // color+depth FBO). Today (P2 + B6 closure) it samples the
+    // LightingOutputFbo / sceneFbo directly and no longer maintains
+    // a private RT. F6 confirms that pattern by removing the
+    // destroyResources call.
+    // (S1a / S1b / S4b individual passes' destroyResources blocks
+    // also removed ── those passes no longer own FBOs in F2/F3/F4,
+    // so calling destroyResources would be a no-op-but-noisy. F6
+    // consolidates: only VB/IB + program cleanup, no RT destroy.)
+    //
+    // §F6 — centralized FrameGraph resize. All post-process chain
+    // transient RTs (BloomBright / BloomBlurA / BloomBlurB /
+    // HazeHalf) live on the FrameGraph now; resize() destroys
+    // owned FG RTs, leaves externals alone (mirror sceneFbo
+    // block above). Passes (BloomExtract / BloomBlur / DepthHaze
+    // / PostProcess) get a single fg.resize() call instead of
+    // four individual destroyResources blocks.
+    _impl->frameGraph.resize(width, height);
 
     _impl->initDesc.width  = width;
     _impl->initDesc.height = height;

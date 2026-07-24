@@ -212,7 +212,10 @@ private:
         bool                      declared    = false;
         bool                      isExternal  = false;
         bool                      live        = false;
-        bgfx::FrameBufferHandle   physical    = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+        // `mutable` 因为 resolve() 是 const 成员,但 lazy
+        // create-on-first-resolve 路径必须能写 physical。
+        mutable bgfx::FrameBufferHandle physical =
+            bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
         // F6 才填 ── 物理尺寸 / alias 索引
         uint16_t                  physicalW   = 0;
         uint16_t                  physicalH   = 0;
