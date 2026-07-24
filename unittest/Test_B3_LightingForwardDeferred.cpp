@@ -292,7 +292,7 @@ TEST_CASE(b3_full_deferred_pipeline_noop_dispatch_with_lighting_pointer_wired) {
     // ForwardOpaque OMITTED.
     const RenderPipelineDesc deferred = RenderPipelineDesc::makeDeferred();
     CHECK(deferred.path == RenderPath::Deferred);
-    CHECK(deferred.passes.size() == 10u);
+    CHECK(deferred.passes.size() == 11u);   // §A2 SSAO MVP (2026-07-24): +1 SSAO between DepthHaze and PostProcess
     CHECK(deferred.contains(RenderPassSlot::Shadow));
     CHECK(deferred.contains(RenderPassSlot::Skybox));    // §Skybox0: in Deferred
     CHECK(deferred.contains(RenderPassSlot::GBuffer));   // B3: in Deferred

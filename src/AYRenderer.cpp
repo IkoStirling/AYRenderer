@@ -106,6 +106,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::DepthHaze,      // S4b (2026-07-23) — half-res exponential depth-aware haze; hazeEnabled=false default ⇒ zero FBO + zero write.
+        RenderPassSlot::SSAO,           // §A2 SSAO MVP (2026-07-24) — full-res 8-tap worldPos SSAO. Deferred-only (cutsheet §S2 hard line: makeDefault() does NOT include this slot). ssaoEnabled=false / ssaoStrength<=0 / gbufferPass==nullptr ⇒ 0 alloc.
         RenderPassSlot::PostProcess,
         RenderPassSlot::UI,
     }, RenderPath::Deferred};
@@ -1068,6 +1069,65 @@ void Renderer::render(const RenderScene& scene)
     if (hazePassEnabled) {
         fg.setResolvedSemantic(detail::FgSemantic::HazeSource,
                                detail::FgResourceId::HazeHalf);
+    }
+
+    // §A2 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) —
+    // SSAOTexture target. Centralized `ssaoPassEnabled` gate.
+    // Mirrors `hazePassEnabled` semantics so K-SSAO-1 ("ssaoEnabled
+    // == false ⇒ no FBO allocation") is enforced at the FG compile
+    // step rather than inside SSAOPass::execute. The two extra
+    // conditions beyond the haze gate (mirror cutsheet §S2):
+    //
+    //   - frame.ssaoEnabled (host knob; default false)
+    //   - frame.ssaoStrength > 0 (otherwise the FS gate `step
+    //     (0.0001, ssaoStrength.x)` collapses to 0; no point
+    //     allocating the RT and the noise texture)
+    //   - gbufferPassPtr != nullptr (Deferred-only MVP; SSAOPass
+    //     reads GBuffer RT2 worldPos via ctx.gbufferPass. Forward
+    //     ⇒ no GBuffer ⇒ safe no-SSAO at the host side; cutsheet
+    //     §S2 "Deferred-only" hard line)
+    //   - _impl->viewportW > 0 && _impl->viewportH > 0
+    //   - adapter.isInitialized() && !adapter.isNoopBackend()
+    //
+    // The last two conditions are pinned by A2 — they make the
+    // Noop-backend test path not leak stats (mirror F6 K3 #3
+    // "Noop / uninit ⇒ 0 alloc" guard). When `ssaoPassEnabled`
+    // is false, SSAOPass is not added to the FG, SSAOTexture is
+    // not declared, and FG compile culls it entirely ⇒ resolve
+    // returns invalid ⇒ SSAOPass::execute early-returns 0.
+    const bool ssaoPassEnabled =
+        frame.ssaoEnabled
+        && frame.ssaoStrength > 0.0f
+        && (gbufferPassPtr != nullptr)
+        && (_impl->viewportW > 0)
+        && (_impl->viewportH > 0)
+        && _impl->adapter.isInitialized()
+        && !_impl->adapter.isNoopBackend();
+    if (ssaoPassEnabled) {
+        // §A2 SSAO MVP (2026-07-24) — SSAOTexture resource lives
+        // on the FrameGraph now. SSAOPass::execute reads it via
+        // `ctx.frameGraph->resolve(FgResourceId::SSAOTexture)`,
+        // PostProcessPass (A3) reads it via
+        // `ctx.frameGraph->resolveSemantic(
+        //   FgSemantic::SSAOSource)`.
+        //
+        // NOTE: composite is not wired in A2 — PostProcessPass
+        // (F5-shipped) currently does NOT bind the SSAOSource
+        // sampler (the A3 cut adds `texture2d ssaoTexture` to FS).
+        // A2 only verifies the FG resource side; A3 then wires
+        // the consumer pipeline so the composite reaches the
+        // backbuffer.
+        fg.addResource(detail::FgResourceId::SSAOTexture,
+                       {bgfx::TextureFormat::RGBA8,
+                        detail::FgTextureScale::Full,
+                        /*transient=*/true,
+                        /*withDepth=*/false});
+        fg.addPass({"SSAO",
+                    {detail::FgResourceId::SceneColor},
+                    {detail::FgResourceId::SSAOTexture},
+                    /*enabled=*/true});
+        fg.setResolvedSemantic(detail::FgSemantic::SSAOSource,
+                               detail::FgResourceId::SSAOTexture);
     }
 
     fg.compile();

@@ -333,7 +333,13 @@ TEST_CASE(f5_render_pipeline_slot_abi_lock) {
 
 TEST_CASE(f5_view_id_constant_lock) {
     // F5 view id 锁:PostProcess = kBlitViewId = 14,F5 不动。
-    CHECK(static_cast<uint16_t>(PostProcessPass::kBlitViewId) == 14);
+    //
+    // §A2 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) — single-
+    // point view-id bump 14→15 so PostProcess runs AFTER the SSAO
+    // pass (view 14) and BEFORE UI (view 255). The lock is bumped
+    // here to match the new kBlitViewId. No F5 test contract
+    // changes.
+    CHECK(static_cast<uint16_t>(PostProcessPass::kBlitViewId) == 15);
 }
 
 // ─── E. setResolvedSemantic + compile 顺序 ──────────────────────

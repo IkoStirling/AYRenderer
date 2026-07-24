@@ -498,15 +498,17 @@ TEST_CASE(s4c_make_default_slot_table_depthhaze_before_postprocess) {
 
 TEST_CASE(s4c_make_deferred_slot_table_depthhaze_before_postprocess) {
     // Deferred path also unchanged: DepthHaze at index 7,
-    // PostProcess at index 8.
+    // SSAO at index 8 (cutsheet §S2 hard line: between DepthHaze
+    // and PostProcess), PostProcess at index 9.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 10);
+    CHECK(desc.passes.size() == 11);    // §A2 SSAO MVP (2026-07-24): +1 SSAO
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[9] == RenderPassSlot::UI);
+    CHECK(desc.passes[8] == RenderPassSlot::SSAO);          // §A2 SSAO MVP
+    CHECK(desc.passes[9] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[10] == RenderPassSlot::UI);
 }
 
 // === I. setEnabled(false) on PostProcessPass skips dispatch ==========

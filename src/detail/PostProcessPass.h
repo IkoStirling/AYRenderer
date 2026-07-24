@@ -101,9 +101,16 @@ namespace ayt::render::detail
 // (destroy on shutdown / resize / adapter-reinit).
 class PostProcessPass : public RenderPass {
 public:
-    // After DepthHaze=13; shared by Forward + Deferred.
+    // §A2 SSAO MVP (2026-07-24) — single-point view-id bump
+    // 14→15 so PostProcess reads SSAOTexture on the next view.
+    // Lock: SSAO=14 → PostProcess=15 → UI=255. SSAO sits between
+    // DepthHaze (=13) and Final PP so same-frame sampling of the
+    // occlusion RT works (PostProcess's `ssaoTexture` sampler,
+    // wired in §A3, sees SSAOPass's just-written RT0).
+    //
+    // Before §A2: After DepthHaze=13; shared by Forward + Deferred.
     // UI chrome is fixed at view 255 (must stay > Final PP).
-    static constexpr uint8_t kBlitViewId = 14;
+    static constexpr uint8_t kBlitViewId = 15;
 
     PostProcessPass() = default;
     // R5+ — destructor intentionally does NOT touch bgfx handles.

@@ -50,6 +50,7 @@
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
+#include "detail/SSAOPass.h"        // §A2 SSAO MVP (2026-07-24) — view-chain cross-check pinning SSAO between DepthHaze and PostProcess.
 #include "detail/RenderPipeline.h"
 #include "detail/TransparentPass.h"
 
@@ -83,6 +84,7 @@ using ayt::render::detail::GpuMesh;
 using ayt::render::detail::GpuTexture;
 using ayt::render::detail::PassExecContext;
 using ayt::render::detail::PostProcessPass;
+using ayt::render::detail::SSAOPass;       // §A2 SSAO MVP (2026-07-24)
 using ayt::render::detail::RenderPipeline;
 // §S1b Bug fix #3 mirror — pin the live cache-key extern so the
 // drift-detection test below sees it. Test cases live at global
@@ -293,12 +295,12 @@ TEST_CASE(s1b_make_default_includes_bloomblur_after_bloomextract) {
 
 TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
     // The Deferred path also gets BloomBlur at the same dispatch
-    // position (after BloomExtract, before PostProcess). Now 10
+    // position (after BloomExtract, before PostProcess). Now 11
     // slots total (was 8 after S1a; +1 BloomBlur; +1 DepthHaze
-    // from S4b).
+    // from S4b; +1 SSAO from §A2).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 10);
+    CHECK(desc.passes.size() == 11);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
@@ -307,8 +309,9 @@ TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
-    CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[9] == RenderPassSlot::UI);
+    CHECK(desc.passes[8] == RenderPassSlot::SSAO);        // §A2 SSAO MVP (2026-07-24) — between DepthHaze and PP
+    CHECK(desc.passes[9] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[10] == RenderPassSlot::UI);
 }
 
 // === C. View id constants ===========================================
@@ -324,8 +327,15 @@ TEST_CASE(s1b_bloomblur_view_ids_after_extract_before_pp) {
           == BloomBlurPass::kBloomBlurHorizontalViewId + 1);
     CHECK(DepthHazePass::kDepthHazeViewId
           == BloomBlurPass::kBloomBlurVerticalViewId + 1);
-    CHECK(PostProcessPass::kBlitViewId
+    // §A2 SSAO MVP (2026-07-24) — single-point view-id bump. The
+    // chain now goes SSAO between DepthHaze and PostProcess:
+    // DepthHaze=13 → SSAO=14 → PostProcess=15. BloomBlur chain
+    // remains DepthHaze=13; the SSAO slot is consumed between
+    // DepthHaze and PostProcess now.
+    CHECK(SSAOPass::kSsaoViewId
           == DepthHazePass::kDepthHazeViewId + 1);
+    CHECK(PostProcessPass::kBlitViewId
+          == SSAOPass::kSsaoViewId + 1);
     CHECK(ayt::render::UIRenderBackend::kViewId == 255);
     CHECK(ayt::render::UIRenderBackend::kViewId > PostProcessPass::kBlitViewId);
 }

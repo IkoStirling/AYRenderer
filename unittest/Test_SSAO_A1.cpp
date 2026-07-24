@@ -157,12 +157,12 @@ TEST_CASE(a1_ssao_view_id_lock_is_14) {
     CHECK(SSAOPass::kSsaoViewId == 14u);
 }
 
-TEST_CASE(a1_post_process_view_id_lock_is_14_pre_a2_bump) {
-    // §A1 (2026-07-24) — pre-A2 baseline: kBlitViewId is still 14
-    // (the historical lock from §S4b). The 14→15 single-point bump
-    // lands in A2. Pin this here so a tester reading the suite
-    // knows the bump-then-lock order across A1 / A2 / A3.
-    CHECK(static_cast<uint16_t>(PostProcessPass::kBlitViewId) == 14u);
+TEST_CASE(a1_post_process_view_id_lock_is_15_post_a2_bump) {
+    // §A2 (2026-07-24) — single-point view-id bump 14→15 so
+    // PostProcess reads SSAOTexture on the next view (cutsheet §S2
+    // view-map lock: SSAO=14 → PP=15 → UI=255). Pinned here so a
+    // future cutsheet that re-renumbers would break loudly.
+    CHECK(static_cast<uint16_t>(PostProcessPass::kBlitViewId) == 15u);
 }
 
 // ─── D. FrameContext default-zero (K-SSAO-1 hold) ──────────────────
