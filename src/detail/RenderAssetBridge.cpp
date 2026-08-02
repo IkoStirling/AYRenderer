@@ -6,6 +6,7 @@
 #include "AYAssetPath.h"
 #include "AYShadowShaderSources.h"
 #include "assetsImpl/AYMaterial.h"
+#include <ayio/Env.h>
 
 #include <bgfx/bgfx.h>
 
@@ -328,7 +329,7 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
     static std::atomic<uint64_t> s_uploadLastReport{0};
     static std::atomic<uint64_t> s_frameMarker{0};
     using namespace std::chrono;
-    const auto t0 = (std::getenv("AY_RENDERER_UPLOAD_TIMING") != nullptr)
+    const auto t0 = ayt::io::env::get("AY_RENDERER_UPLOAD_TIMING").has_value()
                         ? high_resolution_clock::now() : high_resolution_clock::time_point{};
     s_uploadCount.fetch_add(1, std::memory_order_relaxed);
     const uint64_t callIdx = s_uploadCount.load(std::memory_order_relaxed);
@@ -398,7 +399,7 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
 
     // Diag closure: print once per ~256 calls so a runaway
     // upload is loud but a stable scene is silent.
-    if (std::getenv("AY_RENDERER_UPLOAD_TIMING") != nullptr) {
+    if (ayt::io::env::get("AY_RENDERER_UPLOAD_TIMING").has_value()) {
         const auto t1 = high_resolution_clock::now();
         const double ms = duration<double, std::milli>(t1 - t0).count();
         std::fprintf(stderr,
@@ -429,17 +430,14 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     // Default: Phoskia file path. Force hand .sc with AY_SHADOW_USE_SC=1
     // (PowerShell: $env:AY_SHADOW_USE_SC="1").
     MaterialHandle handle{};
-    const char* useScEnv = std::getenv("AY_SHADOW_USE_SC");
+    const std::string useScEnv = ayt::io::env::get("AY_SHADOW_USE_SC").value_or("");
     const bool forceSc =
-        useScEnv != nullptr
-        && useScEnv[0] != '\0'
+        !useScEnv.empty()
         && useScEnv[0] != '0';
     // Legacy: AY_SHADOW_USE_PHOSKIA=0 also forces .sc (compat with old docs).
-    const char* usePhoskiaEnv = std::getenv("AY_SHADOW_USE_PHOSKIA");
+    const std::string usePhoskiaEnv = ayt::io::env::get("AY_SHADOW_USE_PHOSKIA").value_or("");
     const bool forcePhoskiaOff =
-        usePhoskiaEnv != nullptr
-        && usePhoskiaEnv[0] == '0'
-        && usePhoskiaEnv[1] == '\0';
+        usePhoskiaEnv == "0";
     const bool preferSc =
         (std::strstr(shaderRef, "simple_lit_shadow") != nullptr)
         && (forceSc || forcePhoskiaOff);

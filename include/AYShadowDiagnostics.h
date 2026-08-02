@@ -2,8 +2,9 @@
 
 #include "AYShadowSettings.h"
 
+#include <ayio/Env.h>
 #include <cstdint>
-#include <cstdlib>
+#include <string>
 
 namespace ayt::render
 {
@@ -52,9 +53,19 @@ struct ShadowDiagnostics {
     // is mesh-draw-call count.
     static ShadowLogLevel levelFromEnv() noexcept
     {
-        const char* env = std::getenv("AY_SHADOW_LOG");
-        if (env == nullptr || env[0] == '\0') {
-            if (std::getenv("AY_SHADOW_DEBUG") != nullptr) {
+        // Wrap env::get in a try/catch to preserve the previous
+        // noexcept contract — the underlying call allocates a
+        // std::string on Windows and could throw std::bad_alloc on
+        // the rare alloca-fail path. Drop back to the production
+        // default L2_Frame if anything goes wrong.
+        std::string env;
+        try {
+            env = ayt::io::env::get("AY_SHADOW_LOG").value_or("");
+        } catch (...) {
+            return ShadowLogLevel::L2_Frame;
+        }
+        if (env.empty()) {
+            if (ayt::io::env::get("AY_SHADOW_DEBUG").has_value()) {
                 return ShadowLogLevel::L3_Probe;
             }
             return ShadowLogLevel::L2_Frame;
@@ -78,14 +89,27 @@ struct ShadowDiagnostics {
 
     static bool debugVisEnabled() noexcept
     {
-        const char* env = std::getenv("AY_SHADOW_DEBUG");
-        return env != nullptr && env[0] != '\0' && env[0] != '0';
+        // Preserve the v0 contract: enabled iff set AND not empty
+        // AND first char != '0'. env::get() allocates on Windows —
+        // catch the bad_alloc path so noexcept stays intact.
+        std::string env;
+        try {
+            env = ayt::io::env::get("AY_SHADOW_DEBUG").value_or("");
+        } catch (...) {
+            return false;
+        }
+        return !env.empty() && env[0] != '0';
     }
 
     static bool casterSolidEnabled() noexcept
     {
-        const char* env = std::getenv("AY_SHADOW_CASTER_SOLID");
-        return env != nullptr && env[0] != '\0' && env[0] != '0';
+        std::string env;
+        try {
+            env = ayt::io::env::get("AY_SHADOW_CASTER_SOLID").value_or("");
+        } catch (...) {
+            return false;
+        }
+        return !env.empty() && env[0] != '0';
     }
 };
 
