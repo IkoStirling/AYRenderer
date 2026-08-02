@@ -190,6 +190,38 @@ void RenderResourceManager::removeMeshCacheEntry(uint64_t id)
     }
 }
 
+void RenderResourceManager::destroyMeshGpuOnly(uint64_t id)
+{
+    const auto it = _meshes.find(id);
+    if (it == _meshes.end()) {
+        return;
+    }
+    _adapter.destroy(it->second.vertexBuffer);
+    _adapter.destroy(it->second.indexBuffer);
+    _meshes.erase(it);
+}
+
+void RenderResourceManager::destroyTextureGpuOnly(uint64_t id)
+{
+    const auto it = _textures.find(id);
+    if (it == _textures.end()) {
+        return;
+    }
+    _adapter.destroy(it->second.handle);
+    _textures.erase(it);
+}
+
+void RenderResourceManager::destroyMaterialGpuOnly(uint64_t id)
+{
+    const auto it = _materials.find(id);
+    if (it == _materials.end()) {
+        return;
+    }
+    // ShaderResource is ref-counted via the pool; dropping the GpuMaterial
+    // releases our view. Uniform/texture slots are plain data.
+    _materials.erase(it);
+}
+
 MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
                                                      uint32_t vertexCount,
                                                      uint32_t vertexStride,
@@ -578,6 +610,166 @@ uint32_t RenderResourceManager::reloadMaterialsForShaderFile(const std::string& 
         ++updated;
     }
     return updated;
+}
+
+bool RenderResourceManager::reloadMeshFromPath(const std::string& path)
+{
+    const std::string key = normalizeAssetPathKey(path);
+    if (key.empty()) {
+        return false;
+    }
+    const auto cached = _meshCacheByKey.find(key);
+    if (cached == _meshCacheByKey.end()) {
+        return false;
+    }
+    const uint64_t id = cached->second;
+
+    const auto mesh = ayt::resource::ResourceManager::instance().load<ayt::resource::IMesh>(path);
+    if (!mesh) {
+        std::fprintf(stderr, "[RenderResourceManager] reloadMesh L2 miss '%s'\n", path.c_str());
+        return false;
+    }
+
+    destroyMeshGpuOnly(id);
+    const MeshHandle fresh = uploadMeshFromResource(*this, *mesh);
+    if (!fresh.isValid()) {
+        std::fprintf(stderr, "[RenderResourceManager] reloadMesh upload failed '%s'\n",
+                     path.c_str());
+        return false;
+    }
+
+    if (fresh.id != id) {
+        _meshes[id] = std::move(_meshes.at(fresh.id));
+        _meshes.erase(fresh.id);
+    }
+    _meshCacheByKey[key] = id;
+    std::fprintf(stderr, "[RenderResourceManager] reloadMesh ok '%s' id=%llu\n",
+                 path.c_str(), static_cast<unsigned long long>(id));
+    return true;
+}
+
+bool RenderResourceManager::reloadMaterialFromPath(const std::string& path)
+{
+    const std::string key = normalizeAssetPathKey(path);
+    if (key.empty()) {
+        return false;
+    }
+    const auto cached = _materialCacheByKey.find(key);
+    if (cached == _materialCacheByKey.end()) {
+        return false;
+    }
+    const uint64_t id = cached->second;
+
+    const auto material =
+        ayt::resource::ResourceManager::instance().load<ayt::resource::IMaterial>(path);
+    if (!material) {
+        std::fprintf(stderr, "[RenderResourceManager] reloadMaterial L2 miss '%s'\n",
+                     path.c_str());
+        return false;
+    }
+
+    // Drop path cache so bindMaterialFromResource can create a fresh GPU mat,
+    // then remap onto the stable handle id so scene refs stay valid.
+    _materialCacheByKey.erase(cached);
+    destroyMaterialGpuOnly(id);
+
+    MaterialHandle fresh = bindMaterialFromResource(*this, *material, path);
+    if (!fresh.isValid()) {
+        std::fprintf(stderr, "[RenderResourceManager] reloadMaterial bind failed '%s'\n",
+                     path.c_str());
+        return false;
+    }
+
+    if (fresh.id != id) {
+        _materials[id] = std::move(_materials.at(fresh.id));
+        _materials.erase(fresh.id);
+    }
+    _materialCacheByKey[key] = id;
+    std::fprintf(stderr, "[RenderResourceManager] reloadMaterial ok '%s' id=%llu\n",
+                 path.c_str(), static_cast<unsigned long long>(id));
+    return true;
+}
+
+bool RenderResourceManager::reloadTextureFromPath(const std::string& path)
+{
+    const std::string key = normalizeAssetPathKey(path);
+    if (key.empty()) {
+        return false;
+    }
+    const auto cached = _textureCacheByKey.find(key);
+    if (cached == _textureCacheByKey.end()) {
+        return false;
+    }
+    const uint64_t id = cached->second;
+
+    const auto texture =
+        ayt::resource::ResourceManager::instance().load<ayt::resource::ITexture>(path);
+    if (!texture) {
+        // Raw image fallback (png/jpg) when not a typed .aytex.
+        destroyTextureGpuOnly(id);
+        _textureCacheByKey.erase(key);
+        const TextureHandle fresh = createTextureFromFile(path, key);
+        if (!fresh.isValid()) {
+            return false;
+        }
+        if (fresh.id != id) {
+            _textures[id] = std::move(_textures.at(fresh.id));
+            _textures.erase(fresh.id);
+            _textureCacheByKey[key] = id;
+        }
+        return true;
+    }
+
+    destroyTextureGpuOnly(id);
+    _textureCacheByKey.erase(key);
+    const TextureHandle fresh = uploadTextureFromResource(*this, *texture, key);
+    if (!fresh.isValid()) {
+        std::fprintf(stderr, "[RenderResourceManager] reloadTexture upload failed '%s'\n",
+                     path.c_str());
+        return false;
+    }
+    if (fresh.id != id) {
+        _textures[id] = std::move(_textures.at(fresh.id));
+        _textures.erase(fresh.id);
+        _textureCacheByKey[key] = id;
+    }
+    std::fprintf(stderr, "[RenderResourceManager] reloadTexture ok '%s' id=%llu\n",
+                 path.c_str(), static_cast<unsigned long long>(id));
+    return true;
+}
+
+bool RenderResourceManager::onResourceFileChanged(const std::string& path)
+{
+    if (path.empty()) {
+        return false;
+    }
+
+    const std::string key = normalizeAssetPathKey(path);
+    const auto dot = key.find_last_of('.');
+    const std::string ext = (dot == std::string::npos) ? std::string{} : key.substr(dot);
+
+    if (ext == ".aymesh") {
+        return reloadMeshFromPath(path);
+    }
+    if (ext == ".aymat") {
+        return reloadMaterialFromPath(path);
+    }
+    if (ext == ".aytex" || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga"
+        || ext == ".bmp" || ext == ".hdr") {
+        return reloadTextureFromPath(path);
+    }
+
+    // Unknown extension: try whichever path cache has it.
+    if (_meshCacheByKey.count(key) != 0 && reloadMeshFromPath(path)) {
+        return true;
+    }
+    if (_materialCacheByKey.count(key) != 0 && reloadMaterialFromPath(path)) {
+        return true;
+    }
+    if (_textureCacheByKey.count(key) != 0 && reloadTextureFromPath(path)) {
+        return true;
+    }
+    return false;
 }
 
 MaterialHandle RenderResourceManager::loadMaterial(const std::string& path)

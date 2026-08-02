@@ -29,6 +29,7 @@
 #include "AYUIRenderBackend.h"
 
 #include "AYShaderResourcePool.h"
+#include "AYResourceManager.h"
 
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
@@ -679,6 +680,14 @@ bool Renderer::initialize(const InitDesc& desc)
     // return if adapter already initialized) so the second call won't
     // re-stamp the origin; render() guards on "origin not yet set".
     _impl->renderClockOrigin = std::chrono::steady_clock::now();
+
+    // P2: L2 file change → L3 GPU re-upload (stable handle ids).
+    ayt::resource::ResourceManager::instance().setOnHotReload(
+        [this](const std::string& path) {
+            if (_impl) {
+                (void)_impl->resources.onResourceFileChanged(path);
+            }
+        });
     return true;
 }
 
@@ -709,6 +718,7 @@ void Renderer::shutdown()
     // destroys each (externals are skipped). Idempotent.
     _impl->frameGraph.shutdown();
 
+    ayt::resource::ResourceManager::instance().setOnHotReload({});
     _impl->resources.shutdown();
     _impl->shaderPool.shutdown();
     _impl->adapter.shutdown();
@@ -2321,6 +2331,13 @@ void Renderer::pollShaderHotReload()
         _impl->shaderPool.pollHotReload();
         _impl->resources.refreshMaterialsAfterHotReload();
     }
+}
+
+void Renderer::pollResourceHotReload()
+{
+    // Manager drains FileWatcher/mtime, invalidates L2, then invokes the
+    // callback installed in initialize() which refreshes L3 GPU caches.
+    ayt::resource::ResourceManager::instance().update(0.0f);
 }
 
 uint32_t Renderer::reloadMaterialsForShaderFile(const std::string& shaderPath)

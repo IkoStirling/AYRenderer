@@ -56,6 +56,13 @@ public:
     // (normalized path compare). Returns the number of materials updated.
     uint32_t reloadMaterialsForShaderFile(const std::string& shaderPath);
 
+    // P2: L2 file changed → drop GPU for that path (keep handle id) and re-upload.
+    // No-op when the path was never GPU-cached. Returns true if something refreshed.
+    bool onResourceFileChanged(const std::string& path);
+    bool reloadMeshFromPath(const std::string& path);
+    bool reloadMaterialFromPath(const std::string& path);
+    bool reloadTextureFromPath(const std::string& path);
+
     void setMaterialColor(MaterialHandle material, const char* propertyName,
                           float r, float g, float b, float a);
     void setMaterialFloat(MaterialHandle material, const char* uniformName, float value);
@@ -129,6 +136,9 @@ private:
     void removeMaterialCacheEntry(uint64_t id);
     void removeTextureCacheEntry(uint64_t id);
     void removeMeshCacheEntry(uint64_t id);
+    void destroyMeshGpuOnly(uint64_t id);
+    void destroyTextureGpuOnly(uint64_t id);
+    void destroyMaterialGpuOnly(uint64_t id);
 
     void resetMaterialBindingCache(GpuMaterial& material);
     void rebindMaterialAfterShaderSwap(GpuMaterial& material);

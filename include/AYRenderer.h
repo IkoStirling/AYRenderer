@@ -334,6 +334,12 @@ public:
 
     void pollShaderHotReload();
 
+    // P2: tick ResourceManager hot-reload (FileWatcher + mtime). When an
+    // asset file changes, L2 is invalidated/reloaded and L3 GPU for that
+    // path is re-uploaded (stable handle ids). Call once per frame alongside
+    // pollShaderHotReload().
+    void pollResourceHotReload();
+
     // Re-compile materials already loaded from `shaderPath` (e.g. after
     // EditorPlayRuntime rewrites a .phoskia on disk). No-op when renderer
     // is not initialized or no matching materials are loaded yet.

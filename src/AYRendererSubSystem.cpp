@@ -541,9 +541,11 @@ void RendererSubSystem::renderFrame()
 
     _renderer.endFrame();
 
+    _renderer.pollResourceHotReload();
     _renderer.pollShaderHotReload();
 
 }
+
 
 
 
@@ -603,6 +605,7 @@ void RendererSubSystem::renderCompositeFrame(bool renderScene3D, UIRenderBackend
     _renderer.setDebugOverlaySuppressed(true);
     _renderer.endFrame();
     _renderer.setDebugOverlaySuppressed(false);
+    _renderer.pollResourceHotReload();
     _renderer.pollShaderHotReload();
 }
 
