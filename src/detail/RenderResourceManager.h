@@ -11,6 +11,10 @@
 namespace ayt::render::detail
 {
 
+// L3 owner: GPU maps + opaque Mesh/Material/Texture handles.
+// Upload copies L2 CPU data; RRM does not retain shared_ptr<IResource>.
+// L2 unload/trim does not destroy GPU — only destroy* / shutdown / hot-reload
+// path refresh (stable handle ids). See AYResource/docs/ownership-contracts.md.
 class RenderResourceManager {
 public:
     RenderResourceManager(BGFXAdapter& adapter, shader::ShaderResourcePool& shaderPool);
