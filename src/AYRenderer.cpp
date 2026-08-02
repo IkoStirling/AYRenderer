@@ -34,6 +34,8 @@
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 
+#include <ayio/Env.h>
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -644,8 +646,8 @@ bool Renderer::initialize(const InitDesc& desc)
     bgfxParams.vsync              = desc.vsync;
     bgfxParams.backend            = desc.backend;
     bgfxParams.msaa               = desc.msaa;
-    if (const char* msaaEnv = std::getenv("AY_MSAA")) {
-        bgfxParams.msaa = static_cast<uint32_t>(std::atoi(msaaEnv));
+    if (const std::string msaaEnv = ayt::io::env::get("AY_MSAA").value_or(""); !msaaEnv.empty()) {
+        bgfxParams.msaa = static_cast<uint32_t>(std::atoi(msaaEnv.c_str()));
     }
 
     if (!_impl->adapter.initialize(bgfxParams)) {
@@ -655,7 +657,7 @@ bool Renderer::initialize(const InitDesc& desc)
     _impl->initDesc        = desc;
     _impl->initDesc.msaa   = bgfxParams.msaa;
     _impl->shadowPcfEnabled = desc.shadowPcf;
-    if (const char* pcfEnv = std::getenv("AY_SHADOW_PCF")) {
+    if (const std::string pcfEnv = ayt::io::env::get("AY_SHADOW_PCF").value_or(""); !pcfEnv.empty()) {
         _impl->shadowPcfEnabled = !(pcfEnv[0] == '\0' || pcfEnv[0] == '0');
     }
     _impl->initDesc.shadowPcf = _impl->shadowPcfEnabled;

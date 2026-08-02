@@ -6,8 +6,10 @@
 #include "AYShaderResource.h"
 
 #include <algorithm>
+#include <ayio/Env.h>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace ayt::render::detail
@@ -141,8 +143,8 @@ uint32_t EditorOverlayPass::execute(PassExecContext& ctx)
     if (!adapter.isInitialized() || adapter.isNoopBackend()) {
         return 0;
     }
-    const char* outlineEnv = std::getenv("AY_EDITOR_OUTLINE");
-    if (outlineEnv != nullptr && std::strcmp(outlineEnv, "0") == 0) {
+    const std::string outlineEnv = ayt::io::env::get("AY_EDITOR_OUTLINE").value_or("");
+    if (!outlineEnv.empty() && outlineEnv == "0") {
         return 0;
     }
     if (viewportWidth == 0 || viewportHeight == 0) {

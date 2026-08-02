@@ -7,6 +7,7 @@
 
 #include <bgfx/bgfx.h>
 
+#include <ayio/Env.h>
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
@@ -25,13 +26,13 @@ namespace {
 
 bool envForceScCaster()
 {
-    const char* sc = std::getenv("AY_SHADOW_USE_SC");
-    if (sc != nullptr && sc[0] != '\0' && sc[0] != '0') {
+    const std::string sc = ayt::io::env::get("AY_SHADOW_USE_SC").value_or("");
+    if (!sc.empty() && sc[0] != '\0' && sc[0] != '0') {
         return true;
     }
     // Legacy: AY_SHADOW_USE_PHOSKIA=0 forces .sc.
-    const char* v = std::getenv("AY_SHADOW_USE_PHOSKIA");
-    return v != nullptr && v[0] == '0' && v[1] == '\0';
+    const std::string v = ayt::io::env::get("AY_SHADOW_USE_PHOSKIA").value_or("");
+    return v == "0";
 }
 
 } // namespace

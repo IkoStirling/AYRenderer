@@ -13,7 +13,9 @@
 #include "AYShaderResource.h"
 
 #include <bgfx/bgfx.h>
+#include <ayio/Env.h>
 #include <cstdio>
+#include <string>
 #include <cstring>
 #include <cstdlib>
 #include <vector>
@@ -78,10 +80,10 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
     // Isolation: AY_SHADOW_FORCE_LIT=1 → white fallback (no map).
     // Default: sample the map (AY_SHADOW_USE_MAP=0 forces lit).
     const bool forceLit = []() noexcept {
-        if (const char* v = std::getenv("AY_SHADOW_FORCE_LIT")) {
+        if (const std::string v = ayt::io::env::get("AY_SHADOW_FORCE_LIT").value_or(""); !v.empty()) {
             return v[0] != '\0' && v[0] != '0';
         }
-        if (const char* v = std::getenv("AY_SHADOW_USE_MAP")) {
+        if (const std::string v = ayt::io::env::get("AY_SHADOW_USE_MAP").value_or(""); !v.empty()) {
             return !(v[0] != '\0' && v[0] != '0');
         }
         return false;

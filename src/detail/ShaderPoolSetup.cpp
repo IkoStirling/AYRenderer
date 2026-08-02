@@ -2,6 +2,7 @@
 
 #include "AYShadercDriver.h"
 
+#include <ayio/Env.h>
 #include <cstdlib>
 #include <string>
 #include <sys/stat.h>
@@ -127,7 +128,7 @@ bool configureShaderPool(shader::ShaderResourcePool& pool)
     pool.setAutoProbeFromRendererType(true);
     pool.setHotReloadEnabled(true);
 
-    if (const char* dumpDir = std::getenv("AY_SHADER_DUMP_DIR")) {
+    if (const std::string dumpDir = ayt::io::env::get("AY_SHADER_DUMP_DIR").value_or(""); !dumpDir.empty()) {
         if (dumpDir[0] != '\0' && ensureDirectoryExists(dumpDir)) {
             pool.setIntermediateDumpDirectory(dumpDir);
         }
