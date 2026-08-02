@@ -5,9 +5,7 @@
 #include "detail/VertexLayoutBridge.h"
 
 #include "AYAssetPath.h"
-#include "AYResourceBootstrap.h"
-#include "AYResourceRegistry.h"
-#include "IAYResource.h"
+#include "AYResourceManager.h"
 #include "IAYMaterial.h"
 #include "IAYMesh.h"
 #include "IAYTexture.h"
@@ -311,18 +309,12 @@ MeshHandle RenderResourceManager::loadMesh(const std::string& path)
         }
     }
 
-    ayt::resource::initializeLoaders();
-    const std::shared_ptr<ayt::resource::IResource> resource =
-        ayt::resource::ResourceRegistry::loadByPath(path);
-    if (!resource) {
-        std::fprintf(stderr, "[RenderResourceManager] loadMesh failed: ResourceRegistry '%s'\n",
-                     path.c_str());
-        return {};
-    }
-
-    const auto* mesh = dynamic_cast<const ayt::resource::IMesh*>(resource.get());
-    if (mesh == nullptr) {
-        std::fprintf(stderr, "[RenderResourceManager] loadMesh failed: not IMesh '%s'\n",
+    // P0: L2 load must go through ResourceManager (cache/deps/pak/hot-reload).
+    // Do not call ResourceRegistry::loadByPath from the renderer path.
+    const std::shared_ptr<ayt::resource::IMesh> mesh =
+        ayt::resource::ResourceManager::instance().load<ayt::resource::IMesh>(path);
+    if (!mesh) {
+        std::fprintf(stderr, "[RenderResourceManager] loadMesh failed: ResourceManager '%s'\n",
                      path.c_str());
         return {};
     }
@@ -604,18 +596,11 @@ MaterialHandle RenderResourceManager::loadMaterial(const std::string& path)
         }
     }
 
-    ayt::resource::initializeLoaders();
-    const std::shared_ptr<ayt::resource::IResource> resource =
-        ayt::resource::ResourceRegistry::loadByPath(path);
-    if (!resource) {
-        std::fprintf(stderr, "[RenderResourceManager] loadMaterial failed: ResourceRegistry '%s'\n",
-                     path.c_str());
-        return {};
-    }
-
-    const auto* material = dynamic_cast<const ayt::resource::IMaterial*>(resource.get());
-    if (material == nullptr) {
-        std::fprintf(stderr, "[RenderResourceManager] loadMaterial failed: not IMaterial '%s'\n",
+    // P0: L2 load must go through ResourceManager (cache/deps/pak/hot-reload).
+    const std::shared_ptr<ayt::resource::IMaterial> material =
+        ayt::resource::ResourceManager::instance().load<ayt::resource::IMaterial>(path);
+    if (!material) {
+        std::fprintf(stderr, "[RenderResourceManager] loadMaterial failed: ResourceManager '%s'\n",
                      path.c_str());
         return {};
     }
@@ -926,16 +911,12 @@ TextureHandle RenderResourceManager::loadTexture(const std::string& path)
         }
     }
 
-    ayt::resource::initializeLoaders();
-    const std::shared_ptr<ayt::resource::IResource> resource =
-        ayt::resource::ResourceRegistry::loadByPath(path);
-    if (!resource) {
+    // P0: L2 load must go through ResourceManager (cache/deps/pak/hot-reload).
+    // Fall back to raw image decode when the path is not a typed .ay* asset.
+    const std::shared_ptr<ayt::resource::ITexture> texture =
+        ayt::resource::ResourceManager::instance().load<ayt::resource::ITexture>(path);
+    if (!texture) {
         return createTextureFromFile(path, key);
-    }
-
-    const auto* texture = dynamic_cast<const ayt::resource::ITexture*>(resource.get());
-    if (texture == nullptr) {
-        return {};
     }
 
     return uploadTextureFromResource(*this, *texture, key);
