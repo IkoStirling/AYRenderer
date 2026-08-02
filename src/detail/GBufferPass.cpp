@@ -195,6 +195,9 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
 
     uint32_t drawCount = 0;
     for (const DrawItem& item : ctx.scene.items()) {
+        if (item.outlineHull) {
+            continue;
+        }
         if (!item.mesh.isValid() || !item.material.isValid()) {
             continue;
         }

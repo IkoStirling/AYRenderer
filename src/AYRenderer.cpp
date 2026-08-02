@@ -15,6 +15,7 @@
 #include "detail/LightingPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
+#include "detail/EditorOverlayPass.h"
 #include "detail/RenderPipeline.h"
 #include "detail/SSAOPass.h"        // §A1 SSAO MVP (2026-07-24) — SSAOPass factory + FrameGraph SSAOTexture resolve gate.
 #include "detail/RenderResourceManager.h"
@@ -76,6 +77,35 @@ RenderPipelineDesc RenderPipelineDesc::makeForwardWithShadows()
     // assemble the shadow-forward pipeline (see
     // AYEditorPlayRuntime.cpp:applyEditorRenderPipeline).
     return makeDefault();
+}
+
+namespace {
+
+void insertEditorOverlayAfterPostProcess(RenderPipelineDesc& desc)
+{
+    auto ppIt = std::find(desc.passes.begin(), desc.passes.end(),
+                          RenderPassSlot::PostProcess);
+    if (ppIt != desc.passes.end()) {
+        desc.passes.insert(ppIt + 1, RenderPassSlot::EditorOverlay);
+    } else {
+        desc.passes.push_back(RenderPassSlot::EditorOverlay);
+    }
+}
+
+} // namespace
+
+RenderPipelineDesc RenderPipelineDesc::makeEditorForward()
+{
+    RenderPipelineDesc desc = makeForwardWithShadows();
+    insertEditorOverlayAfterPostProcess(desc);
+    return desc;
+}
+
+RenderPipelineDesc RenderPipelineDesc::makeEditorDeferred()
+{
+    RenderPipelineDesc desc = makeDeferred();
+    insertEditorOverlayAfterPostProcess(desc);
+    return desc;
 }
 
 RenderPipelineDesc RenderPipelineDesc::makeDeferred()
@@ -144,6 +174,8 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::TransparentPass>();
     case RenderPassSlot::PostProcess:
         return std::make_unique<detail::PostProcessPass>();
+    case RenderPassSlot::EditorOverlay:
+        return std::make_unique<detail::EditorOverlayPass>();
     case RenderPassSlot::UI:
         return std::make_unique<detail::UIPass>();
     // §P5 B3 (2026-07-22) — Deferred-only slots. Both shells are

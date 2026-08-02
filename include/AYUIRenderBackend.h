@@ -77,6 +77,9 @@ public:
 
     void flushBatches() override;
 
+    void pushClip(const ayt::math::FRectangle& bounds) override;
+    void popClip() override;
+
     int getDrawCallCount() const override { return _drawCalls; }
 
 private:
@@ -95,6 +98,8 @@ private:
     void syncTextAtlasIfNeeded();
     void drawTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
                           const ayt::math::FVector4& tint);
+    ayt::math::FRectangle activeClipBounds() const;
+    bool clipRect(ayt::math::FRectangle& inout) const;
 
     bool     _initialized = false;
     uint16_t _width         = 0;

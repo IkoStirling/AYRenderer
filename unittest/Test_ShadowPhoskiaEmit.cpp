@@ -16,8 +16,7 @@ TEST_CASE(dump_and_check_simple_lit_shadow_phoskia_emit)
     ayt::shader::phoskia::CompileOptions opts;
     opts.keepSources = true;
     opts.dumpIntermediate = true;
-    opts.dumpDir =
-        "D:/Projects/out/build/x64-Debug/AYRuntime/AYEditor/ayeditor_cache/phoskia_emit";
+    opts.dumpDir = ayt::test::testTmpPath("phoskia_emit");
 
     ayt::shader::phoskia::Compiler compiler;
     ayt::shader::CompiledShaderProgram prog;

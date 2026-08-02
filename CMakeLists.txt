@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 
+project(AYRenderer
+    VERSION 0.1.0
+    DESCRIPTION "AYRenderer — bgfx-based renderer (Forward+Deferred + SSAO + UI backend)"
+)
+
 # C++ standard follows the root CMakeLists (currently C++23; may move to C++26).
 # Do not pin a standard here.
 
@@ -128,3 +133,5 @@ target_compile_definitions(AYRenderer PRIVATE
 enable_testing()
 add_subdirectory(unittest)
 add_subdirectory(demo)
+
+message(STATUS "AYRenderer v0.1.0 (Forward+Deferred + SSAO v2 + GBuffer debug + selection outline) — see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")

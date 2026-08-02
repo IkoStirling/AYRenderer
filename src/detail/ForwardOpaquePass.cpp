@@ -215,6 +215,9 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     uint32_t drawCount = 0;
 
     for (const DrawItem& item : scene.items()) {
+        if (item.outlineHull) {
+            continue;
+        }
         if (!item.mesh.isValid() || !item.material.isValid()) {
             continue;
         }

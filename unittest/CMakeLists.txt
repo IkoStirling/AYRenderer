@@ -50,4 +50,5 @@ target_compile_definitions(${TEST_NAME} PRIVATE
     AY_SHADER_BGFX_SRC_HINT="${AY_SHADER_BGFX_SRC_DIR}"
 )
 
+ay_configure_test_tmpdir(${TEST_NAME})
 add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})

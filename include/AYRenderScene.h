@@ -25,9 +25,13 @@ struct DrawItem {
     uint32_t                   jointCount   = 0;
     int32_t                    sortKey      = 0;
     ShadowFlags                shadowFlags  = kShadowCastAndReceive;
-    // When true, TransparentPass draws with inverted-hull state
-    // (front-face cull) for selection outline.
+    // When true, EditorOverlayPass draws with inverted-hull state
+    // (front-face cull) for selection outline (after PostProcess).
     bool                       outlineHull  = false;
+    // Unexpanded mesh world for outline depth prepass. Required when
+    // the selected surface never wrote depth (transparent objects).
+    bool                       hasOutlineDepthWorld = false;
+    ayt::math::Float4x4        outlineDepthWorld = ayt::math::Float4x4::identity();
 };
 
 class RenderScene {

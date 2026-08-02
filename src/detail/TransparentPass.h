@@ -36,6 +36,14 @@ public:
     std::string_view name() const override { return "Transparent"; }
 
     uint32_t execute(PassExecContext& ctx) override;
+
+private:
+    static bool submitItem(BGFXAdapter& adapter,
+                           PassExecContext& ctx,
+                           const FrameContext& frame,
+                           const DrawItem& item,
+                           uint8_t viewId,
+                           const ayt::math::Float4x4* worldOverride = nullptr);
 };
 
 } // namespace ayt::render::detail

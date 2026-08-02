@@ -8,6 +8,7 @@
 
 #include <AYCoreUtility.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <vector>
 
@@ -53,6 +54,21 @@ float toNdcY(float py, float height)
     return 1.0f - (py / height) * 2.0f;
 }
 
+ayt::math::FRectangle intersectRect(const ayt::math::FRectangle& a,
+                                    const ayt::math::FRectangle& b)
+{
+    return ayt::math::FRectangle(
+        std::max(a.minX, b.minX),
+        std::max(a.minY, b.minY),
+        std::min(a.maxX, b.maxX),
+        std::min(a.maxY, b.maxY));
+}
+
+bool rectNonEmpty(const ayt::math::FRectangle& r)
+{
+    return r.maxX > r.minX && r.maxY > r.minY;
+}
+
 } // namespace
 
 struct UIRenderBackend::FrameState {
@@ -61,6 +77,7 @@ struct UIRenderBackend::FrameState {
     std::vector<uint32_t>             scratchIndices;
     std::unique_ptr<PendingTextBatch> textBatch;
     ayt::font::IFont*                 textSyncFont = nullptr;
+    std::vector<ayt::math::FRectangle> clipStack;
 };
 
 UIRenderBackend::UIRenderBackend()
@@ -193,6 +210,7 @@ void UIRenderBackend::beginFrame()
 
     FrameState& frame = *_frame;
     frame.pendingRects.clear();
+    frame.clipStack.clear();
     frame.textSyncFont = nullptr;
 
     if (frame.scratchVertices.capacity() < 1024u) {
@@ -225,6 +243,50 @@ void UIRenderBackend::beginCanvas(const ayt::math::FRectangle& viewport)
 }
 
 void UIRenderBackend::endCanvas() {}
+
+ayt::math::FRectangle UIRenderBackend::activeClipBounds() const
+{
+    if (_frame == nullptr || _frame->clipStack.empty()) {
+        return ayt::math::FRectangle(0.0f, 0.0f,
+                                     static_cast<float>(_width),
+                                     static_cast<float>(_height));
+    }
+    return _frame->clipStack.back();
+}
+
+bool UIRenderBackend::clipRect(ayt::math::FRectangle& inout) const
+{
+    if (_frame == nullptr || _frame->clipStack.empty()) {
+        return rectNonEmpty(inout);
+    }
+    inout = intersectRect(inout, _frame->clipStack.back());
+    return rectNonEmpty(inout);
+}
+
+void UIRenderBackend::pushClip(const ayt::math::FRectangle& bounds)
+{
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+    flushColoredRects();
+    flushPendingText();
+
+    ayt::math::FRectangle clipped = bounds;
+    if (!_frame->clipStack.empty()) {
+        clipped = intersectRect(bounds, _frame->clipStack.back());
+    }
+    _frame->clipStack.push_back(clipped);
+}
+
+void UIRenderBackend::popClip()
+{
+    if (_frame == nullptr || _frame->clipStack.empty()) {
+        return;
+    }
+    flushColoredRects();
+    flushPendingText();
+    _frame->clipStack.pop_back();
+}
 
 void UIRenderBackend::endFrame()
 {
@@ -260,13 +322,18 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, const ayt::m
         _frame = std::make_unique<FrameState>();
     }
 
+    ayt::math::FRectangle clipped = bounds;
+    if (!clipRect(clipped)) {
+        return;
+    }
+
     // Cut the text batch before any new rect so overlays drawn after text
     // keep correct z-order (rect submit follows flushed text).
     if (_frame->textBatch != nullptr && !_frame->textBatch->vertices.empty()) {
         flushPendingText();
     }
 
-    _frame->pendingRects.push_back({bounds, color});
+    _frame->pendingRects.push_back({clipped, color});
 }
 
 void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textureHandle,
@@ -464,6 +531,11 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         return;
     }
 
+    ayt::math::FRectangle clippedBounds = bounds;
+    if (!clipRect(clippedBounds)) {
+        return;
+    }
+
     if (_frame == nullptr) {
         _frame = std::make_unique<FrameState>();
     }
@@ -521,6 +593,19 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         const float y0 = penY - yOff - static_cast<float>(glyph->metrics.bearingY);
         const float x1 = x0 + static_cast<float>(glyphW);
         const float y1 = y0 + static_cast<float>(glyphH);
+
+        ayt::math::FRectangle glyphBounds(x0, y0, x1, y1);
+        if (!clipRect(glyphBounds)) {
+            cursorX = penX + xAdv;
+            return;
+        }
+        // Conservative: drop glyphs that would need UV remapping when
+        // partially clipped (avoids stretched atlas sampling).
+        if (glyphBounds.minX != x0 || glyphBounds.minY != y0
+            || glyphBounds.maxX != x1 || glyphBounds.maxY != y1) {
+            cursorX = penX + xAdv;
+            return;
+        }
 
         const float u0 = glyph->atlasPosX / atlasW;
         const float v0 = glyph->atlasPosY / atlasH;

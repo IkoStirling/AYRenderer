@@ -281,6 +281,13 @@ enum class RenderPassSlot : uint8_t {
     //      slot values. Test pin: static_cast<uint8_t>(
     //      RenderPassSlot::GBufferDebug) == 12.
     GBufferDebug = 12,
+
+    // Editor selection overlay (2026-07-25) — append-only ABI value 13.
+    // Inverted-hull selection rim drawn AFTER PostProcess (stable color,
+    // no bloom/tonemap) and BEFORE UI. Omitted from makeDefault() /
+    // makeDeferred(); editor hosts opt in via makeEditorForward() /
+    // makeEditorDeferred(). View 16 (PostProcess=15, UI=255).
+    EditorOverlay = 13,
 };
 
 // §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was
@@ -317,6 +324,11 @@ struct RenderPipelineDesc {
     // pre-wires the plumbing without touching dispatch order or
     // GPU resources).
     static RenderPipelineDesc makeDeferred();
+    // Editor pipelines — same as makeForwardWithShadows() / makeDeferred()
+    // but insert RenderPassSlot::EditorOverlay immediately after PostProcess
+    // (selection rim on backbuffer; stable color, no bloom/tonemap).
+    static RenderPipelineDesc makeEditorForward();
+    static RenderPipelineDesc makeEditorDeferred();
 
     bool contains(RenderPassSlot slot) const noexcept;
     bool isDeferred() const noexcept { return path == RenderPath::Deferred; }

@@ -199,6 +199,13 @@ public:
     bgfx::FrameBufferHandle createBorrowedColorDepthFrameBuffer(
         bgfx::TextureHandle color,
         bgfx::TextureHandle depth);
+    // Swap-chain color + borrowed scene depth. Do NOT use for direct
+    // outline draws: a depth-only attachment FBO has zero RTVs on D3D11
+    // (OMSetRenderTargets(0, NULL, dsv) discards color). EditorOverlayPass
+    // renders to an RGBA8 RT + borrowed depth, then alpha-composites
+    // onto the backbuffer after PostProcess.
+    bgfx::FrameBufferHandle createBackbufferWithBorrowedDepthFrameBuffer(
+        bgfx::TextureHandle depth);
     // P6.5 — bgfx::VertexLayout preset for the PostProcessPass
     // fullscreen triangle (Position 2 floats + TexCoord0 2 floats).
     // The returned layout is a freshly-built bgfx::VertexLayout each

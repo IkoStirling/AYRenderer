@@ -754,11 +754,15 @@ void BGFXAdapter::setStateDepthOnlyWrite()
 
 void BGFXAdapter::setStateOutlineHull()
 {
-    // Front-face cull (CCW front → CULL_CCW). Depth LESS so the hull
-    // only shows where it is in front of existing geometry (silhouette).
+    // Cull front faces (CCW in our mesh winding — mirror setStateOpaque).
+    // Inverted hull: only expanded back faces contribute.
+    //
+    // Forward opaque uses DEPTH_TEST_LESS (setStateOpaque). Inverted hull
+    // uses the opposite compare so only the expanded shell beyond the
+    // stored scene depth passes (works for both D3D ndc01 and GL).
     bgfx::setState(BGFX_STATE_WRITE_RGB
                  | BGFX_STATE_WRITE_A
-                 | BGFX_STATE_DEPTH_TEST_LESS
+                 | BGFX_STATE_DEPTH_TEST_GREATER
                  | BGFX_STATE_CULL_CCW);
 }
 
@@ -769,8 +773,25 @@ bgfx::FrameBufferHandle BGFXAdapter::createBorrowedColorDepthFrameBuffer(
     if (!_initialized || !bgfx::isValid(color) || !bgfx::isValid(depth)) {
         return BGFX_INVALID_HANDLE;
     }
-    const bgfx::TextureHandle attachments[2] = { color, depth };
-    return bgfx::createFrameBuffer(2, attachments, /*destroyTextures=*/false);
+    // Attachment::init marks depth formats correctly. The raw
+    // TextureHandle* overload can mis-classify a shared D24S8 as a
+    // color slot on some backends, which drops depth testing and
+    // makes inverted-hull selection look like a solid orange shell.
+    bgfx::Attachment attachment[2];
+    attachment[0].init(color);
+    attachment[1].init(depth);
+    return bgfx::createFrameBuffer(2, attachment, /*destroyTextures=*/false);
+}
+
+bgfx::FrameBufferHandle BGFXAdapter::createBackbufferWithBorrowedDepthFrameBuffer(
+    bgfx::TextureHandle depth)
+{
+    if (!_initialized || !bgfx::isValid(depth)) {
+        return BGFX_INVALID_HANDLE;
+    }
+    bgfx::Attachment attachment;
+    attachment.init(depth);
+    return bgfx::createFrameBuffer(1, &attachment, /*destroyTextures=*/false);
 }
 
 bgfx::VertexLayout BGFXAdapter::vertexLayoutPosUv()
