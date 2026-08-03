@@ -448,8 +448,8 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
                          "[RenderAssetBridge] simple_lit_shadow path=%s "
                          "(AY_SHADOW_USE_SC=%s AY_SHADOW_USE_PHOSKIA=%s)\n",
                          preferSc ? "bgfx .sc" : "Phoskia file",
-                         useScEnv ? useScEnv : "(unset)",
-                         usePhoskiaEnv ? usePhoskiaEnv : "(unset)");
+                         useScEnv.empty() ? "(unset)" : useScEnv.c_str(),
+                         usePhoskiaEnv.empty() ? "(unset)" : usePhoskiaEnv.c_str());
             s_loggedOnce = true;
         }
     }
