@@ -277,6 +277,9 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // Forward parity: sample(albedoMap)*baseColor. Bind host
         // material texture slots onto GBufferFill's albedoMap stage
         // (skip shadowMap — GBuffer does not consume it).
+        // Imported .aymat uses baseColorTexture / diffuse; GBufferFill
+        // only declares albedoMap — alias those names so characters
+        // are not forced to solid white.
         for (const GpuMaterial::TextureSlot& slot : material.textures) {
             if (slot.name.empty() || !slot.texture.isValid()) {
                 continue;
@@ -284,7 +287,14 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             if (slot.name == "shadowMap") {
                 continue;
             }
-            const shader::BindingId binding = _program.getTextureBinding(slot.name);
+            shader::BindingId binding = _program.getTextureBinding(slot.name);
+            if (binding == shader::InvalidBinding
+                && (slot.name == "baseColorTexture"
+                    || slot.name == "diffuse"
+                    || slot.name == "mainTexture"
+                    || slot.name == "albedo")) {
+                binding = _program.getTextureBinding("albedoMap");
+            }
             if (binding == shader::InvalidBinding) {
                 continue;
             }

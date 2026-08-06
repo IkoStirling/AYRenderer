@@ -478,6 +478,20 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
                          static_cast<unsigned long long>(handle.id));
         }
     }
+    // Cached FBX aymats often reference missing shaders/pbr.phoskia.
+    // Fall back to the editor-shipped lit shader so albedo textures still bind.
+    if (!handle.isValid()) {
+        const std::string fallback =
+            ayt::resource::resolveAssetPath(materialPath, "simple_lit_shadow.phoskia");
+        handle = mgr.createMaterialFromFile(fallback);
+        if (handle.isValid()) {
+            std::fprintf(stderr,
+                         "[RenderAssetBridge] shader '%s' missing; "
+                         "fallback '%s' matId=%llu\n",
+                         shaderPath.c_str(), fallback.c_str(),
+                         static_cast<unsigned long long>(handle.id));
+        }
+    }
     if (!handle.isValid()) {
         std::fprintf(stderr,
                      "[RenderAssetBridge] createMaterial failed (mat='%s' shader='%s')\n",

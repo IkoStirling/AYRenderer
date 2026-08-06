@@ -60,6 +60,11 @@ bool BgfxFontAtlas::initialize(BGFXAdapter& adapter)
     }
 
     static const wchar_t* kCandidates[] = {
+        // Prefer a CJK-capable face so TextInput / labels can show Chinese.
+        // Segoe UI / Arial alone render missing glyphs as tofu (□□□□).
+        L"C:\\Windows\\Fonts\\msyh.ttc",
+        L"C:\\Windows\\Fonts\\msyhbd.ttc",
+        L"C:\\Windows\\Fonts\\simsun.ttc",
         L"C:\\Windows\\Fonts\\segoeui.ttf",
         L"C:\\Windows\\Fonts\\arial.ttf",
     };
