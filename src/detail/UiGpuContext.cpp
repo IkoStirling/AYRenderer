@@ -302,6 +302,7 @@ $input v_color0, v_pos
 
 SAMPLER2D(s_texColor, 0);
 
+uniform vec4 u_rect;
 uniform vec4 u_radius;
 uniform vec4 u_stroke;
 uniform vec4 u_strokeWidth;
@@ -333,7 +334,7 @@ void main()
     vec2 halfB  = (u_rect.zw - u_rect.xy) * 0.5;
     vec2 p      = v_pos - center;
 
-    vec4 col = vec4(0.0);
+    vec4 col = vec4(0.0, 0.0, 0.0, 0.0);
 
     // Shadow first (behind fill): rect offset by u_shadowOffset, radius
     // expanded by blur — soft shadow approximation. Straight alpha.
