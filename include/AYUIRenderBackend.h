@@ -70,6 +70,15 @@ public:
     void drawWithAlpha(const ayt::math::FRectangle& bounds, void* textureHandle,
                        float alpha) override;
 
+    // P3: UI texture registry (non-virtual — AYUI only sees the interface,
+    // which passes opaque handles into drawRect/drawWithAlpha/drawNinePatch).
+    // Returns a fake-pointer handle, or nullptr on upload failure. Refcount
+    // starts at 1; releaseUiTexture decrements and frees the GPU texture at
+    // 0 (double-release is a safe no-op). The registry is persistent across
+    // frames (beginFrame does not touch it) and fully released at shutdown.
+    void* createUiTexture(uint16_t width, uint16_t height, const void* bgraPixels);
+    void releaseUiTexture(void* textureHandle);
+
     // P1+P2 merged header edit (single header change to bound incremental
     // rebuilds): overrides that were previously inherited interface
     // defaults. setBlendMode / drawGradientRect land in P1; drawBorderRect /

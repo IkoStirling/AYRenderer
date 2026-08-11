@@ -45,6 +45,13 @@ public:
     uint16_t uploadTextTexture(BGFXAdapter& adapter, uint16_t width, uint16_t height,
                                const void* bgraPixels, uint32_t byteSize);
 
+    // P3: UI texture upload — same BGRA8 path as uploadTextTexture but with
+    // linear filtering (no POINT bits) + clamp wrap, so stretched UI art
+    // doesn't bleed edge texels across 9-patch seams. uploadTextTexture's
+    // signature is untouched (font atlas path zero contact).
+    uint16_t uploadUiTexture(BGFXAdapter& adapter, uint16_t width, uint16_t height,
+                             const void* bgraPixels, uint32_t byteSize);
+
     void releaseTextTexture(BGFXAdapter& adapter, uint16_t textureIdx);
 
     // P2 — SDF rounded-rect primitive. Every uniform is a standalone

@@ -804,6 +804,31 @@ uint16_t UiGpuContext::uploadTextTexture(BGFXAdapter& adapter, uint16_t width, u
 
 
 
+uint16_t UiGpuContext::uploadUiTexture(BGFXAdapter& adapter, uint16_t width, uint16_t height,
+                                       const void* bgraPixels, uint32_t byteSize)
+{
+    AYUNREFERENCED_PARAM(adapter);
+
+    if (bgraPixels == nullptr || byteSize == 0 || width == 0 || height == 0) {
+        return kInvalidIdx;
+    }
+
+    // Linear filtering (no POINT sampler bits) + clamp wrap — UI textures
+    // are stretched art; clamp stops edge texels bleeding across seams.
+    const bgfx::TextureHandle handle = bgfx::createTexture2D(
+        width, height, false, 1, bgfx::TextureFormat::BGRA8,
+        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP,
+        bgfx::copy(bgraPixels, byteSize));
+
+    if (!bgfx::isValid(handle)) {
+        return kInvalidIdx;
+    }
+
+    return handle.idx;
+}
+
+
+
 void UiGpuContext::releaseTextTexture(BGFXAdapter& adapter, uint16_t textureIdx)
 
 {

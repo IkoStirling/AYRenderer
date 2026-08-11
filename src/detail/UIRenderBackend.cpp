@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <unordered_map>
 #include <vector>
 
 namespace ayt::render {
@@ -109,6 +110,21 @@ uint64_t blendStateBits(ayt::ui::BlendMode mode)
     return bits;
 }
 
+// P3: one live UI texture in the registry. textureIdx is the bgfx handle
+// (uploaded via uploadUiTexture — linear + clamp), width/height back the
+// 9-patch UV math (padding is in texture pixels, so corners map 1:1 to
+// screen pixels). Handles are fake pointers from an increasing counter —
+// never reused, so a stale handle can never alias a new texture.
+struct TextureRef {
+    uint16_t textureIdx = detail::UiGpuContext::kInvalidIdx;
+    uint32_t refCount   = 0;
+    uint16_t width      = 0;
+    uint16_t height     = 0;
+};
+
+// Pre-P3 gray-block fallback for unknown / released handles.
+const ayt::math::FVector4 kUnknownTextureColor(0.25f, 0.25f, 0.28f, 1.0f);
+
 } // namespace
 
 struct UIRenderBackend::FrameState {
@@ -118,7 +134,27 @@ struct UIRenderBackend::FrameState {
     ayt::font::IFont*                  textSyncFont = nullptr;
     std::vector<ayt::math::FRectangle> clipStack;
     ayt::ui::BlendMode                 currentBlend = ayt::ui::BlendMode::Normal;
+    // P3: texture registry — persistent across frames (beginFrame does not
+    // touch it; handles stay valid until releaseUiTexture frees them).
+    std::unordered_map<void*, TextureRef> textures;
+    uintptr_t                             nextHandle = 1;  // fake-pointer counter
 };
+
+namespace {
+
+// Takes the registry map (not FrameState — that type is private to
+// UIRenderBackend) so free functions can look up handles.
+const TextureRef* findTextureRef(const std::unordered_map<void*, TextureRef>& textures,
+                                 void* handle)
+{
+    if (handle == nullptr) {
+        return nullptr;
+    }
+    auto it = textures.find(handle);
+    return (it == textures.end()) ? nullptr : &it->second;
+}
+
+} // namespace
 
 UIRenderBackend::UIRenderBackend()
     : _frame(std::make_unique<FrameState>())
@@ -187,6 +223,15 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
                                            shader::ShaderResourcePool& shaderPool)
 {
     if (_frame != nullptr) {
+        // P3: release every live UI texture before the GPU context dies.
+        // nextHandle intentionally NOT reset — fake pointers never reused,
+        // so handles handed out before shutdown stay dead after reinit.
+        if (_gpu != nullptr) {
+            for (const auto& entry : _frame->textures) {
+                _gpu->releaseTextTexture(adapter, entry.second.textureIdx);
+            }
+        }
+        _frame->textures.clear();
         _frame->items.clear();
         _frame->scratchVertices.clear();
         _frame->scratchIndices.clear();
@@ -211,6 +256,9 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
 void UIRenderBackend::shutdownFromRendererWithoutAdapter()
 {
     if (_frame != nullptr) {
+        // No adapter to destroy through; the bgfx context is gone with the
+        // renderer anyway. Drop the registry without touching GPU objects.
+        _frame->textures.clear();
         _frame->items.clear();
         _frame->scratchVertices.clear();
         _frame->scratchIndices.clear();
@@ -531,31 +579,228 @@ void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
     _frame->items.push_back(item);
 }
 
-void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* textureHandle,
-                                    const ayt::math::FRectangle& uvRegion,
-                                    const ayt::math::FVector4& padding)
+void* UIRenderBackend::createUiTexture(uint16_t width, uint16_t height, const void* bgraPixels)
 {
-    // P3: texture registry + 9-slice. No-op until then (matches the
-    // interface default).
-    AYUNREFERENCED_PARAM(bounds);
-    AYUNREFERENCED_PARAM(textureHandle);
-    AYUNREFERENCED_PARAM(uvRegion);
-    AYUNREFERENCED_PARAM(padding);
+    if (!_initialized || _gpu == nullptr || _adapter == nullptr || bgraPixels == nullptr
+        || width == 0 || height == 0) {
+        return nullptr;
+    }
+
+    const uint32_t byteSize = static_cast<uint32_t>(static_cast<uint64_t>(width) * height * 4u);
+    const uint16_t idx = _gpu->uploadUiTexture(*_adapter, width, height, bgraPixels, byteSize);
+    if (idx == detail::UiGpuContext::kInvalidIdx) {
+        return nullptr;
+    }
+
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+    void* handle = reinterpret_cast<void*>(_frame->nextHandle++);
+    _frame->textures[handle] = TextureRef{idx, 1u, width, height};
+    return handle;
+}
+
+void UIRenderBackend::releaseUiTexture(void* textureHandle)
+{
+    if (_frame == nullptr) {
+        return;
+    }
+    auto it = _frame->textures.find(textureHandle);
+    if (it == _frame->textures.end()) {
+        return;  // unknown / double release — safe no-op
+    }
+    if (--it->second.refCount == 0) {
+        if (_initialized && _gpu != nullptr && _adapter != nullptr) {
+            _gpu->releaseTextTexture(*_adapter, it->second.textureIdx);
+        }
+        _frame->textures.erase(it);
+    }
 }
 
 void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textureHandle,
                                const ayt::math::FRectangle& uv)
 {
-    AYUNREFERENCED_PARAM(uv);
-    AYUNREFERENCED_PARAM(textureHandle);
-    drawRect(bounds, ayt::math::FVector4(0.25f, 0.25f, 0.28f, 1.0f));
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+
+    const TextureRef* ref = findTextureRef(_frame->textures, textureHandle);
+    if (ref == nullptr) {
+        // Unknown / released handle — pre-P3 gray-block fallback.
+        drawRect(bounds, kUnknownTextureColor);
+        return;
+    }
+
+    ayt::math::FRectangle clipped = bounds;
+    if (!clipRect(clipped)) {
+        return;
+    }
+
+    // Flat item on the UI texture with an opaque white tint — the shader
+    // multiplies v_color0 by the texture sample, so alpha rides through.
+    UiItem item;
+    item.textureIdx = ref->textureIdx;
+    item.state      = blendStateBits(_frame->currentBlend);
+    item.minX       = clipped.minX;
+    item.minY       = clipped.minY;
+    item.maxX       = clipped.maxX;
+    item.maxY       = clipped.maxY;
+    const uint32_t abgr = 0xFFFFFFFFu;
+    item.abgr[0] = abgr;
+    item.abgr[1] = abgr;
+    item.abgr[2] = abgr;
+    item.abgr[3] = abgr;
+    item.u0 = uv.minX;
+    item.v0 = uv.minY;
+    item.u1 = uv.maxX;
+    item.v1 = uv.maxY;
+    _frame->items.push_back(item);
 }
 
 void UIRenderBackend::drawWithAlpha(const ayt::math::FRectangle& bounds, void* textureHandle,
                                     float alpha)
 {
-    drawRect(bounds, textureHandle, ayt::math::FRectangle(0.0f, 0.0f, 1.0f, 1.0f));
-    AYUNREFERENCED_PARAM(alpha);
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+
+    const TextureRef* ref = findTextureRef(_frame->textures, textureHandle);
+    if (ref == nullptr) {
+        // Unknown handle — gray fallback tinted by the requested alpha.
+        drawRect(bounds, ayt::math::FVector4(
+                             kUnknownTextureColor.x, kUnknownTextureColor.y,
+                             kUnknownTextureColor.z,
+                             std::max(0.0f, std::min(1.0f, alpha))));
+        return;
+    }
+
+    ayt::math::FRectangle clipped = bounds;
+    if (!clipRect(clipped)) {
+        return;
+    }
+
+    // Interface contract: alpha multiplies the texture's alpha channel —
+    // carried by the per-vertex color (shader does v_color0 * sample).
+    UiItem item;
+    item.textureIdx = ref->textureIdx;
+    item.state      = blendStateBits(_frame->currentBlend);
+    item.minX       = clipped.minX;
+    item.minY       = clipped.minY;
+    item.maxX       = clipped.maxX;
+    item.maxY       = clipped.maxY;
+    const uint32_t abgr = toAbgr(ayt::math::FVector4(1.0f, 1.0f, 1.0f,
+                                                     std::max(0.0f, std::min(1.0f, alpha))));
+    item.abgr[0] = abgr;
+    item.abgr[1] = abgr;
+    item.abgr[2] = abgr;
+    item.abgr[3] = abgr;
+    item.u0 = 0.0f;
+    item.v0 = 0.0f;
+    item.u1 = 1.0f;
+    item.v1 = 1.0f;
+    _frame->items.push_back(item);
+}
+
+void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* textureHandle,
+                                    const ayt::math::FRectangle& uvRegion,
+                                    const ayt::math::FVector4& padding)
+{
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+
+    const TextureRef* ref = findTextureRef(_frame->textures, textureHandle);
+    if (ref == nullptr) {
+        drawRect(bounds, kUnknownTextureColor);
+        return;
+    }
+
+    ayt::math::FRectangle clipped = bounds;
+    if (!clipRect(clipped)) {
+        return;
+    }
+
+    const float bW = clipped.maxX - clipped.minX;
+    const float bH = clipped.maxY - clipped.minY;
+    if (bW <= 0.0f || bH <= 0.0f) {
+        return;
+    }
+
+    // padding = (left, top, right, bottom) in TEXTURE pixels, so corners
+    // keep their natural size on screen (1:1 texel mapping). Bounds smaller
+    // than the corner block: scale padding down to fit so the center slice
+    // never collapses; UV padding follows the same scale.
+    const float padL = std::max(0.0f, padding.x);
+    const float padT = std::max(0.0f, padding.y);
+    const float padR = std::max(0.0f, padding.z);
+    const float padB = std::max(0.0f, padding.w);
+    const float padSumX = padL + padR;
+    const float padSumY = padT + padB;
+    if (padSumX <= 0.0f || padSumY <= 0.0f) {
+        // No corner area at all — a single stretched quad.
+        drawRect(clipped, textureHandle, uvRegion);
+        return;
+    }
+    const float s  = std::min(1.0f, std::min(bW / padSumX, bH / padSumY));
+    const float pl = padL * s, pr = padR * s, pt = padT * s, pb = padB * s;
+
+    const float texW = static_cast<float>(ref->width);
+    const float texH = static_cast<float>(ref->height);
+
+    const float uSpan = std::max(0.0f, uvRegion.maxX - uvRegion.minX);
+    const float vSpan = std::max(0.0f, uvRegion.maxY - uvRegion.minY);
+    if (uSpan <= 0.0f || vSpan <= 0.0f) {
+        drawRect(clipped, textureHandle, uvRegion);
+        return;
+    }
+
+    // Texture-space paddings; clamped to the region span so the center UV
+    // slice never inverts (degenerate tiny textures + huge pixel padding).
+    float uPl = pl / texW, uPr = pr / texW;
+    float uPt = pt / texH, uPb = pb / texH;
+    if (uPl + uPr > uSpan) {
+        const float su = uSpan / (uPl + uPr);
+        uPl *= su;
+        uPr *= su;
+    }
+    if (uPt + uPb > vSpan) {
+        const float sv = vSpan / (uPt + uPb);
+        uPt *= sv;
+        uPb *= sv;
+    }
+
+    // 3x3 grid: 4 corners keep their size, edges stretch one axis, the
+    // center stretches both. All 9 quads share (textureIdx, state) so they
+    // form a single flush run.
+    const float x[4] = {clipped.minX, clipped.minX + pl, clipped.maxX - pr, clipped.maxX};
+    const float y[4] = {clipped.minY, clipped.minY + pt, clipped.maxY - pb, clipped.maxY};
+    const float u[4] = {uvRegion.minX, uvRegion.minX + uPl,
+                        uvRegion.maxX - uPr, uvRegion.maxX};
+    const float v[4] = {uvRegion.minY, uvRegion.minY + uPt,
+                        uvRegion.maxY - uPb, uvRegion.maxY};
+
+    UiItem item;
+    item.textureIdx = ref->textureIdx;
+    item.state      = blendStateBits(_frame->currentBlend);
+    const uint32_t abgr = 0xFFFFFFFFu;
+    item.abgr[0] = abgr;
+    item.abgr[1] = abgr;
+    item.abgr[2] = abgr;
+    item.abgr[3] = abgr;
+
+    for (int j = 0; j < 3; ++j) {
+        for (int i = 0; i < 3; ++i) {
+            item.minX = x[i];
+            item.minY = y[j];
+            item.maxX = x[i + 1];
+            item.maxY = y[j + 1];
+            item.u0   = u[i];
+            item.v0   = v[j];
+            item.u1   = u[i + 1];
+            item.v1   = v[j + 1];
+            _frame->items.push_back(item);
+        }
+    }
 }
 
 void UIRenderBackend::flushColoredRects()
