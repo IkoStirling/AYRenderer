@@ -103,7 +103,7 @@ TEST_CASE(a2_make_default_does_not_include_ssao) {
     // mount SSAO. Forward path stays byte-equivalent pre-A2.
     const auto desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 8);
+    CHECK(desc.passes.size() == 9);
     bool found = false;
     for (const auto s : desc.passes) {
         if (s == RenderPassSlot::SSAO) {

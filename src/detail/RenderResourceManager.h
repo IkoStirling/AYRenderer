@@ -41,6 +41,8 @@ public:
     MeshHandle loadMesh(const std::string& path);
     MeshHandle createUnitCube();
     MeshHandle createTexturedUnitCube();
+    // CM-1 (2026-08-11) — unit quad (XY plane, z=0), UV (0,0)..(1,1).
+    MeshHandle createUnitQuad();
     void destroyMesh(MeshHandle& mesh);
 
     MaterialHandle createMaterialFromPhoskia(const std::string& source,

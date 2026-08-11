@@ -225,15 +225,16 @@ TEST_CASE(s1a_make_default_includes_bloomextract_after_transparent) {
     // PostProcess — slot index shifts PostProcess/UI by another +1.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 8);   // S4b (2026-07-23): +1 DepthHaze
+    CHECK(desc.passes.size() == 9);   // S4b (2026-07-23): +1 DepthHaze
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
-    CHECK(desc.passes[2] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[3] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[4] == RenderPassSlot::BloomBlur);      // S1b (2026-07-23)
-    CHECK(desc.passes[5] == RenderPassSlot::DepthHaze);      // S4b (2026-07-23)
-    CHECK(desc.passes[6] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[7] == RenderPassSlot::UI);
+    CHECK(desc.passes[2] == RenderPassSlot::Forward2DOpaque);  // CM-1 (2026-08-11)
+    CHECK(desc.passes[3] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[4] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[5] == RenderPassSlot::BloomBlur);      // S1b (2026-07-23)
+    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);      // S4b (2026-07-23)
+    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[8] == RenderPassSlot::UI);
     // contains() helper round-trip
     CHECK(desc.contains(RenderPassSlot::BloomExtract));
     CHECK(desc.contains(RenderPassSlot::BloomBlur));          // S1b (2026-07-23)

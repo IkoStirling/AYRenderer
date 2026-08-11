@@ -438,12 +438,12 @@ TEST_CASE(s1c_make_default_slot_table_postprocess_after_bloomblur) {
     // RenderPassSlot enum unchanged).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 8);    // S4b (2026-07-23): +1 DepthHaze
-    CHECK(desc.passes[3] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[4] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[5] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
-    CHECK(desc.passes[6] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[7] == RenderPassSlot::UI);
+    CHECK(desc.passes.size() == 9);    // S4b (2026-07-23): +1 DepthHaze
+    CHECK(desc.passes[4] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[5] == RenderPassSlot::BloomBlur);
+    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
+    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[8] == RenderPassSlot::UI);
     // S1c does NOT add a RenderPassSlot enum value (no slot in the
     // table for "FinalPP" — the composite lives in PostProcessPass
     // and reads ctx.bloomBlurPass via borrowed pointer). Future

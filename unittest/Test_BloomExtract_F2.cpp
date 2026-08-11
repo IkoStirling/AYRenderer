@@ -253,10 +253,11 @@ TEST_CASE(f2_render_pipeline_slot_abi_lock) {
     // F2 不动 slot ABI ── BloomExtract 仍是 8。
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    // S4b 后是 8 slot,顺序 Shadow, FO, Trans, BloomExtract,
-    // BloomBlur, DepthHaze, PostProcess, UI。
-    CHECK(desc.passes.size() == 8);
-    CHECK(desc.passes[3] == RenderPassSlot::BloomExtract);
+    // S4b 后是 9 slot (CM-1 2026-08-11: +1 Forward2DOpaque),顺序
+    // Shadow, FO, 2DOpaque, Trans, BloomExtract, BloomBlur,
+    // DepthHaze, PostProcess, UI。
+    CHECK(desc.passes.size() == 9);
+    CHECK(desc.passes[4] == RenderPassSlot::BloomExtract);
     CHECK(desc.contains(RenderPassSlot::BloomExtract));
     // BloomExtract enum 值仍 = 8(append-only 锁)。
     CHECK(static_cast<uint8_t>(RenderPassSlot::BloomExtract) == 8);

@@ -325,8 +325,8 @@ TEST_CASE(f5_render_pipeline_slot_abi_lock) {
     // DepthHaze=10)。
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 8);
-    CHECK(desc.passes[6] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes.size() == 9);
+    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
     CHECK(desc.contains(RenderPassSlot::PostProcess));
     CHECK(static_cast<uint8_t>(RenderPassSlot::PostProcess) == 4);
 }

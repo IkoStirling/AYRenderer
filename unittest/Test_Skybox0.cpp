@@ -319,7 +319,7 @@ TEST_CASE(forward_default_pipeline_does_not_include_skybox) {
     // configurePipeline(makeDeferred()).
     auto desc = RenderPipelineDesc::makeDefault();
     CHECK(!desc.contains(RenderPassSlot::Skybox));
-    CHECK(desc.passes.size() == 8u);  // Shadow + FO + Trans + BloomExtract(S1a 2026-07-23) + BloomBlur(S1b 2026-07-23) + DepthHaze(S4b 2026-07-23) + PP + UI
+    CHECK(desc.passes.size() == 9u);  // Shadow + FO + Trans + BloomExtract(S1a 2026-07-23) + BloomBlur(S1b 2026-07-23) + DepthHaze(S4b 2026-07-23) + PP + UI
 }
 
 TEST_CASE(skybox_pass_name_and_initial_state) {

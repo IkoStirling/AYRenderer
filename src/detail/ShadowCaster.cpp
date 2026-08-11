@@ -120,6 +120,13 @@ uint32_t ShadowCaster::drawCasters(
         if (!castsShadow(item.shadowFlags)) {
             continue;
         }
+        // CM-1 (2026-08-11) — 2D lane items never cast: ortho z=0
+        // quads in the light's view-proj are meaningless + waste the
+        // shadow map. The payload pointer is the lane discriminator
+        // (ForwardOpaquePass mirror).
+        if (item.payload != nullptr) {
+            continue;
+        }
         if (!item.mesh.isValid()) {
             continue;
         }

@@ -63,6 +63,12 @@ public:
     MeshHandle loadMesh(const std::string& path);
     MeshHandle createUnitCube();
     MeshHandle createTexturedUnitCube();
+    // CM-1 (2026-08-11) — unit quad in the XY plane (z=0), UV (0,0)..(1,1),
+    // 2 triangles / 6 indices. Mirrors createUnitCube laziness: returns
+    // an invalid handle on uninitialized adapter. The 2D lane
+    // (Forward2DOpaquePass) draws every tile / sprite through this mesh
+    // + a per-draw DrawPayload2D.
+    MeshHandle createUnitQuad();
 
     MaterialHandle createMaterialFromPhoskia(const std::string& source,
                                              const std::string& cacheKey = "");

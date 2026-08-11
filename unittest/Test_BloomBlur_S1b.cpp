@@ -277,20 +277,23 @@ TEST_CASE(s1b_renderpassslot_bloomblur_value_is_9) {
 TEST_CASE(s1b_make_default_includes_bloomblur_after_bloomextract) {
     // Cutsheet §S1 sub-cut 2: BloomBlur sits between BloomExtract
     // and PostProcess in the dispatch order. makeDefault() forward
-    // path now has 8 slots (was 6 after S1a; +1 BloomBlur; +1
-    // DepthHaze from S4b).
+    // path now has 9 slots (was 8 after S4b; +1 Forward2DOpaque
+    // from CM-1 (2026-08-11), inserted between ForwardOpaque and
+    // Transparent).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 8);
+    CHECK(desc.passes.size() == 9);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
-    CHECK(desc.passes[2] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[3] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[4] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[5] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
-    CHECK(desc.passes[6] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[7] == RenderPassSlot::UI);
+    CHECK(desc.passes[2] == RenderPassSlot::Forward2DOpaque);  // CM-1 (2026-08-11)
+    CHECK(desc.passes[3] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[4] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[5] == RenderPassSlot::BloomBlur);
+    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
+    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[8] == RenderPassSlot::UI);
     CHECK(desc.contains(RenderPassSlot::BloomBlur));
+    CHECK(desc.contains(RenderPassSlot::Forward2DOpaque));
 }
 
 TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {

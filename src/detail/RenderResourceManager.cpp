@@ -76,6 +76,20 @@ const uint16_t kUnitCubeIndices[] = {
     0, 5, 1,  0, 4, 5,
 };
 
+// CM-1 (2026-08-11) — unit quad in the XY plane. The 2D lane builds
+// per-tile / per-sprite world matrices on top of this unit square
+// (uv = tile source rect in the fragment shader via srcRect uniform).
+const PosUvVertex kUnitQuadVertices[] = {
+    {-0.5f, -0.5f, 0.0f, 0.0f, 0.0f},
+    { 0.5f, -0.5f, 0.0f, 1.0f, 0.0f},
+    { 0.5f,  0.5f, 0.0f, 1.0f, 1.0f},
+    {-0.5f,  0.5f, 0.0f, 0.0f, 1.0f},
+};
+
+const uint16_t kUnitQuadIndices[] = {
+    0, 1, 2,  0, 2, 3,
+};
+
 const PosUvVertex kTexturedCubeVertices[] = {
     // -Z
     {-1.0f, -1.0f, -1.0f, 0.0f, 1.0f}, {1.0f, -1.0f, -1.0f, 1.0f, 1.0f},
@@ -385,6 +399,18 @@ MeshHandle RenderResourceManager::createTexturedUnitCube()
                       VertexLayoutDesc::position3TexCoord2(),
                       kTexturedCubeIndices,
                       static_cast<uint32_t>(sizeof(kTexturedCubeIndices) / sizeof(uint16_t)));
+}
+
+MeshHandle RenderResourceManager::createUnitQuad()
+{
+    if (!_adapter.isInitialized()) {
+        return {};
+    }
+    return createMesh(kUnitQuadVertices,
+                      static_cast<uint32_t>(sizeof(kUnitQuadVertices) / sizeof(PosUvVertex)),
+                      VertexLayoutDesc::position3TexCoord2(),
+                      kUnitQuadIndices,
+                      static_cast<uint32_t>(sizeof(kUnitQuadIndices) / sizeof(uint16_t)));
 }
 
 void RenderResourceManager::destroyMesh(MeshHandle& mesh)

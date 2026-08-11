@@ -495,12 +495,12 @@ TEST_CASE(s4c_make_default_slot_table_depthhaze_before_postprocess) {
     // append-only; RenderPassSlot enum unchanged).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 8);
-    CHECK(desc.passes[3] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[4] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[5] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[6] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[7] == RenderPassSlot::UI);
+    CHECK(desc.passes.size() == 9);
+    CHECK(desc.passes[4] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[5] == RenderPassSlot::BloomBlur);
+    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[8] == RenderPassSlot::UI);
 }
 
 TEST_CASE(s4c_make_deferred_slot_table_depthhaze_before_postprocess) {

@@ -30,7 +30,7 @@ TEST_CASE(pipeline_desc_make_default_has_shadow_first_but_disabled_by_lifecycle)
     // SHAPE here; the enable-state assertion lives in
     // Test_E4_DefaultShadow.cpp.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
-    CHECK(desc.passes.size() == 8u);    // S4b (2026-07-23): +1 DepthHaze
+    CHECK(desc.passes.size() == 9u);    // S4b (2026-07-23): +1 DepthHaze
     CHECK(desc.contains(RenderPassSlot::Shadow));
     CHECK(desc.passes.front() == RenderPassSlot::Shadow);
     CHECK(desc.contains(RenderPassSlot::ForwardOpaque));
@@ -44,7 +44,7 @@ TEST_CASE(pipeline_desc_make_default_has_shadow_first_but_disabled_by_lifecycle)
 
 TEST_CASE(pipeline_desc_make_forward_with_shadows_orders_shadow_first) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeForwardWithShadows();
-    CHECK(desc.passes.size() == 8u);    // S4b (2026-07-23): +1 DepthHaze
+    CHECK(desc.passes.size() == 9u);    // S4b (2026-07-23): +1 DepthHaze
     CHECK(desc.passes.front() == RenderPassSlot::Shadow);
     CHECK(desc.contains(RenderPassSlot::Shadow));
 }
@@ -53,21 +53,21 @@ TEST_CASE(renderer_configure_pipeline_rebuilds_slots) {
     Renderer renderer;
     // E4 — the canonical default mounts Shadow first.
     // S4b (2026-07-23) bumped default to 8 slots (DepthHaze added on top of S1b's BloomBlur + S1a's BloomExtract).
-    CHECK(renderer.pipelineDesc().passes.size() == 8u);
+    CHECK(renderer.pipelineDesc().passes.size() == 9u);
     CHECK(renderer.pipelineDesc().contains(RenderPassSlot::Shadow));
 
     renderer.configurePipeline(RenderPipelineDesc::makeForwardWithShadows());
-    CHECK(renderer.pipelineDesc().passes.size() == 8u);
+    CHECK(renderer.pipelineDesc().passes.size() == 9u);
     CHECK(renderer.pipelineDesc().passes.front() == RenderPassSlot::Shadow);
     CHECK(renderer.pipelineDesc().contains(RenderPassSlot::Shadow));
 
     renderer.configurePipeline(RenderPipelineDesc::makeDefault());
-    CHECK(renderer.pipelineDesc().passes.size() == 8u);
+    CHECK(renderer.pipelineDesc().passes.size() == 9u);
     CHECK(renderer.pipelineDesc().contains(RenderPassSlot::Shadow));
 
     // Empty desc falls back to default (also now 8 slots).
     renderer.configurePipeline(RenderPipelineDesc{});
-    CHECK(renderer.pipelineDesc().passes.size() == 8u);
+    CHECK(renderer.pipelineDesc().passes.size() == 9u);
 }
 
 TEST_SUITE_END

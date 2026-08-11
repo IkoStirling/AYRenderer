@@ -218,6 +218,15 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         if (item.outlineHull) {
             continue;
         }
+        // CM-1 (2026-08-11) — 2D lane discriminator: items carrying a
+        // DrawPayload2D belong to Forward2DOpaquePass. Drawing them
+        // here with 3D state (depth write, no blend) would double-draw
+        // AND pollute the depth buffer with ortho z=0. The payload
+        // pointer is the lane contract — pre-CM-1 items always have
+        // payload == nullptr, so 3D hosts see zero behavior change.
+        if (item.payload != nullptr) {
+            continue;
+        }
         if (!item.mesh.isValid() || !item.material.isValid()) {
             continue;
         }

@@ -17,6 +17,23 @@ namespace ayt::render
 // state still call Renderer::setDirectionalLight(dir, color) which
 // feeds FrameContext::lightDirection (the existing primitive) — no
 // Light struct ever needed on the render path.
+// CM-1 (2026-08-11) — per-instance 2D draw data carried by
+// DrawItem.payload (Forward2DOpaquePass lane). Pure POD, no GPU
+// types, no allocators — alignof == 16 (FVector2/FVector4 are
+// __m128-backed). NEVER #pragma pack this struct; MSVC SIMD
+// alignment depends on the natural layout. The per-atlas texture
+// is NOT part of the payload — it lives on DrawItem.material
+// (shader `albedoMap` binding), so one material = one atlas =
+// one batch key (AY2D design.md §7.1).
+struct DrawPayload2D {
+    ayt::math::FVector2 sourceRectMin{0.0f, 0.0f};  // UV-space source rect (min corner)
+    ayt::math::FVector2 sourceRectMax{1.0f, 1.0f};  // UV-space source rect (max corner)
+    ayt::math::FVector4 tintRGBA{1.0f, 1.0f, 1.0f, 1.0f};
+    uint8_t  flip = 0;          // 1 = horizontal, 2 = vertical (SpriteFlip bit semantics)
+    uint8_t  reserved[3] = {};
+    uint32_t packedSortKey = 0; // (layer << 24) | (sortingKey & 0x00FFFFFF)
+};
+
 struct DrawItem {
     MeshHandle     mesh;
     MaterialHandle material;
@@ -32,6 +49,13 @@ struct DrawItem {
     // the selected surface never wrote depth (transparent objects).
     bool                       hasOutlineDepthWorld = false;
     ayt::math::Float4x4        outlineDepthWorld = ayt::math::Float4x4::identity();
+    // CM-1 (2026-08-11) — per-instance 2D data. Append-only borrowed
+    // pointer, mirroring boneMatrices: when non-null, Forward2DOpaquePass
+    // draws this item on the 2D lane. Lifetime contract (same as
+    // SceneLights / boneMatrices): the pointed-to DrawPayload2D must
+    // remain valid across the synchronous render() call. Default
+    // nullptr ⇒ pre-CM-1 behavior — 3D passes never see this field.
+    const DrawPayload2D*       payload      = nullptr;
 };
 
 class RenderScene {

@@ -110,7 +110,7 @@ TEST_CASE(a1_make_default_does_not_include_ssao) {
     // real wire path; A1 just guarantees the slot-table ABI is
     // not pollution'd into the Forward path.
     const auto desc = ayt::render::RenderPipelineDesc::makeDefault();
-    CHECK(desc.passes.size() == 8);
+    CHECK(desc.passes.size() == 9);
     bool found = false;
     for (const auto s : desc.passes) {
         if (s == RenderPassSlot::SSAO) {

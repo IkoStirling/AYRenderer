@@ -16,6 +16,7 @@
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/EditorOverlayPass.h"
+#include "detail/Forward2DOpaquePass.h"  // CM-1 (2026-08-11) — 2D lane pass factory.
 #include "detail/RenderPipeline.h"
 #include "detail/SSAOPass.h"        // §A1 SSAO MVP (2026-07-24) — SSAOPass factory + FrameGraph SSAOTexture resolve gate.
 #include "detail/RenderResourceManager.h"
@@ -64,6 +65,11 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
     return RenderPipelineDesc{{
         RenderPassSlot::Shadow,
         RenderPassSlot::ForwardOpaque,
+        // CM-1 (2026-08-11) — 2D lane between ForwardOpaque and
+        // Transparent. Zero-cost when the scene carries no
+        // DrawPayload2D items (pass returns 0 draws) ⇒ pre-CM-1
+        // Forward hosts see 0 behavior change.
+        RenderPassSlot::Forward2DOpaque,
         RenderPassSlot::Transparent,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
@@ -247,6 +253,13 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
     // invariant, cutsheet §G1 V1).
     case RenderPassSlot::GBufferDebug:
         return std::make_unique<detail::GBufferDebugPass>();
+    // CM-1 (2026-08-11) — 2D lane. Mounted only when the desc
+    // includes RenderPassSlot::Forward2DOpaque (makeDefault() does;
+    // makeDeferred() does NOT — 2D is Forward-path-only per the
+    // slot comment in AYRenderTypes.h). Zero payload items ⇒
+    // execute() returns 0 (zero behavior change for 3D hosts).
+    case RenderPassSlot::Forward2DOpaque:
+        return std::make_unique<detail::Forward2DOpaquePass>();
     }
     return nullptr;
 }
@@ -1616,6 +1629,14 @@ MeshHandle Renderer::createTexturedUnitCube()
         return {};
     }
     return _impl->resources.createTexturedUnitCube();
+}
+
+MeshHandle Renderer::createUnitQuad()
+{
+    if (!_impl || !_impl->adapter.isInitialized()) {
+        return {};
+    }
+    return _impl->resources.createUnitQuad();
 }
 
 MaterialHandle Renderer::createMaterialFromPhoskia(const std::string& source,

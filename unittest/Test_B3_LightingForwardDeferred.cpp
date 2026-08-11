@@ -270,7 +270,7 @@ TEST_CASE(b3_full_deferred_pipeline_noop_dispatch_with_lighting_pointer_wired) {
     // BloomBlur and PostProcess), no GBuffer, no Lighting.
     const RenderPipelineDesc def = RenderPipelineDesc::makeDefault();
     CHECK(def.path == RenderPath::Forward);
-    CHECK(def.passes.size() == 8u);
+    CHECK(def.passes.size() == 9u);
     CHECK(def.contains(RenderPassSlot::Shadow));
     CHECK(def.contains(RenderPassSlot::ForwardOpaque));
     CHECK(def.contains(RenderPassSlot::Transparent));

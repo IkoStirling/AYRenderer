@@ -310,9 +310,10 @@ TEST_CASE(f3_render_pipeline_slot_abi_lock) {
     // F3 不动 slot ABI ── BloomBlur 仍是 9。
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    // F3 阶段 RenderPipelineDesc::makeDefault 的 passes 列表 8 个 slot。
-    CHECK(desc.passes.size() == 8);
-    CHECK(desc.passes[4] == RenderPassSlot::BloomBlur);
+    // F3 阶段 RenderPipelineDesc::makeDefault 的 passes 列表 9 个 slot
+    // (CM-1 2026-08-11: +1 Forward2DOpaque, inserted after FO)。
+    CHECK(desc.passes.size() == 9);
+    CHECK(desc.passes[5] == RenderPassSlot::BloomBlur);
     CHECK(desc.contains(RenderPassSlot::BloomBlur));
     // BloomBlur enum 值仍 = 9(append-only 锁)。
     CHECK(static_cast<uint8_t>(RenderPassSlot::BloomBlur) == 9);
