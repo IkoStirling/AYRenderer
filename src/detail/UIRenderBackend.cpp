@@ -25,14 +25,24 @@ struct UiVertex {
     float    v;
 };
 
-struct ColoredRect {
-    ayt::math::FRectangle bounds;
-    ayt::math::FVector4   color;
-};
+// P0 unified batch: every draw entry becomes one UiItem appended to
+// frame.items in submission order (array order == z-order; runs are
+// grouped at flush time, never re-sorted). Sdf items arrive in P2.
+enum class UiItemKind : uint8_t { Flat, Sdf };
 
-struct PendingTextBatch {
-    std::vector<UiVertex> vertices;
-    std::vector<uint32_t> indices;
+struct UiItem {
+    UiItemKind kind        = UiItemKind::Flat;
+    uint16_t   textureIdx  = UINT16_MAX;  // Flat: white / font atlas / UI texture
+    uint64_t   state       = 0;           // bgfx blend state (P1 encodes BlendMode)
+    float      minX        = 0.0f;
+    float      minY        = 0.0f;
+    float      maxX        = 0.0f;
+    float      maxY        = 0.0f;
+    uint32_t   abgr[4]     = {0, 0, 0, 0};  // per-corner colors: TL TR BR BL
+    float      u0          = 0.0f;          // Flat only
+    float      v0          = 0.0f;
+    float      u1          = 1.0f;
+    float      v1          = 1.0f;
 };
 
 uint32_t toAbgr(const ayt::math::FVector4& color)
@@ -72,11 +82,10 @@ bool rectNonEmpty(const ayt::math::FRectangle& r)
 } // namespace
 
 struct UIRenderBackend::FrameState {
-    std::vector<ColoredRect>          pendingRects;
-    std::vector<UiVertex>             scratchVertices;
-    std::vector<uint32_t>             scratchIndices;
-    std::unique_ptr<PendingTextBatch> textBatch;
-    ayt::font::IFont*                 textSyncFont = nullptr;
+    std::vector<UiItem>                items;              // ordered draw list (z-order)
+    std::vector<UiVertex>              scratchVertices;
+    std::vector<uint32_t>              scratchIndices;
+    ayt::font::IFont*                  textSyncFont = nullptr;
     std::vector<ayt::math::FRectangle> clipStack;
 };
 
@@ -147,15 +156,10 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
                                            shader::ShaderResourcePool& shaderPool)
 {
     if (_frame != nullptr) {
-        _frame->pendingRects.clear();
+        _frame->items.clear();
         _frame->scratchVertices.clear();
         _frame->scratchIndices.clear();
-        if (_frame->textBatch != nullptr) {
-            _frame->textBatch->vertices.clear();
-            _frame->textBatch->indices.clear();
-        }
         _frame->textSyncFont = nullptr;
-        _frame->textBatch.reset();
     }
 
     if (_fontAtlas != nullptr) {
@@ -176,15 +180,10 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
 void UIRenderBackend::shutdownFromRendererWithoutAdapter()
 {
     if (_frame != nullptr) {
-        _frame->pendingRects.clear();
+        _frame->items.clear();
         _frame->scratchVertices.clear();
         _frame->scratchIndices.clear();
-        if (_frame->textBatch != nullptr) {
-            _frame->textBatch->vertices.clear();
-            _frame->textBatch->indices.clear();
-        }
         _frame->textSyncFont = nullptr;
-        _frame->textBatch.reset();
     }
 
     _gpu.reset();
@@ -209,23 +208,13 @@ void UIRenderBackend::beginFrame()
     }
 
     FrameState& frame = *_frame;
-    frame.pendingRects.clear();
+    frame.items.clear();
     frame.clipStack.clear();
     frame.textSyncFont = nullptr;
 
     if (frame.scratchVertices.capacity() < 1024u) {
         frame.scratchVertices.reserve(1024u);
         frame.scratchIndices.reserve(1536u);
-    }
-
-    if (frame.textBatch == nullptr) {
-        frame.textBatch = std::make_unique<PendingTextBatch>();
-    }
-    frame.textBatch->vertices.clear();
-    frame.textBatch->indices.clear();
-    if (frame.textBatch->vertices.capacity() < 512u) {
-        frame.textBatch->vertices.reserve(512u);
-        frame.textBatch->indices.reserve(768u);
     }
 
     if (_gpu == nullptr || _width < 1 || _height < 1) {
@@ -268,8 +257,8 @@ void UIRenderBackend::pushClip(const ayt::math::FRectangle& bounds)
     if (_frame == nullptr) {
         _frame = std::make_unique<FrameState>();
     }
-    flushColoredRects();
-    flushPendingText();
+    // P0: no forced flush — items keep array order (z-order), clip is
+    // applied at item-record time via clipRect() CPU intersection.
 
     ayt::math::FRectangle clipped = bounds;
     if (!_frame->clipStack.empty()) {
@@ -283,8 +272,6 @@ void UIRenderBackend::popClip()
     if (_frame == nullptr || _frame->clipStack.empty()) {
         return;
     }
-    flushColoredRects();
-    flushPendingText();
     _frame->clipStack.pop_back();
 }
 
@@ -296,7 +283,8 @@ void UIRenderBackend::endFrame()
 
 void UIRenderBackend::flushBatches()
 {
-    flushPendingText();
+    // P0: unified batch — flush submits everything recorded so far.
+    flushColoredRects();
 }
 
 void UIRenderBackend::syncTextAtlasIfNeeded()
@@ -327,13 +315,22 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, const ayt::m
         return;
     }
 
-    // Cut the text batch before any new rect so overlays drawn after text
-    // keep correct z-order (rect submit follows flushed text).
-    if (_frame->textBatch != nullptr && !_frame->textBatch->vertices.empty()) {
-        flushPendingText();
-    }
-
-    _frame->pendingRects.push_back({clipped, color});
+    // P0 unified batch: append item; z-order is preserved by array order
+    // (no mid-frame flushes — the old "cut the text batch" flush here
+    // existed only to keep draw order across two separate batches).
+    UiItem item;
+    item.textureIdx = (_gpu != nullptr) ? _gpu->whiteTextureIdx()
+                                        : detail::UiGpuContext::kInvalidIdx;
+    item.minX = clipped.minX;
+    item.minY = clipped.minY;
+    item.maxX = clipped.maxX;
+    item.maxY = clipped.maxY;
+    const uint32_t abgr = toAbgr(color);
+    item.abgr[0] = abgr;
+    item.abgr[1] = abgr;
+    item.abgr[2] = abgr;
+    item.abgr[3] = abgr;
+    _frame->items.push_back(item);
 }
 
 void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textureHandle,
@@ -358,85 +355,91 @@ void UIRenderBackend::flushColoredRects()
     }
 
     FrameState& frame = *_frame;
-    if (frame.pendingRects.empty() || !_initialized || _gpu == nullptr || _adapter == nullptr
+    if (frame.items.empty() || !_initialized || _gpu == nullptr || _adapter == nullptr
         || _width < 1 || _height < 1) {
-        frame.pendingRects.clear();
+        frame.items.clear();
         return;
     }
 
-    frame.scratchVertices.clear();
-    frame.scratchIndices.clear();
-    frame.scratchVertices.reserve(frame.pendingRects.size() * 4u);
-    frame.scratchIndices.reserve(frame.pendingRects.size() * 6u);
+    const uint16_t whiteIdx  = _gpu->whiteTextureIdx();
+    const float    fbW       = static_cast<float>(_width);
+    const float    fbH       = static_cast<float>(_height);
 
-    for (const ColoredRect& rect : frame.pendingRects) {
-        const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
-        const uint32_t abgr = toAbgr(rect.color);
-        const float    z    = 0.0f;
+    // Consecutive-runs only — never re-sort (z-order = array order).
+    auto flushFlatRun = [&](size_t begin, size_t end) {
+        const UiItem& first = frame.items[begin];
+        const size_t  count = end - begin;
 
-        frame.scratchVertices.push_back({toNdcX(rect.bounds.minX, static_cast<float>(_width)),
-                                         toNdcY(rect.bounds.minY, static_cast<float>(_height)), z,
-                                         abgr, 0.0f, 0.0f});
-        frame.scratchVertices.push_back({toNdcX(rect.bounds.maxX, static_cast<float>(_width)),
-                                         toNdcY(rect.bounds.minY, static_cast<float>(_height)), z,
-                                         abgr, 1.0f, 0.0f});
-        frame.scratchVertices.push_back({toNdcX(rect.bounds.maxX, static_cast<float>(_width)),
-                                         toNdcY(rect.bounds.maxY, static_cast<float>(_height)), z,
-                                         abgr, 1.0f, 1.0f});
-        frame.scratchVertices.push_back({toNdcX(rect.bounds.minX, static_cast<float>(_width)),
-                                         toNdcY(rect.bounds.maxY, static_cast<float>(_height)), z,
-                                         abgr, 0.0f, 1.0f});
+        frame.scratchVertices.clear();
+        frame.scratchIndices.clear();
+        frame.scratchVertices.reserve(count * 4u);
+        frame.scratchIndices.reserve(count * 6u);
 
-        frame.scratchIndices.push_back(base + 0);
-        frame.scratchIndices.push_back(base + 1);
-        frame.scratchIndices.push_back(base + 2);
-        frame.scratchIndices.push_back(base + 0);
-        frame.scratchIndices.push_back(base + 2);
-        frame.scratchIndices.push_back(base + 3);
+        for (size_t i = begin; i < end; ++i) {
+            const UiItem& it = frame.items[i];
+            const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
+            const float    z    = 0.0f;
+
+            frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.minY, fbH), z,
+                                             it.abgr[0], it.u0, it.v0});
+            frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.minY, fbH), z,
+                                             it.abgr[1], it.u1, it.v0});
+            frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.maxY, fbH), z,
+                                             it.abgr[2], it.u1, it.v1});
+            frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.maxY, fbH), z,
+                                             it.abgr[3], it.u0, it.v1});
+
+            frame.scratchIndices.push_back(base + 0);
+            frame.scratchIndices.push_back(base + 1);
+            frame.scratchIndices.push_back(base + 2);
+            frame.scratchIndices.push_back(base + 0);
+            frame.scratchIndices.push_back(base + 2);
+            frame.scratchIndices.push_back(base + 3);
+        }
+
+        if (first.textureIdx == whiteIdx) {
+            _gpu->submitColoredQuads(kViewId, *_adapter, frame.scratchVertices.data(),
+                                     static_cast<uint32_t>(frame.scratchVertices.size()),
+                                     sizeof(UiVertex), frame.scratchIndices.data(),
+                                     static_cast<uint32_t>(frame.scratchIndices.size()));
+        } else {
+            _gpu->submitTexturedQuads(kViewId, *_adapter, first.textureIdx,
+                                      frame.scratchVertices.data(),
+                                      static_cast<uint32_t>(frame.scratchVertices.size()),
+                                      sizeof(UiVertex), frame.scratchIndices.data(),
+                                      static_cast<uint32_t>(frame.scratchIndices.size()));
+        }
+        ++_drawCalls;
+    };
+
+    size_t i = 0;
+    const size_t n = frame.items.size();
+    while (i < n) {
+        const UiItem& it = frame.items[i];
+        if (it.kind == UiItemKind::Sdf) {
+            // P2: SDF items are submitted individually (single draw call
+            // each, parameters via uniforms). No Sdf producer exists yet.
+            ++i;
+            continue;
+        }
+        size_t end = i + 1;
+        while (end < n && frame.items[end].kind == UiItemKind::Flat
+               && frame.items[end].textureIdx == it.textureIdx
+               && frame.items[end].state == it.state) {
+            ++end;
+        }
+        flushFlatRun(i, end);
+        i = end;
     }
 
-    _gpu->submitColoredQuads(kViewId, *_adapter, frame.scratchVertices.data(),
-                             static_cast<uint32_t>(frame.scratchVertices.size()), sizeof(UiVertex),
-                             frame.scratchIndices.data(),
-                             static_cast<uint32_t>(frame.scratchIndices.size()));
-
-    ++_drawCalls;
-    frame.pendingRects.clear();
+    frame.items.clear();
 }
 
 void UIRenderBackend::flushPendingText()
 {
-    if (_frame == nullptr) {
-        return;
-    }
-
-    FrameState& frame = *_frame;
-    if (frame.textBatch == nullptr || frame.textBatch->vertices.empty() || !_initialized
-        || _gpu == nullptr || _adapter == nullptr || _fontAtlas == nullptr || _width < 1
-        || _height < 1) {
-        if (frame.textBatch != nullptr) {
-            frame.textBatch->vertices.clear();
-            frame.textBatch->indices.clear();
-        }
-        return;
-    }
-
-    syncTextAtlasIfNeeded();
-
-    const uint16_t atlasIdx = _fontAtlas->atlasTextureIdx();
-    if (atlasIdx == detail::UiGpuContext::kInvalidIdx) {
-        frame.textBatch->vertices.clear();
-        frame.textBatch->indices.clear();
-        return;
-    }
-
-    _gpu->submitTexturedQuads(kViewId, *_adapter, atlasIdx, frame.textBatch->vertices.data(),
-                              static_cast<uint32_t>(frame.textBatch->vertices.size()),
-                              sizeof(UiVertex), frame.textBatch->indices.data(),
-                              static_cast<uint32_t>(frame.textBatch->indices.size()));
-    ++_drawCalls;
-    frame.textBatch->vertices.clear();
-    frame.textBatch->indices.clear();
+    // P0: text glyphs are UiItems in the unified batch; flushColoredRects
+    // (called from endFrame / flushBatches) submits them. Kept as a
+    // declared no-op so endFrame's call sequence stays unchanged.
 }
 
 void UIRenderBackend::drawTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
@@ -557,11 +560,8 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
 
     frame.textSyncFont = font;
     syncTextAtlasIfNeeded();
-    flushColoredRects();
 
-    if (frame.textBatch == nullptr) {
-        frame.textBatch = std::make_unique<PendingTextBatch>();
-    }
+    const uint16_t atlasIdx = _fontAtlas->atlasTextureIdx();
 
     const ayt::font::FontMetrics& metrics = font->getMetrics();
     const float boundsH = bounds.maxY - bounds.minY;
@@ -571,8 +571,6 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     const uint32_t abgr = toAbgr(color);
     const float    atlasW = static_cast<float>(detail::BgfxFontAtlas::kAtlasWidth);
     const float    atlasH = static_cast<float>(detail::BgfxFontAtlas::kAtlasHeight);
-    const float    fbW    = static_cast<float>(_width);
-    const float    fbH    = static_cast<float>(_height);
 
     auto emitGlyph = [&](ayt::font::GlyphInfo* glyph, float penX, float penY, float xOff,
                          float yOff, float xAdv) {
@@ -618,22 +616,23 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
             tv1 = v0 + (v1 - v0) * ((glyphBounds.maxY - y0) / gh);
         }
 
-        const uint32_t base = static_cast<uint32_t>(frame.textBatch->vertices.size());
-        const float    z    = 0.0f;
-        const float qx0 = glyphBounds.minX;
-        const float qy0 = glyphBounds.minY;
-        const float qx1 = glyphBounds.maxX;
-        const float qy1 = glyphBounds.maxY;
-        frame.textBatch->vertices.push_back({toNdcX(qx0, fbW), toNdcY(qy0, fbH), z, abgr, tu0, tv0});
-        frame.textBatch->vertices.push_back({toNdcX(qx1, fbW), toNdcY(qy0, fbH), z, abgr, tu1, tv0});
-        frame.textBatch->vertices.push_back({toNdcX(qx1, fbW), toNdcY(qy1, fbH), z, abgr, tu1, tv1});
-        frame.textBatch->vertices.push_back({toNdcX(qx0, fbW), toNdcY(qy1, fbH), z, abgr, tu0, tv1});
-        frame.textBatch->indices.push_back(base + 0);
-        frame.textBatch->indices.push_back(base + 1);
-        frame.textBatch->indices.push_back(base + 2);
-        frame.textBatch->indices.push_back(base + 0);
-        frame.textBatch->indices.push_back(base + 2);
-        frame.textBatch->indices.push_back(base + 3);
+        // P0 unified batch: one UiItem per glyph quad; all glyphs of a
+        // drawText call share (atlas, state) so they form one flush run.
+        UiItem item;
+        item.textureIdx = atlasIdx;
+        item.minX = glyphBounds.minX;
+        item.minY = glyphBounds.minY;
+        item.maxX = glyphBounds.maxX;
+        item.maxY = glyphBounds.maxY;
+        item.abgr[0] = abgr;
+        item.abgr[1] = abgr;
+        item.abgr[2] = abgr;
+        item.abgr[3] = abgr;
+        item.u0 = tu0;
+        item.v0 = tv0;
+        item.u1 = tu1;
+        item.v1 = tv1;
+        frame.items.push_back(item);
         cursorX = penX + xAdv;
     };
 
