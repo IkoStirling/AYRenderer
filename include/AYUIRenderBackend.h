@@ -70,6 +70,34 @@ public:
     void drawWithAlpha(const ayt::math::FRectangle& bounds, void* textureHandle,
                        float alpha) override;
 
+    // P1+P2 merged header edit (single header change to bound incremental
+    // rebuilds): overrides that were previously inherited interface
+    // defaults. setBlendMode / drawGradientRect land in P1; drawBorderRect /
+    // drawRectShadow get SDF bodies in P2; drawNinePatch is a no-op until
+    // P3's texture registry.
+    void setBlendMode(ayt::ui::BlendMode mode) override;
+    // IAYRenderBackend declares the 2-color (vertical) variant as
+    // pure virtual — the 4-color override below does NOT satisfy it
+    // (different signature). Implement both; the 2-color routes to the
+    // 4-color path (top = both top corners, bottom = both bottom
+    // corners), matching AYUI's MockRenderer + Test_UIGradientBlend
+    // semantics.
+    void drawGradientRect(const ayt::math::FRectangle& bounds,
+                          const ayt::math::FVector4& topColor,
+                          const ayt::math::FVector4& bottomColor) override;
+    void drawGradientRect(const ayt::math::FRectangle& bounds,
+                          const ayt::math::FVector4& topLeft,
+                          const ayt::math::FVector4& topRight,
+                          const ayt::math::FVector4& bottomLeft,
+                          const ayt::math::FVector4& bottomRight) override;
+    void drawBorderRect(const ayt::math::FRectangle& bounds, const ayt::math::FVector4& color,
+                        float borderWidth, float cornerRadius = 0) override;
+    void drawRectShadow(const ayt::math::FRectangle& bounds,
+                        const ayt::ui::IRenderBackend::ShadowStyle& shadow) override;
+    void drawNinePatch(const ayt::math::FRectangle& bounds, void* textureHandle,
+                       const ayt::math::FRectangle& uvRegion,
+                       const ayt::math::FVector4& padding) override;
+
     TextMetrics measureText(const std::wstring& text, int fontSize,
                             float maxWidth = 0.0f) const override;
     ayt::font::FontMetrics getFontMetrics(ayt::font::FontHandle font) const override;

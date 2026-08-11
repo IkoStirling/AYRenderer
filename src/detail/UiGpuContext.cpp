@@ -129,11 +129,11 @@ bgfx::VertexLayout uiVertexLayout()
 
 void submitMesh(uint8_t viewId, BGFXAdapter& adapter, shader::ShaderResource& shader,
 
-                shader::BindingId texBinding, uint16_t textureIdx, const void* vertices,
+                shader::BindingId texBinding, uint16_t textureIdx, uint64_t state,
 
-                uint32_t vertexCount, uint32_t vertexStride, const uint32_t* indices,
+                const void* vertices, uint32_t vertexCount, uint32_t vertexStride,
 
-                uint32_t indexCount)
+                const uint32_t* indices, uint32_t indexCount)
 
 {
 
@@ -232,7 +232,7 @@ void submitMesh(uint8_t viewId, BGFXAdapter& adapter, shader::ShaderResource& sh
 
         ctx.viewId = viewId;
 
-        ctx.state  = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA;
+        ctx.state  = state;
 
         shader.submit(ctx);
 
@@ -256,7 +256,7 @@ void submitMesh(uint8_t viewId, BGFXAdapter& adapter, shader::ShaderResource& sh
 
     ctx.viewId = viewId;
 
-    ctx.state  = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA;
+    ctx.state  = state;
 
     shader.submit(ctx);
 
@@ -420,7 +420,7 @@ void UiGpuContext::beginView(uint8_t viewId, uint16_t width, uint16_t height)
 
 
 
-void UiGpuContext::submitColoredQuads(uint8_t viewId, BGFXAdapter& adapter,
+void UiGpuContext::submitColoredQuads(uint8_t viewId, BGFXAdapter& adapter, uint64_t state,
 
                                       const void* vertices, uint32_t vertexCount,
 
@@ -436,21 +436,21 @@ void UiGpuContext::submitColoredQuads(uint8_t viewId, BGFXAdapter& adapter,
 
     }
 
-    submitMesh(viewId, adapter, _shader, _texColorBinding, _whiteTexture, vertices, vertexCount,
+    submitMesh(viewId, adapter, _shader, _texColorBinding, _whiteTexture, state, vertices,
 
-               vertexStride, indices, indexCount);
+               vertexCount, vertexStride, indices, indexCount);
 
 }
 
 
 
-void UiGpuContext::submitTexturedQuads(uint8_t viewId, BGFXAdapter& adapter, uint16_t textureIdx,
+void UiGpuContext::submitTexturedQuads(uint8_t viewId, BGFXAdapter& adapter, uint64_t state,
 
-                                       const void* vertices, uint32_t vertexCount,
+                                       uint16_t textureIdx, const void* vertices,
 
-                                       uint32_t vertexStride, const uint32_t* indices,
+                                       uint32_t vertexCount, uint32_t vertexStride,
 
-                                       uint32_t indexCount)
+                                       const uint32_t* indices, uint32_t indexCount)
 
 {
 
@@ -460,9 +460,9 @@ void UiGpuContext::submitTexturedQuads(uint8_t viewId, BGFXAdapter& adapter, uin
 
     }
 
-    submitMesh(viewId, adapter, _shader, _texColorBinding, textureIdx, vertices, vertexCount,
+    submitMesh(viewId, adapter, _shader, _texColorBinding, textureIdx, state, vertices,
 
-               vertexStride, indices, indexCount);
+               vertexCount, vertexStride, indices, indexCount);
 
 }
 

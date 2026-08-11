@@ -28,13 +28,15 @@ public:
 
     void beginView(uint8_t viewId, uint16_t width, uint16_t height);
 
-    void submitColoredQuads(uint8_t viewId, BGFXAdapter& adapter,
+    // P1: callers pass the full bgfx state (write flags + blend func).
+    // State is per-run (item.state), so a BlendMode change starts a new run.
+    void submitColoredQuads(uint8_t viewId, BGFXAdapter& adapter, uint64_t state,
                             const void* vertices, uint32_t vertexCount, uint32_t vertexStride,
                             const uint32_t* indices, uint32_t indexCount);
 
-    void submitTexturedQuads(uint8_t viewId, BGFXAdapter& adapter, uint16_t textureIdx,
-                             const void* vertices, uint32_t vertexCount, uint32_t vertexStride,
-                             const uint32_t* indices, uint32_t indexCount);
+    void submitTexturedQuads(uint8_t viewId, BGFXAdapter& adapter, uint64_t state,
+                             uint16_t textureIdx, const void* vertices, uint32_t vertexCount,
+                             uint32_t vertexStride, const uint32_t* indices, uint32_t indexCount);
 
     uint16_t whiteTextureIdx() const { return _whiteTexture; }
 

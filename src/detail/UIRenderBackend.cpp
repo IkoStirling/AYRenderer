@@ -8,6 +8,8 @@
 
 #include <AYCoreUtility.h>
 
+#include <bgfx/bgfx.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <vector>
@@ -79,6 +81,32 @@ bool rectNonEmpty(const ayt::math::FRectangle& r)
     return r.maxX > r.minX && r.maxY > r.minY;
 }
 
+// P1: BlendMode -> bgfx blend state. Write bits are folded in here so
+// every recorded item state is self-sufficient (submit() skips setState
+// when the passed state is 0, so state must never be 0). Additive uses
+// FUNC(SRC_ALPHA, ONE) to match the interface contract SRC*SRC_ALPHA+DST*1
+// (plain BGFX_STATE_BLEND_ADD would be ONE,ONE = SRC*1+DST*1).
+uint64_t blendStateBits(ayt::ui::BlendMode mode)
+{
+    uint64_t bits = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
+    switch (mode) {
+    case ayt::ui::BlendMode::Additive:
+        bits |= BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_ONE);
+        break;
+    case ayt::ui::BlendMode::Multiply:
+        bits |= BGFX_STATE_BLEND_MULTIPLY;
+        break;
+    case ayt::ui::BlendMode::Screen:
+        bits |= BGFX_STATE_BLEND_SCREEN;
+        break;
+    case ayt::ui::BlendMode::Normal:
+    default:
+        bits |= BGFX_STATE_BLEND_ALPHA;
+        break;
+    }
+    return bits;
+}
+
 } // namespace
 
 struct UIRenderBackend::FrameState {
@@ -87,6 +115,7 @@ struct UIRenderBackend::FrameState {
     std::vector<uint32_t>              scratchIndices;
     ayt::font::IFont*                  textSyncFont = nullptr;
     std::vector<ayt::math::FRectangle> clipStack;
+    ayt::ui::BlendMode                 currentBlend = ayt::ui::BlendMode::Normal;
 };
 
 UIRenderBackend::UIRenderBackend()
@@ -211,6 +240,7 @@ void UIRenderBackend::beginFrame()
     frame.items.clear();
     frame.clipStack.clear();
     frame.textSyncFont = nullptr;
+    frame.currentBlend = ayt::ui::BlendMode::Normal;  // P1: per-frame reset
 
     if (frame.scratchVertices.capacity() < 1024u) {
         frame.scratchVertices.reserve(1024u);
@@ -321,6 +351,7 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, const ayt::m
     UiItem item;
     item.textureIdx = (_gpu != nullptr) ? _gpu->whiteTextureIdx()
                                         : detail::UiGpuContext::kInvalidIdx;
+    item.state = blendStateBits(_frame->currentBlend);  // P1
     item.minX = clipped.minX;
     item.minY = clipped.minY;
     item.maxX = clipped.maxX;
@@ -331,6 +362,131 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, const ayt::m
     item.abgr[2] = abgr;
     item.abgr[3] = abgr;
     _frame->items.push_back(item);
+}
+
+void UIRenderBackend::setBlendMode(ayt::ui::BlendMode mode)
+{
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+    // Recorded into every item's state at draw time; a mode change starts
+    // a new flush run. Reset to Normal at beginFrame.
+    _frame->currentBlend = mode;
+}
+
+void UIRenderBackend::drawGradientRect(const ayt::math::FRectangle& bounds,
+                                       const ayt::math::FVector4& topColor,
+                                       const ayt::math::FVector4& bottomColor)
+{
+    // 2-color vertical gradient — routes to the 4-color path
+    // (topColor = both top corners, bottomColor = both bottom
+    // corners), matching AYUI MockRenderer semantics.
+    drawGradientRect(bounds, topColor, topColor, bottomColor, bottomColor);
+}
+
+void UIRenderBackend::drawGradientRect(const ayt::math::FRectangle& bounds,
+                                       const ayt::math::FVector4& topLeft,
+                                       const ayt::math::FVector4& topRight,
+                                       const ayt::math::FVector4& bottomLeft,
+                                       const ayt::math::FVector4& bottomRight)
+{
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+
+    ayt::math::FRectangle clipped = bounds;
+    if (!clipRect(clipped)) {
+        return;
+    }
+
+    // P1: a Flat item with per-corner colors — the existing shader
+    // interpolates v_color0 across the quad, so gradients are free.
+    // Corner order matches flushFlatRun: TL TR BR BL.
+    UiItem item;
+    item.textureIdx = (_gpu != nullptr) ? _gpu->whiteTextureIdx()
+                                        : detail::UiGpuContext::kInvalidIdx;
+    item.state = blendStateBits(_frame->currentBlend);
+    item.minX = clipped.minX;
+    item.minY = clipped.minY;
+    item.maxX = clipped.maxX;
+    item.maxY = clipped.maxY;
+    item.abgr[0] = toAbgr(topLeft);
+    item.abgr[1] = toAbgr(topRight);
+    item.abgr[2] = toAbgr(bottomRight);
+    item.abgr[3] = toAbgr(bottomLeft);
+    _frame->items.push_back(item);
+}
+
+void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
+                                     const ayt::math::FVector4& color,
+                                     float borderWidth, float cornerRadius)
+{
+    // P1: temporary — replicates the interface's inline 8-rect default so
+    // behavior is bit-identical until P2 routes it through the SDF shader.
+    if (borderWidth <= 0.0f) {
+        return;
+    }
+
+    const float minX = bounds.minX;
+    const float minY = bounds.minY;
+    const float maxX = bounds.maxX;
+    const float maxY = bounds.maxY;
+    const float width  = maxX - minX;
+    const float height = maxY - minY;
+
+    if (width <= 0.0f || height <= 0.0f) {
+        return;
+    }
+
+    const float w = std::min(borderWidth, std::min(width, height) * 0.5f);
+    if (w <= 0.0f) {
+        return;
+    }
+
+    if (width <= w * 2.0f || height <= w * 2.0f) {
+        drawRect(bounds, color);
+        return;
+    }
+
+    const float maxRadius = std::min(width, height) * 0.5f;
+    const float r         = std::max(0.0f, std::min(cornerRadius, maxRadius - w));
+
+    drawRect(math::FRectangle(minX + r, minY, maxX - r, minY + w), color);
+    drawRect(math::FRectangle(minX + r, maxY - w, maxX - r, maxY), color);
+    drawRect(math::FRectangle(minX, minY + r, minX + w, maxY - r), color);
+    drawRect(math::FRectangle(maxX - w, minY + r, maxX, maxY - r), color);
+
+    if (r > 0.0f) {
+        drawRect(math::FRectangle(minX, minY, minX + r, minY + r), color);
+        drawRect(math::FRectangle(maxX - r, minY, maxX, minY + r), color);
+        drawRect(math::FRectangle(minX, maxY - r, minX + r, maxY), color);
+        drawRect(math::FRectangle(maxX - r, maxY - r, maxX, maxY), color);
+    }
+}
+
+void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
+                                     const ayt::ui::IRenderBackend::ShadowStyle& shadow)
+{
+    // P1: temporary — replicates the interface inline default (offset flat
+    // rect) until P2's SDF shadow replaces it.
+    drawRect(math::FRectangle(
+                 bounds.minX + shadow.offset.x,
+                 bounds.minY + shadow.offset.y,
+                 bounds.maxX + shadow.offset.x,
+                 bounds.maxY + shadow.offset.y),
+             shadow.color);
+}
+
+void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* textureHandle,
+                                    const ayt::math::FRectangle& uvRegion,
+                                    const ayt::math::FVector4& padding)
+{
+    // P3: texture registry + 9-slice. No-op until then (matches the
+    // interface default).
+    AYUNREFERENCED_PARAM(bounds);
+    AYUNREFERENCED_PARAM(textureHandle);
+    AYUNREFERENCED_PARAM(uvRegion);
+    AYUNREFERENCED_PARAM(padding);
 }
 
 void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textureHandle,
@@ -397,13 +553,15 @@ void UIRenderBackend::flushColoredRects()
             frame.scratchIndices.push_back(base + 3);
         }
 
+        // P1: state is uniform within a run (grouping key), pass first.state.
         if (first.textureIdx == whiteIdx) {
-            _gpu->submitColoredQuads(kViewId, *_adapter, frame.scratchVertices.data(),
+            _gpu->submitColoredQuads(kViewId, *_adapter, first.state,
+                                     frame.scratchVertices.data(),
                                      static_cast<uint32_t>(frame.scratchVertices.size()),
                                      sizeof(UiVertex), frame.scratchIndices.data(),
                                      static_cast<uint32_t>(frame.scratchIndices.size()));
         } else {
-            _gpu->submitTexturedQuads(kViewId, *_adapter, first.textureIdx,
+            _gpu->submitTexturedQuads(kViewId, *_adapter, first.state, first.textureIdx,
                                       frame.scratchVertices.data(),
                                       static_cast<uint32_t>(frame.scratchVertices.size()),
                                       sizeof(UiVertex), frame.scratchIndices.data(),
@@ -462,8 +620,8 @@ void UIRenderBackend::drawTexturedQuad(const ayt::math::FRectangle& bounds, uint
     };
     const uint32_t indices[6] = {0, 1, 2, 0, 2, 3};
 
-    _gpu->submitTexturedQuads(kViewId, *_adapter, textureIdx, vertices, 4, sizeof(UiVertex),
-                              indices, 6);
+    _gpu->submitTexturedQuads(kViewId, *_adapter, blendStateBits(ayt::ui::BlendMode::Normal),
+                              textureIdx, vertices, 4, sizeof(UiVertex), indices, 6);
 }
 
 ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(const std::wstring& text,
@@ -620,6 +778,7 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         // drawText call share (atlas, state) so they form one flush run.
         UiItem item;
         item.textureIdx = atlasIdx;
+        item.state = blendStateBits(_frame->currentBlend);  // P1
         item.minX = glyphBounds.minX;
         item.minY = glyphBounds.minY;
         item.maxX = glyphBounds.maxX;
