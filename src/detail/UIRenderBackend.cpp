@@ -11,6 +11,7 @@
 #include <bgfx/bgfx.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
@@ -45,7 +46,8 @@ struct UiItem {
     float      v0          = 0.0f;
     float      u1          = 1.0f;
     float      v1          = 1.0f;
-};
+    detail::UiGpuContext::SdfParams sdf;    // P2: kind==Sdf only; quad bounds
+};                                          //     (minX..maxY) already expanded
 
 uint32_t toAbgr(const ayt::math::FVector4& color)
 {
@@ -421,19 +423,14 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
                                      const ayt::math::FVector4& color,
                                      float borderWidth, float cornerRadius)
 {
-    // P1: temporary — replicates the interface's inline 8-rect default so
-    // behavior is bit-identical until P2 routes it through the SDF shader.
+    // P2: single SDF item — the shader renders the ring natively with
+    // per-pixel AA (the P1 body's 8-rect decomposition made square corners).
     if (borderWidth <= 0.0f) {
         return;
     }
 
-    const float minX = bounds.minX;
-    const float minY = bounds.minY;
-    const float maxX = bounds.maxX;
-    const float maxY = bounds.maxY;
-    const float width  = maxX - minX;
-    const float height = maxY - minY;
-
+    const float width  = bounds.maxX - bounds.minX;
+    const float height = bounds.maxY - bounds.minY;
     if (width <= 0.0f || height <= 0.0f) {
         return;
     }
@@ -443,38 +440,95 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
         return;
     }
 
+    // Degenerate: border as wide as the rect is a solid fill (same
+    // fallback the interface default used).
     if (width <= w * 2.0f || height <= w * 2.0f) {
         drawRect(bounds, color);
         return;
     }
 
+    ayt::math::FRectangle clipped = bounds;
+    if (!clipRect(clipped)) {
+        return;
+    }
+
+    // Radius clamped so the ring stays inside the quad even at the corners.
     const float maxRadius = std::min(width, height) * 0.5f;
     const float r         = std::max(0.0f, std::min(cornerRadius, maxRadius - w));
 
-    drawRect(math::FRectangle(minX + r, minY, maxX - r, minY + w), color);
-    drawRect(math::FRectangle(minX + r, maxY - w, maxX - r, maxY), color);
-    drawRect(math::FRectangle(minX, minY + r, minX + w, maxY - r), color);
-    drawRect(math::FRectangle(maxX - w, minY + r, maxX, maxY - r), color);
-
-    if (r > 0.0f) {
-        drawRect(math::FRectangle(minX, minY, minX + r, minY + r), color);
-        drawRect(math::FRectangle(maxX - r, minY, maxX, minY + r), color);
-        drawRect(math::FRectangle(minX, maxY - r, minX + r, maxY), color);
-        drawRect(math::FRectangle(maxX - r, maxY - r, maxX, maxY), color);
+    // Outside stroke spans d in (0, w) across the edge (inset -w/2) — the
+    // quad must extend w past the clip rect, then be clipped again so the
+    // ring cannot paint outside the clip (AA falloff clipped at the edge,
+    // same as the Flat path).
+    ayt::math::FRectangle outer(clipped.minX - w, clipped.minY - w,
+                                clipped.maxX + w, clipped.maxY + w);
+    if (!clipRect(outer)) {
+        return;
     }
+
+    UiItem item;
+    item.kind  = UiItemKind::Sdf;
+    item.state = blendStateBits(_frame->currentBlend);
+    item.minX  = outer.minX;
+    item.minY  = outer.minY;
+    item.maxX  = outer.maxX;
+    item.maxY  = outer.maxY;
+    item.sdf.rect        = ayt::math::FVector4(outer.minX, outer.minY, outer.maxX, outer.maxY);
+    item.sdf.radius      = ayt::math::FVector4(r, r, r, r);
+    item.sdf.strokeColor = color;
+    item.sdf.strokeWidth = w;
+    item.sdf.strokeInset = -w * 0.5f;  // Outside: ring centered on the edge
+    _frame->items.push_back(item);
 }
 
 void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
                                      const ayt::ui::IRenderBackend::ShadowStyle& shadow)
 {
-    // P1: temporary — replicates the interface inline default (offset flat
-    // rect) until P2's SDF shadow replaces it.
-    drawRect(math::FRectangle(
-                 bounds.minX + shadow.offset.x,
-                 bounds.minY + shadow.offset.y,
-                 bounds.maxX + shadow.offset.x,
-                 bounds.maxY + shadow.offset.y),
-             shadow.color);
+    // P2: single SDF item; blur is approximated by expanding the SDF radius
+    // in the shader (u_radius + blur), which fades the edge over blur
+    // pixels. The quad grows by |offset| + blur so the falloff is not
+    // clipped at the rect edge. Transparent shadow color → nothing to draw.
+    if (shadow.color.w <= 0.0f) {
+        return;
+    }
+
+    const float width  = bounds.maxX - bounds.minX;
+    const float height = bounds.maxY - bounds.minY;
+    if (width <= 0.0f || height <= 0.0f) {
+        return;
+    }
+
+    ayt::math::FRectangle clipped = bounds;
+    if (!clipRect(clipped)) {
+        return;
+    }
+
+    const float blur = std::max(0.0f, shadow.blurRadius);
+    const float extX = std::fabs(shadow.offset.x) + blur;
+    const float extY = std::fabs(shadow.offset.y) + blur;
+
+    ayt::math::FRectangle outer(clipped.minX - extX, clipped.minY - extY,
+                                clipped.maxX + extX, clipped.maxY + extY);
+    if (!clipRect(outer)) {
+        return;
+    }
+
+    const float maxRadius = std::min(width, height) * 0.5f;
+    const float r         = std::max(0.0f, std::min(shadow.cornerRadius, maxRadius));
+
+    UiItem item;
+    item.kind  = UiItemKind::Sdf;
+    item.state = blendStateBits(_frame->currentBlend);
+    item.minX  = outer.minX;
+    item.minY  = outer.minY;
+    item.maxX  = outer.maxX;
+    item.maxY  = outer.maxY;
+    item.sdf.rect         = ayt::math::FVector4(outer.minX, outer.minY, outer.maxX, outer.maxY);
+    item.sdf.radius       = ayt::math::FVector4(r, r, r, r);
+    item.sdf.shadowColor  = shadow.color;
+    item.sdf.shadowOffset = shadow.offset;
+    item.sdf.shadowBlur   = blur;
+    _frame->items.push_back(item);
 }
 
 void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* textureHandle,
@@ -575,8 +629,40 @@ void UIRenderBackend::flushColoredRects()
     while (i < n) {
         const UiItem& it = frame.items[i];
         if (it.kind == UiItemKind::Sdf) {
-            // P2: SDF items are submitted individually (single draw call
-            // each, parameters via uniforms). No Sdf producer exists yet.
+            // P2: SDF items submit individually — the quad bounds already
+            // include stroke/shadow expansion, all params ride via uniforms.
+            // Fill is transparent (v_color0 = 0): the SDF path paints only
+            // what its effect uniforms enable.
+            frame.scratchVertices.clear();
+            frame.scratchIndices.clear();
+            frame.scratchVertices.reserve(4u);
+            frame.scratchIndices.reserve(6u);
+            const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
+            const float    z    = 0.0f;
+            const uint32_t transparent = 0u;
+
+            frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.minY, fbH), z,
+                                             transparent, 0.0f, 0.0f});
+            frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.minY, fbH), z,
+                                             transparent, 0.0f, 0.0f});
+            frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.maxY, fbH), z,
+                                             transparent, 0.0f, 0.0f});
+            frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.maxY, fbH), z,
+                                             transparent, 0.0f, 0.0f});
+            frame.scratchIndices.push_back(base + 0);
+            frame.scratchIndices.push_back(base + 1);
+            frame.scratchIndices.push_back(base + 2);
+            frame.scratchIndices.push_back(base + 0);
+            frame.scratchIndices.push_back(base + 2);
+            frame.scratchIndices.push_back(base + 3);
+
+            _gpu->submitSdfQuads(kViewId, *_adapter, it.state,
+                                 frame.scratchVertices.data(),
+                                 static_cast<uint32_t>(frame.scratchVertices.size()),
+                                 sizeof(UiVertex), frame.scratchIndices.data(),
+                                 static_cast<uint32_t>(frame.scratchIndices.size()),
+                                 it.sdf);
+            ++_drawCalls;
             ++i;
             continue;
         }
