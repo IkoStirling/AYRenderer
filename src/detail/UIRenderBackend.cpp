@@ -599,25 +599,35 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
             cursorX = penX + xAdv;
             return;
         }
-        // Conservative: drop glyphs that would need UV remapping when
-        // partially clipped (avoids stretched atlas sampling).
-        if (glyphBounds.minX != x0 || glyphBounds.minY != y0
-            || glyphBounds.maxX != x1 || glyphBounds.maxY != y1) {
-            cursorX = penX + xAdv;
-            return;
-        }
 
         const float u0 = glyph->atlasPosX / atlasW;
         const float v0 = glyph->atlasPosY / atlasH;
         const float u1 = (glyph->atlasPosX + glyph->atlasWidth) / atlasW;
         const float v1 = (glyph->atlasPosY + glyph->atlasHeight) / atlasH;
 
+        // Remap UVs when the quad is partially clipped so boundary glyphs
+        // stay visible (cropped), instead of the old "drop if not fully
+        // inside" path that made rows pop in/out at ScrollView edges.
+        float tu0 = u0, tv0 = v0, tu1 = u1, tv1 = v1;
+        const float gw = x1 - x0;
+        const float gh = y1 - y0;
+        if (gw > 1e-5f && gh > 1e-5f) {
+            tu0 = u0 + (u1 - u0) * ((glyphBounds.minX - x0) / gw);
+            tv0 = v0 + (v1 - v0) * ((glyphBounds.minY - y0) / gh);
+            tu1 = u0 + (u1 - u0) * ((glyphBounds.maxX - x0) / gw);
+            tv1 = v0 + (v1 - v0) * ((glyphBounds.maxY - y0) / gh);
+        }
+
         const uint32_t base = static_cast<uint32_t>(frame.textBatch->vertices.size());
         const float    z    = 0.0f;
-        frame.textBatch->vertices.push_back({toNdcX(x0, fbW), toNdcY(y0, fbH), z, abgr, u0, v0});
-        frame.textBatch->vertices.push_back({toNdcX(x1, fbW), toNdcY(y0, fbH), z, abgr, u1, v0});
-        frame.textBatch->vertices.push_back({toNdcX(x1, fbW), toNdcY(y1, fbH), z, abgr, u1, v1});
-        frame.textBatch->vertices.push_back({toNdcX(x0, fbW), toNdcY(y1, fbH), z, abgr, u0, v1});
+        const float qx0 = glyphBounds.minX;
+        const float qy0 = glyphBounds.minY;
+        const float qx1 = glyphBounds.maxX;
+        const float qy1 = glyphBounds.maxY;
+        frame.textBatch->vertices.push_back({toNdcX(qx0, fbW), toNdcY(qy0, fbH), z, abgr, tu0, tv0});
+        frame.textBatch->vertices.push_back({toNdcX(qx1, fbW), toNdcY(qy0, fbH), z, abgr, tu1, tv0});
+        frame.textBatch->vertices.push_back({toNdcX(qx1, fbW), toNdcY(qy1, fbH), z, abgr, tu1, tv1});
+        frame.textBatch->vertices.push_back({toNdcX(qx0, fbW), toNdcY(qy1, fbH), z, abgr, tu0, tv1});
         frame.textBatch->indices.push_back(base + 0);
         frame.textBatch->indices.push_back(base + 1);
         frame.textBatch->indices.push_back(base + 2);
