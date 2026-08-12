@@ -121,6 +121,8 @@ bgfx::VertexLayout uiVertexLayout()
 
         .add(bgfx::Attrib::TexCoord1, 4, bgfx::AttribType::Float)
 
+        .add(bgfx::Attrib::TexCoord2, 4, bgfx::AttribType::Float)
+
         .end();
 
     return layout;
@@ -266,27 +268,30 @@ void submitMesh(uint8_t viewId, BGFXAdapter& adapter, shader::ShaderResource& sh
 
 
 
-// P2 — SDF rounded-rect shader pair. Vertices carry pixel-space shape
-// corners in a_texcoord0 (the *content* rect — may be inset relative to
-// the draw quad for shadows/outside strokes) and the shape center +
-// half-extent in a_texcoord1. Batch knife: u_rect is gone — identical
-// SDF params (memcmp of SdfParams) now merge into one submission while
-// position/fill still vary per vertex.
+// P2 — SDF rounded-rect shader pair. Vertices carry pixel-space position
+// of the *submitted draw quad* in a_texcoord0 (may be expanded relative
+// to the content silhouette for shadows / outside strokes) and the
+// shape center + half-extent in a_texcoord1. Batch knife: u_rect is gone
+// — identical SDF params merge into one submission while position/fill
+// still vary per vertex. a_texcoord2 carries the soft-clip rect as
+// (center, half-extent); all-zero = no clip pushed.
 const char* kVaryingDefUiSdf = R"(
 vec4 v_color0    : COLOR0    = vec4(1.0, 0.0, 0.0, 1.0);
 vec2 v_texcoord0 : TEXCOORD0 = vec2(0.0, 0.0);
 vec2 v_pos       : TEXCOORD1 = vec2(0.0, 0.0);
 vec4 v_shape     : TEXCOORD2 = vec4(0.0, 0.0, 0.0, 0.0);
+vec4 v_clip      : TEXCOORD3 = vec4(0.0, 0.0, 0.0, 0.0);
 
 vec3 a_position  : POSITION;
 vec4 a_color0    : COLOR0;
 vec2 a_texcoord0 : TEXCOORD0;
 vec4 a_texcoord1 : TEXCOORD1;
+vec4 a_texcoord2 : TEXCOORD2;
 )";
 
 const char* kVsUiSdf = R"(
-$input a_position, a_color0, a_texcoord0, a_texcoord1
-$output v_color0, v_pos, v_shape
+$input a_position, a_color0, a_texcoord0, a_texcoord1, a_texcoord2
+$output v_color0, v_pos, v_shape, v_clip
 
 #include <bgfx_shader.sh>
 
@@ -299,11 +304,13 @@ void main()
     v_pos = a_texcoord0;
     // Shape center + half-extent, constant across the quad.
     v_shape = a_texcoord1;
+    // Soft-clip rect (center, half-extent), constant across the quad.
+    v_clip = a_texcoord2;
 }
 )";
 
 const char* kFsUiSdf = R"(
-$input v_color0, v_pos, v_shape
+$input v_color0, v_pos, v_shape, v_clip
 
 #include <bgfx_shader.sh>
 
@@ -382,7 +389,18 @@ void main()
         col.a   += u_stroke.a   * ring;
     }
 
-    gl_FragColor = vec4(col.rgb, min(col.a, 1.0));
+    // Soft clip: fade coverage across the clip-rect edge (radius 0 =
+    // plain box SDF). The draw quad is already CPU-intersected with the
+    // clip, so this only re-adds AA where the quad edge cuts a stroke or
+    // shadow gradient — scrolling an SDF card no longer hard-cuts its
+    // AA ring at the clip boundary. All-zero clip (hw == 0) = no clip.
+    float clipCover = 1.0;
+    if (v_clip.z > 0.0 && v_clip.w > 0.0) {
+        // (no scalar broadcast — vec4(0.0) is illegal HLSL, X3014)
+        clipCover = cover(sdRoundRect(v_pos - v_clip.xy, v_clip.zw, vec4(0.0, 0.0, 0.0, 0.0)));
+    }
+
+    gl_FragColor = vec4(col.rgb * clipCover, min(col.a, 1.0) * clipCover);
 }
 )";
 

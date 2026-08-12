@@ -63,7 +63,8 @@ public:
     struct SdfParams {
         // Batch knife: the shape rect is NOT here — it rides per-vertex
         // (UiVertex shapeCx/Cy/HalfW/HalfH) so identical-param SDF items
-        // share one submission; memcmp of this struct is the run key.
+        // share one submission. Run key is sdfParamsEqual() (not memcmp —
+        // FVector4 padding would false-break merges).
         ayt::math::FVector4 radius;        // rTL rTR rBR rBL (CPU-clamped)
         ayt::math::FVector4 strokeColor;   // a==0 → no stroke
         float strokeWidth = 0.0f;          // ring thickness, px
@@ -74,7 +75,8 @@ public:
     };
 
     // One quad per Sdf item (params ride along via uniforms). Vertices
-    // use the shared UiVertex layout with the white texture bound.
+    // use the shared UiVertex layout with the white texture bound;
+    // TexCoord2 = soft-clip rect (center, half-extent; all-zero = none).
     void submitSdfQuads(uint8_t viewId, BGFXAdapter& adapter, uint64_t state,
                         const void* vertices, uint32_t vertexCount, uint32_t vertexStride,
                         const uint32_t* indices, uint32_t indexCount, const SdfParams& params);

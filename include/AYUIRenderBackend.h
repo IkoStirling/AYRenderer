@@ -2,6 +2,7 @@
 
 #include "IAYRenderBackend.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 
@@ -67,6 +68,12 @@ public:
                   const ayt::math::FRectangle& uv) override;
     void drawText(const ayt::math::FRectangle& bounds, const std::wstring& text, int fontSize,
                   const ayt::math::FVector4& color) override;
+    // Text-style drawText: implements Align + VAlign (outline/shadow/
+    // letterSpacing/lineSpacing are documented as not-yet-implemented —
+    // see .cpp). The simple overload routes through here with default
+    // style (Left + Middle == legacy single-line behavior).
+    void drawText(const ayt::math::FRectangle& bounds, const std::wstring& text, int fontSize,
+                  const ayt::ui::IRenderBackend::TextStyle& style) override;
     void drawWithAlpha(const ayt::math::FRectangle& bounds, void* textureHandle,
                        float alpha) override;
 
@@ -143,6 +150,13 @@ private:
     void syncTextAtlasIfNeeded();
     void drawTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
                           const ayt::math::FVector4& tint);
+    // Textured-quad entry shared by drawRect(texture) / drawWithAlpha /
+    // drawNinePatch: CPU-clips and remaps UVs by the clip fraction so a
+    // partially-clipped quad crops instead of stretching (tint alpha rides
+    // the opacity stack like every color-emitting entry).
+    void emitClippedTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
+                                 const ayt::math::FRectangle& uv,
+                                 const ayt::math::FVector4& tint);
     ayt::math::FRectangle activeClipBounds() const;
     bool clipRect(ayt::math::FRectangle& inout) const;
 
@@ -157,5 +171,44 @@ private:
     std::unique_ptr<detail::BgfxFontAtlas> _fontAtlas;
     std::unique_ptr<FrameState>           _frame;
 };
+
+// Text alignment math, shared by the styled drawText implementation and
+// its unit tests (pure functions — no backend state). Horizontal: where a
+// line of `lineWidth` px starts inside a bounds of `boundsWidth` px.
+// Vertical: baseline Y for a line of `lineHeight` px inside `boundsHeight`
+// px, `ascent` above the baseline. Middle is the legacy simple-drawText
+// behavior (line centered in bounds, baseline = ascent below the top edge
+// of that centered line box).
+inline float uiTextAlignX(ayt::ui::IRenderBackend::TextStyle::Align align, float boundsMinX,
+                          float boundsWidth, float lineWidth)
+{
+    // A line wider than the bounds clamps to the left edge (no negative
+    // origin) — overflow degrades to left-aligned, matching common UI.
+    switch (align) {
+    case ayt::ui::IRenderBackend::TextStyle::Align::Center:
+        return boundsMinX + std::max(0.0f, (boundsWidth - lineWidth) * 0.5f);
+    case ayt::ui::IRenderBackend::TextStyle::Align::Right:
+        return boundsMinX + std::max(0.0f, boundsWidth - lineWidth);
+    case ayt::ui::IRenderBackend::TextStyle::Align::Left:
+    default:
+        return boundsMinX;
+    }
+}
+
+inline float uiTextBaselineY(ayt::ui::IRenderBackend::TextStyle::VAlign valign, float boundsMinY,
+                             float boundsHeight, float lineHeight, float ascent)
+{
+    // A line taller than the bounds clamps to the top edge (overflow
+    // degrades to top-aligned).
+    switch (valign) {
+    case ayt::ui::IRenderBackend::TextStyle::VAlign::Top:
+        return boundsMinY + ascent;
+    case ayt::ui::IRenderBackend::TextStyle::VAlign::Bottom:
+        return boundsMinY + std::max(0.0f, boundsHeight - lineHeight) + ascent;
+    case ayt::ui::IRenderBackend::TextStyle::VAlign::Middle:
+    default:
+        return boundsMinY + std::max(0.0f, (boundsHeight - lineHeight) * 0.5f) + ascent;
+    }
+}
 
 } // namespace ayt::render

@@ -35,6 +35,15 @@ struct UiVertex {
     float    shapeCy;
     float    shapeHalfW;
     float    shapeHalfH;
+    // SDF only: clip rect as (center, half-extent), soft-clip seam AA.
+    // The draw quad is already CPU-intersected with the clip; this lets
+    // the SDF shader fade coverage across the clip edge instead of
+    // hard-cutting stroke/shadow AA gradients (scroll edges). Flat/text
+    // vertices leave these 0 — their shaders never read TexCoord2.
+    float    clipCx;
+    float    clipCy;
+    float    clipHalfW;
+    float    clipHalfH;
 };
 
 // P0 unified batch: every draw entry becomes one UiItem appended to
@@ -64,6 +73,12 @@ struct UiItem {
     float      shapeMinY    = 0.0f;
     float      shapeMaxX    = 0.0f;
     float      shapeMaxY    = 0.0f;
+    // SDF only: the clip rect at record time (activeClipBounds — full
+    // screen when no clip is pushed). Soft-clip seam AA, see UiVertex.
+    float      clipMinX     = 0.0f;
+    float      clipMinY     = 0.0f;
+    float      clipMaxX     = 0.0f;
+    float      clipMaxY     = 0.0f;
 };                                          //     (minX..maxY) already expanded
 
 // SdfParams holds FVector4 members (16B-aligned f128) → trailing padding;
@@ -595,6 +610,12 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
     item.sdf.strokeColor = stroke;
     item.sdf.strokeWidth = w;
     item.sdf.strokeInset = 0.0f;
+    // Soft-clip: the clip rect at record time, for seam AA in the shader.
+    const ayt::math::FRectangle clip = activeClipBounds();
+    item.clipMinX = clip.minX;
+    item.clipMinY = clip.minY;
+    item.clipMaxX = clip.maxX;
+    item.clipMaxY = clip.maxY;
     _frame->items.push_back(item);
 }
 
@@ -650,6 +671,11 @@ void UIRenderBackend::drawRoundedRect(const ayt::math::FRectangle& bounds,
     item.shapeMaxX = bounds.maxX;
     item.shapeMaxY = bounds.maxY;
     item.sdf.radius = ayt::math::FVector4(r, r, r, r);
+    const ayt::math::FRectangle clip = activeClipBounds();
+    item.clipMinX = clip.minX;
+    item.clipMinY = clip.minY;
+    item.clipMaxX = clip.maxX;
+    item.clipMaxY = clip.maxY;
     _frame->items.push_back(item);
 }
 
@@ -702,6 +728,11 @@ void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
     item.sdf.shadowColor  = shadowColor;
     item.sdf.shadowOffset = shadow.offset;
     item.sdf.shadowBlur   = blur;
+    const ayt::math::FRectangle clip = activeClipBounds();
+    item.clipMinX = clip.minX;
+    item.clipMinY = clip.minY;
+    item.clipMaxX = clip.maxX;
+    item.clipMaxY = clip.maxY;
     _frame->items.push_back(item);
 }
 
@@ -757,33 +788,10 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textur
         return;
     }
 
-    ayt::math::FRectangle clipped = bounds;
-    if (!clipRect(clipped)) {
-        return;
-    }
-
     // Flat item on the UI texture with an opaque white tint — the shader
     // multiplies v_color0 by the texture sample, so alpha rides through.
-    UiItem item;
-    item.textureIdx = ref->textureIdx;
-    item.state      = blendStateBits(_frame->currentBlend);
-    item.minX       = clipped.minX;
-    item.minY       = clipped.minY;
-    item.maxX       = clipped.maxX;
-    item.maxY       = clipped.maxY;
-    // PR-anim: alpha rides the white tint (1,1,1,opacity) so a faded
-    // tree fades the texture draw too. opacity==1 stays 0xFFFFFFFF.
-    const uint32_t abgr = toAbgr(ayt::math::FVector4(
-        1.0f, 1.0f, 1.0f, _frame->opacityStack.back()));
-    item.abgr[0] = abgr;
-    item.abgr[1] = abgr;
-    item.abgr[2] = abgr;
-    item.abgr[3] = abgr;
-    item.u0 = uv.minX;
-    item.v0 = uv.minY;
-    item.u1 = uv.maxX;
-    item.v1 = uv.maxY;
-    _frame->items.push_back(item);
+    emitClippedTexturedQuad(bounds, ref->textureIdx, uv,
+                            ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
 }
 
 void UIRenderBackend::drawWithAlpha(const ayt::math::FRectangle& bounds, void* textureHandle,
@@ -803,31 +811,66 @@ void UIRenderBackend::drawWithAlpha(const ayt::math::FRectangle& bounds, void* t
         return;
     }
 
+    // Interface contract: alpha multiplies the texture's alpha channel —
+    // carried by the tint (shader does v_color0 * sample).
+    emitClippedTexturedQuad(bounds, ref->textureIdx,
+                            ayt::math::FRectangle(0.0f, 0.0f, 1.0f, 1.0f),
+                            ayt::math::FVector4(
+                                1.0f, 1.0f, 1.0f, std::max(0.0f, std::min(1.0f, alpha))));
+}
+
+void UIRenderBackend::emitClippedTexturedQuad(const ayt::math::FRectangle& bounds,
+                                              uint16_t textureIdx,
+                                              const ayt::math::FRectangle& uv,
+                                              const ayt::math::FVector4& tint)
+{
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+
     ayt::math::FRectangle clipped = bounds;
     if (!clipRect(clipped)) {
         return;
     }
 
-    // Interface contract: alpha multiplies the texture's alpha channel —
-    // carried by the per-vertex color (shader does v_color0 * sample).
+    // UV remap: the quad is CPU-clipped to the clip rect, so the sampled
+    // region must shrink by the same fraction — otherwise the texture
+    // smears/stretches across the seam (whole-image UVs on a clipped quad
+    // squeeze the edge texels). Correct for LINEAR sampling (UI textures);
+    // glyph UVs never route here (they remap in emitGlyph already).
+    float u0 = uv.minX, v0 = uv.minY, u1 = uv.maxX, v1 = uv.maxY;
+    const float bw = bounds.maxX - bounds.minX;
+    const float bh = bounds.maxY - bounds.minY;
+    if (bw > 1e-5f && bh > 1e-5f) {
+        const float lf = (clipped.minX - bounds.minX) / bw;
+        const float rf = (clipped.maxX - bounds.minX) / bw;
+        const float tf = (clipped.minY - bounds.minY) / bh;
+        const float bf = (clipped.maxY - bounds.minY) / bh;
+        u0 = uv.minX + (uv.maxX - uv.minX) * lf;
+        u1 = uv.minX + (uv.maxX - uv.minX) * rf;
+        v0 = uv.minY + (uv.maxY - uv.minY) * tf;
+        v1 = uv.minY + (uv.maxY - uv.minY) * bf;
+    }
+
+    // PR-anim: alpha rides the tint (shader does v_color0 * sample);
+    // opacity==1 keeps 0xFFFFFFFF.
+    const uint32_t abgr = toAbgr(ayt::math::FVector4(
+        tint.x, tint.y, tint.z, tint.w * _frame->opacityStack.back()));
     UiItem item;
-    item.textureIdx = ref->textureIdx;
+    item.textureIdx = textureIdx;
     item.state      = blendStateBits(_frame->currentBlend);
     item.minX       = clipped.minX;
     item.minY       = clipped.minY;
     item.maxX       = clipped.maxX;
     item.maxY       = clipped.maxY;
-    const uint32_t abgr = toAbgr(ayt::math::FVector4(
-        1.0f, 1.0f, 1.0f,
-        std::max(0.0f, std::min(1.0f, alpha)) * _frame->opacityStack.back()));
     item.abgr[0] = abgr;
     item.abgr[1] = abgr;
     item.abgr[2] = abgr;
     item.abgr[3] = abgr;
-    item.u0 = 0.0f;
-    item.v0 = 0.0f;
-    item.u1 = 1.0f;
-    item.v1 = 1.0f;
+    item.u0 = u0;
+    item.v0 = v0;
+    item.u1 = u1;
+    item.v1 = v1;
     _frame->items.push_back(item);
 }
 
@@ -845,13 +888,12 @@ void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* t
         return;
     }
 
-    ayt::math::FRectangle clipped = bounds;
-    if (!clipRect(clipped)) {
-        return;
-    }
-
-    const float bW = clipped.maxX - clipped.minX;
-    const float bH = clipped.maxY - clipped.minY;
+    // 9-slice layout is computed from the *unclipped* bounds — a clip
+    // should crop the display, not re-layout the slices (the old code
+    // intersected first, which also shrunk the corner-fit scale `s`).
+    // Each slice is clipped + UV-remapped by emitClippedTexturedQuad.
+    const float bW = bounds.maxX - bounds.minX;
+    const float bH = bounds.maxY - bounds.minY;
     if (bW <= 0.0f || bH <= 0.0f) {
         return;
     }
@@ -868,7 +910,8 @@ void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* t
     const float padSumY = padT + padB;
     if (padSumX <= 0.0f || padSumY <= 0.0f) {
         // No corner area at all — a single stretched quad.
-        drawRect(clipped, textureHandle, uvRegion);
+        emitClippedTexturedQuad(bounds, ref->textureIdx, uvRegion,
+                                ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
         return;
     }
     const float s  = std::min(1.0f, std::min(bW / padSumX, bH / padSumY));
@@ -880,7 +923,8 @@ void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* t
     const float uSpan = std::max(0.0f, uvRegion.maxX - uvRegion.minX);
     const float vSpan = std::max(0.0f, uvRegion.maxY - uvRegion.minY);
     if (uSpan <= 0.0f || vSpan <= 0.0f) {
-        drawRect(clipped, textureHandle, uvRegion);
+        emitClippedTexturedQuad(bounds, ref->textureIdx, uvRegion,
+                                ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
         return;
     }
 
@@ -901,37 +945,21 @@ void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* t
 
     // 3x3 grid: 4 corners keep their size, edges stretch one axis, the
     // center stretches both. All 9 quads share (textureIdx, state) so they
-    // form a single flush run.
-    const float x[4] = {clipped.minX, clipped.minX + pl, clipped.maxX - pr, clipped.maxX};
-    const float y[4] = {clipped.minY, clipped.minY + pt, clipped.maxY - pb, clipped.maxY};
+    // form a single flush run; each is individually clipped + UV-remapped.
+    const float x[4] = {bounds.minX, bounds.minX + pl, bounds.maxX - pr, bounds.maxX};
+    const float y[4] = {bounds.minY, bounds.minY + pt, bounds.maxY - pb, bounds.maxY};
     const float u[4] = {uvRegion.minX, uvRegion.minX + uPl,
                         uvRegion.maxX - uPr, uvRegion.maxX};
     const float v[4] = {uvRegion.minY, uvRegion.minY + uPt,
                         uvRegion.maxY - uPb, uvRegion.maxY};
 
-    UiItem item;
-    item.textureIdx = ref->textureIdx;
-    item.state      = blendStateBits(_frame->currentBlend);
-    // PR-anim: white tint carries the tree opacity (1,1,1,opacity);
-    // opacity==1 stays 0xFFFFFFFF.
-    const uint32_t abgr = toAbgr(ayt::math::FVector4(
-        1.0f, 1.0f, 1.0f, _frame->opacityStack.back()));
-    item.abgr[0] = abgr;
-    item.abgr[1] = abgr;
-    item.abgr[2] = abgr;
-    item.abgr[3] = abgr;
-
+    const ayt::math::FVector4 white(1.0f, 1.0f, 1.0f, 1.0f);
     for (int j = 0; j < 3; ++j) {
         for (int i = 0; i < 3; ++i) {
-            item.minX = x[i];
-            item.minY = y[j];
-            item.maxX = x[i + 1];
-            item.maxY = y[j + 1];
-            item.u0   = u[i];
-            item.v0   = v[j];
-            item.u1   = u[i + 1];
-            item.v1   = v[j + 1];
-            _frame->items.push_back(item);
+            emitClippedTexturedQuad(ayt::math::FRectangle(x[i], y[j], x[i + 1], y[j + 1]),
+                                    ref->textureIdx,
+                                    ayt::math::FRectangle(u[i], v[j], u[i + 1], v[j + 1]),
+                                    white);
         }
     }
 }
@@ -969,13 +997,17 @@ void UIRenderBackend::flushColoredRects()
             const float    z    = 0.0f;
 
             frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.minY, fbH), z,
-                                             it.abgr[0], it.u0, it.v0, 0.0f, 0.0f, 0.0f, 0.0f});
+                                             it.abgr[0], it.u0, it.v0,
+                                             0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
             frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.minY, fbH), z,
-                                             it.abgr[1], it.u1, it.v0, 0.0f, 0.0f, 0.0f, 0.0f});
+                                             it.abgr[1], it.u1, it.v0,
+                                             0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
             frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.maxY, fbH), z,
-                                             it.abgr[2], it.u1, it.v1, 0.0f, 0.0f, 0.0f, 0.0f});
+                                             it.abgr[2], it.u1, it.v1,
+                                             0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
             frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.maxY, fbH), z,
-                                             it.abgr[3], it.u0, it.v1, 0.0f, 0.0f, 0.0f, 0.0f});
+                                             it.abgr[3], it.u0, it.v1,
+                                             0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
 
             frame.scratchIndices.push_back(base + 0);
             frame.scratchIndices.push_back(base + 1);
@@ -1035,14 +1067,33 @@ void UIRenderBackend::flushColoredRects()
                 const float cy = (s.shapeMinY + s.shapeMaxY) * 0.5f;
                 const float hw = (s.shapeMaxX - s.shapeMinX) * 0.5f;
                 const float hh = (s.shapeMaxY - s.shapeMinY) * 0.5f;
+                // Soft-clip rect as (center, half-extent); all-zero
+                // (chw == 0) = no clip, shader skips the seam fade.
+                float ccx = 0.0f, ccy = 0.0f, chw = 0.0f, chh = 0.0f;
+                if (s.clipMaxX > s.clipMinX && s.clipMaxY > s.clipMinY) {
+                    ccx = (s.clipMinX + s.clipMaxX) * 0.5f;
+                    ccy = (s.clipMinY + s.clipMaxY) * 0.5f;
+                    chw = (s.clipMaxX - s.clipMinX) * 0.5f;
+                    chh = (s.clipMaxY - s.clipMinY) * 0.5f;
+                }
+                // a_texcoord0 / v_pos MUST be draw-quad pixel corners
+                // (minX..maxY), not shapeMin/Max. Shape is often inset
+                // (outside stroke / shadow blur expand the draw quad);
+                // packing shape corners warps SDF space so stroke rings
+                // collapse to corner arcs and soft shadows become solid
+                // blocks. Shape silhouette stays in TexCoord1 (cx,cy,hw,hh).
                 frame.scratchVertices.push_back({toNdcX(s.minX, fbW), toNdcY(s.minY, fbH), z,
-                                                 fill, s.shapeMinX, s.shapeMinY, cx, cy, hw, hh});
+                                                 fill, s.minX, s.minY, cx, cy, hw, hh,
+                                                 ccx, ccy, chw, chh});
                 frame.scratchVertices.push_back({toNdcX(s.maxX, fbW), toNdcY(s.minY, fbH), z,
-                                                 fill, s.shapeMaxX, s.shapeMinY, cx, cy, hw, hh});
+                                                 fill, s.maxX, s.minY, cx, cy, hw, hh,
+                                                 ccx, ccy, chw, chh});
                 frame.scratchVertices.push_back({toNdcX(s.maxX, fbW), toNdcY(s.maxY, fbH), z,
-                                                 fill, s.shapeMaxX, s.shapeMaxY, cx, cy, hw, hh});
+                                                 fill, s.maxX, s.maxY, cx, cy, hw, hh,
+                                                 ccx, ccy, chw, chh});
                 frame.scratchVertices.push_back({toNdcX(s.minX, fbW), toNdcY(s.maxY, fbH), z,
-                                                 fill, s.shapeMinX, s.shapeMaxY, cx, cy, hw, hh});
+                                                 fill, s.minX, s.maxY, cx, cy, hw, hh,
+                                                 ccx, ccy, chw, chh});
                 frame.scratchIndices.push_back(base + 0);
                 frame.scratchIndices.push_back(base + 1);
                 frame.scratchIndices.push_back(base + 2);
@@ -1092,16 +1143,16 @@ void UIRenderBackend::drawTexturedQuad(const ayt::math::FRectangle& bounds, uint
     const UiVertex vertices[4] = {
         {toNdcX(bounds.minX, static_cast<float>(_width)),
          toNdcY(bounds.minY, static_cast<float>(_height)), 0.0f, abgr, 0.0f, 0.0f,
-         0.0f, 0.0f, 0.0f, 0.0f},
+         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
         {toNdcX(bounds.maxX, static_cast<float>(_width)),
          toNdcY(bounds.minY, static_cast<float>(_height)), 0.0f, abgr, 1.0f, 0.0f,
-         0.0f, 0.0f, 0.0f, 0.0f},
+         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
         {toNdcX(bounds.maxX, static_cast<float>(_width)),
          toNdcY(bounds.maxY, static_cast<float>(_height)), 0.0f, abgr, 1.0f, 1.0f,
-         0.0f, 0.0f, 0.0f, 0.0f},
+         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
         {toNdcX(bounds.minX, static_cast<float>(_width)),
          toNdcY(bounds.maxY, static_cast<float>(_height)), 0.0f, abgr, 0.0f, 1.0f,
-         0.0f, 0.0f, 0.0f, 0.0f},
+         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
     };
     const uint32_t indices[6] = {0, 1, 2, 0, 2, 3};
 
@@ -1133,15 +1184,80 @@ ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(const std::wst
         return out;
     }
 
+    // Glyph advances (px). Shaped path = HB 26.6 fixed-point; fallback =
+    // per-codepoint advance (same default advance the draw path uses).
     const std::vector<ayt::font::ShapedGlyph> shaped = atlas->shapeText(font, text);
+    const size_t n = shaped.empty() ? text.size() : shaped.size();
+    std::vector<float> advances;
+    std::vector<bool>  isSpace;
+    advances.reserve(n);
+    isSpace.reserve(n);
     if (!shaped.empty()) {
-        out.width = atlas->measureShapedWidth(shaped);
+        for (const ayt::font::ShapedGlyph& sg : shaped) {
+            advances.push_back(static_cast<float>(sg.xAdvance) / 64.0f);
+            const size_t ci = std::min<size_t>(sg.charIndex, text.size() - 1);
+            isSpace.push_back(text[ci] == L' ' || text[ci] == L'\t');
+        }
     } else {
-        out.width = font->measureText(text.c_str(), static_cast<int>(text.size()));
+        for (wchar_t ch : text) {
+            ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
+            advances.push_back((glyph != nullptr) ? static_cast<float>(glyph->metrics.advance)
+                                                  : out.height * 0.25f);
+            isSpace.push_back(ch == L' ' || ch == L'\t');
+        }
     }
 
-    // maxWidth reserved for future wrap metrics; callers still get full span.
-    AYUNREFERENCED_PARAM(maxWidth);
+    if (maxWidth <= 0.0f) {
+        // No wrap constraint: single line, full span.
+        for (float a : advances) {
+            out.width += a;
+        }
+        return out;
+    }
+
+    // Greedy word wrap (maxWidth px): break at the last space that fits;
+    // a word wider than maxWidth hard-breaks per glyph (CJK has no
+    // spaces, so it degrades to per-glyph breaking naturally).
+    const float lh = out.height > 0.0f ? out.height : static_cast<float>(fontSize);
+    std::vector<float> prefix(n + 1, 0.0f);
+    for (size_t i = 0; i < n; ++i) {
+        prefix[i + 1] = prefix[i] + advances[i];
+    }
+
+    int    lines     = 1;
+    float  lineW     = 0.0f;
+    float  maxLineW  = 0.0f;
+    size_t lineStart = 0;
+    size_t lastBreak = n;  // index of the last space that fit in the line; n = none
+    for (size_t i = 0; i < n; ++i) {
+        const float w = advances[i];
+        if (lineW + w <= maxWidth || lineW <= 0.0f) {
+            lineW += w;
+            if (isSpace[i]) {
+                lastBreak = i;
+            }
+        } else {
+            // Line full. Break after the last fitting space when one is in
+            // this line; the space itself stays on the old line, so the new
+            // line's width = glyphs (lastBreak+1 .. i]. Else hard-break.
+            if (lastBreak != n && lastBreak >= lineStart) {
+                lineW = prefix[i + 1] - prefix[lastBreak + 1];
+                lineStart = lastBreak + 1;
+                lastBreak = n;
+            } else {
+                lineW     = w;
+                lineStart = i;
+            }
+            if (isSpace[i]) {
+                lastBreak = i;
+            }
+            ++lines;
+        }
+        maxLineW = std::max(maxLineW, lineW);
+    }
+
+    out.width  = maxLineW;
+    out.height = static_cast<float>(lines) * lh;
     return out;
 }
 
@@ -1172,10 +1288,26 @@ ayt::font::FontHandle UIRenderBackend::getFontHandle(const wchar_t* /*familyName
 void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::wstring& text,
                                int fontSize, const ayt::math::FVector4& color)
 {
+    // Style route: default style keeps the legacy single-line behavior
+    // (Align::Left + VAlign::Middle == the old centered baseline).
+    ayt::ui::IRenderBackend::TextStyle style;
+    style.color = color;
+    drawText(bounds, text, fontSize, style);
+}
+
+void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::wstring& text,
+                               int fontSize, const ayt::ui::IRenderBackend::TextStyle& style)
+{
     if (!_initialized || text.empty() || _width < 1 || _height < 1 || _gpu == nullptr
         || _adapter == nullptr || _fontAtlas == nullptr) {
         return;
     }
+
+    // outline / shadow / letterSpacing / lineSpacing: documented as
+    // not-yet-implemented (the interface default previously dropped them
+    // too). This implementation honors style.color + style.align +
+    // style.valign. Single-line only — callers wrap via measureText and
+    // draw per line.
 
     ayt::math::FRectangle clippedBounds = bounds;
     if (!clipRect(clippedBounds)) {
@@ -1189,7 +1321,7 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
 
     ayt::font::IFont* font = _fontAtlas->acquireFont(fontSize);
     if (font == nullptr) {
-        drawRect(bounds, color);
+        drawRect(bounds, style.color);
         return;
     }
 
@@ -1207,12 +1339,30 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     const uint16_t atlasIdx = _fontAtlas->atlasTextureIdx();
 
     const ayt::font::FontMetrics& metrics = font->getMetrics();
+    const float boundsW = bounds.maxX - bounds.minX;
     const float boundsH = bounds.maxY - bounds.minY;
-    float cursorX       = bounds.minX;
-    const float baselineY = bounds.minY + (boundsH - metrics.lineHeight) * 0.5f + metrics.ascent;
+
+    // Full-line width first so horizontal alignment can position the
+    // whole line (same advance math as measureText).
+    float lineWidth = 0.0f;
+    if (useShaped) {
+        for (const ayt::font::ShapedGlyph& sg : shaped) {
+            lineWidth += static_cast<float>(sg.xAdvance) / 64.0f;
+        }
+    } else {
+        for (wchar_t ch : text) {
+            ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
+            lineWidth += (glyph != nullptr) ? static_cast<float>(glyph->metrics.advance)
+                                            : metrics.lineHeight * 0.25f;
+        }
+    }
+
+    float cursorX = uiTextAlignX(style.align, bounds.minX, boundsW, lineWidth);
+    const float baselineY =
+        uiTextBaselineY(style.valign, bounds.minY, boundsH, metrics.lineHeight, metrics.ascent);
 
     // PR-anim: glyph color fades with the tree.
-    ayt::math::FVector4 glyphColor = color;
+    ayt::math::FVector4 glyphColor = style.color;
     glyphColor.w *= _frame->opacityStack.back();
     const uint32_t abgr = toAbgr(glyphColor);
     const float    atlasW = static_cast<float>(detail::BgfxFontAtlas::kAtlasWidth);
