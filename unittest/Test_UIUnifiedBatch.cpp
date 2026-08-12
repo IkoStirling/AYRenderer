@@ -184,4 +184,124 @@ TEST_CASE(ui_unified_batch_clip_culls)
     CHECK(h.ui.getDrawCallCount() == 0);
 }
 
+// Batch knife: consecutive SDF items with identical params (radius /
+// stroke / shadow — shape rect and fill color are per-vertex now) merge
+// into one submission. Non-contiguous or param-differing items keep
+// their own calls (z-order = array order, never re-sorted).
+
+TEST_CASE(ui_sdf_batch_same_params_merge)
+{
+    UiHarness h;
+    CHECK(h.init());
+
+    h.ui.beginFrame();
+    for (int i = 0; i < 5; ++i) {
+        const float x = 20.0f + static_cast<float>(i) * 60.0f;
+        h.ui.drawRoundedRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                             ayt::math::FVector4(0.3f, 0.5f, 0.9f, 1.0f), 6.0f);
+    }
+    h.ui.endFrame();
+    CHECK(h.ui.getDrawCallCount() == 1);
+}
+
+TEST_CASE(ui_sdf_batch_radius_breaks_run)
+{
+    UiHarness h;
+    CHECK(h.init());
+
+    h.ui.beginFrame();
+    for (int i = 0; i < 3; ++i) {
+        const float x = 20.0f + static_cast<float>(i) * 60.0f;
+        h.ui.drawRoundedRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                             ayt::math::FVector4(0.3f, 0.5f, 0.9f, 1.0f), 6.0f);
+    }
+    for (int i = 0; i < 2; ++i) {
+        const float x = 200.0f + static_cast<float>(i) * 60.0f;
+        h.ui.drawRoundedRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                             ayt::math::FVector4(0.3f, 0.5f, 0.9f, 1.0f), 12.0f);
+    }
+    h.ui.endFrame();
+    CHECK(h.ui.getDrawCallCount() == 2);
+}
+
+TEST_CASE(ui_sdf_batch_different_fill_colors_merge)
+{
+    UiHarness h;
+    CHECK(h.init());
+
+    // Fill color rides per-vertex — same-shape different-color blocks
+    // (palette swatches, status dots) share one submission.
+    h.ui.beginFrame();
+    const ayt::math::FVector4 colors[4] = {
+        ayt::math::FVector4(1.0f, 0.2f, 0.2f, 1.0f), ayt::math::FVector4(0.2f, 1.0f, 0.2f, 1.0f),
+        ayt::math::FVector4(0.2f, 0.2f, 1.0f, 1.0f), ayt::math::FVector4(1.0f, 1.0f, 0.2f, 1.0f)};
+    for (int i = 0; i < 4; ++i) {
+        const float x = 20.0f + static_cast<float>(i) * 60.0f;
+        h.ui.drawRoundedRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f), colors[i], 6.0f);
+    }
+    h.ui.endFrame();
+    CHECK(h.ui.getDrawCallCount() == 1);
+}
+
+TEST_CASE(ui_sdf_batch_blend_mode_breaks_run)
+{
+    UiHarness h;
+    CHECK(h.init());
+
+    h.ui.beginFrame();
+    for (int i = 0; i < 2; ++i) {
+        const float x = 20.0f + static_cast<float>(i) * 60.0f;
+        h.ui.drawRoundedRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                             ayt::math::FVector4(0.3f, 0.5f, 0.9f, 1.0f), 6.0f);
+    }
+    h.ui.setBlendMode(ayt::ui::BlendMode::Additive);
+    for (int i = 0; i < 2; ++i) {
+        const float x = 200.0f + static_cast<float>(i) * 60.0f;
+        h.ui.drawRoundedRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                             ayt::math::FVector4(0.3f, 0.5f, 0.9f, 1.0f), 6.0f);
+    }
+    h.ui.endFrame();
+    CHECK(h.ui.getDrawCallCount() == 2);
+}
+
+TEST_CASE(ui_sdf_batch_fill_stroke_do_not_merge)
+{
+    UiHarness h;
+    CHECK(h.init());
+
+    // Same radius but fill vs stroke differ in strokeWidth — separate runs.
+    h.ui.beginFrame();
+    for (int i = 0; i < 3; ++i) {
+        const float x = 20.0f + static_cast<float>(i) * 60.0f;
+        h.ui.drawRoundedRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                             ayt::math::FVector4(0.3f, 0.5f, 0.9f, 1.0f), 6.0f);
+    }
+    for (int i = 0; i < 3; ++i) {
+        const float x = 200.0f + static_cast<float>(i) * 60.0f;
+        h.ui.drawBorderRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                            ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f), 1.0f, 6.0f);
+    }
+    h.ui.endFrame();
+    CHECK(h.ui.getDrawCallCount() == 2);
+}
+
+TEST_CASE(ui_sdf_batch_noncontiguous_not_merged)
+{
+    UiHarness h;
+    CHECK(h.init());
+
+    // Identical params but interleaved with a different item: z-order
+    // (array order) must win — runs never jump across items.
+    h.ui.beginFrame();
+    for (int i = 0; i < 4; ++i) {
+        const float x = 20.0f + static_cast<float>(i) * 60.0f;
+        h.ui.drawRoundedRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                             ayt::math::FVector4(0.3f, 0.5f, 0.9f, 1.0f), 6.0f);
+        h.ui.drawBorderRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                            ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f), 1.0f, 6.0f);
+    }
+    h.ui.endFrame();
+    CHECK(h.ui.getDrawCallCount() == 8);
+}
+
 TEST_SUITE_END

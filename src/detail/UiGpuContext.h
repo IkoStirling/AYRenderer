@@ -61,9 +61,9 @@ public:
     // FVector2 keep the style of the IRenderBackend interface and give
     // whole-value assignment (raw float[] members can't be assigned).
     struct SdfParams {
-        ayt::math::FVector4 rect;          // shape minX minY maxX maxY (pixels)
-                                           // — may differ from the draw quad
-                                           // (shadows: content; borders: outer)
+        // Batch knife: the shape rect is NOT here — it rides per-vertex
+        // (UiVertex shapeCx/Cy/HalfW/HalfH) so identical-param SDF items
+        // share one submission; memcmp of this struct is the run key.
         ayt::math::FVector4 radius;        // rTL rTR rBR rBL (CPU-clamped)
         ayt::math::FVector4 strokeColor;   // a==0 → no stroke
         float strokeWidth = 0.0f;          // ring thickness, px
@@ -86,11 +86,10 @@ private:
     ayt::shader::ShaderResource _shader;
     ayt::shader::BindingId      _texColorBinding = ayt::shader::InvalidBinding;
 
-    // P2: SDF program + its 6 uniform bindings (resolved at initialize;
+    // P2: SDF program + its 5 uniform bindings (resolved at initialize;
     // any Invalid binding fails init so tests go red on shader drift).
     ayt::shader::ShaderResource _sdfShader;
     ayt::shader::BindingId      _sdfTexBinding    = ayt::shader::InvalidBinding;
-    ayt::shader::BindingId      _sdfRectBinding   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _sdfRadiusBinding = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _sdfStrokeBinding = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _sdfStrokeWidBind = ayt::shader::InvalidBinding;

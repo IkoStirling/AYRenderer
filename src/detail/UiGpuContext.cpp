@@ -119,6 +119,8 @@ bgfx::VertexLayout uiVertexLayout()
 
         .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
 
+        .add(bgfx::Attrib::TexCoord1, 4, bgfx::AttribType::Float)
+
         .end();
 
     return layout;
@@ -264,22 +266,27 @@ void submitMesh(uint8_t viewId, BGFXAdapter& adapter, shader::ShaderResource& sh
 
 
 
-// P2 — SDF rounded-rect shader pair. Vertices carry pixel-space corners
-// in a_texcoord0 (UIRenderBackend flush writes min/max); u_rect is the
-// SDF *shape* (may be inset relative to the draw quad for shadows).
+// P2 — SDF rounded-rect shader pair. Vertices carry pixel-space shape
+// corners in a_texcoord0 (the *content* rect — may be inset relative to
+// the draw quad for shadows/outside strokes) and the shape center +
+// half-extent in a_texcoord1. Batch knife: u_rect is gone — identical
+// SDF params (memcmp of SdfParams) now merge into one submission while
+// position/fill still vary per vertex.
 const char* kVaryingDefUiSdf = R"(
 vec4 v_color0    : COLOR0    = vec4(1.0, 0.0, 0.0, 1.0);
 vec2 v_texcoord0 : TEXCOORD0 = vec2(0.0, 0.0);
 vec2 v_pos       : TEXCOORD1 = vec2(0.0, 0.0);
+vec4 v_shape     : TEXCOORD2 = vec4(0.0, 0.0, 0.0, 0.0);
 
 vec3 a_position  : POSITION;
 vec4 a_color0    : COLOR0;
 vec2 a_texcoord0 : TEXCOORD0;
+vec4 a_texcoord1 : TEXCOORD1;
 )";
 
 const char* kVsUiSdf = R"(
-$input a_position, a_color0, a_texcoord0
-$output v_color0, v_pos
+$input a_position, a_color0, a_texcoord0, a_texcoord1
+$output v_color0, v_pos, v_shape
 
 #include <bgfx_shader.sh>
 
@@ -290,17 +297,18 @@ void main()
     // Pixel position across the submitted quad (NOT NDC→unit remap —
     // a_position is already screen NDC of an arbitrary UI rect).
     v_pos = a_texcoord0;
+    // Shape center + half-extent, constant across the quad.
+    v_shape = a_texcoord1;
 }
 )";
 
 const char* kFsUiSdf = R"(
-$input v_color0, v_pos
+$input v_color0, v_pos, v_shape
 
 #include <bgfx_shader.sh>
 
 SAMPLER2D(s_texColor, 0);
 
-uniform vec4 u_rect;
 uniform vec4 u_radius;
 uniform vec4 u_stroke;
 uniform vec4 u_strokeWidth;
@@ -335,13 +343,15 @@ float coverPx(float d, float aaPx)
 
 void main()
 {
-    vec2 center = (u_rect.xy + u_rect.zw) * 0.5;
-    vec2 halfB  = (u_rect.zw - u_rect.xy) * 0.5;
+    // Shape geometry arrives per-vertex (a_texcoord1) instead of a
+    // uniform, so same-param items batch into one submission.
+    vec2 center = v_shape.xy;
+    vec2 halfB  = v_shape.zw;
     vec2 p      = v_pos - center;
 
     vec4 col = vec4(0.0, 0.0, 0.0, 0.0);
 
-    // Shadow first (behind fill): shape = u_rect, shifted by offset.
+    // Shadow first (behind fill): shape = v_shape, shifted by offset.
     // Soft falloff width = blur (u_shadowOffset.z), not 1px fwidth —
     // otherwise blur 4 vs 12 look identical solid blobs.
     if (u_shadow.a > 0.0) {
@@ -480,13 +490,12 @@ bool UiGpuContext::initialize(shader::ShaderResourcePool& shaderPool, BGFXAdapte
     std::fprintf(stderr, "[UiGpuContext] UI SDF shader OK (editor_ui_sdf_cw = constant-width stroke)\n");
 
     _sdfTexBinding    = _sdfShader.getTextureBinding("s_texColor");
-    _sdfRectBinding   = _sdfShader.getUniformBinding("u_rect");
     _sdfRadiusBinding = _sdfShader.getUniformBinding("u_radius");
     _sdfStrokeBinding = _sdfShader.getUniformBinding("u_stroke");
     _sdfStrokeWidBind = _sdfShader.getUniformBinding("u_strokeWidth");
     _sdfShadowBinding = _sdfShader.getUniformBinding("u_shadow");
     _sdfShadowOffBind = _sdfShader.getUniformBinding("u_shadowOffset");
-    if (_sdfTexBinding == shader::InvalidBinding || _sdfRectBinding == shader::InvalidBinding
+    if (_sdfTexBinding == shader::InvalidBinding
         || _sdfRadiusBinding == shader::InvalidBinding || _sdfStrokeBinding == shader::InvalidBinding
         || _sdfStrokeWidBind == shader::InvalidBinding || _sdfShadowBinding == shader::InvalidBinding
         || _sdfShadowOffBind == shader::InvalidBinding) {
@@ -541,8 +550,6 @@ void UiGpuContext::shutdown(shader::ShaderResourcePool& shaderPool, BGFXAdapter&
     _texColorBinding   = shader::InvalidBinding;
 
     _sdfTexBinding     = shader::InvalidBinding;
-
-    _sdfRectBinding    = shader::InvalidBinding;
 
     _sdfRadiusBinding  = shader::InvalidBinding;
 
@@ -638,10 +645,12 @@ void UiGpuContext::submitTexturedQuads(uint8_t viewId, BGFXAdapter& adapter, uin
 
 
 
-// P2 — one quad per SDF item; all params ride as standalone vec4 uniforms
-// (bgfx has no uniform arrays — see SdfParams in UiGpuContext.h). Same
-// transient/fallback double path as submitMesh; the fallback path builds
-// and destroys VB/IB per call (landmine #11 — acceptable at UI scale).
+// P2 — SDF quads; identical-param runs submit together (batch knife):
+// uniforms are set once per run, quads ride one transient buffer. The
+// shape rect itself is per-vertex, so position/fill still vary inside
+// the run. Same transient/fallback double path as submitMesh; the
+// fallback path builds and destroys VB/IB per call (landmine #11 —
+// acceptable at UI scale).
 void UiGpuContext::submitSdfQuads(uint8_t viewId, BGFXAdapter& adapter, uint64_t state,
 
                                   const void* vertices, uint32_t vertexCount,
@@ -665,7 +674,6 @@ void UiGpuContext::submitSdfQuads(uint8_t viewId, BGFXAdapter& adapter, uint64_t
     const float strokeWid[4] = {params.strokeWidth, params.strokeInset, 0.0f, 0.0f};
     const float shadowOff[4] = {params.shadowOffset.x, params.shadowOffset.y,
                                 params.shadowBlur, 0.0f};
-    _sdfShader.setUniform(_sdfRectBinding, &params.rect, sizeof(params.rect));
     _sdfShader.setUniform(_sdfRadiusBinding, &params.radius, sizeof(params.radius));
     _sdfShader.setUniform(_sdfStrokeBinding, &params.strokeColor, sizeof(params.strokeColor));
     _sdfShader.setUniform(_sdfStrokeWidBind, strokeWid, sizeof(strokeWid));

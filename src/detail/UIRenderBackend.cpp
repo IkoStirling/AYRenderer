@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <unordered_map>
 #include <vector>
 
@@ -27,6 +28,13 @@ struct UiVertex {
     uint32_t abgr;
     float    u;
     float    v;
+    // SDF only: shape center + half-extent (replaces the u_rect uniform so
+    // same-param SDF items can share a submission). Flat/text vertices
+    // leave these 0 — their shaders never read TexCoord1.
+    float    shapeCx;
+    float    shapeCy;
+    float    shapeHalfW;
+    float    shapeHalfH;
 };
 
 // P0 unified batch: every draw entry becomes one UiItem appended to
@@ -48,7 +56,27 @@ struct UiItem {
     float      u1          = 1.0f;
     float      v1          = 1.0f;
     detail::UiGpuContext::SdfParams sdf;    // P2: kind==Sdf only; quad bounds
+    // Shape silhouette (Sdf only): the *content* rect. Differs from the
+    // draw quad (minX..maxY, expanded by shadow/outside-stroke/blur).
+    // Baked into vertices as (center, half-extent) at flush so SDF items
+    // with identical sdf params can share one submission (run merging).
+    float      shapeMinX    = 0.0f;
+    float      shapeMinY    = 0.0f;
+    float      shapeMaxX    = 0.0f;
+    float      shapeMaxY    = 0.0f;
 };                                          //     (minX..maxY) already expanded
+
+// SdfParams holds FVector4 members (16B-aligned f128) → trailing padding;
+// memcmp would compare uninitialized tail bytes and never match. Compare
+// the value fields only (the run-merge key for SDF batching).
+bool sdfParamsEqual(const detail::UiGpuContext::SdfParams& a,
+                    const detail::UiGpuContext::SdfParams& b)
+{
+    return a.radius == b.radius && a.strokeColor == b.strokeColor
+        && a.strokeWidth == b.strokeWidth && a.strokeInset == b.strokeInset
+        && a.shadowColor == b.shadowColor && a.shadowOffset == b.shadowOffset
+        && a.shadowBlur == b.shadowBlur;
+}
 
 uint32_t toAbgr(const ayt::math::FVector4& color)
 {
@@ -556,8 +584,10 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
     item.minY  = drawQuad.minY;
     item.maxX  = drawQuad.maxX;
     item.maxY  = drawQuad.maxY;
-    item.sdf.rect        = ayt::math::FVector4(bounds.minX, bounds.minY,
-                                               bounds.maxX, bounds.maxY);
+    item.shapeMinX = bounds.minX;
+    item.shapeMinY = bounds.minY;
+    item.shapeMaxX = bounds.maxX;
+    item.shapeMaxY = bounds.maxY;
     item.sdf.radius      = ayt::math::FVector4(r, r, r, r);
     // PR-anim: stroke fades with the tree (shader treats a=0 as no stroke).
     ayt::math::FVector4 stroke = color;
@@ -615,8 +645,10 @@ void UIRenderBackend::drawRoundedRect(const ayt::math::FRectangle& bounds,
     item.abgr[2] = fill;
     item.abgr[3] = fill;
     // Original silhouette — do not reshape to the clipped remnant.
-    item.sdf.rect   = ayt::math::FVector4(bounds.minX, bounds.minY,
-                                          bounds.maxX, bounds.maxY);
+    item.shapeMinX = bounds.minX;
+    item.shapeMinY = bounds.minY;
+    item.shapeMaxX = bounds.maxX;
+    item.shapeMaxY = bounds.maxY;
     item.sdf.radius = ayt::math::FVector4(r, r, r, r);
     _frame->items.push_back(item);
 }
@@ -626,8 +658,9 @@ void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
 {
     // P2: single SDF item; blur softens coverage over `blur` pixels in the
     // shader (d/blur), not by expanding the shape rect. The draw quad grows
-    // by |offset| + blur so the falloff is not clipped. sdf.rect stays the
-    // *content* bounds — using the expanded outer made solid black blobs.
+    // by |offset| + blur so the falloff is not clipped. The shape fields
+    // stay the *content* bounds — using the expanded outer made solid
+    // black blobs.
     if (shadow.color.w <= 0.0f) {
         return;
     }
@@ -658,8 +691,10 @@ void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
     item.minY  = drawQuad.minY;
     item.maxX  = drawQuad.maxX;
     item.maxY  = drawQuad.maxY;
-    item.sdf.rect         = ayt::math::FVector4(bounds.minX, bounds.minY,
-                                                bounds.maxX, bounds.maxY);
+    item.shapeMinX = bounds.minX;
+    item.shapeMinY = bounds.minY;
+    item.shapeMaxX = bounds.maxX;
+    item.shapeMaxY = bounds.maxY;
     item.sdf.radius       = ayt::math::FVector4(r, r, r, r);
     // PR-anim: shadow fades with the tree (a=0 = no shadow in shader).
     ayt::math::FVector4 shadowColor = shadow.color;
@@ -934,13 +969,13 @@ void UIRenderBackend::flushColoredRects()
             const float    z    = 0.0f;
 
             frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.minY, fbH), z,
-                                             it.abgr[0], it.u0, it.v0});
+                                             it.abgr[0], it.u0, it.v0, 0.0f, 0.0f, 0.0f, 0.0f});
             frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.minY, fbH), z,
-                                             it.abgr[1], it.u1, it.v0});
+                                             it.abgr[1], it.u1, it.v0, 0.0f, 0.0f, 0.0f, 0.0f});
             frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.maxY, fbH), z,
-                                             it.abgr[2], it.u1, it.v1});
+                                             it.abgr[2], it.u1, it.v1, 0.0f, 0.0f, 0.0f, 0.0f});
             frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.maxY, fbH), z,
-                                             it.abgr[3], it.u0, it.v1});
+                                             it.abgr[3], it.u0, it.v1, 0.0f, 0.0f, 0.0f, 0.0f});
 
             frame.scratchIndices.push_back(base + 0);
             frame.scratchIndices.push_back(base + 1);
@@ -972,33 +1007,49 @@ void UIRenderBackend::flushColoredRects()
     while (i < n) {
         const UiItem& it = frame.items[i];
         if (it.kind == UiItemKind::Sdf) {
-            // P2: SDF items submit individually — the quad bounds already
-            // include stroke/shadow expansion, all params ride via uniforms.
-            // Fill is transparent (v_color0 = 0): the SDF path paints only
-            // what its effect uniforms enable.
+            // Batch knife: consecutive SDF items with IDENTICAL params
+            // (shape rect rides per-vertex now, so position/color vary
+            // freely within a run) and same blend state merge into one
+            // submission. Per-item uniforms would force one call per
+            // quad; same-skin buttons/panels collapse to a single call.
+            // Never re-sort (z-order = array order).
+            size_t end = i + 1;
+            while (end < n && frame.items[end].kind == UiItemKind::Sdf
+                   && frame.items[end].state == it.state
+                   && sdfParamsEqual(frame.items[end].sdf, it.sdf)) {
+                ++end;
+            }
+
             frame.scratchVertices.clear();
             frame.scratchIndices.clear();
-            frame.scratchVertices.reserve(4u);
-            frame.scratchIndices.reserve(6u);
-            const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
-            const float    z    = 0.0f;
+            frame.scratchVertices.reserve((end - i) * 4u);
+            frame.scratchIndices.reserve((end - i) * 6u);
+            const float z = 0.0f;
 
-            // Fill from abgr[0] (drawRoundedRect); borders leave it 0.
-            const uint32_t fill = it.abgr[0];
-            frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.minY, fbH), z,
-                                             fill, it.minX, it.minY});
-            frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.minY, fbH), z,
-                                             fill, it.maxX, it.minY});
-            frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.maxY, fbH), z,
-                                             fill, it.maxX, it.maxY});
-            frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.maxY, fbH), z,
-                                             fill, it.minX, it.maxY});
-            frame.scratchIndices.push_back(base + 0);
-            frame.scratchIndices.push_back(base + 1);
-            frame.scratchIndices.push_back(base + 2);
-            frame.scratchIndices.push_back(base + 0);
-            frame.scratchIndices.push_back(base + 2);
-            frame.scratchIndices.push_back(base + 3);
+            for (size_t k = i; k < end; ++k) {
+                const UiItem& s = frame.items[k];
+                const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
+                // Fill from abgr[0] (drawRoundedRect); borders leave it 0.
+                const uint32_t fill = s.abgr[0];
+                const float cx = (s.shapeMinX + s.shapeMaxX) * 0.5f;
+                const float cy = (s.shapeMinY + s.shapeMaxY) * 0.5f;
+                const float hw = (s.shapeMaxX - s.shapeMinX) * 0.5f;
+                const float hh = (s.shapeMaxY - s.shapeMinY) * 0.5f;
+                frame.scratchVertices.push_back({toNdcX(s.minX, fbW), toNdcY(s.minY, fbH), z,
+                                                 fill, s.shapeMinX, s.shapeMinY, cx, cy, hw, hh});
+                frame.scratchVertices.push_back({toNdcX(s.maxX, fbW), toNdcY(s.minY, fbH), z,
+                                                 fill, s.shapeMaxX, s.shapeMinY, cx, cy, hw, hh});
+                frame.scratchVertices.push_back({toNdcX(s.maxX, fbW), toNdcY(s.maxY, fbH), z,
+                                                 fill, s.shapeMaxX, s.shapeMaxY, cx, cy, hw, hh});
+                frame.scratchVertices.push_back({toNdcX(s.minX, fbW), toNdcY(s.maxY, fbH), z,
+                                                 fill, s.shapeMinX, s.shapeMaxY, cx, cy, hw, hh});
+                frame.scratchIndices.push_back(base + 0);
+                frame.scratchIndices.push_back(base + 1);
+                frame.scratchIndices.push_back(base + 2);
+                frame.scratchIndices.push_back(base + 0);
+                frame.scratchIndices.push_back(base + 2);
+                frame.scratchIndices.push_back(base + 3);
+            }
 
             _gpu->submitSdfQuads(kViewId, *_adapter, it.state,
                                  frame.scratchVertices.data(),
@@ -1007,7 +1058,7 @@ void UIRenderBackend::flushColoredRects()
                                  static_cast<uint32_t>(frame.scratchIndices.size()),
                                  it.sdf);
             ++_drawCalls;
-            ++i;
+            i = end;
             continue;
         }
         size_t end = i + 1;
@@ -1040,13 +1091,17 @@ void UIRenderBackend::drawTexturedQuad(const ayt::math::FRectangle& bounds, uint
     const uint32_t abgr = toAbgr(tint);
     const UiVertex vertices[4] = {
         {toNdcX(bounds.minX, static_cast<float>(_width)),
-         toNdcY(bounds.minY, static_cast<float>(_height)), 0.0f, abgr, 0.0f, 0.0f},
+         toNdcY(bounds.minY, static_cast<float>(_height)), 0.0f, abgr, 0.0f, 0.0f,
+         0.0f, 0.0f, 0.0f, 0.0f},
         {toNdcX(bounds.maxX, static_cast<float>(_width)),
-         toNdcY(bounds.minY, static_cast<float>(_height)), 0.0f, abgr, 1.0f, 0.0f},
+         toNdcY(bounds.minY, static_cast<float>(_height)), 0.0f, abgr, 1.0f, 0.0f,
+         0.0f, 0.0f, 0.0f, 0.0f},
         {toNdcX(bounds.maxX, static_cast<float>(_width)),
-         toNdcY(bounds.maxY, static_cast<float>(_height)), 0.0f, abgr, 1.0f, 1.0f},
+         toNdcY(bounds.maxY, static_cast<float>(_height)), 0.0f, abgr, 1.0f, 1.0f,
+         0.0f, 0.0f, 0.0f, 0.0f},
         {toNdcX(bounds.minX, static_cast<float>(_width)),
-         toNdcY(bounds.maxY, static_cast<float>(_height)), 0.0f, abgr, 0.0f, 1.0f},
+         toNdcY(bounds.maxY, static_cast<float>(_height)), 0.0f, abgr, 0.0f, 1.0f,
+         0.0f, 0.0f, 0.0f, 0.0f},
     };
     const uint32_t indices[6] = {0, 1, 2, 0, 2, 3};
 
