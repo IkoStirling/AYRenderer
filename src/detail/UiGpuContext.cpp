@@ -20,7 +20,6 @@
 
 #include <cstdio>
 #include <cstring>
-#include <vector>
 
 
 
@@ -265,10 +264,9 @@ void submitMesh(uint8_t viewId, BGFXAdapter& adapter, shader::ShaderResource& sh
 
 
 
-// P2 — SDF rounded-rect shader pair. Same vertex layout as the flat
-// shader; v_pos is computed in the VS from a_position (NDC) + u_rect
-// (pixel rect), so no viewport uniform is needed. All params ride as
-// standalone vec4 uniforms (bgfx has no uniform arrays).
+// P2 — SDF rounded-rect shader pair. Vertices carry pixel-space corners
+// in a_texcoord0 (UIRenderBackend flush writes min/max); u_rect is the
+// SDF *shape* (may be inset relative to the draw quad for shadows).
 const char* kVaryingDefUiSdf = R"(
 vec4 v_color0    : COLOR0    = vec4(1.0, 0.0, 0.0, 1.0);
 vec2 v_texcoord0 : TEXCOORD0 = vec2(0.0, 0.0);
@@ -285,14 +283,13 @@ $output v_color0, v_pos
 
 #include <bgfx_shader.sh>
 
-uniform vec4 u_rect;
-
 void main()
 {
     gl_Position = vec4(a_position, 1.0);
     v_color0 = a_color0;
-    // NDC (-1..1) → pixel space via u_rect.
-    v_pos = mix(u_rect.xy, u_rect.zw, a_position.xy * 0.5 + 0.5);
+    // Pixel position across the submitted quad (NOT NDC→unit remap —
+    // a_position is already screen NDC of an arbitrary UI rect).
+    v_pos = a_texcoord0;
 }
 )";
 
@@ -323,10 +320,17 @@ float sdRoundRect(vec2 p, vec2 b, vec4 r)
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rSel;
 }
 
-// 1px-width anti-aliased coverage (d in pixels, same scale as fwidth).
+// Anti-aliased coverage. Prefer a *fixed* pixel width for strokes —
+// fwidth(d) balloons at curved corners (∂d/∂x and ∂d/∂y both nonzero),
+// so the ring thins/fades relative to straight edges.
 float cover(float d)
 {
     return clamp(0.5 - d / fwidth(d), 0.0, 1.0);
+}
+
+float coverPx(float d, float aaPx)
+{
+    return clamp(0.5 - d / max(aaPx, 1e-4), 0.0, 1.0);
 }
 
 void main()
@@ -337,11 +341,13 @@ void main()
 
     vec4 col = vec4(0.0, 0.0, 0.0, 0.0);
 
-    // Shadow first (behind fill): rect offset by u_shadowOffset, radius
-    // expanded by blur — soft shadow approximation. Straight alpha.
+    // Shadow first (behind fill): shape = u_rect, shifted by offset.
+    // Soft falloff width = blur (u_shadowOffset.z), not 1px fwidth —
+    // otherwise blur 4 vs 12 look identical solid blobs.
     if (u_shadow.a > 0.0) {
-        float cov = cover(sdRoundRect(p - u_shadowOffset.xy, halfB,
-                                      u_radius + u_shadowOffset.zzzz));
+        float blur = max(u_shadowOffset.z, 0.001);
+        float d = sdRoundRect(p - u_shadowOffset.xy, halfB, u_radius);
+        float cov = clamp(0.5 - d / blur, 0.0, 1.0);
         col.rgb += u_shadow.rgb * cov;
         col.a   += u_shadow.a   * cov;
     }
@@ -353,13 +359,15 @@ void main()
         col.a   += v_color0.a   * cov;
     }
 
-    // Stroke ring |d + inset| < w/2, centered at d = -inset. Positive
-    // inset (Outside stroke) centers the ring half a width beyond the
-    // rect edge — d here is measured in the quad's space, where the true
-    // rect edge sits at d = -w (the quad expands w beyond it).
+    // Outside stroke of width w: band where content SDF d ∈ [0, w].
+    // This is the Euclidean offset curve — constant pixel width on
+    // straight edges AND corners (unlike expanding the rect while
+    // keeping the same radius, which thins the corners).
+    // u_strokeWidth = (w, unused, …); inset unused for stroke path.
     if (u_stroke.a > 0.0) {
-        float dStroke = sdRoundRect(p, halfB, u_radius);
-        float ring = cover(abs(dStroke + u_strokeWidth.y) - u_strokeWidth.x * 0.5);
+        float d = sdRoundRect(p, halfB, u_radius);
+        float w = u_strokeWidth.x;
+        float ring = coverPx(abs(d - w * 0.5) - w * 0.5, 1.0);
         col.rgb += u_stroke.rgb * ring;
         col.a   += u_stroke.a   * ring;
     }
@@ -457,7 +465,7 @@ bool UiGpuContext::initialize(shader::ShaderResourcePool& shaderPool, BGFXAdapte
     // P2 — SDF program for rounded-rect borders/shadows. Same pool/cacheKey
     // pattern as the flat shader; any missing binding fails init so callers
     // (and tests) see initialize() == false instead of a silently wrong shader.
-    _sdfShader = shaderPool.acquireFromBgfxSc(kVsUiSdf, kFsUiSdf, kVaryingDefUiSdf, "editor_ui_sdf");
+    _sdfShader = shaderPool.acquireFromBgfxSc(kVsUiSdf, kFsUiSdf, kVaryingDefUiSdf, "editor_ui_sdf_cw");
     if (!_sdfShader.isValid()) {
         const auto& errors = shaderPool.lastCompileErrors();
         std::fprintf(stderr, "[UiGpuContext] UI SDF shader acquire failed\n");
@@ -469,6 +477,7 @@ bool UiGpuContext::initialize(shader::ShaderResourcePool& shaderPool, BGFXAdapte
         _shader.reset();
         return false;
     }
+    std::fprintf(stderr, "[UiGpuContext] UI SDF shader OK (editor_ui_sdf_cw = constant-width stroke)\n");
 
     _sdfTexBinding    = _sdfShader.getTextureBinding("s_texColor");
     _sdfRectBinding   = _sdfShader.getUniformBinding("u_rect");
@@ -817,28 +826,14 @@ uint16_t UiGpuContext::uploadUiTexture(BGFXAdapter& adapter, uint16_t width, uin
         return kInvalidIdx;
     }
 
-    // BGRA input (Windows bitmap convention) → RGBA storage: the flat
-    // shader samples tex.rgb as RGBA, and on D3D11 a BGRA8 texture's tex2D
-    // returns (B,G,R,A) — sampling it as .rgb silently swaps R/B (white
-    // text glyphs masked this; colored art shows blue→brown).
-    std::vector<uint8_t> rgba(byteSize);
-    {
-        const uint8_t* src = static_cast<const uint8_t*>(bgraPixels);
-        uint8_t*       dst = rgba.data();
-        for (uint32_t i = 0; i < byteSize; i += 4u) {
-            dst[i + 0] = src[i + 2];  // R
-            dst[i + 1] = src[i + 1];  // G
-            dst[i + 2] = src[i + 0];  // B
-            dst[i + 3] = src[i + 3];  // A
-        }
-    }
-
-    // Linear filtering (no POINT sampler bits) + clamp wrap — UI textures
-    // are stretched art; clamp stops edge texels bleeding across seams.
+    // BGRA input, BGRA8 storage: bgfx interprets the byte order natively, so
+    // pass pixels through unchanged (a byte-swap here would be a display-level
+    // no-op). Clamp wrap: stretched art must not bleed edge texels across
+    // seams (9-patch corners stay clean).
     const bgfx::TextureHandle handle = bgfx::createTexture2D(
-        width, height, false, 1, bgfx::TextureFormat::RGBA8,
+        width, height, false, 1, bgfx::TextureFormat::BGRA8,
         BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP,
-        bgfx::copy(rgba.data(), byteSize));
+        bgfx::copy(bgraPixels, byteSize));
 
     if (!bgfx::isValid(handle)) {
         return kInvalidIdx;

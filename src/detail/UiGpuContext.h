@@ -61,11 +61,13 @@ public:
     // FVector2 keep the style of the IRenderBackend interface and give
     // whole-value assignment (raw float[] members can't be assigned).
     struct SdfParams {
-        ayt::math::FVector4 rect;          // minX minY maxX maxY, pixels
+        ayt::math::FVector4 rect;          // shape minX minY maxX maxY (pixels)
+                                           // — may differ from the draw quad
+                                           // (shadows: content; borders: outer)
         ayt::math::FVector4 radius;        // rTL rTR rBR rBL (CPU-clamped)
         ayt::math::FVector4 strokeColor;   // a==0 → no stroke
         float strokeWidth = 0.0f;          // ring thickness, px
-        float strokeInset = 0.0f;          // Outside: -w/2, Center: 0, Inside: +w/2
+        float strokeInset = 0.0f;          // ring center offset; outside stroke = +w/2 (center lands on true rect edge)
         ayt::math::FVector4 shadowColor;   // a==0 → no shadow
         ayt::math::FVector2 shadowOffset;  // dx dy
         float shadowBlur  = 0.0f;          // radius expansion = soft shadow approx

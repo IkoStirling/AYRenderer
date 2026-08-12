@@ -101,6 +101,8 @@ public:
                           const ayt::math::FVector4& bottomRight) override;
     void drawBorderRect(const ayt::math::FRectangle& bounds, const ayt::math::FVector4& color,
                         float borderWidth, float cornerRadius = 0) override;
+    void drawRoundedRect(const ayt::math::FRectangle& bounds, const ayt::math::FVector4& color,
+                         float cornerRadius = 0) override;
     void drawRectShadow(const ayt::math::FRectangle& bounds,
                         const ayt::ui::IRenderBackend::ShadowStyle& shadow) override;
     void drawNinePatch(const ayt::math::FRectangle& bounds, void* textureHandle,

@@ -495,52 +495,91 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
         return;
     }
 
-    ayt::math::FRectangle clipped = bounds;
-    if (!clipRect(clipped)) {
+    // Shape stays the caller bounds. Only the *draw quad* is intersected
+    // with the clip — reshaping sdf.rect to the clipped remnant invents
+    // four new corners that "stick" to the scroll/clip edge.
+    ayt::math::FRectangle drawQuad(bounds.minX - w, bounds.minY - w,
+                                   bounds.maxX + w, bounds.maxY + w);
+    if (!clipRect(drawQuad)) {
         return;
     }
 
-    // Radius clamped so the ring stays inside the quad even at the corners.
     const float maxRadius = std::min(width, height) * 0.5f;
-    const float r         = std::max(0.0f, std::min(cornerRadius, maxRadius - w));
-
-    // Outside stroke spans d in (0, w) across the edge (inset -w/2) — the
-    // quad must extend w past the clip rect, then be clipped again so the
-    // ring cannot paint outside the clip (AA falloff clipped at the edge,
-    // same as the Flat path).
-    ayt::math::FRectangle outer(clipped.minX - w, clipped.minY - w,
-                                clipped.maxX + w, clipped.maxY + w);
-    if (!clipRect(outer)) {
-        return;
-    }
+    const float r         = std::max(0.0f, std::min(cornerRadius, maxRadius));
 
     UiItem item;
     item.kind  = UiItemKind::Sdf;
     item.state = blendStateBits(_frame->currentBlend);
-    item.minX  = outer.minX;
-    item.minY  = outer.minY;
-    item.maxX  = outer.maxX;
-    item.maxY  = outer.maxY;
-    item.sdf.rect        = ayt::math::FVector4(outer.minX, outer.minY, outer.maxX, outer.maxY);
+    item.minX  = drawQuad.minX;
+    item.minY  = drawQuad.minY;
+    item.maxX  = drawQuad.maxX;
+    item.maxY  = drawQuad.maxY;
+    item.sdf.rect        = ayt::math::FVector4(bounds.minX, bounds.minY,
+                                               bounds.maxX, bounds.maxY);
     item.sdf.radius      = ayt::math::FVector4(r, r, r, r);
     item.sdf.strokeColor = color;
     item.sdf.strokeWidth = w;
-    // Outside stroke: the ring spans dStroke in [-w, 0] — from the true
-    // rect edge (quad is expanded w beyond it, so that is dStroke = -w)
-    // out to the quad edge. Ring center sits at dStroke = -w/2, and the
-    // shader centers the ring at dStroke = -inset → inset = +w/2. (A
-    // negative inset would push the ring outside the quad — invisible.)
-    item.sdf.strokeInset = w * 0.5f;
+    item.sdf.strokeInset = 0.0f;
+    _frame->items.push_back(item);
+}
+
+void UIRenderBackend::drawRoundedRect(const ayt::math::FRectangle& bounds,
+                                      const ayt::math::FVector4& color,
+                                      float cornerRadius)
+{
+    // SDF filled rounded rect — pairs with drawBorderRect so combo cards
+    // (fill + stroke) share the same silhouette. Flat drawRect is axis-
+    // aligned and pokes square corners through a rounded stroke.
+    if (color.w <= 0.0f) {
+        return;
+    }
+    if (cornerRadius <= 0.0f) {
+        drawRect(bounds, color);
+        return;
+    }
+
+    const float width  = bounds.maxX - bounds.minX;
+    const float height = bounds.maxY - bounds.minY;
+    if (width <= 0.0f || height <= 0.0f) {
+        return;
+    }
+
+    constexpr float kAa = 1.0f;
+    ayt::math::FRectangle drawQuad(bounds.minX - kAa, bounds.minY - kAa,
+                                   bounds.maxX + kAa, bounds.maxY + kAa);
+    if (!clipRect(drawQuad)) {
+        return;
+    }
+
+    const float maxRadius = std::min(width, height) * 0.5f;
+    const float r         = std::max(0.0f, std::min(cornerRadius, maxRadius));
+
+    const uint32_t fill = toAbgr(color);
+    UiItem item;
+    item.kind  = UiItemKind::Sdf;
+    item.state = blendStateBits(_frame->currentBlend);
+    item.minX  = drawQuad.minX;
+    item.minY  = drawQuad.minY;
+    item.maxX  = drawQuad.maxX;
+    item.maxY  = drawQuad.maxY;
+    item.abgr[0] = fill;
+    item.abgr[1] = fill;
+    item.abgr[2] = fill;
+    item.abgr[3] = fill;
+    // Original silhouette — do not reshape to the clipped remnant.
+    item.sdf.rect   = ayt::math::FVector4(bounds.minX, bounds.minY,
+                                          bounds.maxX, bounds.maxY);
+    item.sdf.radius = ayt::math::FVector4(r, r, r, r);
     _frame->items.push_back(item);
 }
 
 void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
                                      const ayt::ui::IRenderBackend::ShadowStyle& shadow)
 {
-    // P2: single SDF item; blur is approximated by expanding the SDF radius
-    // in the shader (u_radius + blur), which fades the edge over blur
-    // pixels. The quad grows by |offset| + blur so the falloff is not
-    // clipped at the rect edge. Transparent shadow color → nothing to draw.
+    // P2: single SDF item; blur softens coverage over `blur` pixels in the
+    // shader (d/blur), not by expanding the shape rect. The draw quad grows
+    // by |offset| + blur so the falloff is not clipped. sdf.rect stays the
+    // *content* bounds — using the expanded outer made solid black blobs.
     if (shadow.color.w <= 0.0f) {
         return;
     }
@@ -551,18 +590,13 @@ void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
         return;
     }
 
-    ayt::math::FRectangle clipped = bounds;
-    if (!clipRect(clipped)) {
-        return;
-    }
-
     const float blur = std::max(0.0f, shadow.blurRadius);
     const float extX = std::fabs(shadow.offset.x) + blur;
     const float extY = std::fabs(shadow.offset.y) + blur;
 
-    ayt::math::FRectangle outer(clipped.minX - extX, clipped.minY - extY,
-                                clipped.maxX + extX, clipped.maxY + extY);
-    if (!clipRect(outer)) {
+    ayt::math::FRectangle drawQuad(bounds.minX - extX, bounds.minY - extY,
+                                   bounds.maxX + extX, bounds.maxY + extY);
+    if (!clipRect(drawQuad)) {
         return;
     }
 
@@ -572,11 +606,12 @@ void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
     UiItem item;
     item.kind  = UiItemKind::Sdf;
     item.state = blendStateBits(_frame->currentBlend);
-    item.minX  = outer.minX;
-    item.minY  = outer.minY;
-    item.maxX  = outer.maxX;
-    item.maxY  = outer.maxY;
-    item.sdf.rect         = ayt::math::FVector4(outer.minX, outer.minY, outer.maxX, outer.maxY);
+    item.minX  = drawQuad.minX;
+    item.minY  = drawQuad.minY;
+    item.maxX  = drawQuad.maxX;
+    item.maxY  = drawQuad.maxY;
+    item.sdf.rect         = ayt::math::FVector4(bounds.minX, bounds.minY,
+                                                bounds.maxX, bounds.maxY);
     item.sdf.radius       = ayt::math::FVector4(r, r, r, r);
     item.sdf.shadowColor  = shadow.color;
     item.sdf.shadowOffset = shadow.offset;
@@ -889,16 +924,17 @@ void UIRenderBackend::flushColoredRects()
             frame.scratchIndices.reserve(6u);
             const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
             const float    z    = 0.0f;
-            const uint32_t transparent = 0u;
 
+            // Fill from abgr[0] (drawRoundedRect); borders leave it 0.
+            const uint32_t fill = it.abgr[0];
             frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.minY, fbH), z,
-                                             transparent, 0.0f, 0.0f});
+                                             fill, it.minX, it.minY});
             frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.minY, fbH), z,
-                                             transparent, 0.0f, 0.0f});
+                                             fill, it.maxX, it.minY});
             frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.maxY, fbH), z,
-                                             transparent, 0.0f, 0.0f});
+                                             fill, it.maxX, it.maxY});
             frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.maxY, fbH), z,
-                                             transparent, 0.0f, 0.0f});
+                                             fill, it.minX, it.maxY});
             frame.scratchIndices.push_back(base + 0);
             frame.scratchIndices.push_back(base + 1);
             frame.scratchIndices.push_back(base + 2);
