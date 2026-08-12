@@ -20,6 +20,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 
 
@@ -352,8 +353,10 @@ void main()
         col.a   += v_color0.a   * cov;
     }
 
-    // Stroke ring |d + inset| < w/2. Negative inset (Outside) pushes the
-    // ring across the edge outward; positive (Inside) pulls it inward.
+    // Stroke ring |d + inset| < w/2, centered at d = -inset. Positive
+    // inset (Outside stroke) centers the ring half a width beyond the
+    // rect edge — d here is measured in the quad's space, where the true
+    // rect edge sits at d = -w (the quad expands w beyond it).
     if (u_stroke.a > 0.0) {
         float dStroke = sdRoundRect(p, halfB, u_radius);
         float ring = cover(abs(dStroke + u_strokeWidth.y) - u_strokeWidth.x * 0.5);
@@ -814,12 +817,28 @@ uint16_t UiGpuContext::uploadUiTexture(BGFXAdapter& adapter, uint16_t width, uin
         return kInvalidIdx;
     }
 
+    // BGRA input (Windows bitmap convention) → RGBA storage: the flat
+    // shader samples tex.rgb as RGBA, and on D3D11 a BGRA8 texture's tex2D
+    // returns (B,G,R,A) — sampling it as .rgb silently swaps R/B (white
+    // text glyphs masked this; colored art shows blue→brown).
+    std::vector<uint8_t> rgba(byteSize);
+    {
+        const uint8_t* src = static_cast<const uint8_t*>(bgraPixels);
+        uint8_t*       dst = rgba.data();
+        for (uint32_t i = 0; i < byteSize; i += 4u) {
+            dst[i + 0] = src[i + 2];  // R
+            dst[i + 1] = src[i + 1];  // G
+            dst[i + 2] = src[i + 0];  // B
+            dst[i + 3] = src[i + 3];  // A
+        }
+    }
+
     // Linear filtering (no POINT sampler bits) + clamp wrap — UI textures
     // are stretched art; clamp stops edge texels bleeding across seams.
     const bgfx::TextureHandle handle = bgfx::createTexture2D(
-        width, height, false, 1, bgfx::TextureFormat::BGRA8,
+        width, height, false, 1, bgfx::TextureFormat::RGBA8,
         BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP,
-        bgfx::copy(bgraPixels, byteSize));
+        bgfx::copy(rgba.data(), byteSize));
 
     if (!bgfx::isValid(handle)) {
         return kInvalidIdx;

@@ -525,7 +525,12 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
     item.sdf.radius      = ayt::math::FVector4(r, r, r, r);
     item.sdf.strokeColor = color;
     item.sdf.strokeWidth = w;
-    item.sdf.strokeInset = -w * 0.5f;  // Outside: ring centered on the edge
+    // Outside stroke: the ring spans dStroke in [-w, 0] — from the true
+    // rect edge (quad is expanded w beyond it, so that is dStroke = -w)
+    // out to the quad edge. Ring center sits at dStroke = -w/2, and the
+    // shader centers the ring at dStroke = -inset → inset = +w/2. (A
+    // negative inset would push the ring outside the quad — invisible.)
+    item.sdf.strokeInset = w * 0.5f;
     _frame->items.push_back(item);
 }
 
