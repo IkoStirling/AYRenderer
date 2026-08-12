@@ -85,6 +85,12 @@ public:
     // drawRectShadow get SDF bodies in P2; drawNinePatch is a no-op until
     // P3's texture registry.
     void setBlendMode(ayt::ui::BlendMode mode) override;
+    // PR-anim: stacked global opacity. Every color-emitting entry
+    // (rect / gradient / SDF / text glyph) multiplies its alpha by the
+    // stack top; Widget::render pushes per-node opacity so the tree
+    // fades as a whole. Base frame is 1.0 (no-op).
+    void pushOpacity(float alpha) override;
+    void popOpacity() override;
     // IAYRenderBackend declares the 2-color (vertical) variant as
     // pure virtual — the 4-color override below does NOT satisfy it
     // (different signature). Implement both; the 2-color routes to the

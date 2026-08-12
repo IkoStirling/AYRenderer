@@ -134,6 +134,10 @@ struct UIRenderBackend::FrameState {
     ayt::font::IFont*                  textSyncFont = nullptr;
     std::vector<ayt::math::FRectangle> clipStack;
     ayt::ui::BlendMode                 currentBlend = ayt::ui::BlendMode::Normal;
+    // PR-anim: stacked global opacity (LIFO, mirrors clipStack). Every
+    // color-emitting entry multiplies its alpha by the stack top; the
+    // base frame is 1.0 so default rendering is byte-identical.
+    std::vector<float> opacityStack = {1.0f};
     // P3: texture registry — persistent across frames (beginFrame does not
     // touch it; handles stay valid until releaseUiTexture frees them).
     std::unordered_map<void*, TextureRef> textures;
@@ -291,6 +295,10 @@ void UIRenderBackend::beginFrame()
     frame.clipStack.clear();
     frame.textSyncFont = nullptr;
     frame.currentBlend = ayt::ui::BlendMode::Normal;  // P1: per-frame reset
+    // PR-anim: opacity is a per-frame render-state like BlendMode —
+    // Widget::render balances its push/pop every frame, but a buggy
+    // tree must not leak a stale frame into the next frame.
+    frame.opacityStack.assign(1, 1.0f);
 
     if (frame.scratchVertices.capacity() < 1024u) {
         frame.scratchVertices.reserve(1024u);
@@ -406,7 +414,10 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, const ayt::m
     item.minY = clipped.minY;
     item.maxX = clipped.maxX;
     item.maxY = clipped.maxY;
-    const uint32_t abgr = toAbgr(color);
+    // PR-anim: flat fill fades with the tree.
+    ayt::math::FVector4 fill = color;
+    fill.w *= _frame->opacityStack.back();
+    const uint32_t abgr = toAbgr(fill);
     item.abgr[0] = abgr;
     item.abgr[1] = abgr;
     item.abgr[2] = abgr;
@@ -422,6 +433,33 @@ void UIRenderBackend::setBlendMode(ayt::ui::BlendMode mode)
     // Recorded into every item's state at draw time; a mode change starts
     // a new flush run. Reset to Normal at beginFrame.
     _frame->currentBlend = mode;
+}
+
+void UIRenderBackend::pushOpacity(float alpha)
+{
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+    // Clamp to [0,1]: 1.0 is a no-op, out-of-range values are caller
+    // bugs that would otherwise stack nonsense (alpha > 1 makes draws
+    // opaque-er than authored, negative alpha breaks the multiply).
+    const float a = alpha < 0.0f ? 0.0f : (alpha > 1.0f ? 1.0f : alpha);
+    // COMPOUND: the stack stores the CUMULATIVE product, not the raw
+    // frame — parent push(0.5) then child push(0.5) yields stack top
+    // 0.25 (tree opacity multiplies). pop() restores the parent frame.
+    _frame->opacityStack.push_back(_frame->opacityStack.back() * a);
+}
+
+void UIRenderBackend::popOpacity()
+{
+    if (_frame == nullptr) {
+        return;
+    }
+    // The stack base (1.0) is never popped — an unbalanced pop must not
+    // empty the stack and corrupt the rest of the frame.
+    if (_frame->opacityStack.size() > 1) {
+        _frame->opacityStack.pop_back();
+    }
 }
 
 void UIRenderBackend::drawGradientRect(const ayt::math::FRectangle& bounds,
@@ -460,10 +498,14 @@ void UIRenderBackend::drawGradientRect(const ayt::math::FRectangle& bounds,
     item.minY = clipped.minY;
     item.maxX = clipped.maxX;
     item.maxY = clipped.maxY;
-    item.abgr[0] = toAbgr(topLeft);
-    item.abgr[1] = toAbgr(topRight);
-    item.abgr[2] = toAbgr(bottomRight);
-    item.abgr[3] = toAbgr(bottomLeft);
+    // PR-anim: gradient corners fade with the tree.
+    ayt::math::FVector4 tl = topLeft, tr = topRight, bl = bottomLeft, br = bottomRight;
+    const float op = _frame->opacityStack.back();
+    tl.w *= op; tr.w *= op; bl.w *= op; br.w *= op;
+    item.abgr[0] = toAbgr(tl);
+    item.abgr[1] = toAbgr(tr);
+    item.abgr[2] = toAbgr(br);
+    item.abgr[3] = toAbgr(bl);
     _frame->items.push_back(item);
 }
 
@@ -517,7 +559,10 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
     item.sdf.rect        = ayt::math::FVector4(bounds.minX, bounds.minY,
                                                bounds.maxX, bounds.maxY);
     item.sdf.radius      = ayt::math::FVector4(r, r, r, r);
-    item.sdf.strokeColor = color;
+    // PR-anim: stroke fades with the tree (shader treats a=0 as no stroke).
+    ayt::math::FVector4 stroke = color;
+    stroke.w *= _frame->opacityStack.back();
+    item.sdf.strokeColor = stroke;
     item.sdf.strokeWidth = w;
     item.sdf.strokeInset = 0.0f;
     _frame->items.push_back(item);
@@ -554,7 +599,10 @@ void UIRenderBackend::drawRoundedRect(const ayt::math::FRectangle& bounds,
     const float maxRadius = std::min(width, height) * 0.5f;
     const float r         = std::max(0.0f, std::min(cornerRadius, maxRadius));
 
-    const uint32_t fill = toAbgr(color);
+    // PR-anim: SDF fill fades with the tree (per-vertex color rides alpha).
+    ayt::math::FVector4 fillColor = color;
+    fillColor.w *= _frame->opacityStack.back();
+    const uint32_t fill = toAbgr(fillColor);
     UiItem item;
     item.kind  = UiItemKind::Sdf;
     item.state = blendStateBits(_frame->currentBlend);
@@ -613,7 +661,10 @@ void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
     item.sdf.rect         = ayt::math::FVector4(bounds.minX, bounds.minY,
                                                 bounds.maxX, bounds.maxY);
     item.sdf.radius       = ayt::math::FVector4(r, r, r, r);
-    item.sdf.shadowColor  = shadow.color;
+    // PR-anim: shadow fades with the tree (a=0 = no shadow in shader).
+    ayt::math::FVector4 shadowColor = shadow.color;
+    shadowColor.w *= _frame->opacityStack.back();
+    item.sdf.shadowColor  = shadowColor;
     item.sdf.shadowOffset = shadow.offset;
     item.sdf.shadowBlur   = blur;
     _frame->items.push_back(item);
@@ -685,7 +736,10 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textur
     item.minY       = clipped.minY;
     item.maxX       = clipped.maxX;
     item.maxY       = clipped.maxY;
-    const uint32_t abgr = 0xFFFFFFFFu;
+    // PR-anim: alpha rides the white tint (1,1,1,opacity) so a faded
+    // tree fades the texture draw too. opacity==1 stays 0xFFFFFFFF.
+    const uint32_t abgr = toAbgr(ayt::math::FVector4(
+        1.0f, 1.0f, 1.0f, _frame->opacityStack.back()));
     item.abgr[0] = abgr;
     item.abgr[1] = abgr;
     item.abgr[2] = abgr;
@@ -728,8 +782,9 @@ void UIRenderBackend::drawWithAlpha(const ayt::math::FRectangle& bounds, void* t
     item.minY       = clipped.minY;
     item.maxX       = clipped.maxX;
     item.maxY       = clipped.maxY;
-    const uint32_t abgr = toAbgr(ayt::math::FVector4(1.0f, 1.0f, 1.0f,
-                                                     std::max(0.0f, std::min(1.0f, alpha))));
+    const uint32_t abgr = toAbgr(ayt::math::FVector4(
+        1.0f, 1.0f, 1.0f,
+        std::max(0.0f, std::min(1.0f, alpha)) * _frame->opacityStack.back()));
     item.abgr[0] = abgr;
     item.abgr[1] = abgr;
     item.abgr[2] = abgr;
@@ -822,7 +877,10 @@ void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* t
     UiItem item;
     item.textureIdx = ref->textureIdx;
     item.state      = blendStateBits(_frame->currentBlend);
-    const uint32_t abgr = 0xFFFFFFFFu;
+    // PR-anim: white tint carries the tree opacity (1,1,1,opacity);
+    // opacity==1 stays 0xFFFFFFFF.
+    const uint32_t abgr = toAbgr(ayt::math::FVector4(
+        1.0f, 1.0f, 1.0f, _frame->opacityStack.back()));
     item.abgr[0] = abgr;
     item.abgr[1] = abgr;
     item.abgr[2] = abgr;
@@ -1098,7 +1156,10 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     float cursorX       = bounds.minX;
     const float baselineY = bounds.minY + (boundsH - metrics.lineHeight) * 0.5f + metrics.ascent;
 
-    const uint32_t abgr = toAbgr(color);
+    // PR-anim: glyph color fades with the tree.
+    ayt::math::FVector4 glyphColor = color;
+    glyphColor.w *= _frame->opacityStack.back();
+    const uint32_t abgr = toAbgr(glyphColor);
     const float    atlasW = static_cast<float>(detail::BgfxFontAtlas::kAtlasWidth);
     const float    atlasH = static_cast<float>(detail::BgfxFontAtlas::kAtlasHeight);
 
