@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace ayt::shader {
 class ShaderResourcePool;
@@ -50,6 +51,11 @@ public:
 
     UIRenderBackend(const UIRenderBackend&) = delete;
     UIRenderBackend& operator=(const UIRenderBackend&) = delete;
+
+    // Our own drawRect overloads would otherwise hide the base
+    // drawRect(bounds, BorderStyle) (C++ name lookup); bring it in so
+    // UIRenderBackend-typed callers can use the BorderStyle form too.
+    using ayt::ui::IRenderBackend::drawRect;
 
     bool initialize(Renderer& renderer);
     void shutdown();
@@ -114,10 +120,19 @@ public:
                           const ayt::math::FVector4& bottomRight) override;
     void drawBorderRect(const ayt::math::FRectangle& bounds, const ayt::math::FVector4& color,
                         float borderWidth, float cornerRadius = 0) override;
+    void drawBorderRect(const ayt::math::FRectangle& bounds, const ayt::math::FVector4& color,
+                        float borderWidth,
+                        const ayt::ui::IRenderBackend::CornerRadii& radii) override;
     void drawRoundedRect(const ayt::math::FRectangle& bounds, const ayt::math::FVector4& color,
                          float cornerRadius = 0) override;
+    void drawRoundedRect(const ayt::math::FRectangle& bounds, const ayt::math::FVector4& color,
+                         const ayt::ui::IRenderBackend::CornerRadii& radii) override;
     void drawRectShadow(const ayt::math::FRectangle& bounds,
                         const ayt::ui::IRenderBackend::ShadowStyle& shadow) override;
+    // Card: shadow + fill + stroke composited in ONE SDF submission (the
+    // shader already blends the layers; this skips the three-draw API).
+    void drawCard(const ayt::math::FRectangle& bounds,
+                  const ayt::ui::IRenderBackend::CardStyle& style) override;
     void drawNinePatch(const ayt::math::FRectangle& bounds, void* textureHandle,
                        const ayt::math::FRectangle& uvRegion,
                        const ayt::math::FVector4& padding) override;
@@ -208,6 +223,93 @@ inline float uiTextBaselineY(ayt::ui::IRenderBackend::TextStyle::VAlign valign, 
     case ayt::ui::IRenderBackend::TextStyle::VAlign::Middle:
     default:
         return boundsMinY + std::max(0.0f, (boundsHeight - lineHeight) * 0.5f) + ascent;
+    }
+}
+
+// Total width of `count` advances with `letterSpacing` px after each glyph.
+// The trailing spacing (after the last glyph) is invisible but keeps wrap
+// widths identical to the pen advance the draw path emits.
+inline float uiTextLineWidth(const float* advances, int count, float letterSpacing)
+{
+    float w = 0.0f;
+    for (int i = 0; i < count; ++i) {
+        w += advances[i] + letterSpacing;
+    }
+    return w;
+}
+
+// One wrapped line: [begin,end) glyph range into the advance array plus
+// its width (letterSpacing included) — used for per-line alignment.
+struct UiTextLineRange {
+    int   begin = 0;
+    int   end   = 0;
+    float width = 0.0f;
+};
+
+// Greedy word wrap over `count` advances constrained to maxWidth px — the
+// same rules as measureText: break at the last space that fits (the space
+// stays on the old line); a space-free run hard-breaks per glyph, so CJK
+// degrades to per-glyph breaking naturally. isSpace[i] marks break
+// candidates (std::vector<bool> by ref — bit-packed, no .data()). maxWidth
+// <= 0 emits a single full line (no wrap).
+inline void uiTextWrapToLines(const float* advances, const std::vector<bool>& isSpace, int count,
+                              float maxWidth, float letterSpacing,
+                              std::vector<UiTextLineRange>& outLines)
+{
+    outLines.clear();
+    if (count <= 0) {
+        return;
+    }
+    if (maxWidth <= 0.0f) {
+        outLines.push_back({0, count, uiTextLineWidth(advances, count, letterSpacing)});
+        return;
+    }
+
+    // Effective per-glyph width includes the trailing letterSpacing, so
+    // prefix sums double as exact line widths for alignment.
+    std::vector<float> prefix(static_cast<size_t>(count) + 1u, 0.0f);
+    for (int i = 0; i < count; ++i) {
+        prefix[static_cast<size_t>(i) + 1u] =
+            prefix[static_cast<size_t>(i)] + advances[i] + letterSpacing;
+    }
+
+    int   lineStart = 0;
+    int   lastBreak = -1;  // last space index in the current line; -1 = none
+    float lineW     = 0.0f;
+    for (int i = 0; i < count; ++i) {
+        const float w = advances[i] + letterSpacing;
+        if (lineW + w <= maxWidth || lineW <= 0.0f) {
+            lineW += w;
+            if (isSpace[i]) {
+                lastBreak = i;
+            }
+        } else {
+            if (lastBreak >= lineStart) {
+                // Word break: the space stays on the old line; the new line
+                // starts with glyphs (lastBreak+1 .. i].
+                outLines.push_back({lineStart, lastBreak + 1,
+                                    prefix[static_cast<size_t>(lastBreak) + 1u]
+                                        - prefix[static_cast<size_t>(lineStart)]});
+                lineStart = lastBreak + 1;
+                lineW     = prefix[static_cast<size_t>(i) + 1u]
+                          - prefix[static_cast<size_t>(lineStart)];
+                lastBreak = -1;
+            } else {
+                outLines.push_back({lineStart, i,
+                                    prefix[static_cast<size_t>(i)]
+                                        - prefix[static_cast<size_t>(lineStart)]});
+                lineStart = i;
+                lineW     = w;
+            }
+            if (isSpace[i]) {
+                lastBreak = i;
+            }
+        }
+    }
+    if (lineStart < count) {
+        outLines.push_back({lineStart, count,
+                            prefix[static_cast<size_t>(count)]
+                                - prefix[static_cast<size_t>(lineStart)]});
     }
 }
 

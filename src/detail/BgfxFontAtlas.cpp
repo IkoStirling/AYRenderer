@@ -82,6 +82,26 @@ bool BgfxFontAtlas::initialize(BGFXAdapter& adapter)
         return false;
     }
 
+    // Seed the family → path table for getFontHandle(familyName, size).
+    // Only families whose file actually exists are mapped (same existence
+    // check tryRegisterFont uses); anything else falls back to the default
+    // face at that size.
+    static const struct {
+        const wchar_t* family;
+        const wchar_t* path;
+    } kFamilyPaths[] = {
+        {L"Microsoft YaHei", L"C:\\Windows\\Fonts\\msyh.ttc"},
+        {L"Microsoft YaHei UI", L"C:\\Windows\\Fonts\\msyh.ttc"},
+        {L"SimSun", L"C:\\Windows\\Fonts\\simsun.ttc"},
+        {L"Segoe UI", L"C:\\Windows\\Fonts\\segoeui.ttf"},
+        {L"Arial", L"C:\\Windows\\Fonts\\arial.ttf"},
+    };
+    for (const auto& entry : kFamilyPaths) {
+        if (fileExists(entry.path)) {
+            _familyPaths[entry.family] = entry.path;
+        }
+    }
+
     _bgraScratch.resize(static_cast<size_t>(kAtlasWidth) * static_cast<size_t>(kAtlasHeight) * 4u);
 
     const bgfx::TextureHandle handle = bgfx::createTexture2D(
@@ -115,6 +135,8 @@ void BgfxFontAtlas::shutdown(BGFXAdapter& adapter)
     }
 
     _fontsBySize.clear();
+    _familyPaths.clear();
+    _fontsByFamilySize.clear();
     _bgraScratch.clear();
     _atlasDirty = true;
     _knownGlyphs.clear();
@@ -184,6 +206,47 @@ ayt::font::IFont* BgfxFontAtlas::acquireFont(int pixelSize)
     return registerFontForSize(pixelSize);
 }
 
+ayt::font::IFont* BgfxFontAtlas::acquireFont(const wchar_t* familyName, int pixelSize)
+{
+    if (_fontManager == nullptr || pixelSize < 8) {
+        return nullptr;
+    }
+    if (familyName == nullptr || familyName[0] == L'\0') {
+        return acquireFont(pixelSize);  // default-family path
+    }
+
+    const std::wstring family(familyName);
+    auto famIt = _fontsByFamilySize.find(family);
+    if (famIt != _fontsByFamilySize.end()) {
+        const auto sizeIt = famIt->second.find(pixelSize);
+        if (sizeIt != famIt->second.end()) {
+            return _fontManager->getFont(sizeIt->second);
+        }
+    }
+
+    const auto pathIt = _familyPaths.find(family);
+    if (pathIt == _familyPaths.end()) {
+        return acquireFont(pixelSize);  // unknown family → default face
+    }
+
+    // Register lazily per (family, size); the name must be unique so the
+    // FontManager keeps distinct faces (glyph indices are font-local).
+    wchar_t name[64] = {};
+#if defined(_WIN32)
+    swprintf_s(name, L"UI_%ls_%d", family.c_str(), pixelSize);
+#else
+    swprintf(name, sizeof(name) / sizeof(name[0]), L"UI_%ls_%d", family.c_str(), pixelSize);
+#endif
+    const ayt::font::FontHandle handle =
+        _fontManager->registerFont(name, pathIt->second.c_str(), pixelSize);
+    if (!handle.isValid() || _fontManager->getFont(handle) == nullptr) {
+        return acquireFont(pixelSize);
+    }
+    _fontManager->preloadFont(handle);
+    _fontsByFamilySize[family][pixelSize] = handle;
+    return _fontManager->getFont(handle);
+}
+
 ayt::font::IFont* BgfxFontAtlas::fontForHandle(ayt::font::FontHandle handle) const
 {
     if (_fontManager == nullptr || !handle.isValid()) {
@@ -241,8 +304,12 @@ void BgfxFontAtlas::prepareShapedGlyphs(ayt::font::IFont* font, int pixelSize,
     }
     for (const ayt::font::ShapedGlyph& sg : shaped) {
         font->getGlyphByIndex(sg.glyphIndex);
+        // Keyed by (fontId, glyph): glyph indices are font-local — a
+        // size-keyed key would collide across same-size families and
+        // suppress the atlas re-upload for the second family's glyphs.
         const uint64_t key =
-            (static_cast<uint64_t>(static_cast<uint32_t>(pixelSize)) << 32) | sg.glyphIndex;
+            (static_cast<uint64_t>(static_cast<uint32_t>(font->getHandle().id)) << 32)
+            | sg.glyphIndex;
         if (_knownGlyphs.insert(key).second) {
             markAtlasDirty();
         }
@@ -263,8 +330,11 @@ void BgfxFontAtlas::prepareGlyphs(ayt::font::IFont* font, int pixelSize, const s
     for (wchar_t ch : text) {
         const uint32_t codepoint = static_cast<uint32_t>(ch);
         font->getGlyph(codepoint);
+        // Font-id keyed — see prepareShapedGlyphs (glyph indices are
+        // font-local; same-size families must not share dirty keys).
         const uint64_t key =
-            (static_cast<uint64_t>(static_cast<uint32_t>(pixelSize)) << 32) | codepoint;
+            (static_cast<uint64_t>(static_cast<uint32_t>(font->getHandle().id)) << 32)
+            | codepoint;
         if (_knownGlyphs.insert(key).second) {
             markAtlasDirty();
         }

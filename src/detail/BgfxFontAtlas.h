@@ -29,7 +29,12 @@ public:
     bool initialize(BGFXAdapter& adapter);
     void shutdown(BGFXAdapter& adapter);
 
+    // Default-family face (size-keyed; legacy path).
     ayt::font::IFont* acquireFont(int pixelSize);
+    // Family-aware acquire: known family names (seeded from the default
+    // system candidates in initialize) resolve to their own face; unknown
+    // or null/empty family falls back to the default face at that size.
+    ayt::font::IFont* acquireFont(const wchar_t* familyName, int pixelSize);
     ayt::font::IFont* fontForHandle(ayt::font::FontHandle handle) const;
     ayt::font::FontHandle handleForSize(int pixelSize) const;
     uint16_t              atlasTextureIdx() const { return _atlasTextureIdx; }
@@ -58,6 +63,12 @@ private:
 
     std::unique_ptr<ayt::font::IFontManager> _fontManager;
     std::unordered_map<int, ayt::font::FontHandle> _fontsBySize;
+    // family name → font file path (seeded in initialize from the default
+    // candidates; empty = family not installed → default-face fallback).
+    std::unordered_map<std::wstring, std::wstring> _familyPaths;
+    // family → size → handle (family fonts register lazily on first use).
+    std::unordered_map<std::wstring, std::unordered_map<int, ayt::font::FontHandle>>
+        _fontsByFamilySize;
     std::unordered_map<int, std::unique_ptr<ayt::font::IAYShaper>> _shapersByFontId;
 
     uint16_t             _atlasTextureIdx = UINT16_MAX;

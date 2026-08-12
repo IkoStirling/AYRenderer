@@ -93,6 +93,38 @@ bool sdfParamsEqual(const detail::UiGpuContext::SdfParams& a,
         && a.shadowBlur == b.shadowBlur;
 }
 
+// Per-corner radii helpers. Shader u_radius order is TL TR BR BL —
+// CornerRadii field order matches 1:1. Each corner clamps to maxRadius.
+float clampRadius(float r, float maxRadius)
+{
+    return std::max(0.0f, std::min(r, maxRadius));
+}
+
+ayt::math::FVector4 radiiVec4(const ayt::ui::IRenderBackend::CornerRadii& radii, float maxRadius)
+{
+    return ayt::math::FVector4(clampRadius(radii.topLeft, maxRadius),
+                               clampRadius(radii.topRight, maxRadius),
+                               clampRadius(radii.bottomRight, maxRadius),
+                               clampRadius(radii.bottomLeft, maxRadius));
+}
+
+// BorderStyle::Position → SdfParams.strokeInset (ring center offset):
+// Outside = +w/2 (band d ∈ [0, w], flush outside the rect edge),
+// Center = 0 (straddles the edge), Inside = -w/2 (band d ∈ [-w, 0]).
+float borderInsetForPosition(ayt::ui::IRenderBackend::BorderStyle::Position position,
+                             float strokeWidth)
+{
+    switch (position) {
+    case ayt::ui::IRenderBackend::BorderStyle::Position::Outside:
+        return strokeWidth * 0.5f;
+    case ayt::ui::IRenderBackend::BorderStyle::Position::Inside:
+        return -strokeWidth * 0.5f;
+    case ayt::ui::IRenderBackend::BorderStyle::Position::Center:
+    default:
+        return 0.0f;
+    }
+}
+
 uint32_t toAbgr(const ayt::math::FVector4& color)
 {
     const uint8_t r = static_cast<uint8_t>(color.x * 255.0f);
@@ -556,6 +588,15 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
                                      const ayt::math::FVector4& color,
                                      float borderWidth, float cornerRadius)
 {
+    drawBorderRect(bounds, color, borderWidth,
+                   ayt::ui::IRenderBackend::CornerRadii(cornerRadius));
+}
+
+void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
+                                     const ayt::math::FVector4& color,
+                                     float borderWidth,
+                                     const ayt::ui::IRenderBackend::CornerRadii& radii)
+{
     // P2: single SDF item — the shader renders the ring natively with
     // per-pixel AA (the P1 body's 8-rect decomposition made square corners).
     if (borderWidth <= 0.0f) {
@@ -590,7 +631,6 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
     }
 
     const float maxRadius = std::min(width, height) * 0.5f;
-    const float r         = std::max(0.0f, std::min(cornerRadius, maxRadius));
 
     UiItem item;
     item.kind  = UiItemKind::Sdf;
@@ -603,12 +643,14 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
     item.shapeMinY = bounds.minY;
     item.shapeMaxX = bounds.maxX;
     item.shapeMaxY = bounds.maxY;
-    item.sdf.radius      = ayt::math::FVector4(r, r, r, r);
+    item.sdf.radius = radiiVec4(radii, maxRadius);
     // PR-anim: stroke fades with the tree (shader treats a=0 as no stroke).
     ayt::math::FVector4 stroke = color;
     stroke.w *= _frame->opacityStack.back();
     item.sdf.strokeColor = stroke;
     item.sdf.strokeWidth = w;
+    // Center ring (inset 0) — the legacy drawBorderRect visual; drawCard
+    // routes BorderStyle::Position through strokeInset instead.
     item.sdf.strokeInset = 0.0f;
     // Soft-clip: the clip rect at record time, for seam AA in the shader.
     const ayt::math::FRectangle clip = activeClipBounds();
@@ -623,14 +665,17 @@ void UIRenderBackend::drawRoundedRect(const ayt::math::FRectangle& bounds,
                                       const ayt::math::FVector4& color,
                                       float cornerRadius)
 {
+    drawRoundedRect(bounds, color, ayt::ui::IRenderBackend::CornerRadii(cornerRadius));
+}
+
+void UIRenderBackend::drawRoundedRect(const ayt::math::FRectangle& bounds,
+                                      const ayt::math::FVector4& color,
+                                      const ayt::ui::IRenderBackend::CornerRadii& radii)
+{
     // SDF filled rounded rect — pairs with drawBorderRect so combo cards
     // (fill + stroke) share the same silhouette. Flat drawRect is axis-
     // aligned and pokes square corners through a rounded stroke.
     if (color.w <= 0.0f) {
-        return;
-    }
-    if (cornerRadius <= 0.0f) {
-        drawRect(bounds, color);
         return;
     }
 
@@ -640,15 +685,19 @@ void UIRenderBackend::drawRoundedRect(const ayt::math::FRectangle& bounds,
         return;
     }
 
+    const float maxRadius = std::min(width, height) * 0.5f;
+    const ayt::math::FVector4 r = radiiVec4(radii, maxRadius);
+    if (r.x <= 0.0f && r.y <= 0.0f && r.z <= 0.0f && r.w <= 0.0f) {
+        drawRect(bounds, color);
+        return;
+    }
+
     constexpr float kAa = 1.0f;
     ayt::math::FRectangle drawQuad(bounds.minX - kAa, bounds.minY - kAa,
                                    bounds.maxX + kAa, bounds.maxY + kAa);
     if (!clipRect(drawQuad)) {
         return;
     }
-
-    const float maxRadius = std::min(width, height) * 0.5f;
-    const float r         = std::max(0.0f, std::min(cornerRadius, maxRadius));
 
     // PR-anim: SDF fill fades with the tree (per-vertex color rides alpha).
     ayt::math::FVector4 fillColor = color;
@@ -670,7 +719,7 @@ void UIRenderBackend::drawRoundedRect(const ayt::math::FRectangle& bounds,
     item.shapeMinY = bounds.minY;
     item.shapeMaxX = bounds.maxX;
     item.shapeMaxY = bounds.maxY;
-    item.sdf.radius = ayt::math::FVector4(r, r, r, r);
+    item.sdf.radius = r;
     const ayt::math::FRectangle clip = activeClipBounds();
     item.clipMinX = clip.minX;
     item.clipMinY = clip.minY;
@@ -728,6 +777,89 @@ void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
     item.sdf.shadowColor  = shadowColor;
     item.sdf.shadowOffset = shadow.offset;
     item.sdf.shadowBlur   = blur;
+    const ayt::math::FRectangle clip = activeClipBounds();
+    item.clipMinX = clip.minX;
+    item.clipMinY = clip.minY;
+    item.clipMaxX = clip.maxX;
+    item.clipMaxY = clip.maxY;
+    _frame->items.push_back(item);
+}
+
+void UIRenderBackend::drawCard(const ayt::math::FRectangle& bounds,
+                               const ayt::ui::IRenderBackend::CardStyle& style)
+{
+    // Single SDF item: the shader composites shadow → fill → stroke in one
+    // pass, so a card that used to cost drawRectShadow + drawRoundedRect +
+    // drawBorderRect now submits once (same silhouette for all three layers
+    // — no corner AA mismatch between fill and ring).
+    const bool hasFill   = style.fillColor.w > 0.0f;
+    const bool hasStroke = style.borderWidth > 0.0f && style.borderColor.w > 0.0f;
+    const bool hasShadow = style.shadowColor.w > 0.0f;
+    if (!hasFill && !hasStroke && !hasShadow) {
+        return;
+    }
+
+    const float width  = bounds.maxX - bounds.minX;
+    const float height = bounds.maxY - bounds.minY;
+    if (width <= 0.0f || height <= 0.0f) {
+        return;
+    }
+
+    const float maxRadius = std::min(width, height) * 0.5f;
+    // Stroke width clamp matches drawBorderRect; the ring band for any
+    // position (|inset| <= w/2) stays within w px of the shape, so the
+    // draw quad grows by w at most.
+    const float strokeW = hasStroke ? std::min(style.borderWidth, maxRadius) : 0.0f;
+    const float blur    = hasShadow ? std::max(0.0f, style.shadowBlurRadius) : 0.0f;
+
+    const float extX = std::max(hasShadow ? std::fabs(style.shadowOffset.x) + blur : 0.0f,
+                                strokeW);
+    const float extY = std::max(hasShadow ? std::fabs(style.shadowOffset.y) + blur : 0.0f,
+                                strokeW);
+    constexpr float kAa = 1.0f;  // SDF AA margin (cover() falloff is 1px)
+    ayt::math::FRectangle drawQuad(bounds.minX - extX - kAa, bounds.minY - extY - kAa,
+                                   bounds.maxX + extX + kAa, bounds.maxY + extY + kAa);
+    if (!clipRect(drawQuad)) {
+        return;
+    }
+
+    UiItem item;
+    item.kind  = UiItemKind::Sdf;
+    item.state = blendStateBits(_frame->currentBlend);
+    item.minX  = drawQuad.minX;
+    item.minY  = drawQuad.minY;
+    item.maxX  = drawQuad.maxX;
+    item.maxY  = drawQuad.maxY;
+    item.shapeMinX = bounds.minX;
+    item.shapeMinY = bounds.minY;
+    item.shapeMaxX = bounds.maxX;
+    item.shapeMaxY = bounds.maxY;
+    item.sdf.radius = radiiVec4(style.cornerRadius, maxRadius);
+
+    // PR-anim: every layer fades with the tree (a=0 disables the layer).
+    if (hasFill) {
+        ayt::math::FVector4 fill = style.fillColor;
+        fill.w *= _frame->opacityStack.back();
+        const uint32_t abgr = toAbgr(fill);
+        item.abgr[0] = abgr;
+        item.abgr[1] = abgr;
+        item.abgr[2] = abgr;
+        item.abgr[3] = abgr;
+    }
+    if (hasStroke) {
+        ayt::math::FVector4 stroke = style.borderColor;
+        stroke.w *= _frame->opacityStack.back();
+        item.sdf.strokeColor = stroke;
+        item.sdf.strokeWidth = strokeW;
+        item.sdf.strokeInset = borderInsetForPosition(style.borderPosition, strokeW);
+    }
+    if (hasShadow) {
+        ayt::math::FVector4 shadowColor = style.shadowColor;
+        shadowColor.w *= _frame->opacityStack.back();
+        item.sdf.shadowColor  = shadowColor;
+        item.sdf.shadowOffset = style.shadowOffset;
+        item.sdf.shadowBlur   = blur;
+    }
     const ayt::math::FRectangle clip = activeClipBounds();
     item.clipMinX = clip.minX;
     item.clipMinY = clip.minY;
@@ -1273,12 +1405,21 @@ ayt::font::FontMetrics UIRenderBackend::getFontMetrics(ayt::font::FontHandle fon
     return face->getMetrics();
 }
 
-ayt::font::FontHandle UIRenderBackend::getFontHandle(const wchar_t* /*familyName*/, int baseSize)
+ayt::font::FontHandle UIRenderBackend::getFontHandle(const wchar_t* familyName, int baseSize)
 {
     if (!_initialized || _fontAtlas == nullptr) {
         return ayt::font::FontHandle{-1};
     }
-    // Size-keyed UI fonts; family name is ignored until multi-face config lands.
+    // Family-aware: known family names resolve to their registered face
+    // (BgfxFontAtlas seeds the family→file table from the default system
+    // candidates); unknown or empty names fall back to the size-keyed
+    // default face — the legacy behavior.
+    if (familyName != nullptr && familyName[0] != L'\0') {
+        ayt::font::IFont* familyFont = _fontAtlas->acquireFont(familyName, baseSize);
+        if (familyFont != nullptr) {
+            return familyFont->getHandle();
+        }
+    }
     if (_fontAtlas->acquireFont(baseSize) == nullptr) {
         return ayt::font::FontHandle{-1};
     }
@@ -1303,11 +1444,10 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         return;
     }
 
-    // outline / shadow / letterSpacing / lineSpacing: documented as
-    // not-yet-implemented (the interface default previously dropped them
-    // too). This implementation honors style.color + style.align +
-    // style.valign. Single-line only — callers wrap via measureText and
-    // draw per line.
+    // This implementation honors color / outline / shadow / letterSpacing /
+    // lineSpacing / align / valign. wrapToBounds enables multi-line layout
+    // (greedy word wrap to the bounds width); without it text stays
+    // single-line and clips at the bounds — the legacy behavior.
 
     ayt::math::FRectangle clippedBounds = bounds;
     if (!clipRect(clippedBounds)) {
@@ -1342,62 +1482,124 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     const float boundsW = bounds.maxX - bounds.minX;
     const float boundsH = bounds.maxY - bounds.minY;
 
-    // Full-line width first so horizontal alignment can position the
-    // whole line (same advance math as measureText).
-    float lineWidth = 0.0f;
+    // Per-glyph run data: glyph + HB offsets + advance (px). One array
+    // feeds measuring, wrapping and emitting, so line widths and pen
+    // positions can never diverge.
+    struct GlyphRun {
+        ayt::font::GlyphInfo* glyph;
+        float xOff;
+        float yOff;
+        float xAdv;
+        bool  space;
+    };
+    std::vector<GlyphRun> runs;
     if (useShaped) {
+        runs.reserve(shaped.size());
         for (const ayt::font::ShapedGlyph& sg : shaped) {
-            lineWidth += static_cast<float>(sg.xAdvance) / 64.0f;
+            const size_t ci = std::min<size_t>(sg.charIndex, text.size() - 1);
+            runs.push_back({font->getGlyphByIndex(sg.glyphIndex),
+                            static_cast<float>(sg.xOffset) / 64.0f,
+                            static_cast<float>(sg.yOffset) / 64.0f,
+                            static_cast<float>(sg.xAdvance) / 64.0f,
+                            text[ci] == L' ' || text[ci] == L'\t'});
         }
     } else {
+        runs.reserve(text.size());
         for (wchar_t ch : text) {
             ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
-            lineWidth += (glyph != nullptr) ? static_cast<float>(glyph->metrics.advance)
-                                            : metrics.lineHeight * 0.25f;
+            runs.push_back({glyph, 0.0f, 0.0f,
+                            (glyph != nullptr) ? static_cast<float>(glyph->metrics.advance)
+                                               : metrics.lineHeight * 0.25f,
+                            ch == L' ' || ch == L'\t'});
         }
     }
+    const size_t n = runs.size();
+    if (n == 0) {
+        return;
+    }
 
-    float cursorX = uiTextAlignX(style.align, bounds.minX, boundsW, lineWidth);
-    const float baselineY =
-        uiTextBaselineY(style.valign, bounds.minY, boundsH, metrics.lineHeight, metrics.ascent);
+    const float ls = static_cast<float>(style.letterSpacing);
 
-    // PR-anim: glyph color fades with the tree.
-    ayt::math::FVector4 glyphColor = style.color;
-    glyphColor.w *= _frame->opacityStack.back();
-    const uint32_t abgr = toAbgr(glyphColor);
-    const float    atlasW = static_cast<float>(detail::BgfxFontAtlas::kAtlasWidth);
-    const float    atlasH = static_cast<float>(detail::BgfxFontAtlas::kAtlasHeight);
+    // Lines: wrapToBounds + overflow → greedy word wrap (same rules as
+    // measureText); otherwise the single legacy line. letterSpacing rides
+    // the per-glyph advance everywhere (a trailing invisible spacing keeps
+    // wrap widths == pen advances).
+    std::vector<float> advances(n);
+    std::vector<bool>  isSpace(n);
+    for (size_t i = 0; i < n; ++i) {
+        advances[i] = runs[i].xAdv;
+        isSpace[i]  = runs[i].space;
+    }
+    std::vector<UiTextLineRange> lines;
+    if (style.wrapToBounds && boundsW > 0.0f
+        && uiTextLineWidth(advances.data(), static_cast<int>(n), ls) > boundsW) {
+        uiTextWrapToLines(advances.data(), isSpace, static_cast<int>(n), boundsW, ls, lines);
+    } else {
+        lines.push_back({0, static_cast<int>(n),
+                         uiTextLineWidth(advances.data(), static_cast<int>(n), ls)});
+    }
 
-    auto emitGlyph = [&](ayt::font::GlyphInfo* glyph, float penX, float penY, float xOff,
-                         float yOff, float xAdv) {
-        if (glyph == nullptr) {
-            cursorX = penX + xAdv;
+    // Block layout: lines sit at lineHeight + lineSpacing stride; VAlign
+    // positions the whole block (blockH > boundsH clamps top-aligned).
+    const float lineHeight =
+        metrics.lineHeight > 0.0f ? metrics.lineHeight : static_cast<float>(fontSize);
+    const float stride = lineHeight + static_cast<float>(style.lineSpacing);
+    const float blockH = lineHeight + stride * (static_cast<float>(lines.size()) - 1.0f);
+    const float firstBaseline =
+        uiTextBaselineY(style.valign, bounds.minY, boundsH, blockH, metrics.ascent);
+
+    // Render passes back-to-front: shadow (offset copy) → outline (4-dir
+    // offset copies) → fill. All passes emit the same atlas/state items,
+    // so they merge into a single flush run. The shadow is a flat tinted
+    // copy — shadowBlurRadius is reserved for a future text-shader blur
+    // (atlas quads are bitmaps; per-item gaussian is not in this pass).
+    struct Pass {
+        ayt::math::FVector4 color;
+        float dx;
+        float dy;
+    };
+    std::vector<Pass> passes;
+    if (style.shadowColor.w > 0.0f) {
+        passes.push_back({style.shadowColor, style.shadowOffset.x, style.shadowOffset.y});
+    }
+    if (style.outlineWidth > 0.0f && style.outlineColor.w > 0.0f) {
+        const float ow = style.outlineWidth;
+        passes.push_back({style.outlineColor, -ow, 0.0f});
+        passes.push_back({style.outlineColor, +ow, 0.0f});
+        passes.push_back({style.outlineColor, 0.0f, -ow});
+        passes.push_back({style.outlineColor, 0.0f, +ow});
+    }
+    passes.push_back({style.color, 0.0f, 0.0f});
+
+    const float atlasW = static_cast<float>(detail::BgfxFontAtlas::kAtlasWidth);
+    const float atlasH = static_cast<float>(detail::BgfxFontAtlas::kAtlasHeight);
+
+    auto emitGlyph = [&](const GlyphRun& g, float penX, float penY, uint32_t colorAbgr) {
+        if (g.glyph == nullptr) {
             return;
         }
 
-        const int glyphW = glyph->metrics.width;
-        const int glyphH = glyph->metrics.height;
+        const int glyphW = g.glyph->metrics.width;
+        const int glyphH = g.glyph->metrics.height;
         if (glyphW <= 0 || glyphH <= 0) {
-            cursorX = penX + xAdv;
             return;
         }
 
-        const float x0 = penX + xOff + static_cast<float>(glyph->metrics.bearingX);
+        const float x0 = penX + g.xOff + static_cast<float>(g.glyph->metrics.bearingX);
         // HB y_offset is up-positive; screen Y grows downward.
-        const float y0 = penY - yOff - static_cast<float>(glyph->metrics.bearingY);
+        const float y0 = penY - g.yOff - static_cast<float>(g.glyph->metrics.bearingY);
         const float x1 = x0 + static_cast<float>(glyphW);
         const float y1 = y0 + static_cast<float>(glyphH);
 
         ayt::math::FRectangle glyphBounds(x0, y0, x1, y1);
         if (!clipRect(glyphBounds)) {
-            cursorX = penX + xAdv;
             return;
         }
 
-        const float u0 = glyph->atlasPosX / atlasW;
-        const float v0 = glyph->atlasPosY / atlasH;
-        const float u1 = (glyph->atlasPosX + glyph->atlasWidth) / atlasW;
-        const float v1 = (glyph->atlasPosY + glyph->atlasHeight) / atlasH;
+        const float u0 = g.glyph->atlasPosX / atlasW;
+        const float v0 = g.glyph->atlasPosY / atlasH;
+        const float u1 = (g.glyph->atlasPosX + g.glyph->atlasWidth) / atlasW;
+        const float v1 = (g.glyph->atlasPosY + g.glyph->atlasHeight) / atlasH;
 
         // Remap UVs when the quad is partially clipped so boundary glyphs
         // stay visible (cropped), instead of the old "drop if not fully
@@ -1416,38 +1618,38 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         // drawText call share (atlas, state) so they form one flush run.
         UiItem item;
         item.textureIdx = atlasIdx;
-        item.state = blendStateBits(_frame->currentBlend);  // P1
+        item.state = blendStateBits(frame.currentBlend);  // P1
         item.minX = glyphBounds.minX;
         item.minY = glyphBounds.minY;
         item.maxX = glyphBounds.maxX;
         item.maxY = glyphBounds.maxY;
-        item.abgr[0] = abgr;
-        item.abgr[1] = abgr;
-        item.abgr[2] = abgr;
-        item.abgr[3] = abgr;
+        item.abgr[0] = colorAbgr;
+        item.abgr[1] = colorAbgr;
+        item.abgr[2] = colorAbgr;
+        item.abgr[3] = colorAbgr;
         item.u0 = tu0;
         item.v0 = tv0;
         item.u1 = tu1;
         item.v1 = tv1;
         frame.items.push_back(item);
-        cursorX = penX + xAdv;
     };
 
-    if (useShaped) {
-        for (const ayt::font::ShapedGlyph& sg : shaped) {
-            ayt::font::GlyphInfo* glyph = font->getGlyphByIndex(sg.glyphIndex);
-            const float xOff = static_cast<float>(sg.xOffset) / 64.0f;
-            const float yOff = static_cast<float>(sg.yOffset) / 64.0f;
-            const float xAdv = static_cast<float>(sg.xAdvance) / 64.0f;
-            emitGlyph(glyph, cursorX, baselineY, xOff, yOff, xAdv);
-        }
-    } else {
-        for (wchar_t ch : text) {
-            ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
-            const float xAdv = (glyph != nullptr)
-                                   ? static_cast<float>(glyph->metrics.advance)
-                                   : metrics.lineHeight * 0.25f;
-            emitGlyph(glyph, cursorX, baselineY, 0.0f, 0.0f, xAdv);
+    // PR-anim: per-pass color fades with the tree.
+    for (const Pass& pass : passes) {
+        ayt::math::FVector4 passColor = pass.color;
+        passColor.w *= frame.opacityStack.back();
+        const uint32_t abgr = toAbgr(passColor);
+        for (size_t li = 0; li < lines.size(); ++li) {
+            const UiTextLineRange& line = lines[li];
+            const float cursorX = uiTextAlignX(style.align, bounds.minX, boundsW, line.width);
+            const float baselineY = firstBaseline + stride * static_cast<float>(li);
+            float penX = cursorX + pass.dx;
+            const float penY = baselineY + pass.dy;
+            for (int gi = line.begin; gi < line.end; ++gi) {
+                const GlyphRun& g = runs[static_cast<size_t>(gi)];
+                emitGlyph(g, penX, penY, abgr);
+                penX += g.xAdv + ls;
+            }
         }
     }
 }

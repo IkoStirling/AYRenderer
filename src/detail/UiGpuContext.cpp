@@ -376,15 +376,19 @@ void main()
         col.a   += v_color0.a   * cov;
     }
 
-    // Outside stroke of width w: band where content SDF d ∈ [0, w].
-    // This is the Euclidean offset curve — constant pixel width on
-    // straight edges AND corners (unlike expanding the rect while
-    // keeping the same radius, which thins the corners).
-    // u_strokeWidth = (w, unused, …); inset unused for stroke path.
+    // Stroke of width w as a ring of the Euclidean offset curve — constant
+    // pixel width on straight edges AND corners (unlike expanding the rect
+    // while keeping the same radius, which thins the corners). Ring center
+    // offset c = u_strokeWidth.y positions the band d ∈ [c-w/2, c+w/2]:
+    // +w/2 = Outside (band [0, w], flush outside the edge), 0 = Center
+    // (straddles the edge), -w/2 = Inside. drawCard maps BorderStyle::
+    // Position to the inset; scalar drawBorderRect keeps Center — the
+    // legacy visual.
     if (u_stroke.a > 0.0) {
         float d = sdRoundRect(p, halfB, u_radius);
         float w = u_strokeWidth.x;
-        float ring = coverPx(abs(d - w * 0.5) - w * 0.5, 1.0);
+        float c = u_strokeWidth.y;
+        float ring = coverPx(abs(d - c) - w * 0.5, 1.0);
         col.rgb += u_stroke.rgb * ring;
         col.a   += u_stroke.a   * ring;
     }
