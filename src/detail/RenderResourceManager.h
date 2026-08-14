@@ -84,6 +84,12 @@ public:
     TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
                                          const uint8_t* pixels,
                                          const std::string& cacheKey = "");
+    // Mutable RGBA8 texture for per-frame CPU uploads (AYVideo V3).
+    // Never cached — each call allocates a fresh GPU texture.
+    TextureHandle createDynamicTextureRgba8(uint32_t width, uint32_t height);
+    // Full-rect rewrite. Returns false on invalid handle / size mismatch /
+    // non-dynamic texture / null pixels.
+    bool updateTextureFromRgba8(TextureHandle texture, const uint8_t* pixels);
     // §P5.5 D-upload — RGBA8 cubemap. `rgba8Faces` layout matches
     // bgfx::createTextureCube (6 faces × size² × 4).
     TextureHandle createCubeTextureFromRgba8(uint32_t size,

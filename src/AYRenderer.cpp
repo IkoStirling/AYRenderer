@@ -1692,6 +1692,22 @@ TextureHandle Renderer::createTextureFromRgba8(uint32_t width, uint32_t height,
     return _impl->resources.createTextureFromRgba8(width, height, pixels, cacheKey);
 }
 
+TextureHandle Renderer::createDynamicTextureRgba8(uint32_t width, uint32_t height)
+{
+    if (!_impl || !_impl->adapter.isInitialized()) {
+        return {};
+    }
+    return _impl->resources.createDynamicTextureRgba8(width, height);
+}
+
+bool Renderer::updateTextureFromRgba8(TextureHandle texture, const uint8_t* pixels)
+{
+    if (!_impl || !_impl->adapter.isInitialized()) {
+        return false;
+    }
+    return _impl->resources.updateTextureFromRgba8(texture, pixels);
+}
+
 TextureHandle Renderer::createCubeTextureFromRgba8(uint32_t size,
                                                    const uint8_t* rgba8Faces,
                                                    const std::string& cacheKey)

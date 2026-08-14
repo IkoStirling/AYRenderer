@@ -82,6 +82,13 @@ public:
     TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
                                          const uint8_t* pixels,
                                          const std::string& cacheKey = "");
+    // Mutable RGBA8 texture for per-frame CPU→GPU uploads (AYVideo V3
+    // frame texture bridge). Not cache-keyed — each call is a new GPU
+    // resource. Pair with updateTextureFromRgba8 each present tick.
+    TextureHandle createDynamicTextureRgba8(uint32_t width, uint32_t height);
+    // Full-rect pixel rewrite. Returns false when the handle is invalid,
+    // not dynamic, size-mismatched, or pixels is null.
+    bool updateTextureFromRgba8(TextureHandle texture, const uint8_t* pixels);
     // §P5.5 D-upload — host-facing cubemap create (6×RGBA8 faces).
     TextureHandle createCubeTextureFromRgba8(uint32_t size,
                                              const uint8_t* rgba8Faces,

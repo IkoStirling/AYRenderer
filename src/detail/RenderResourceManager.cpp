@@ -1020,6 +1020,48 @@ TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint
     return out;
 }
 
+TextureHandle RenderResourceManager::createDynamicTextureRgba8(uint32_t width,
+                                                               uint32_t height)
+{
+    TextureHandle out;
+    if (!_adapter.isInitialized() || width == 0 || height == 0) {
+        return out;
+    }
+
+    GpuTexture gpuTex;
+    gpuTex.width  = static_cast<uint16_t>(width);
+    gpuTex.height = static_cast<uint16_t>(height);
+    gpuTex.dynamic = true;
+    gpuTex.handle = _adapter.createDynamicTexture2D(gpuTex.width, gpuTex.height);
+    if (!bgfx::isValid(gpuTex.handle)) {
+        return out;
+    }
+
+    const uint64_t id = _nextTextureId++;
+    _textures.emplace(id, gpuTex);
+    out.id = id;
+    return out;
+}
+
+bool RenderResourceManager::updateTextureFromRgba8(TextureHandle texture,
+                                                   const uint8_t* pixels)
+{
+    if (!_adapter.isInitialized() || texture.id == 0 || pixels == nullptr) {
+        return false;
+    }
+    const auto it = _textures.find(texture.id);
+    if (it == _textures.end()) {
+        return false;
+    }
+    GpuTexture& gpuTex = it->second;
+    if (!gpuTex.dynamic || !bgfx::isValid(gpuTex.handle)
+        || gpuTex.width == 0 || gpuTex.height == 0) {
+        return false;
+    }
+    _adapter.updateTexture2D(gpuTex.handle, gpuTex.width, gpuTex.height, pixels);
+    return true;
+}
+
 TextureHandle RenderResourceManager::createCubeTextureFromRgba8(uint32_t size,
                                                                 const uint8_t* rgba8Faces,
                                                                 const std::string& cacheKey)

@@ -85,6 +85,15 @@ public:
     bgfx::TextureHandle createTexture2D(uint16_t width, uint16_t height,
                                         const void* rgba8Data,
                                         uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
+    // Empty mutable RGBA8 texture (mem=nullptr). Required for
+    // updateTexture2D / video frame upload (AYVideo V3 §12).
+    bgfx::TextureHandle createDynamicTexture2D(
+        uint16_t width, uint16_t height,
+        uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
+    // CPU → GPU full-rect update. `rgba8Data` must be width*height*4 bytes.
+    void updateTexture2D(bgfx::TextureHandle handle,
+                         uint16_t width, uint16_t height,
+                         const void* rgba8Data);
     // §P5.5 D-upload — RGBA8 cube. `rgba8Faces` = 6 contiguous faces
     // (+X,-X,+Y,-Y,+Z,-Z), each size×size×4 bytes.
     bgfx::TextureHandle createTextureCube(uint16_t size,

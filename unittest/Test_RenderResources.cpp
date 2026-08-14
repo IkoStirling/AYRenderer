@@ -103,6 +103,47 @@ TEST_CASE(texture_cache_reuses_same_key)
     renderer.shutdown();
 }
 
+TEST_CASE(dynamic_texture_update_rgba8)
+{
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend = ayt::render::Backend::Noop;
+    CHECK(renderer.initialize(desc));
+
+    ayt::render::TextureHandle dyn =
+        renderer.createDynamicTextureRgba8(4, 4);
+    CHECK(dyn.isValid());
+
+    const std::vector<uint8_t> red(4 * 4 * 4, 0);
+    std::vector<uint8_t> pixels = red;
+    for (size_t i = 0; i < pixels.size(); i += 4) {
+        pixels[i + 0] = 255;
+        pixels[i + 3] = 255;
+    }
+    CHECK(renderer.updateTextureFromRgba8(dyn, pixels.data()));
+
+    // Second update (video-style per-frame rewrite).
+    for (size_t i = 0; i < pixels.size(); i += 4) {
+        pixels[i + 0] = 0;
+        pixels[i + 1] = 255;
+    }
+    CHECK(renderer.updateTextureFromRgba8(dyn, pixels.data()));
+
+    // Static createTextureFromRgba8 must reject update.
+    const std::vector<uint8_t> staticPx = makeCheckerboardRgba8(4, 4, 2);
+    ayt::render::TextureHandle stat =
+        renderer.createTextureFromRgba8(4, 4, staticPx.data(), "static_no_update");
+    CHECK(stat.isValid());
+    CHECK(!renderer.updateTextureFromRgba8(stat, pixels.data()));
+
+    CHECK(!renderer.updateTextureFromRgba8(dyn, nullptr));
+    CHECK(!renderer.updateTextureFromRgba8({}, pixels.data()));
+
+    renderer.destroyTexture(dyn);
+    renderer.destroyTexture(stat);
+    renderer.shutdown();
+}
+
 TEST_CASE(textured_material_draw_one_frame)
 {
     if (!fileExists(AY_SHADER_SHADERC_HINT)) {

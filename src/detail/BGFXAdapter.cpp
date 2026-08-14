@@ -388,6 +388,36 @@ bgfx::TextureHandle BGFXAdapter::createTexture2D(uint16_t width, uint16_t height
                                  mem);
 }
 
+bgfx::TextureHandle BGFXAdapter::createDynamicTexture2D(uint16_t width, uint16_t height,
+                                                         uint64_t flags)
+{
+    if (!_initialized || width == 0 || height == 0) {
+        return BGFX_INVALID_HANDLE;
+    }
+    // mem=nullptr → mutable texture; mirror BgfxFontAtlas atlas create.
+    return bgfx::createTexture2D(width, height, false, 1,
+                                 bgfx::TextureFormat::RGBA8,
+                                 static_cast<uint64_t>(flags),
+                                 nullptr);
+}
+
+void BGFXAdapter::updateTexture2D(bgfx::TextureHandle handle,
+                                  uint16_t width, uint16_t height,
+                                  const void* rgba8Data)
+{
+    if (!_initialized || !bgfx::isValid(handle) || width == 0 || height == 0
+        || rgba8Data == nullptr) {
+        return;
+    }
+    if (isNoopBackend()) {
+        // Noop still accepts the call so host paths stay exercised;
+        // bgfx Noop implements updateTexture2D as a no-op.
+    }
+    const uint32_t bytes = static_cast<uint32_t>(width) * height * 4u;
+    const bgfx::Memory* mem = bgfx::copy(rgba8Data, bytes);
+    bgfx::updateTexture2D(handle, 0, 0, 0, 0, width, height, mem);
+}
+
 bgfx::TextureHandle BGFXAdapter::createTextureCube(uint16_t size,
                                                     const void* rgba8Faces,
                                                     uint64_t flags)

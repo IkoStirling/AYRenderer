@@ -26,6 +26,9 @@ struct GpuTexture {
     bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
     uint16_t width  = 0;
     uint16_t height = 0;
+    // True when created via createDynamicTextureRgba8 (mem=nullptr) so
+    // updateTextureFromRgba8 may rewrite pixels each frame (AYVideo V3).
+    bool dynamic = false;
 };
 
 struct GpuMaterial {
