@@ -48,8 +48,8 @@
 //     Test_ShadowPass::f1_safe_light_space_matrices_non_identity_and_direction_sensitive).
 
 #include "AYTest.h"
-#include "AYRenderScene.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYShader/ShaderResourcePool.h"
 
 #include "AYMath/MathTypes.h"
 

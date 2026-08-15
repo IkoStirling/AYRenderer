@@ -9,7 +9,7 @@
 //      - default ctor �?count = 0, no lights
 //      - add() returns assigned slot, fails soft past MAX (UINT32_MAX)
 //      - A: pre-§P5.5 `DirectionalLight` POD still compiles because
-//        AYRenderScene.h:142 carries `using DirectionalLight = Light;`.
+//        AYRenderer/RenderScene.h:142 carries `using DirectionalLight = Light;`.
 //
 //   2) PassExecContext::sceneLights borrowed pointer contract:
 //      - 17-field brace init continues to compile (= C++14 trailing
@@ -59,9 +59,9 @@
 //   - PassExecContext grew by 1 borrowed-pointer field (�?1 per cut).
 
 #include "AYTest.h"
-#include "AYRenderScene.h"
+#include "AYRenderer/RenderScene.h"
 #include "AYRenderer.h"
-#include "AYShaderResourcePool.h"
+#include "AYShader/ShaderResourcePool.h"
 
 #include "AYMath/MathTypes.h"
 
@@ -540,11 +540,11 @@ TEST_CASE(b7_light_pod_size_assert_passes_after_widen) {
     // B.3 �?`sizeof(Light)` is bounded by the `static_assert` ceiling
     // bumped in B (�?96). The actual size on MSVC with the new
     // fields (4 float + FVector3 spotDirection) is ~72 bytes (see
-    // AYRenderScene.h comment for layout rationale).
+    // AYRenderer/RenderScene.h comment for layout rationale).
     //
     // §P5.5 C (2026-07-23) �?Light POD widened with castShadow +
     // shadowBias (2 new fields, ~80B). Static assert cap bumped
-    // from �?6 to �?28 in AYRenderScene.h (std140 single-block
+    // from �?6 to �?28 in AYRenderer/RenderScene.h (std140 single-block
     // read breaks past ~128B on some backends).
     //
     // We pin the exact size as the contract �?any future field

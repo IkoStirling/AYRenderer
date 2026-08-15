@@ -28,7 +28,7 @@
 //      crash" anchor — flake ⇒ bisect back.
 
 #include "AYRenderer.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderTypes.h"
 #include "AYTest.h"
 
 #include "detail/BGFXAdapter.h"

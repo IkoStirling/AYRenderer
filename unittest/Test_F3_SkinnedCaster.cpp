@@ -52,9 +52,9 @@
 //     real GPU backend (covered on GPU-side via the Demo bin).
 
 #include "AYTest.h"
-#include "AYRenderScene.h"
-#include "AYShadowConfig.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYRenderer/ShadowConfig.h"
+#include "AYShader/ShaderResourcePool.h"
 
 #include "AYMath/MathTypes.h"
 

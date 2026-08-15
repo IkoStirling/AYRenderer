@@ -102,7 +102,7 @@ renderer.endFrame();
 // renderer.captureScreenshot("capture.png");
 ```
 
-公开头文件：`AYRenderer.h`、`AYRenderScene.h`、`AYRenderTypes.h`、`AYRendererSubSystem.h`。**不含** `<bgfx/bgfx.h>`。
+公开头文件：`AYRenderer.h`、`AYRenderer/RenderScene.h`、`AYRenderer/RenderTypes.h`、`AYRenderer/RendererSubSystem.h`。**不含** `<bgfx/bgfx.h>`。
 
 ---
 
@@ -121,9 +121,9 @@ GameLoop::submitRenderCommands  →  RendererSubSystem::renderFrame  →  Render
 
 ```cpp
 #include "AYEntity.h"
-#include "AYEntityModule.h"
+#include "AYEntity/EntityModule.h"
 #include "AYGameLoop.h"
-#include "AYRendererSubSystem.h"
+#include "AYRenderer/RendererSubSystem.h"
 
 HWND hwnd = /* create window */;
 ayt::render::RendererSubSystem::setBootstrapWindow(hwnd, 1280, 720);
@@ -257,7 +257,7 @@ AYRenderer/
 |------|------|------|
 | AYRenderer | `design.md` §10.4、§16 | Engine 集成、shutdown、ShaderPool 析构修复 |
 | AYEntity | `design.md` §15 | `bootstrapModule`、`RenderSystem`、SparseSet 指针 |
-| AYCore | `README.md` | `AYCoreSerializer.h` 宏提升 |
+| AYCore | `README.md` | `AYCore/CoreSerializer.h` 宏提升 |
 | AYSerializer | `README.md` §变更记录 | 默认 `SerializerFor` → `SerializerForReflect` |
 
 **里程碑**：R0–R4 + Engine 闭环已完成；R5+ 延后，可启动 AYUI。

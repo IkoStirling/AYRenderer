@@ -1,8 +1,8 @@
 #include "detail/ShadowCaster.h"
 
-#include "AYShadowConfig.h"
-#include "AYShadowDiagnostics.h"
-#include "AYShadowShaderSources.h"
+#include "AYRenderer/ShadowConfig.h"
+#include "AYRenderer/ShadowDiagnostics.h"
+#include "AYRenderer/ShadowShaderSources.h"
 #include "detail/RenderPass.h"
 
 #include <bgfx/bgfx.h>

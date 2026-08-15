@@ -24,15 +24,15 @@
 //     alone is the suppression mechanism per lessons §3.6).
 
 #include "AYRenderer.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderTypes.h"
 #include "AYTest.h"
 
 #include "detail/FrameContext.h"
 #include "detail/RenderPass.h"
 #include "detail/ShadowPass.h"
 
-#include "AYShaderResourcePool.h"
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResourcePool.h"
+#include "AYShader/ShaderResource.h"
 
 #include "AYMath/MathTypes.h"
 
@@ -49,7 +49,7 @@ TEST_SUITE(AYRenderer_P4_ShadowBias)
 TEST_CASE(p4_shadow_bias_default_matches_phoskia_property)
 {
     // P4.2.1 — FrameContext default 0.003f matches the Phoskia
-    // receiver property default (AYShadowShaderSources.h:81) and
+    // receiver property default (AYRenderer/ShadowShaderSources.h:81) and
     // ShadowSettings::kBiasDefault. A drift here would mean existing
     // receivers render with a different bias than the host expects
     // (subtle acne / peter-panning regression).

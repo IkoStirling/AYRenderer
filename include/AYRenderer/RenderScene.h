@@ -1,7 +1,7 @@
 #pragma once
-// AYRenderScene.h — frame draw list (engine-facing, no GPU types)
+// AYRenderer/RenderScene.h — frame draw list (engine-facing, no GPU types)
 
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderTypes.h"
 
 #include <vector>
 
@@ -322,7 +322,7 @@ using DirectionalLight = Light;
 // §P5.5 D (2026-07-23) — CubeMap kind upgraded to a real
 // `samplerCube` path. The previously reserved `uint64_t cubeReserve`
 // placeholder is upgraded to `TextureHandle cubeMap` (TextureHandle
-// already in AYRenderTypes.h; no new public type). The renderer
+// already in AYRenderer/RenderTypes.h; no new public type). The renderer
 // drives the cube kind via TWO inputs:
 //   1. `SkySource::kind` (host-declared scene state; default Equirect)
 //   2. `Renderer::setSkySourceCube(TextureHandle)` — host uploads the

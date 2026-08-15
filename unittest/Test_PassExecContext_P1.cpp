@@ -17,8 +17,8 @@
 //      the load-bearing reason ctx.materials is non-const).
 
 #include "AYTest.h"
-#include "AYRenderScene.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYShader/ShaderResourcePool.h"
 
 #include "AYMath/MathTypes.h"
 

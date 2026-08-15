@@ -79,7 +79,7 @@ PostProcess = 在 Deferred path 改采 ctx.gbufferPass->lightingOutputFbo()
 | **3** | ForwardOpaque（FO 用 `ctx.viewId`，Renderer 推 3）| `AYRenderer.cpp:380,384` |
 | **4** | Transparent（独立 view，原与 FO 共享 → 拆）| `TransparentPass::kTransparentViewId = 4`（`TransparentPass.h:37`）|
 | **5** | PostProcess blit-to-backbuffer（独立 view，绝不可与 FO/Trans 共享）| `PostProcessPass::kBlitViewId = 5`（`PostProcessPass.h:68`）|
-| **6** | UI chrome | `UIRenderBackend::kViewId = 6`（`AYUIRenderBackend.h:40`）|
+| **6** | UI chrome | `UIRenderBackend::kViewId = 6`（`AYRenderer/UIRenderBackend.h:40`）|
 
 **关键约束**：
 - **view 2 已被 Shadow resolve blit 占用** ── B0 初稿曾错写 `kGBufferViewId=2`，**直接撞 Shadow** ── 现已删除。

@@ -8,7 +8,7 @@ namespace ayt::render
 // quad). Compiles at runtime through the standard phoskia →
 // AYShadercDriver → shaderc.exe → bgfx Program chain — zero CMake
 // involvement (same shape as kSimpleLitShadowPhoskiaSource in
-// AYShadowShaderSources.h).
+// AYRenderer/ShadowShaderSources.h).
 //
 // Per-draw uniforms (uploaded by Forward2DOpaquePass::execute from
 // the DrawPayload2D):
@@ -17,7 +17,7 @@ namespace ayt::render
 //   - flip    : x = flip horizontal, y = flip vertical
 //
 // V-axis convention: AY2D tileUV is origin-bottom-left
-// (AYTileSamplerUV.h:75-80), so the fragment flips V once before
+// (AY2D/TileSamplerUV.h:75-80), so the fragment flips V once before
 // sampling — tile source rects authored with row 0 = bottom land
 // correctly.
 inline constexpr const char* kTilemapPhoskiaSource = R"(

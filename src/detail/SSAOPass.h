@@ -49,7 +49,7 @@
 //      was unused in the post-S4 slot table). View ids:
 //      SSAO = 14. FG does NOT allocate view ids.
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include "detail/RenderPass.h"
 

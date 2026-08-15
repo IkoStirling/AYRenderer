@@ -28,7 +28,7 @@
 // headless. Default Renderer pipeline must remain 4-pass (no Shadow).
 
 #include "AYTest.h"
-#include "AYRenderScene.h"
+#include "AYRenderer/RenderScene.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"

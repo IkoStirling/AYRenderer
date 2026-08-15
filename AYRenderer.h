@@ -1,8 +1,8 @@
 #pragma once
 // AYRenderer.h — engine renderer entry (pimpl; no bgfx in this header)
 
-#include "AYRenderScene.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYRenderer/RenderTypes.h"
 
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathUtils.h"
@@ -247,7 +247,7 @@ public:
 
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias. Host
     // controls this in ndc01 units (same as the Phoskia receiver
-    // shadowBias property — see AYShadowShaderSources.h:81 + the
+    // shadowBias property — see AYRenderer/ShadowShaderSources.h:81 + the
     // simple_lit_shadow.phoskia receiver contract). The renderer
     // uploads this value into every receiver material's `shadowBias`
     // uniform via tryBindShadowSampler; per-material

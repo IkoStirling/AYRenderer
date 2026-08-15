@@ -7,10 +7,10 @@
 #include "detail/GpuResources.h"
 #include "detail/ShadowDebug.h"
 #include "detail/ShadowPass.h"
-#include "AYShadowConfig.h"
-#include "AYShadowDiagnostics.h"
+#include "AYRenderer/ShadowConfig.h"
+#include "AYRenderer/ShadowDiagnostics.h"
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include <bgfx/bgfx.h>
 #include <AYIO/Env.h>
@@ -62,7 +62,7 @@ void RenderPass::resolveAndApplyColorUniforms(GpuMaterial& material)
     }
 }
 
-// Phase 5 — receiver bind. Contract: AYShadowReceiverContract.h
+// Phase 5 — receiver bind. Contract: AYRenderer/ShadowReceiverContract.h
 void tryBindShadowSampler(shader::ShaderResource& shader,
                           BGFXAdapter& adapter,
                           const ShadowPass* shadowPass,

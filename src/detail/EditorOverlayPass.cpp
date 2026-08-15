@@ -3,7 +3,7 @@
 #include "detail/GpuResources.h"
 #include "detail/ShadowPass.h"
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include <algorithm>
 #include <AYIO/Env.h>

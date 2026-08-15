@@ -1,6 +1,6 @@
 #include "detail/ShadowPass.h"
 
-#include "AYShadowConfig.h"
+#include "AYRenderer/ShadowConfig.h"
 #include "detail/ShadowDebug.h"
 #include "detail/ShadowDiagnostics.h"
 #include "detail/ShadowMatrixBuilder.h"

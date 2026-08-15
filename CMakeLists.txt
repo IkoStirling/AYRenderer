@@ -16,10 +16,11 @@ file(GLOB AYRENDERER_SOURCES CONFIGURE_DEPENDS
 add_library(AYRenderer STATIC ${AYRENDERER_SOURCES})
 
 target_include_directories(AYRenderer PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
-    # INT-04 (2026-07-20): AYAppEventHost.h (EventBusHostScope) + WindowEvents.h.
-    # PUBLIC because RendererSubSystem.h (in include/) references these types,
+    # INT-04 (2026-07-20): AYApplication/AppEventHost.h (EventBusHostScope) + AYEventSystem/Events/AYEventSystem/Events/AYEventSystem/Events/WindowEvents.h.
+    # PUBLIC because AYRenderer/RendererSubSystem.h (in include/) references these types,
     # so consumers of AYRenderer (e.g. AYEntity) need the include path.
     ${CMAKE_CURRENT_SOURCE_DIR}/../AYApplication/interface
 )
@@ -122,7 +123,7 @@ target_compile_definitions(AYRenderer PRIVATE
 # target_compile_definitions block are removed. The diagnostic code
 # paths those flags gated are permanently retired (RenderScene::Light,
 # FrameContext shadow writeback, lastFrameShadowFbo cache). The
-# corresponding include/AYF1DiagFlags.h still defines both macros to
+# corresponding include/AYRenderer/F1DiagFlags.h still defines both macros to
 # 0 unconditionally so any stale `#if AY_F1_DIAG_*` block in a TU
 # that hasn't been edited yet still compiles with the diagnostic-off
 # branch selected. See docs/f1-sigsegv-repro.md for the historical

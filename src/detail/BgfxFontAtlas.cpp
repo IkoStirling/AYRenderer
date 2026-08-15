@@ -2,7 +2,7 @@
 
 #include "detail/BGFXAdapter.h"
 
-#include <AYCoreUtility.h>
+#include <AYCore/CoreUtility.h>
 
 #include <bgfx/bgfx.h>
 

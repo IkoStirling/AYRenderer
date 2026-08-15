@@ -10,7 +10,7 @@
 // are removed. AY_F1_DIAG_DEFAULT_SHADOW was already retired in E4.
 //
 // The header is kept as a thin include-only marker for one frame
-// (some legacy TUs include it transitively via AYRenderScene.h /
+// (some legacy TUs include it transitively via AYRenderer/RenderScene.h /
 // AYRenderer.h). It defines both macros to 0 unconditionally so
 // any stale `#if AY_F1_DIAG_LIGHT` / `#if AY_F1_DIAG_FRAME_SHADOW`
 // in a TU that hasn't been edited yet still compiles with the

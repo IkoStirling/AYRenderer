@@ -35,8 +35,8 @@
 // (see RenderPass.cpp::resolveAndApplyColorUniforms). Pass-internal
 // mutation, not frame-state mutation.
 
-#include "AYRenderScene.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYShader/ShaderResourcePool.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"

@@ -9,8 +9,8 @@
 // subscription. RendererSubSystem is a pure consumer of WindowResizeEvent
 // (DeviceSubSystem produces it via INT-03); the handler calls
 // Renderer::resize(width, height) which wraps bgfx::reset.
-#include <AYAppEventHost.h>
-#include <ayevent/Events/WindowEvents.h>
+#include <AYApplication/AppEventHost.h>
+#include <AYEventSystem/Events/WindowEvents.h>
 
 #include <cstddef>
 #include <functional>
@@ -97,7 +97,7 @@ public:
     //
     // §5.5 cleanup (2026-07-22): diagFlagLight() / diagFlagFrameShadow()
     // removed — the diagnostic compile flags are permanently 0 now
-    // (see include/AYF1DiagFlags.h). Callers should compare against the
+    // (see include/AYRenderer/F1DiagFlags.h). Callers should compare against the
     // AY_F1_DIAG_* macros directly. diagFlagDefaultShadow() was retired
     // in E4.
     static std::size_t diagSizeofRenderScene();

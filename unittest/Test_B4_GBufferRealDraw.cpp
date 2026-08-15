@@ -57,8 +57,8 @@
 //      execute() codepath (not just the B2/B3 shell stubs).
 
 #include "AYTest.h"
-#include "AYRenderScene.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYShader/ShaderResourcePool.h"
 
 #include "AYMath/MathTypes.h"
 

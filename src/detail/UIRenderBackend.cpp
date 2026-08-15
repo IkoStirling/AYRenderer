@@ -1,12 +1,12 @@
-#include "AYUIRenderBackend.h"
+#include "AYRenderer/UIRenderBackend.h"
 
 #include "AYRenderer.h"
 #include "detail/BgfxFontAtlas.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/UiGpuContext.h"
-#include "AYShaderResourcePool.h"
+#include "AYShader/ShaderResourcePool.h"
 
-#include <AYCoreUtility.h>
+#include <AYCore/CoreUtility.h>
 
 #include <bgfx/bgfx.h>
 

@@ -2,11 +2,11 @@
 #include "detail/RenderAssetBridge.h"
 #include "detail/VertexLayoutBridge.h"
 
-#include "assetsImpl/AYMaterial.h"
-#include "assetsImpl/AYMesh.h"
-#include "assetsImpl/AYTexture.h"
+#include "AYResource/assetsImpl/Material.h"
+#include "AYResource/assetsImpl/Mesh.h"
+#include "AYResource/assetsImpl/Texture.h"
 
-#include "AYAssetPath.h"
+#include "AYResource/AssetPath.h"
 #include "AYIO/File.h"
 #include "AYTest.h"
 

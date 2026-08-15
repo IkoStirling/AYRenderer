@@ -25,10 +25,10 @@
 //      pack).
 
 #include "AYRenderer.h"
-#include "AYRenderScene.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYRenderer/RenderTypes.h"
 #include "AYTest.h"
-#include "AYTilemapShaderSources.h"
+#include "AYRenderer/TilemapShaderSources.h"
 
 #include "detail/Forward2DOpaquePass.h"
 #include "detail/FrameContext.h"
@@ -141,7 +141,7 @@ TEST_CASE(cm1_make_default_includes_forward2dopaque_between_fo_and_transparent) 
 }
 
 TEST_CASE(cm1_make_deferred_omits_forward2dopaque) {
-    // 2D is Forward-path-only (slot comment in AYRenderTypes.h).
+    // 2D is Forward-path-only (slot comment in AYRenderer/RenderTypes.h).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
     CHECK(!desc.contains(RenderPassSlot::Forward2DOpaque));

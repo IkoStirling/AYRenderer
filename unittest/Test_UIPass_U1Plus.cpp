@@ -39,10 +39,10 @@
 //      — Same render() called 3x in a row; no accumulating state.
 
 #include "AYRenderer.h"
-#include "AYRenderScene.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYRenderer/RenderTypes.h"
 #include "AYTest.h"
-#include "AYUIRenderBackend.h"
+#include "AYRenderer/UIRenderBackend.h"
 
 #include <AYMath/MathTypes.h>
 
@@ -143,7 +143,7 @@ TEST_CASE(set_ui_backend_null_is_safe) {
 TEST_CASE(set_ui_backend_uninitialized_backend_returns_zero) {
     // Construct a UIRenderBackend on the stack but do NOT call
     // initialize() — _initialized defaults to false (see
-    // AYUIRenderBackend.h:88). setUiBackend injects the pointer;
+    // AYRenderer/UIRenderBackend.h:88). setUiBackend injects the pointer;
     // UIPass::execute dispatches and hits the `!isInitialized()`
     // guard, returning 0. No crash = pass.
     Renderer r;

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "IAYFontManager.h"
-#include "IAYShaper.h"
+#include "AYFont/IFontManager.h"
+#include "AYFont/IShaper.h"
 
 #include <cstdint>
 #include <memory>

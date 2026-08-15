@@ -1,7 +1,7 @@
-#include "AYShadowConfig.h"
+#include "AYRenderer/ShadowConfig.h"
 
 #include "AYTest.h"
-#include "AYShaderResourcePool.h"
+#include "AYShader/ShaderResourcePool.h"
 
 #include <cmath>
 #include <iostream>

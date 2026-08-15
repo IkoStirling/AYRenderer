@@ -43,10 +43,10 @@ struct FrameContext {
     // forward / transparent passes when binding the shadow sampler.
     // Units: same as the receiver Phoskia `shadowBias` property
     // (ndc01 space; the receiver fragment does `refNdc01 + bias`
-    // before the depth comparison, see AYShadowShaderSources.h:211
+    // before the depth comparison, see AYRenderer/ShadowShaderSources.h:211
     // + the simple_lit_shadow.phoskia receiver contract). Default
     // 0.003f matches the Phoskia property default (see
-    // AYShadowShaderSources.h:81). Host callers that want per-material
+    // AYRenderer/ShadowShaderSources.h:81). Host callers that want per-material
     // control still call setMaterialVec3(material, "shadowBias", v)
     // — the global value here is a multiplier applied during
     // tryBindShadowSampler() AFTER the per-material uniform write,

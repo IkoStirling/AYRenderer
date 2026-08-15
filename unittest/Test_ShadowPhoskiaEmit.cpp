@@ -1,7 +1,7 @@
-#include "AYShadowConfig.h"
+#include "AYRenderer/ShadowConfig.h"
 #include "AYTest.h"
-#include "AYPhoskia.h"
-#include "AYShaderProgram.h"
+#include "AYShader/Phoskia.h"
+#include "AYShader/ShaderProgram.h"
 
 #include <fstream>
 #include <iostream>

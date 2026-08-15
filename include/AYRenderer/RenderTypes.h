@@ -1,5 +1,5 @@
 #pragma once
-// AYRenderTypes.h — public renderer types (no bgfx / no driver handles)
+// AYRenderer/RenderTypes.h — public renderer types (no bgfx / no driver handles)
 
 #include "AYMath/MathTypes.h"
 
@@ -291,7 +291,7 @@ enum class RenderPassSlot : uint8_t {
 
     // 2D opaque lane (2026-08-11, CM-1) — append-only ABI value 14.
     // Draws every DrawItem carrying a `DrawPayload2D*` (see
-    // AYRenderScene.h) with alpha blending, NO depth test/write —
+    // AYRenderer/RenderScene.h) with alpha blending, NO depth test/write —
     // ortho z=0 self-occlusion would let depth discard later draws,
     // so the CPU-side packedSortKey order IS the final order
     // (AY2D design.md §7.4 stable_sort semantics). Material must

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "AYRenderTypes.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderTypes.h"
+#include "AYShader/ShaderResourcePool.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/GpuResources.h"
 

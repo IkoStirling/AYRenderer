@@ -7,7 +7,7 @@
 #include "detail/GBufferPass.h"
 #include "detail/LightingPass.h"
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include <cstdio>
 #include <cstring>
@@ -425,7 +425,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
     adapter.setIndexBuffer(_fullscreenIB, 0, 3);
     // Bind by recorded SAMPLER2D slots (pass stage=0 so setTexture does
-    // not override compile-time units — see AYShaderResource.h).
+    // not override compile-time units — see AYShader/ShaderResource.h).
     _program.setTexture(0, _tSceneColor, texHandle);
     _program.setTexture(0, _tBloomTexture, bloomTexHandle);
     // §F5 (2026-07-24) — third sampler now read through
@@ -708,7 +708,7 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
         // AYRenderer.cpp:160 shutdown order: resources → shaderPool
         // → adapter). Resetting _program here is the documented
         // ShaderResource contract (see ShaderResource::reset in
-        // AYShaderResource.h:32) — the pool's dtor releases the
+        // AYShader/ShaderResource.h:32) — the pool's dtor releases the
         // underlying GPU program once the refcount hits zero,
         // regardless of which ShaderResource instance held the last
         // reference.

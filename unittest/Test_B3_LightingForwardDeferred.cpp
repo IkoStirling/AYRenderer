@@ -49,8 +49,8 @@
 //          false again after re-configurePipeline(makeDefault())
 
 #include "AYTest.h"
-#include "AYRenderScene.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYShader/ShaderResourcePool.h"
 
 #include "AYMath/MathTypes.h"
 
@@ -69,7 +69,7 @@
 #include "detail/UIPass.h"
 
 #include <AYRenderer.h>
-#include <AYRenderTypes.h>
+#include <AYRenderer/RenderTypes.h>
 
 #include <memory>
 #include <unordered_map>

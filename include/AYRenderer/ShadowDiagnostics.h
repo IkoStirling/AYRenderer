@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYShadowSettings.h"
+#include "AYRenderer/ShadowSettings.h"
 
 #include <AYIO/Env.h>
 #include <cstdint>

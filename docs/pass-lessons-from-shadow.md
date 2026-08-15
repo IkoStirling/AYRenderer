@@ -198,10 +198,10 @@ flowchart TD
 
 | 主题 | 位置 |
 |------|------|
-| 阴影 shader 金标 / Phoskia | `include/AYShadowShaderSources.h` |
-| Receiver 契约 | `include/AYShadowReceiverContract.h` |
-| 深度 CPU 镜像 | `include/AYShadowDepthCodec.h` |
-| Stamp / bias | `include/AYShadowSettings.h` |
+| 阴影 shader 金标 / Phoskia | `include/AYRenderer/ShadowShaderSources.h` |
+| Receiver 契约 | `include/AYRenderer/ShadowReceiverContract.h` |
+| 深度 CPU 镜像 | `include/AYRenderer/ShadowDepthCodec.h` |
+| Stamp / bias | `include/AYRenderer/ShadowSettings.h` |
 | Phoskia vs sc 切换 | `src/detail/RenderAssetBridge.cpp`, `ShadowCaster.cpp` |
 | Uniform pad 上传 | `src/detail/RenderPass.h` (`trySetUniformVec3`…) |
 | mix 重载决议 | `AYShader/src/AYTypeInference.cpp` |

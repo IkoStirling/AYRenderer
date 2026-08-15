@@ -1,5 +1,5 @@
 #include "AYTest.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderTypes.h"
 
 #include "detail/EditorOverlayPass.h"
 #include "detail/PostProcessPass.h"

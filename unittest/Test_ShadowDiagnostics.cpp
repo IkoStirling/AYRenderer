@@ -1,5 +1,5 @@
-#include "AYShadowDiagnostics.h"
-#include "AYShadowSettings.h"
+#include "AYRenderer/ShadowDiagnostics.h"
+#include "AYRenderer/ShadowSettings.h"
 
 #include "AYTest.h"
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include <AYMath/MathTypes.h>
 

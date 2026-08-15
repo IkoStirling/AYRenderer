@@ -4,11 +4,11 @@
 #include "detail/TextureImageLoader.h"
 #include "detail/VertexLayoutBridge.h"
 
-#include "AYAssetPath.h"
-#include "AYResourceManager.h"
-#include "IAYMaterial.h"
-#include "IAYMesh.h"
-#include "IAYTexture.h"
+#include "AYResource/AssetPath.h"
+#include "AYResource/ResourceManager.h"
+#include "AYResource/assetsDefs/IMaterial.h"
+#include "AYResource/assetsDefs/IMesh.h"
+#include "AYResource/assetsDefs/ITexture.h"
 
 #include <AYIO/File.h>
 

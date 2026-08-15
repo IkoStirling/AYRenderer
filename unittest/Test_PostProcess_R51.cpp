@@ -44,9 +44,9 @@
 
 #include "AYTest.h"
 #include "AYRenderer.h"
-#include "AYRenderScene.h"
-#include "AYShaderResourcePool.h"
-#include "AYShaderResource.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYShader/ShaderResourcePool.h"
+#include "AYShader/ShaderResource.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/ForwardOpaquePass.h"

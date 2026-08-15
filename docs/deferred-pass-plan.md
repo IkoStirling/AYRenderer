@@ -82,12 +82,12 @@ Consumers: Transparent (alpha only) → PostProcess (scene-fbo fallback chain)
 | B | Stamp | 内容 | 触碰面 |
 |---|-------|------|--------|
 | **B0** ✅ | `v13-phase7-vec4-abi` (docs only) | 现场重置：deferred-pass.md + pass-lessons-from-deferred.md + execution-plan.md §P5 + roadmap | `docs/*` |
-| B1 | `v14-phase8-renderpath-enum` | `enum RenderPath` + `RenderPipelineDesc::path` 默认 Forward | `AYRenderTypes.h` / `RenderPipeline.{h,cpp}` / tests (2–3) |
+| B1 | `v14-phase8-renderpath-enum` | `enum RenderPath` + `RenderPipelineDesc::path` 默认 Forward | `AYRenderer/RenderTypes.h` / `RenderPipeline.{h,cpp}` / tests (2–3) |
 | B2 | `v14-phase8-gbuffer-stub` | `GBufferPass` 空壳 + `PassExecContext::gbufferPass` 借用指针 + Noop 0-draw | `GBufferPass.{h,cpp}` / `PassExecContext.h` / tests (5–7) |
 | B3 | `v14-phase8-lighting-stub` | `LightingPass` 空壳 + Forward/Deferred path 显式切换 | `LightingPass.{h,cpp}` / `RenderPipeline.*` / tests (4–6) |
 | **B4** | `v14-phase8-gbuffer-mrt` | GBuffer 真 MRT：RT0 albedo / RT1 normal / RT2 motion / RT3 depth | `GBufferResources.{h,cpp}` / `GBufferPass.cpp` / Phoskia 源 / tests + docs (6–8) |
 | **B5** | `v14-phase8-lighting-realtime` | LightingPass 真光 + 1 盏方向光 parity vs Forward | `LightingPass.cpp` / Phoskia 源 / tests + docs (6–8) |
-| **B6** | `v14-phase8-deferred-default-off` | `makeDeferred()` factory + 默认 Forward 不变 + PostProcess source-FBO 选择优先级 + docs 收口 + 附录 A | `AYRenderTypes.h` / `RenderPipeline.*` / `PostProcessPass.cpp` / docs (3–5) |
+| **B6** | `v14-phase8-deferred-default-off` | `makeDeferred()` factory + 默认 Forward 不变 + PostProcess source-FBO 选择优先级 + docs 收口 + 附录 A | `AYRenderer/RenderTypes.h` / `RenderPipeline.*` / `PostProcessPass.cpp` / docs (3–5) |
 
 每 B ≤ 8 文件 + 3 跑稳通过 → 进下一 B。
 

@@ -89,7 +89,7 @@
 - 它们曾是 §5.5 PR-F1' C' 禁止组合（Light struct + FrameContext shadow 写回 + 默认开 Shadow）的「打开会复现」按钮。
 - E5 ship 默认开 Shadow **不带禁止组合**（Light struct 已删、FrameContext 写回已删、`lastFrameShadowFbo` cache 已删）─ 两个开关再没有东西可 toggle。
 - 同步删除：CMake `option(AY_F1_DIAG_*)` × 2、`RendererSubSystem::diagFlagLight/FrameShadow` 静态函数、`Test_F1_LayoutDiag` 中的运行时 diag-flag 断言改为 `static_assert`。
-- `include/AYF1DiagFlags.h` 保留为薄 include-only marker：两个宏硬编码为 0，让任何尚未编辑的旧 TU 中遗留的 `#if AY_F1_DIAG_*` 块自动选 diagnostic-off 分支。
+- `include/AYRenderer/F1DiagFlags.h` 保留为薄 include-only marker：两个宏硬编码为 0，让任何尚未编辑的旧 TU 中遗留的 `#if AY_F1_DIAG_*` 块自动选 diagnostic-off 分支。
 - `Test_F1_LayoutDiag` 改名为「ABI / ODR / sticky-Noop 守门」─ sizeof 三项检查仍然是 EventBus `_Orphan_all` 历史 crash 的最佳防线。
 
 本文件保留作历史教训；新发现问题请开新 issue，不要再启这两个 flag。

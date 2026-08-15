@@ -3,9 +3,9 @@
 #include "detail/RenderResourceManager.h"
 #include "detail/VertexLayoutBridge.h"
 
-#include "AYAssetPath.h"
-#include "AYShadowShaderSources.h"
-#include "assetsImpl/AYMaterial.h"
+#include "AYResource/AssetPath.h"
+#include "AYRenderer/ShadowShaderSources.h"
+#include "AYResource/assetsImpl/Material.h"
 #include <AYIO/Env.h>
 
 #include <bgfx/bgfx.h>

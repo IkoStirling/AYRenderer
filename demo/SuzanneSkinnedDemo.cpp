@@ -37,20 +37,20 @@
 #include <Windows.h>
 
 #include "AYEntity.h"
-#include "AYEntityModule.h"
-#include "AYWorld.h"
+#include "AYEntity/EntityModule.h"
+#include "AYEntity/World.h"
 #include "AYGameLoop.h"
-#include "AYRendererSubSystem.h"
+#include "AYRenderer/RendererSubSystem.h"
 #include "AYMath/MathUtils.h"
 
-#include "components/AYAnimationComponent.h"
-#include "components/AYMeshComponent.h"
-#include "components/AYSkeletonComponent.h"
+#include "AYEntity/components/AnimationComponent.h"
+#include "AYEntity/components/MeshComponent.h"
+#include "AYEntity/components/SkeletonComponent.h"
 
-#include "assetsImpl/AYMaterial.h"
-#include "assetsImpl/AYMesh.h"
-#include "assetsImpl/AYSkeleton.h"
-#include "assetsImpl/AYAnimation.h"
+#include "AYResource/assetsImpl/Material.h"
+#include "AYResource/assetsImpl/Mesh.h"
+#include "AYResource/assetsImpl/Skeleton.h"
+#include "AYResource/assetsImpl/Animation.h"
 
 #include "AYIO/File.h"
 

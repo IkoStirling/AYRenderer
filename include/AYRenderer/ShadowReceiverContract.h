@@ -1,7 +1,7 @@
 #pragma once
 
-#include "AYShadowSettings.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/ShadowSettings.h"
+#include "AYRenderer/RenderTypes.h"
 
 #include <string_view>
 

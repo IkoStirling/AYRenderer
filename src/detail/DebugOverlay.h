@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderTypes.h"
 
 #include <chrono>
 #include <cstdint>

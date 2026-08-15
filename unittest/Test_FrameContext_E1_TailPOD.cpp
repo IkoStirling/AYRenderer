@@ -25,7 +25,7 @@
 
 #include "AYTest.h"
 #include "AYRenderer.h"
-#include "AYRenderScene.h"
+#include "AYRenderer/RenderScene.h"
 #include "AYMath/MathTypes.h"
 
 #include <cstdint>

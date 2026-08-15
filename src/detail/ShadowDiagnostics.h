@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYShadowDiagnostics.h"
+#include "AYRenderer/ShadowDiagnostics.h"
 
 #include <cstdio>
 

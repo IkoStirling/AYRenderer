@@ -39,8 +39,8 @@
 //        substring check that detects "all-lights-shadow" shape.
 
 #include "AYTest.h"
-#include "AYRenderScene.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYShader/ShaderResourcePool.h"
 
 #include "AYMath/MathTypes.h"
 

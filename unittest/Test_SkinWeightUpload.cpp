@@ -12,7 +12,7 @@
 #include "detail/RenderAssetBridge.h"
 #include "detail/VertexLayoutBridge.h"
 
-#include "assetsImpl/AYMesh.h"
+#include "AYResource/assetsImpl/Mesh.h"
 
 #include "AYIO/File.h"
 #include "AYTest.h"

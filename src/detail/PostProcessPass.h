@@ -3,7 +3,7 @@
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include <bgfx/bgfx.h>
 

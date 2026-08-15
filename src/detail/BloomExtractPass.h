@@ -54,7 +54,7 @@
 //   5. ABI: append-only — RenderPassSlot::BloomExtract = 8 (Lighting
 //      was 7); no existing enum value reorders.
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include "detail/RenderPass.h"
 

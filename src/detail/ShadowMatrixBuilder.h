@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYRenderScene.h"
+#include "AYRenderer/RenderScene.h"
 #include "detail/GpuResources.h"
 
 #include "AYMath/MathTypes.h"

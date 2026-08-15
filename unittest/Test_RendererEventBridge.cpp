@@ -22,12 +22,12 @@
 // Tests use a synthetic probe event to count "frame" deliveries without
 // colliding with WindowResizeEvent itself.
 
-#include "AYRendererSubSystem.h"
+#include "AYRenderer/RendererSubSystem.h"
 #include "AYTest.h"
 
-#include <AYAppEventHost.h>
-#include <ayevent/EventBus.h>
-#include <ayevent/Events/WindowEvents.h>
+#include <AYApplication/AppEventHost.h>
+#include <AYEventSystem/EventBus.h>
+#include <AYEventSystem/Events/WindowEvents.h>
 
 #include <atomic>
 #include <utility>

@@ -2,7 +2,7 @@
 
 #include "detail/BgfxMatrix.h"
 
-#include "AYShadowConfig.h"
+#include "AYRenderer/ShadowConfig.h"
 
 #include <bx/math.h>
 

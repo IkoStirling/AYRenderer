@@ -1,9 +1,9 @@
-#include "AYRendererSubSystem.h"
+#include "AYRenderer/RendererSubSystem.h"
 
-#include "AYF1DiagFlags.h"
-#include "AYUIRenderBackend.h"
+#include "AYRenderer/F1DiagFlags.h"
+#include "AYRenderer/UIRenderBackend.h"
 
-#include <AYSubSystemRegistry.h>
+#include <AYGameLoop/SubSystemRegistry.h>
 
 #include <cstdio>
 #include <string>
@@ -643,7 +643,7 @@ std::size_t RendererSubSystem::diagSizeofFrameContext()
 
 // §5.5 cleanup (2026-07-22) — diagFlagLight() / diagFlagFrameShadow()
 // removed. The diagnostic compile flags they returned are now permanently
-// 0 (see include/AYF1DiagFlags.h). Keeping the functions around as
+// 0 (see include/AYRenderer/F1DiagFlags.h). Keeping the functions around as
 // "always-0" stubs would add surface for no gain — callers (notably
 // Test_F1_LayoutDiag) now assert directly against the AY_F1_DIAG_*
 // header macros at compile time. diagFlagDefaultShadow() was already

@@ -19,7 +19,7 @@ target_include_directories(${TEST_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource/include/assetsImpl
     ${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource/interface
     ${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource/interface/assetsDefs
-    # INT-04: AYAppEventHost.h (EventBusHostScope) + WindowEvents.h.
+    # INT-04: AYApplication/AppEventHost.h (EventBusHostScope) + AYEventSystem/Events/AYEventSystem/Events/AYEventSystem/Events/WindowEvents.h.
     ${CMAKE_CURRENT_SOURCE_DIR}/../../AYApplication/interface
 )
 

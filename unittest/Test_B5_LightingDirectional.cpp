@@ -49,9 +49,9 @@
 //      broadcast).
 
 #include "AYTest.h"
-#include "AYRenderScene.h"
-#include "AYShaderResource.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYShader/ShaderResource.h"
+#include "AYShader/ShaderResourcePool.h"
 
 #include "AYMath/MathTypes.h"
 

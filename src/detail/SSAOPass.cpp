@@ -8,7 +8,7 @@
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include <cstdio>
 

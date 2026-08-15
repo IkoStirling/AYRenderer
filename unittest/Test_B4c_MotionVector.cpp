@@ -10,7 +10,7 @@
 //
 //   HR2: shader uses Phoskia builtin `viewProjectionMatrix` — NOT
 //        bare `projection * view` (verified at AYShader/include/
-//        detail/AYPhoskiaFrameBuiltins.h:37 and Test_BGFXConverter
+//        detail/AYShader/detail/AYShader/detail/AYShader/detail/AYShader/detail/PhoskiaFrameBuiltins.h:37 and Test_BGFXConverter
 //        .cpp:335). The prevoius-frame matrix arrives via
 //        `uniform mat4 u_prevViewProj`.
 //
@@ -69,9 +69,9 @@
 //      B4b).
 
 #include "AYTest.h"
-#include "AYRenderScene.h"
-#include "AYShaderResource.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYShader/ShaderResource.h"
+#include "AYShader/ShaderResourcePool.h"
 
 #include "AYMath/MathTypes.h"
 

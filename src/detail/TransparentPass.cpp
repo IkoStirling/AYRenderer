@@ -4,7 +4,7 @@
 #include "detail/LightingPass.h"
 #include "detail/GBufferPass.h"
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include <algorithm>
 #include <cstdio>

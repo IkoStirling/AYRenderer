@@ -36,7 +36,7 @@
 //      default-init still nullptr (12-field form preserved).
 
 #include "AYRenderer.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderTypes.h"
 #include "AYTest.h"
 
 #include "detail/BGFXAdapter.h"

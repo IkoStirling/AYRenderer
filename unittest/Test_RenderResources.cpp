@@ -1,7 +1,7 @@
 #include "AYRenderer.h"
 #include "AYTest.h"
 
-#include "assetsImpl/AYMesh.h"
+#include "AYResource/assetsImpl/Mesh.h"
 
 #include "AYIO/File.h"
 

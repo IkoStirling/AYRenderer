@@ -14,9 +14,9 @@
 #include "AYRenderer.h"
 #include "AYMath/MathUtils.h"
 
-#include "assetsImpl/AYMaterial.h"
-#include "assetsImpl/AYMesh.h"
-#include "assetsImpl/AYTexture.h"
+#include "AYResource/assetsImpl/Material.h"
+#include "AYResource/assetsImpl/Mesh.h"
+#include "AYResource/assetsImpl/Texture.h"
 
 #include "AYIO/File.h"
 

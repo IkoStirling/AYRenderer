@@ -39,7 +39,7 @@
 //     B2 / B3.
 
 #include "AYRenderer.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderTypes.h"
 #include "AYTest.h"
 
 #include <cstddef>

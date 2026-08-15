@@ -55,7 +55,7 @@
 //   - debug pass early-returns 0 when ctx.gbufferDebugFbo is
 //     invalid (V1 default behavior + V2/V3 when disabled).
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include "detail/RenderPass.h"
 

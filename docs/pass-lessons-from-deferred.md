@@ -49,12 +49,12 @@ Shadow F1 SIGSEGV 历史（[`execution-plan.md`](execution-plan.md) §5.5）让�
 | 阶段 | 做什么 | 触碰面 | 退出门 |
 |------|--------|--------|--------|
 | **B0** | **现场重置：docs only,0 代码**。本文件 + deferred-pass.md + execution-plan.md §P5 + roadmap | `docs/*` | 0 ABI 漂移；3 跑稳 → 写入附录 A |
-| **B1** | `enum class RenderPath { Forward, Deferred }` + `RenderPipelineDesc::path` 字段 + `RenderPipeline` 仍跑 Forward | `AYRenderTypes.h` / `RenderPipeline.*` | 3 跑稳；默认 Forward 无变化 |
+| **B1** | `enum class RenderPath { Forward, Deferred }` + `RenderPipelineDesc::path` 字段 + `RenderPipeline` 仍跑 Forward | `AYRenderer/RenderTypes.h` / `RenderPipeline.*` | 3 跑稳；默认 Forward 无变化 |
 | **B2** | `GBufferPass` 空壳 / Noop 0-draw / `PassExecContext::gbufferPass` 借用指针（镜像 `shadowPass`） | `detail/GBufferPass.{h,cpp}` / `PassExecContext.h` / `AYRenderer.cpp` Impl ctor | 3 跑稳；ABI 新增 1 借用指针字段；FrameContext 0 改 |
 | **B3** | Forward / Deferred path 显式切换 + `LightingPass` 空壳 / Noop 0-draw | `RenderPipeline.*` / `detail/LightingPass.{h,cpp}` / `AYRenderer.cpp` | 3 跑稳；host `configurePipeline(makeDeferred())` 切路径；默认 Forward 不变 |
 | **B4** | GBuffer 真 MRT（NOOP 仍 0-draw,真 GPU 真画）：RT0 albedo / RT1 normal / RT2 motion / RT3 depth；**新加** `BGFXAdapter::createGbufferFrameBuffer` API（现网 `createFrameBuffer` 仅 1×color 或 1×color+1×depth,**不能**做 5-attach MRT ── 主人 B0.5 校正, 2026-07-22）| `BGFXAdapter.{h,cpp}` 新 API + `GBufferResources.{h,cpp}` + `GBufferPass.cpp` + Phoskia + tests + docs delta | 真 GPU Editor 截图：GBuffer 可视化（debug overlay） |
 | **B5** | LightingPass 真光（NOOP 仍 0-draw,真 GPU 采 GBuffer）：单方向光（复用 `FrameContext::lightDirection`），共享 Shadow 借用句柄；vertex 全屏三角形 | `LightingPass.cpp` / 新 shader source | Editor 截图 parity vs Forward（一张图直接对画面） |
-| **B6** | 默认 Forward 不变 / Deferred explicit opt-in / docs 收口 / execution-plan.md 附录 A 加 B0–B6 行 | `AYRenderTypes.h` / `RenderPipeline.*` / `docs/*` | Editor Play 默认 Forward 仍 ⮕ 零回归；Deferred opt-in 路径稳定 |
+| **B6** | 默认 Forward 不变 / Deferred explicit opt-in / docs 收口 / execution-plan.md 附录 A 加 B0–B6 行 | `AYRenderer/RenderTypes.h` / `RenderPipeline.*` / `docs/*` | Editor Play 默认 Forward 仍 ⮕ 零回归；Deferred opt-in 路径稳定 |
 
 **显式推迟（不进 B0–B6）：**
 - 多光源 DataSource（**B7+ Round 2**，**必须**走 ctx.lights 借用指针，绝不进 FrameContext 绝不进 RenderScene Light struct）
@@ -109,12 +109,12 @@ Shadow F1 SIGSEGV 历史（[`execution-plan.md`](execution-plan.md) §5.5）让�
 | PR | 文件数估算 | 说明 |
 |---|---|---|
 | B0 | 4 docs | 零代码 |
-| B1 | 2–3 | `AYRenderTypes.h` / `RenderPipeline.{h,cpp}` / 1 test |
+| B1 | 2–3 | `AYRenderer/RenderTypes.h` / `RenderPipeline.{h,cpp}` / 1 test |
 | B2 | 5–7 | `GBufferPass.{h,cpp}` / `PassExecContext.h` / `AYRenderer.cpp` Impl ctor / `RenderPipeline.{h,cpp}` / 1–2 tests |
 | B3 | 4–6 | `LightingPass.{h,cpp}` / `RenderPipeline.{h,cpp}` / `AYRenderer.cpp` / 1–2 tests |
 | B4 | 6–8 | `GBufferResources.{h,cpp}` + `GBufferPass.cpp` + Phoskia 源 + 1–2 tests + docs delta |
 | B5 | 6–8 | `LightingPass.cpp` + Phoskia 源 + 2 tests + docs delta |
-| B6 | 3–5 | `AYRenderTypes.h` 工厂方法 / `RenderPipeline.*` / docs |
+| B6 | 3–5 | `AYRenderer/RenderTypes.h` 工厂方法 / `RenderPipeline.*` / docs |
 
 任一超 8 → 必须再切，绝不堆。
 
@@ -134,7 +134,7 @@ Shadow F1 SIGSEGV 历史（[`execution-plan.md`](execution-plan.md) §5.5）让�
 | **3** | ForwardOpaque（FO 用 `ctx.viewId`,Renderer composite 推 3）| `AYRenderer.cpp:380,384` |
 | **4** | Transparent | `TransparentPass::kTransparentViewId = 4`（`TransparentPass.h:37`）|
 | **5** | PostProcess blit-to-backbuffer | `PostProcessPass::kBlitViewId = 5`（`PostProcessPass.h:68`）|
-| **6** | UI chrome | `UIRenderBackend::kViewId = 6`（`AYUIRenderBackend.h:40`）|
+| **6** | UI chrome | `UIRenderBackend::kViewId = 6`（`AYRenderer/UIRenderBackend.h:40`）|
 
 **Deferred path 分配（B3 切换时钉死）**：
 
@@ -288,7 +288,7 @@ BGFXAdapter::createGbufferFrameBuffer(uint16_t width, uint16_t height);
 | Shadow 借用指针模式参考 | `src/detail/PassExecContext.h:125` (`shadowPass`) |
 | Shadow 私有 FBO 模式 | `src/detail/ShadowMapResources.{h,cpp}` ── GBufferResources 镜像 |
 | Shadow 矩阵 builder | `src/detail/ShadowLightMatrix.{h,cpp}` / `ShadowMatrixBuilder.{h,cpp}` ── GBuffer identity 不需,LightingPass 走 ctx adapter 取 Projection/View |
-| Phoskia receiver contract | `include/AYShadowReceiverContract.h` ── LightingPass fragment 另起 |
+| Phoskia receiver contract | `include/AYRenderer/ShadowReceiverContract.h` ── LightingPass fragment 另起 |
 | Shadow 借用 pass getter 消费者 | `src/detail/RenderPass.{h,cpp}` (`tryBindShadowSampler`) ── GBuffer pass getter stub 直接走 `ctx.gbufferPass` |
 | Adapter API | `src/detail/BGFXAdapter.{h,cpp}` ── 已 ship 多 cap wrapper / state preset |
 | 公开头守门 | `unittest/Test_PublicHeaderSurface.cpp` ── GBufferPass 类加入 sizeof+符号断言 |
@@ -355,9 +355,9 @@ code,留 §Skybox0-B 接 samplerCube)。
 
 | # | 文件 | 改动 |
 |---|---|---|
-| 1 | `include/AYRenderScene.h` | `enum SkySourceKind` + `struct SkySource` POD |
-| 2 | `include/AYRenderTypes.h` | `RenderPassSlot::Skybox` enum |
-| 3 | `include/AYRenderer.h` | `setSkySource` + `skySource()` getter |
+| 1 | `include/AYRenderer/RenderScene.h` | `enum SkySourceKind` + `struct SkySource` POD |
+| 2 | `include/AYRenderer/RenderTypes.h` | `RenderPassSlot::Skybox` enum |
+| 3 | `AYRenderer.h` | `setSkySource` + `skySource()` getter |
 | 4 | `src/detail/SkySource.h` (新) | DS alias (mirror PerLightShadowDS.h) |
 | 5 | `src/detail/SkyboxPass.h` (新) | RenderPass subclass header |
 | 6 | `src/detail/SkyboxPass.cpp` (新) | Phoskia source + ensure/execute |
@@ -468,7 +468,7 @@ Point + Spot 真光路径 ── host 设 `Light{ type=Point/Spot, ... }`
 
 | # | 文件 | 改动 |
 |---|---|---|
-| 1 | `include/AYRenderScene.h` | Light POD widen + `static_assert ≤ 96` + `Light::point()` / `Light::spot()` factory |
+| 1 | `include/AYRenderer/RenderScene.h` | Light POD widen + `static_assert ≤ 96` + `Light::point()` / `Light::spot()` factory |
 | 2 | `src/detail/LightingPass.h` | `extern const char* const kLightingCacheKeyCStr;` |
 | 3 | `src/detail/LightingPass.cpp` | `kLightingCacheKey` v20 → v21 + `lightsBlock[64]` → `[128]` (512B) + 删 dual-path fallback + Phoskia FS 重写 (8 段 per-type 分支) + `kLightingCacheKeyCStr` 定义 |
 | 4 | `unittest/Test_B5_LightingDirectional.cpp` | cache-key mirror v3 → v21 + `CHECK(localMirror == kLightingCacheKeyCStr)` + 删 `shadowMap` forbidden + mirror FS 改 (4-array UBO + per-type 分支) |
@@ -503,8 +503,8 @@ Point + Spot 真光路径 ── host 设 `Light{ type=Point/Spot, ... }`
 
 | 已有 | 用法 |
 |---|---|
-| `Light::directional()` factory (AYRenderScene.h:147) | `Light::point()` + `Light::spot()` 镜像 |
-| `SceneLights::add(const Light&)` (AYRenderScene.h:220) | B 不改 ── 已能装新 POD |
+| `Light::directional()` factory (AYRenderer/RenderScene.h:147) | `Light::point()` + `Light::spot()` 镜像 |
+| `SceneLights::add(const Light&)` (AYRenderer/RenderScene.h:220) | B 不改 ── 已能装新 POD |
 | `PassExecContext::sceneLights` borrowed ptr (PassExecContext.h:219) | B 不加新 field ── 复用 |
 | `LightingPass::kFullscreenTriangle` + `kFullscreenIndices` | B 不改 ── 几何不变 |
 | `LightingPass::tryBindShadowSampler` (LightingPass.cpp:797) | B 不改 ── shadow 仍只乘 lights[0] |
@@ -557,8 +557,8 @@ Point + Spot 真光路径 ── host 设 `Light{ type=Point/Spot, ... }`
 
 | # | 文件 | 改动 |
 |---|---|---|
-| 1 | `include/AYRenderScene.h` | `SkySource::cubeReserve: uint64_t` → `cubeMap: TextureHandle`;新增 `hasCubeMap()` getter;`isActive()` 加 cube 分支 |
-| 2 | `include/AYRenderer.h` | 新增 `setSkySourceCube(TextureHandle)` + `skySourceCube() const noexcept` getter |
+| 1 | `include/AYRenderer/RenderScene.h` | `SkySource::cubeReserve: uint64_t` → `cubeMap: TextureHandle`;新增 `hasCubeMap()` getter;`isActive()` 加 cube 分支 |
+| 2 | `AYRenderer.h` | 新增 `setSkySourceCube(TextureHandle)` + `skySourceCube() const noexcept` getter |
 | 3 | `src/AYRenderer.cpp` | `Impl::skyCubeTexture` cache + setter 实现 (转发到 SkyboxPass via `findPass("Skybox")→setCubeTexture`) |
 | 4 | `src/detail/SkyboxPass.h` | `extern kSkyboxCacheKeyCStr` + `_tSkyCube` / `_uSkyKind` binding IDs + `_skyCubeTexture` producer state + `setCubeTexture / cubeTexture / hasCubeTexture / hasCubeActive` accessors |
 | 5 | `src/detail/SkyboxPass.cpp` | cache-key bump v0 → v1;Phoskia source 加 `texturecube skyCube` + `uniform float skyKind`;FS dual-kind branch with `mix(equirectColor, cubeColor, skyKind)`;execute body 加 cube sampler bind path + skyKind upload |
@@ -572,7 +572,7 @@ Point + Spot 真光路径 ── host 设 `Light{ type=Point/Spot, ... }`
 1. **cubeActive=0 default ⇒ flat `vec3(0.1)` ambient,byte-equivalent pre-D** ── Test_B7 `b7_ibl_cube_active_zero_default_pins_byte_equivalent` pin `ambientFlat` substring 仍出现;FS `ambientCube * cubeActive = 0`
 2. **setSkySourceCube(invalid) ⇒ equirect path 完整保留** ── SkyboxPass producer state `_skyCubeTexture = TextureHandle{}`,`hasCubeActive()` 返 false,FS skyKind=0 ⇒ equirect branch;LightingPass cubeActive=0 ⇒ flat ambient
 3. **setSkySourceCube(valid) + skySource equirect 同时有效 ⇒ cube path 赢 (硬规则)** ── cube handle valid + `SkySource::kind == CubeMap` ⇒ cubeActive=1 ⇒ FS ambient term 加 cube lookup;SkyboxPass skyKind=1 ⇒ FS `mix(equirect, cube, 1) = cube`,两 path 不各画一半
-4. **SkySource POD 字段从 `cubeReserve: uint64_t` 升级 `cubeMap: TextureHandle`** ── ABI churn 仍守公共头不漏 bgfx:: (TextureHandle 已 ship 在 AYRenderTypes.h)
+4. **SkySource POD 字段从 `cubeReserve: uint64_t` 升级 `cubeMap: TextureHandle`** ── ABI churn 仍守公共头不漏 bgfx:: (TextureHandle 已 ship 在 AYRenderer/RenderTypes.h)
 5. **LightingPass dual-FS 决策 ── 单 FS + uniform gating** ── `cubeActive` 是 uniform 不是 #ifdef;省一半 program acquire overhead,mirror §Skybox0 single-FS 风格
 6. **SkyboxPass cache-key bump `v0 → v1_equirect_or_cube_perpixel_dir`** ── 强制 program re-acquire;`extern kSkyboxCacheKeyCStr` (mirror §P5.5 B Bug fix #3)
 7. **§Skybox0 backdrop 行为保留** ── `mix(skyColor, lit, coverage)` 仍存;cubeColor 替换 equirectColor 但 backdrop 语义不变 (unlit area 仍填 sky)

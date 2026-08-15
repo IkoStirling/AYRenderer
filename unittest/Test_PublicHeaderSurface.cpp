@@ -1,8 +1,8 @@
 // Test_PublicHeaderSurface.cpp — public headers must not pull in bgfx
 
 #include "AYRenderer.h"
-#include "AYRenderScene.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYRenderer/RenderTypes.h"
 
 #include "AYTest.h"
 
@@ -53,7 +53,7 @@ TEST_CASE(public_renderer_lighting_enabled_getter_resolves)
 
 // §P5.5 C (2026-07-23) — Light POD size budget guard. Widened from
 // ≤96 to ≤128 with the addition of castShadow + shadowBias fields
-// (~80B actual). The static_assert in AYRenderScene.h:256 is the
+// (~80B actual). The static_assert in AYRenderer/RenderScene.h:256 is the
 // compile-time guard; this test is the runtime pin so any future
 // cuts that try to widen past 128 trip both gates.
 TEST_CASE(public_light_pod_size_post_c_widen_under_128) {

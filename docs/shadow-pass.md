@@ -26,7 +26,7 @@ Editor Play 默认已配置该 pipeline。产物 stamp 见 stderr（当前约 `v
 
 ## Receiver 材质契约
 
-Phoskia 材质需声明（见 `AYShadowReceiverContract.h` / `kSimpleLitShadowPhoskiaSource`）。  
+Phoskia 材质需声明（见 `AYRenderer/ShadowReceiverContract.h` / `kSimpleLitShadowPhoskiaSource`）。  
 **bgfx 目标下灯光/bias 用 vec4 + swizzle**（与 hand `.sc` 对齐）：
 
 ```
@@ -101,12 +101,12 @@ ForwardOpaque / Transparent
 
 | Header | 角色 |
 |--------|------|
-| `AYShadowSettings.h` | 常量 + build stamp |
-| `AYShadowDepthCodec.h` | CPU ndc01 / pack / compare |
-| `AYShadowShaderSources.h` | caster + receiver Phoskia |
-| `AYShadowReceiverContract.h` | receiver 绑定契约 |
-| `AYShadowDiagnostics.h` | 日志级别 + frame stats |
-| `AYShadowConfig.h` | 伞头 |
+| `AYRenderer/ShadowSettings.h` | 常量 + build stamp |
+| `AYRenderer/ShadowDepthCodec.h` | CPU ndc01 / pack / compare |
+| `AYRenderer/ShadowShaderSources.h` | caster + receiver Phoskia |
+| `AYRenderer/ShadowReceiverContract.h` | receiver 绑定契约 |
+| `AYRenderer/ShadowDiagnostics.h` | 日志级别 + frame stats |
+| `AYRenderer/ShadowConfig.h` | 伞头 |
 
 ## 已知限制 / 后续
 
@@ -118,7 +118,7 @@ ForwardOpaque / Transparent
 
 ## Shadow Bias 控制
 
-- Phoskia receiver 侧声明 `property shadowBias = vec4(0.003, 0.0, 0.0, 0.0)`（`AYShadowShaderSources.h`）；receiver fragment 在 `refNdc01 + bias` 之后做深度比较（`AYShadowShaderSources.h:211`）。
+- Phoskia receiver 侧声明 `property shadowBias = vec4(0.003, 0.0, 0.0, 0.0)`（`AYRenderer/ShadowShaderSources.h`）；receiver fragment 在 `refNdc01 + bias` 之后做深度比较（`AYRenderer/ShadowShaderSources.h:211`）。
 - **P4.2（§P4, 2026-07-22）**：新增全局 bias CPU 镜像 ── `FrameContext::shadowBias` + `Renderer::setShadowBias(float)` / `shadowBias()` getter。Host 一处控制，影响所有用 shadow 的 receiver 材质。
 - 默认 `0.003f`，匹配 Phoskia property 默认 + `ShadowSettings::kBiasDefault`。
 - `tryBindShadowSampler(shader, adapter, shadowPass, flags, bias)` 多 5 参 `bias`（默认 `0.003f`，向后兼容），`ForwardOpaquePass` + `TransparentPass` 调用点都传 `frame.shadowBias`。

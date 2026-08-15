@@ -12,16 +12,16 @@
 // as a historical record of the F1 SIGSEGV bisect that motivated these
 // guards in the first place.
 
-#include "AYF1DiagFlags.h"
+#include "AYRenderer/F1DiagFlags.h"
 #include "AYRenderer.h"
-#include "AYRendererSubSystem.h"
+#include "AYRenderer/RendererSubSystem.h"
 #include "AYTest.h"
 
 #include "detail/FrameContext.h"
 
-#include <AYAppEventHost.h>
-#include <ayevent/EventBus.h>
-#include <ayevent/Events/WindowEvents.h>
+#include <AYApplication/AppEventHost.h>
+#include <AYEventSystem/EventBus.h>
+#include <AYEventSystem/Events/WindowEvents.h>
 
 #include <cstdio>
 #include <iostream>

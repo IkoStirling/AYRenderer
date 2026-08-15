@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYShadowSettings.h"
+#include "AYRenderer/ShadowSettings.h"
 
 #include <algorithm>
 #include <array>
@@ -11,7 +11,7 @@ namespace ayt::render
 {
 
 // CPU mirror of bgfx example 16 shadow depth encoding / compare.
-// GPU shaders in AYShadowShaderSources.h must stay in sync with this file.
+// GPU shaders in AYRenderer/ShadowShaderSources.h must stay in sync with this file.
 struct ShadowDepthCodec {
     // bgfx fs_shadowmaps_packdepth: depth = v_position.z/v_position.w * 0.5 + 0.5
     // Requires clip z/w in NDC range (Phase 3 matrix builder).

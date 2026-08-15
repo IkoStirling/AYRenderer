@@ -100,7 +100,7 @@ Renderer **可以**在资源层使用 `bgfx::VertexBufferHandle` / `bgfx::Textur
 
 ```cpp
 #include "AYShader.h"
-#include "AYPhoskia.h"
+#include "AYShader/Phoskia.h"
 
 using namespace ayt::shader;
 using namespace ayt::shader::phoskia;
@@ -569,7 +569,7 @@ GameLoop::submitRenderCommands()
 | `RenderSystem` | ECS System；填充 `RenderScene` |
 | `bootstrapModule()` | 静态库显式注册 Entity 子系统 + RenderSystem + 组件类型 |
 
-**Bootstrap API**（`AYRendererSubSystem.h`）：
+**Bootstrap API**（`AYRenderer/RendererSubSystem.h`）：
 
 ```cpp
 RendererSubSystem::setBootstrapWindow(hwnd, w, h);
@@ -616,9 +616,9 @@ AYRenderer/
 │   ├── RenderPass.h
 │   ├── ForwardOpaquePass.h
 │   ├── RenderContext.h
-│   ├── RenderScene.h
-│   ├── RenderMesh.h
-│   ├── RenderMaterial.h
+│   ├── AYRenderer/RenderScene.h
+│   ├── RenderAYResource/AYResource/assetsImpl/Mesh.h
+│   ├── RenderAYResource/AYResource/assetsImpl/Material.h
 │   └── RendererSettings.h
 ├── src/
 │   ├── AYRenderer.cpp
@@ -638,7 +638,7 @@ AYRenderer/
 ```
 include/AYRenderer/
 ├── Draw/DrawListBuilder.h
-├── Resource/RenderResourceManager.h
+├── src/detail/RenderResourceManager.h
 ├── Entity/CameraManager.h
 └── Passes/ShadowPass.h ...
 ```
@@ -779,7 +779,7 @@ include/AYRenderer/
 ### 依赖模块同步
 
 - **AYEntity**：`bootstrapModule()`、`SparseSet` 指针语义（见 AYEntity `design.md` §15）。
-- **AYCore**：`AYCoreSerializer.h` 提升属性宏。
+- **AYCore**：`AYCore/CoreSerializer.h` 提升属性宏。
 - **AYSerializer**：`SerializerFor<T,void>` 默认 reflect 路由（见 AYSerializer README §变更记录）。
 
 ### 下一步（R5+，不阻塞 AYUI）

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "AYRenderScene.h"
-#include "AYShaderResourcePool.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYShader/ShaderResourcePool.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/FrameContext.h"
@@ -63,7 +63,7 @@ inline void trySetUniformMat4(shader::ShaderResource& shader, const char* primar
 }
 
 // PR-F2 / Phase 5 — bind shadowMap + upload light-space VP for receivers.
-// See AYShadowReceiverContract.h for the material contract.
+// See AYRenderer/ShadowReceiverContract.h for the material contract.
 //
 // `flags` gates Receive: Cast-only / None items get the lit fallback so
 // meshes without Receive stay fully lit even if the shader declares shadowMap.
@@ -75,7 +75,7 @@ inline void trySetUniformMat4(shader::ShaderResource& shader, const char* primar
 // hard-coded Contract::kDefaultBias. Pass the FrameContext::shadowBias
 // from the call site so a host Renderer::setShadowBias() call takes
 // effect for every receiver. Default 0.003f matches the Phoskia
-// receiver property default (AYShadowShaderSources.h:81 + ShadowSettings
+// receiver property default (AYRenderer/ShadowShaderSources.h:81 + ShadowSettings
 // ::kBiasDefault). Existing call sites pass frame.shadowBias
 // explicitly.
 void tryBindShadowSampler(shader::ShaderResource& shader,

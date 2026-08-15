@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYShaderResourcePool.h"
+#include "AYShader/ShaderResourcePool.h"
 
 namespace ayt::render::detail
 {

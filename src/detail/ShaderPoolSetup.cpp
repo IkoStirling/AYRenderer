@@ -1,6 +1,6 @@
 #include "detail/ShaderPoolSetup.h"
 
-#include "AYShadercDriver.h"
+#include "AYShader/ShadercDriver.h"
 
 #include <AYIO/Env.h>
 #include <cstdlib>

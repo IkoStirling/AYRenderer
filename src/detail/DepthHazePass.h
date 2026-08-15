@@ -70,7 +70,7 @@
 //      before PP so same-frame sampling works). FG does NOT
 //      allocate view ids.
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include "detail/RenderPass.h"
 

@@ -15,10 +15,10 @@
 
 #include "AYTest.h"
 #include "AYRenderer.h"
-#include "AYRenderScene.h"
-#include "AYRenderTypes.h"
-#include "AYShaderResourcePool.h"
-#include "AYShaderResource.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYRenderer/RenderTypes.h"
+#include "AYShader/ShaderResourcePool.h"
+#include "AYShader/ShaderResource.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/FgResource.h"

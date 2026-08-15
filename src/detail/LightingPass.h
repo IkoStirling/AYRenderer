@@ -55,10 +55,10 @@
 #include "detail/RenderPass.h"
 #include "detail/SkyboxPass.h"
 
-#include "AYRenderScene.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYRenderer/RenderTypes.h"
 
-#include <AYShaderResource.h>
+#include <AYShader/ShaderResource.h>
 
 #include <bgfx/bgfx.h>
 

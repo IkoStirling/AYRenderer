@@ -8,11 +8,11 @@
 
 
 
-#include "AYShaderResourcePool.h"
+#include "AYShader/ShaderResourcePool.h"
 
 
 
-#include <AYCoreUtility.h>
+#include <AYCore/CoreUtility.h>
 
 
 

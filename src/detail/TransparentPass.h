@@ -2,7 +2,7 @@
 
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
-#include "AYRenderTypes.h"  // ayt::render::BlendMode
+#include "AYRenderer/RenderTypes.h"  // ayt::render::BlendMode
 
 #include <cstdint>
 #include <string_view>

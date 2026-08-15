@@ -37,7 +37,7 @@
 
 #include "AYTest.h"
 #include "AYRenderer.h"
-#include "AYRenderScene.h"
+#include "AYRenderer/RenderScene.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/ForwardOpaquePass.h"

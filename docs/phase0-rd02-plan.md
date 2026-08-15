@@ -15,8 +15,8 @@ Verified by reading the source:
 
 | # | File:line | Issue |
 |---|-----------|-------|
-| 1 | `AYRenderer/include/AYRenderTypes.h:49-55` | `VertexAttribute` enum has 5 entries — no `BoneIndices` / `BoneWeights` |
-| 2 | `AYRenderer/include/AYRenderTypes.h:80-83` | `VertexLayoutDesc` presets do not include skin channels |
+| 1 | `AYRenderer/include/AYRenderer/RenderTypes.h:49-55` | `VertexAttribute` enum has 5 entries — no `BoneIndices` / `BoneWeights` |
+| 2 | `AYRenderer/include/AYRenderer/RenderTypes.h:80-83` | `VertexLayoutDesc` presets do not include skin channels |
 | 3 | `AYRenderer/src/detail/VertexLayoutBridge.cpp:11-16` | `mapAttribute()` has no skin mapping |
 | 4 | `AYRenderer/src/detail/RenderAssetBridge.cpp:129-163` | `vertexLayoutFromMesh()` checks 5 attributes, silently ignores `MeshAttribute::SkinWeight` |
 | 5 | `AYRenderer/src/detail/RenderAssetBridge.cpp:202-255` | `repackMeshVertices()`'s `kChannels[]` skips skin |
@@ -40,7 +40,7 @@ What this plan **does not** do (deferred):
 ## 2. Target end state
 
 ```cpp
-// AYRenderTypes.h
+// AYRenderer/RenderTypes.h
 enum class VertexAttribute : uint8_t {
     Position, Normal, TexCoord0, Tangent, Color0,
     BoneIndices,   // uint4 (4x u8)
@@ -52,14 +52,14 @@ enum class VertexAttribute : uint8_t {
 //       1. VertexLayoutDesc gets BoneIndices (Uint8x4 normalized) + BoneWeights (Floatx4) channels
 //       2. Vertex stride grows by 24 bytes
 //       3. repackMeshVertices copies IMesh::getSkinWeights() bytes into the new channels
-//       4. GpuMesh.hasSkinWeights = true
+//       4. GpuAYResource/AYResource/assetsImpl/Mesh.hasSkinWeights = true
 //   - When IMesh::hasSkinWeights() == false:
 //       Same behavior as today (regression-safe).
 ```
 
 ## 3. File-by-file change list
 
-### 3.1 `AYRenderTypes.h`
+### 3.1 `AYRenderer/RenderTypes.h`
 
 Add two enum entries and one preset.
 
@@ -208,7 +208,7 @@ TEST(SkinWeightUpload, preserves_through_bridge) {
 ```cpp
 TEST(SkinWeightUpload, gpu_mesh_flag_set_after_load) {
     // Save mesh to disk, load via RenderResourceManager (Noop backend),
-    // assert GpuMesh.hasSkinWeights == true and GpuMesh.vertexCount == 8.
+    // assert GpuAYResource/AYResource/assetsImpl/Mesh.hasSkinWeights == true and GpuMesh.vertexCount == 8.
 }
 ```
 

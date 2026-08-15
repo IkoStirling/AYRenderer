@@ -1,10 +1,10 @@
 #pragma once
 
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderTypes.h"
 
-#include "IAYMaterial.h"
-#include "IAYMesh.h"
-#include "IAYTexture.h"
+#include "AYResource/assetsDefs/IMaterial.h"
+#include "AYResource/assetsDefs/IMesh.h"
+#include "AYResource/assetsDefs/ITexture.h"
 
 #include <bgfx/bgfx.h>
 

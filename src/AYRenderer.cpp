@@ -1,6 +1,6 @@
 #include "AYRenderer.h"
 
-#include "AYF1DiagFlags.h"
+#include "AYRenderer/F1DiagFlags.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/BloomExtractPass.h"
@@ -27,10 +27,10 @@
 #include "detail/TransparentPass.h"
 #include "detail/UiGpuContext.h"
 #include "detail/UIPass.h"
-#include "AYUIRenderBackend.h"
+#include "AYRenderer/UIRenderBackend.h"
 
-#include "AYShaderResourcePool.h"
-#include "AYResourceManager.h"
+#include "AYShader/ShaderResourcePool.h"
+#include "AYResource/ResourceManager.h"
 
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
@@ -256,7 +256,7 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
     // CM-1 (2026-08-11) — 2D lane. Mounted only when the desc
     // includes RenderPassSlot::Forward2DOpaque (makeDefault() does;
     // makeDeferred() does NOT — 2D is Forward-path-only per the
-    // slot comment in AYRenderTypes.h). Zero payload items ⇒
+    // slot comment in AYRenderer/RenderTypes.h). Zero payload items ⇒
     // execute() returns 0 (zero behavior change for 3D hosts).
     case RenderPassSlot::Forward2DOpaque:
         return std::make_unique<detail::Forward2DOpaquePass>();

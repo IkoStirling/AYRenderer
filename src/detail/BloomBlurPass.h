@@ -92,7 +92,7 @@
 //      alias-decision pass MUST keep them in separate physical
 //      FBOs even when their FgTextureDesc matches.
 
-#include "AYShaderResource.h"
+#include "AYShader/ShaderResource.h"
 
 #include "detail/RenderPass.h"
 

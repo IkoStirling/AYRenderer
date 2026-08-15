@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYRenderScene.h"
+#include "AYRenderer/RenderScene.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
@@ -11,7 +11,7 @@
 #include "detail/ShadowCaster.h"
 #include "detail/ShadowMapResources.h"
 
-#include "AYShadowConfig.h"
+#include "AYRenderer/ShadowConfig.h"
 
 #include "AYMath/MathTypes.h"
 

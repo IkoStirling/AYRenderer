@@ -26,8 +26,8 @@
 
 #include "AYTest.h"
 #include "AYRenderer.h"
-#include "AYRenderScene.h"
-#include "AYRenderTypes.h"
+#include "AYRenderer/RenderScene.h"
+#include "AYRenderer/RenderTypes.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/FgResource.h"
