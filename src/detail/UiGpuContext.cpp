@@ -398,10 +398,18 @@ void main()
     // clip, so this only re-adds AA where the quad edge cuts a stroke or
     // shadow gradient — scrolling an SDF card no longer hard-cuts its
     // AA ring at the clip boundary. All-zero clip (hw == 0) = no clip.
+    //
+    // Use coverPx (fixed 1px), NOT cover()/fwidth: deep inside a large
+    // ScrollView clip the box-SDF distance is nearly planar and fwidth(d)
+    // can collapse toward 0 on some GPUs/driver paths, driving clipCover
+    // to 0 and wiping the fill while Flat/text (no soft-clip) still paint.
+    // That matches "hover fill submitted, screen unchanged" on page 8.
     float clipCover = 1.0;
     if (v_clip.z > 0.0 && v_clip.w > 0.0) {
         // (no scalar broadcast — vec4(0.0) is illegal HLSL, X3014)
-        clipCover = cover(sdRoundRect(v_pos - v_clip.xy, v_clip.zw, vec4(0.0, 0.0, 0.0, 0.0)));
+        clipCover = coverPx(
+            sdRoundRect(v_pos - v_clip.xy, v_clip.zw, vec4(0.0, 0.0, 0.0, 0.0)),
+            1.0);
     }
 
     gl_FragColor = vec4(col.rgb * clipCover, min(col.a, 1.0) * clipCover);

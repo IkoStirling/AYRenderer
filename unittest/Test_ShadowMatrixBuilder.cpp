@@ -1,7 +1,7 @@
 #include "detail/ShadowDebug.h"
 #include "detail/ShadowMatrixBuilder.h"
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include "AYTest.h"
 

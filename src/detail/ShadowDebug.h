@@ -6,7 +6,7 @@
 
 
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 
 

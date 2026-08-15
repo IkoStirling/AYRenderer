@@ -2,7 +2,7 @@
 
 #include "AYShaderResource.h"
 
-#include <aymath/MathTypes.h>
+#include <AYMath/MathTypes.h>
 
 #include <cstdint>
 

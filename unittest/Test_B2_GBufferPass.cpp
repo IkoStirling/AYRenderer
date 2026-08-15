@@ -39,7 +39,7 @@
 #include "AYRenderScene.h"
 #include "AYShaderResourcePool.h"
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/ForwardOpaquePass.h"

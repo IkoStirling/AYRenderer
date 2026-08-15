@@ -51,7 +51,7 @@
 #include "detail/TransparentPass.h"
 #include "detail/UIPass.h"
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include <memory>
 #include <unordered_map>

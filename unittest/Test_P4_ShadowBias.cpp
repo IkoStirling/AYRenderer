@@ -34,7 +34,7 @@
 #include "AYShaderResourcePool.h"
 #include "AYShaderResource.h"
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include <cstdint>
 #include <memory>

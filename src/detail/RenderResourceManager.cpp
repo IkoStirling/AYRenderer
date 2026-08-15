@@ -10,7 +10,7 @@
 #include "IAYMesh.h"
 #include "IAYTexture.h"
 
-#include <ayio/File.h>
+#include <AYIO/File.h>
 
 #include <bgfx/bgfx.h>
 #include <algorithm>

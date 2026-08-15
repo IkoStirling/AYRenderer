@@ -24,7 +24,7 @@
 #include "AYRenderer.h"
 #include "AYRenderScene.h"
 #include "AYUIRenderBackend.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include <cstdio>
 #include <string>

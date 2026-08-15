@@ -2,7 +2,7 @@
 
 #include "AYShadercDriver.h"
 
-#include <ayio/Env.h>
+#include <AYIO/Env.h>
 #include <cstdlib>
 #include <string>
 #include <sys/stat.h>

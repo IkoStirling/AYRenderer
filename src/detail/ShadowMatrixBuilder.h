@@ -3,7 +3,7 @@
 #include "AYRenderScene.h"
 #include "detail/GpuResources.h"
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include <unordered_map>
 

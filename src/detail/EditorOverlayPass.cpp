@@ -6,7 +6,7 @@
 #include "AYShaderResource.h"
 
 #include <algorithm>
-#include <ayio/Env.h>
+#include <AYIO/Env.h>
 #include <cstdio>
 #include <cstring>
 #include <string>

@@ -1,7 +1,7 @@
 #pragma once
 // AYRenderTypes.h — public renderer types (no bgfx / no driver handles)
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include <cstdint>
 #include <string>

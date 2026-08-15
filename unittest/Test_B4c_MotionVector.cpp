@@ -73,7 +73,7 @@
 #include "AYShaderResource.h"
 #include "AYShaderResourcePool.h"
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
@@ -225,7 +225,7 @@ struct B4cCapturePass final : public ayt::render::detail::RenderPass {
             // exactly 1.0f and off-diagonals are 0.0f. Sufficient
             // for the first-frame contract pin. Float4x4 stores rows
             // as `row[4]` of FVector4 each with `f[4]` (see
-            // AYFoundation/AYMath/include/aymath/MathTypes.h:758).
+            // AYFoundation/AYMath/include/AYMath/MathTypes.h:758).
             const Float4x4& v = observedPrevView;
             observedPrevIsIdentity =
                 v.row[0].f[0] == 1.0f && v.row[0].f[1] == 0.0f && v.row[0].f[2] == 0.0f && v.row[0].f[3] == 0.0f &&

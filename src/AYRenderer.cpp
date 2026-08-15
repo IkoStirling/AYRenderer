@@ -35,7 +35,7 @@
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 
-#include <ayio/Env.h>
+#include <AYIO/Env.h>
 
 #include <chrono>
 #include <cstdio>

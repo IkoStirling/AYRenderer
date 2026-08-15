@@ -9,7 +9,7 @@
 // so D3D11 homogeneousDepth matches the rest of the pipeline. AYMath
 // lookAt/ortho are intentionally NOT used here.
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 namespace ayt::render::detail
 {

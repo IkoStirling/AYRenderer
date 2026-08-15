@@ -41,7 +41,7 @@
 #include "AYWorld.h"
 #include "AYGameLoop.h"
 #include "AYRendererSubSystem.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 
 #include "components/AYAnimationComponent.h"
 #include "components/AYMeshComponent.h"
@@ -52,7 +52,7 @@
 #include "assetsImpl/AYSkeleton.h"
 #include "assetsImpl/AYAnimation.h"
 
-#include "ayio/File.h"
+#include "AYIO/File.h"
 
 #include <chrono>
 #include <cstdio>

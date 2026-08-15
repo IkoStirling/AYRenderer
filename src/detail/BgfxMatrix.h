@@ -5,7 +5,7 @@
 // All engine-side matrices stay true AYMath; convert only at the
 // GPU upload boundary via these helpers.
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 namespace ayt::render::detail
 {

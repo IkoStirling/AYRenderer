@@ -44,7 +44,7 @@
 #include "AYTest.h"
 #include "AYUIRenderBackend.h"
 
-#include <aymath/MathTypes.h>
+#include <AYMath/MathTypes.h>
 
 #include <cstdio>
 #include <string>

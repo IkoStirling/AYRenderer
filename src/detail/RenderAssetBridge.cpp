@@ -6,7 +6,7 @@
 #include "AYAssetPath.h"
 #include "AYShadowShaderSources.h"
 #include "assetsImpl/AYMaterial.h"
-#include <ayio/Env.h>
+#include <AYIO/Env.h>
 
 #include <bgfx/bgfx.h>
 

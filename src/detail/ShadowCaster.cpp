@@ -7,7 +7,7 @@
 
 #include <bgfx/bgfx.h>
 
-#include <ayio/Env.h>
+#include <AYIO/Env.h>
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>

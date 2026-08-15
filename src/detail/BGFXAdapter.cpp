@@ -1,7 +1,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/BgfxMatrix.h"
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include <cstdio>
 #include <cstdlib>

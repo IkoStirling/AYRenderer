@@ -10,7 +10,7 @@
 #include <bx/allocator.h>
 #include <bimg/decode.h>
 
-#include <ayio/File.h>
+#include <AYIO/File.h>
 
 #include <cstring>
 

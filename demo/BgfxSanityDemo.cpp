@@ -15,7 +15,7 @@
 #include <bx/math.h>
 
 #include "AYShadercDriver.h"
-#include "ayio/File.h"
+#include "AYIO/File.h"
 #include "AYPath.h"
 
 #include <chrono>

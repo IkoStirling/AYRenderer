@@ -13,7 +13,7 @@
 
 #include "AYShadowConfig.h"
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include <bgfx/bgfx.h>
 
