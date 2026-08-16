@@ -33,19 +33,15 @@ bool fileExists(const std::string& path)
 }
 
 #ifndef AY_SHADER_SHADERC_HINT
-#  ifdef _WIN32
-#    define AY_SHADER_SHADERC_HINT "thirdParty/bgfx-install/debug/bin/shaderc.exe"
-#  else
-#    define AY_SHADER_SHADERC_HINT "thirdParty/bgfx-install/debug/bin/shaderc"
-#  endif
+#  define AY_SHADER_SHADERC_HINT ""
 #endif
 
 #ifndef AY_SHADER_BGFX_COMMON_HINT
-#  define AY_SHADER_BGFX_COMMON_HINT "../../../thirdparty/bgfx/examples/common"
+#  define AY_SHADER_BGFX_COMMON_HINT ""
 #endif
 
 #ifndef AY_SHADER_BGFX_SRC_HINT
-#  define AY_SHADER_BGFX_SRC_HINT "../../../thirdparty/bgfx/src"
+#  define AY_SHADER_BGFX_SRC_HINT ""
 #endif
 
 std::vector<std::string> shadercIncludeDirs()
@@ -62,16 +58,6 @@ std::vector<std::string> shadercIncludeDirs()
 #endif
     if (AY_BGFX_SHADER_INCLUDE_HINT[0] && fileExists(AY_BGFX_SHADER_INCLUDE_HINT)) {
         dirs.push_back(AY_BGFX_SHADER_INCLUDE_HINT);
-    }
-    static const char* kInstallIncludeFallbacks[] = {
-        "AYRuntime/AYShader/thirdParty/bgfx-install/debug/include/bgfx",
-        "../AYShader/thirdParty/bgfx-install/debug/include/bgfx",
-        "../../AYShader/thirdParty/bgfx-install/debug/include/bgfx",
-    };
-    for (const char* path : kInstallIncludeFallbacks) {
-        if (fileExists(path)) {
-            dirs.push_back(path);
-        }
     }
     return dirs;
 }

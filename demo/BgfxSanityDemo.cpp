@@ -16,7 +16,7 @@
 
 #include "AYShader/ShadercDriver.h"
 #include "AYIO/File.h"
-#include "AYPath.h"
+#include <AYIO/Path.h>
 
 #include <chrono>
 #include <cstdint>
@@ -123,22 +123,12 @@ std::string resolveExistingPath(const char* hint, const char* const* fallbacks, 
 
 std::string resolveShadercPath()
 {
-    static const char* kFallbacks[] = {
-        "../../AYShader/thirdParty/bgfx-install/debug/bin/shaderc.exe",
-        "../AYShader/thirdParty/bgfx-install/debug/bin/shaderc.exe",
-        "../../../AYShader/thirdParty/bgfx-install/debug/bin/shaderc.exe",
-    };
-    return resolveExistingPath(AY_SHADER_SHADERC_HINT, kFallbacks, sizeof(kFallbacks) / sizeof(kFallbacks[0]));
+    return resolveExistingPath(AY_SHADER_SHADERC_HINT, nullptr, 0);
 }
 
 std::string resolveIncludeDir()
 {
-    static const char* kFallbacks[] = {
-        "../../AYShader/thirdParty/bgfx-install/debug/include/bgfx",
-        "../AYShader/thirdParty/bgfx-install/debug/include/bgfx",
-        "../../../AYShader/thirdParty/bgfx-install/debug/include/bgfx",
-    };
-    return resolveExistingPath(AY_BGFX_SHADER_INCLUDE_HINT, kFallbacks, sizeof(kFallbacks) / sizeof(kFallbacks[0]));
+    return resolveExistingPath(AY_BGFX_SHADER_INCLUDE_HINT, nullptr, 0);
 }
 
 bool compileStage(ayt::shader::AYShadercDriver& driver,

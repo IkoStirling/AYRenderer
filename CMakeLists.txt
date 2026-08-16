@@ -5,6 +5,9 @@ project(AYRenderer
     DESCRIPTION "AYRenderer — bgfx-based renderer (Forward+Deferred + SSAO + UI backend)"
 )
 
+set(AY_SHADER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../AYShader")
+include("${AY_SHADER_ROOT}/cmake/AYBgfx.cmake")
+
 # C++ standard follows the root CMakeLists (currently C++23; may move to C++26).
 # Do not pin a standard here.
 
@@ -33,12 +36,6 @@ target_include_directories(AYRenderer PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../AYResource/interface/assetsDefs
 )
 
-list(APPEND CMAKE_PREFIX_PATH
-    "${CMAKE_CURRENT_SOURCE_DIR}/../AYShader/thirdParty/bgfx-install/debug"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../AYShader/thirdParty/bgfx-install/release"
-)
-find_package(bgfx CONFIG REQUIRED)
-
 target_link_libraries(AYRenderer PUBLIC
     AYShader
     AYMath
@@ -66,49 +63,6 @@ if(MSVC)
     # bgfx/bx headers require conforming preprocessor and __cplusplus on MSVC.
     target_compile_options(AYRenderer PRIVATE /Zc:__cplusplus /Zc:preprocessor)
     target_compile_definitions(AYRenderer PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-endif()
-
-if(NOT DEFINED AY_SHADER_SHADERC_PATH)
-    if(WIN32)
-        set(_ays_shaderc_name "shaderc.exe")
-    else()
-        set(_ays_shaderc_name "shaderc")
-    endif()
-    set(AY_SHADER_SHADERC_PATH
-        "${CMAKE_CURRENT_SOURCE_DIR}/../AYShader/thirdParty/bgfx-install/debug/bin/${_ays_shaderc_name}")
-endif()
-
-if(NOT DEFINED AY_SHADER_BGFX_COMMON_DIR)
-    set(_ays_bgfx_search
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/bgfx/examples/common"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../thirdparty/bgfx/examples/common"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../../thirdparty/bgfx/examples/common"
-    )
-    set(AY_SHADER_BGFX_COMMON_DIR "")
-    foreach(_dir IN LISTS _ays_bgfx_search)
-        if(EXISTS "${_dir}/common.sh")
-            set(AY_SHADER_BGFX_COMMON_DIR "${_dir}")
-            break()
-        endif()
-    endforeach()
-endif()
-
-if(NOT DEFINED AY_SHADER_BGFX_SRC_DIR AND AY_SHADER_BGFX_COMMON_DIR)
-    set(AY_SHADER_BGFX_SRC_DIR "${AY_SHADER_BGFX_COMMON_DIR}/../../src")
-endif()
-
-if(NOT DEFINED AY_BGFX_SHADER_INCLUDE_DIR)
-    set(_ays_bgfx_include_search
-        "${CMAKE_CURRENT_SOURCE_DIR}/../AYShader/thirdParty/bgfx-install/debug/include/bgfx"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/bgfx/include"
-    )
-    set(AY_BGFX_SHADER_INCLUDE_DIR "")
-    foreach(_dir IN LISTS _ays_bgfx_include_search)
-        if(EXISTS "${_dir}/bgfx_shader.sh")
-            set(AY_BGFX_SHADER_INCLUDE_DIR "${_dir}")
-            break()
-        endif()
-    endforeach()
 endif()
 
 target_compile_definitions(AYRenderer PRIVATE

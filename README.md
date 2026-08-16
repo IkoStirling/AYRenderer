@@ -174,7 +174,7 @@ D:\Projects\out\build\x64-Debug\AYRuntime\AYRenderer\demo\AYRenderer_BgfxSanityD
 ```
 
 - 预期：彩色旋转 cube（每面不同 ABGR 顶点色），背景深灰蓝
-- 启动时用 shaderc 编译内置 `vs_color` / `fs_color`（include: `bgfx-install/.../include/bgfx`）
+- 启动时用 vcpkg `bgfx[tools]` 提供的 shaderc 编译内置 `vs_color` / `fs_color`（bgfx include 由 CMake 包自动提供）
 - **Esc** 或关闭窗口退出
 
 | 结果 | 含义 |
@@ -186,7 +186,7 @@ D:\Projects\out\build\x64-Debug\AYRuntime\AYRenderer\demo\AYRenderer_BgfxSanityD
 - 左上角 **debug overlay**（FPS、draw 数、backend、分辨率）
 - **F9** 保存 `{assetRoot}/screenshot.tga` 与 `screenshot.png`（stderr 会打印完整路径）
 - **Esc** 或关闭窗口退出
-- 需要 shaderc 与 bgfx `common.sh`（CMake 自动探测 `thirdparty/bgfx`）
+- 需要 vcpkg `bgfx[tools]`；CMake 自动定位 shaderc，`common.sh` / `shaderlib.sh` 使用 AYShader 内受版本控制的 `shaderinclude/bgfx`
 
 ---
 
