@@ -228,28 +228,21 @@ D:\Projects\out\build\x64-Debug\AYRuntime\AYRenderer\demo\AYSuzanneSkinned_Demo.
 
 ## 依赖
 
-- **AYShader** — `#include "AYShader.h"`（`ShaderResourcePool`、`ShaderResource`）
-- **AYIO** — 文件读取（Phoskia / 贴图路径）；进程 API 不使用
-- **AYResource** — R2b：`loadMesh` / `loadMaterial` / `loadTexture`（`.aymesh` / `.aymat` / `.aytex`）
-- **AYDevice** — 窗口句柄与分辨率（bgfx 初始化）
-- **bgfx** — 仅渲染器 TU 包含；材质/着色器绑定路径不持有 `bgfx::ProgramHandle`
+- 公开：AYShader、AYMath、AYIO、AYGameLoop、AYUI
+- 内部：AYResource、AYFont、AYApplication
+- bgfx、bimg（仅实现层；公开头不泄漏 bgfx 类型）
 
----
+## 目录（当前）
 
-## 目录（目标）
-
-```
+```text
 AYRenderer/
-├── README.md
-├── design.md
-├── CMakeLists.txt          # R0
-├── include/AYRenderer/     # R1 起
-└── src/                    # R1 起
+├── AYRenderer.h                 # 模块入口
+├── include/AYRenderer/          # RenderScene、RenderTypes、UIRenderBackend 等
+├── src/                         # Renderer、SubSystem 与 pass 实现
+├── backend/                     # 后端适配
+├── demo/
+└── unittest/
 ```
-
-详细目录与 phase 切片见 `design.md` §12–§13、§16（变更记录）。
-
----
 
 ## 变更记录（2026-07）
 
