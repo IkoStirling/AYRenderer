@@ -135,6 +135,11 @@ const ayt::game::SubSystemDescriptor& RendererSubSystem::getDescriptor() const
         .basePriority = 100,
 
         .timeType     = ayt::game::SubSystemDescriptor::TimeType::Scaled,
+        .phases       = ayt::game::phaseBit(ayt::game::FramePhase::Presentation),
+        .clock        = ayt::game::ClockDomain::Unscaled,
+        .initializeAfter = {},
+        .runsAfter    = {},
+        .phasePriority = 100,
 
     };
 
