@@ -116,6 +116,9 @@ private:
     Renderer           _renderer;
     RenderScene        _scene;
     SceneBuildCallback _sceneBuilder;
+    uint64_t           _scenePacketFrame = 0;
+    float              _scenePacketInterpolationAlpha = 0.0f;
+    bool               _scenePacketValid = false;
     void*              _windowHandle = nullptr;
     uint32_t           _width        = 1280;
     uint32_t           _height       = 720;

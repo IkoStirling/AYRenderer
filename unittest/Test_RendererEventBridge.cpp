@@ -11,8 +11,8 @@
 // Frame order simulated by the tests:
 //   1. RendererSubSystem::initialize() — Backend::Noop + a placeholder native
 //      window handle. The renderer reports isInitialized() == true after this.
-//   2. RendererSubSystem::update() — currently a no-op, but we drive it to
-//      exercise the loop hook.
+//   2. RendererSubSystem::update() — builds the stable Presentation packet,
+//      matching the normal loop hook.
 //   3. bus.post<WindowResizeEvent>({w,h}) — what DeviceSubSystem (INT-03) does
 //      each frame in production.
 //   4. bus.pump() — what GameLoop::tickOnceFrame() does after the device

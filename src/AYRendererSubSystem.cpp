@@ -140,6 +140,8 @@ const ayt::game::SubSystemDescriptor& RendererSubSystem::getDescriptor() const
         .initializeAfter = {},
         .runsAfter    = {},
         .phasePriority = 100,
+        .reads        = {},
+        .writes       = {"Presentation.RenderPacket"},
 
     };
 
@@ -324,7 +326,17 @@ bool RendererSubSystem::initialize()
 void RendererSubSystem::update(float /*deltaTime*/)
 
 {
-
+    // Presentation builds the complete CPU render packet on the main thread.
+    // The render callback only consumes this stable scene; GameLoop waits for
+    // the previous consumer before the next packet is mutated.
+    _scene.clear();
+    if (_sceneBuilder) {
+        _sceneBuilder(_scene);
+    }
+    auto& loop = ayt::game::GameLoop::instance();
+    _scenePacketFrame = loop.getFrameCount();
+    _scenePacketInterpolationAlpha = loop.getInterpolationFactor();
+    _scenePacketValid = true;
 }
 
 
@@ -348,6 +360,8 @@ void RendererSubSystem::shutdown()
         loop.setRenderCallback({});
 
         _sceneBuilder = nullptr;
+
+        _scenePacketValid = false;
 
         _renderer.shutdown();
 
@@ -414,6 +428,7 @@ void RendererSubSystem::setSceneBuilder(SceneBuildCallback callback)
     // share the same per-frame scene buffer without one overwriting
     // the other. Order of registration = order of execution.
     if (!callback) return;
+    _scenePacketValid = false;
     if (_sceneBuilder) {
         SceneBuildCallback previous = _sceneBuilder;
         _sceneBuilder = [previous, callback](RenderScene& scene) {
@@ -493,12 +508,21 @@ void RendererSubSystem::renderScenePass()
             50.0f, aspect, 0.1f, 100.0f);
     }
 
-    _scene.clear();
-    if (_sceneBuilder) {
-        _sceneBuilder(_scene);
+    // Non-GameLoop editor callers still get a packet on demand. In the staged
+    // path update() has already populated it before submission.
+    if (!_scenePacketValid) {
+        _scene.clear();
+        if (_sceneBuilder) _sceneBuilder(_scene);
+        _scenePacketInterpolationAlpha =
+            ayt::game::GameLoop::instance().getInterpolationFactor();
+        _scenePacketFrame = ayt::game::GameLoop::instance().getFrameCount();
+        _scenePacketValid = true;
     }
 
     _renderer.render(_scene);
+    // The packet has been consumed. This also preserves legacy/editor callers
+    // that invoke renderFrame() without a preceding GameLoop Presentation tick.
+    _scenePacketValid = false;
 }
 
 // INT-04: WindowResize handler. Called on the main thread by EventBus pump
@@ -588,7 +612,7 @@ void RendererSubSystem::renderCompositeFrame(bool renderScene3D, UIRenderBackend
         // Pause freezes the effect. Wall-clock in Renderer::render
         // keeps advancing while the Editor still composites frames.
         _renderer.setSimulationTimeSeconds(
-            ayt::game::GameLoop::instance().getElapsedTime());
+            static_cast<float>(ayt::game::GameLoop::instance().getGameElapsedTime()));
         _renderer.setViewportRect(_viewportX, _viewportY, _viewportW, _viewportH);
         renderScenePass();  // dispatches [ForwardOpaque, Transparent, UIPass];
                             // UIPass::execute now flushes pending text
