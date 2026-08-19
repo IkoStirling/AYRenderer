@@ -7,6 +7,8 @@
 #include "AYRenderer/ShadowShaderSources.h"
 #include "AYResource/assetsImpl/Material.h"
 #include <AYIO/Env.h>
+#include <AYIO/File.h>
+#include <AYIO/Path.h>
 
 #include <bgfx/bgfx.h>
 
@@ -106,6 +108,29 @@ void applyMaterialParameter(RenderResourceManager& mgr,
     default:
         break;
     }
+}
+
+// Bare shader filenames resolve base-relative by convention, but the
+// editor ships .phoskia sources under the asset root (not beside each
+// .aymat in materials/). Try the base-relative hit first, then the
+// root; returns the first path that exists, else the base-relative one
+// (caller logs the miss).
+std::string resolveShaderPath(const std::string& materialPath,
+                              const std::string& shaderRef)
+{
+    const std::string baseHit =
+        ayt::resource::resolveAssetPath(materialPath, shaderRef);
+    if (ayt::io::File::exists(baseHit)) {
+        return baseHit;
+    }
+    const std::string& root = ayt::resource::assetRoot();
+    if (!root.empty() && !ayt::io::path::isAbsolute(shaderRef)) {
+        const std::string rootHit = ayt::io::path::join(root, shaderRef);
+        if (ayt::io::File::exists(rootHit)) {
+            return rootHit;
+        }
+    }
+    return baseHit;
 }
 
 } // namespace
@@ -425,7 +450,7 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     }
 
     const std::string shaderPath =
-        ayt::resource::resolveAssetPath(materialPath, shaderRef);
+        resolveShaderPath(materialPath, shaderRef);
 
     // Default: Phoskia file path. Force hand .sc with AY_SHADOW_USE_SC=1
     // (PowerShell: $env:AY_SHADOW_USE_SC="1").
@@ -482,7 +507,7 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     // Fall back to the editor-shipped lit shader so albedo textures still bind.
     if (!handle.isValid()) {
         const std::string fallback =
-            ayt::resource::resolveAssetPath(materialPath, "simple_lit_shadow.phoskia");
+            resolveShaderPath(materialPath, "simple_lit_shadow.phoskia");
         handle = mgr.createMaterialFromFile(fallback);
         if (handle.isValid()) {
             std::fprintf(stderr,
