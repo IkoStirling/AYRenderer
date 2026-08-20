@@ -1766,6 +1766,16 @@ void Renderer::setMaterialBlendMode(MaterialHandle material, BlendMode blendMode
     it->second.blendMode = blendMode;
 }
 
+void Renderer::setMaterialSurfaceProperties(MaterialHandle material, int alphaMode,
+                                             float alphaCutoff, bool doubleSided)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->resources.setMaterialSurfaceProperties(material, alphaMode,
+                                                   alphaCutoff, doubleSided);
+}
+
 void Renderer::setMaterialFloat(MaterialHandle material, const char* uniformName, float value)
 {
     if (!_impl) {

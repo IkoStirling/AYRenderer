@@ -3,10 +3,23 @@
 #include "detail/FrameContext.h"
 #include "detail/ShadowPass.h"
 
+#include <AYIO/Env.h>
 #include <cstdio>
+#include <string>
 
 namespace ayt::render::detail
 {
+
+namespace {
+
+bool surfaceDiagnosticEnabled()
+{
+    const std::string value =
+        ayt::io::env::get("AY_SKINNED_DIAGNOSTIC").value_or("");
+    return !value.empty() && value != "0" && value != "off";
+}
+
+} // namespace
 
 void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
                                       const std::unordered_map<uint64_t, GpuTexture>& textures,
@@ -253,6 +266,24 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         GpuMaterial& material = matIt->second;
         if (!material.shader.isValid()) {
             continue;
+        }
+
+        if (surfaceDiagnosticEnabled()) {
+            static uint32_t s_surfaceDiagLog = 0;
+            if (s_surfaceDiagLog < 128) {
+                std::fprintf(stderr,
+                             "[MaterialPassDiag] pass=ForwardOpaque itemMat=%llu "
+                             "blend=%u alphaCutout=%d cutoff=%.3f doubleSided=%d "
+                             "textures=%zu first=%u count=%u\n",
+                             static_cast<unsigned long long>(item.material.id),
+                             static_cast<unsigned>(material.blendMode),
+                             material.alphaCutout ? 1 : 0,
+                             material.alphaCutoff,
+                             material.doubleSided ? 1 : 0,
+                             material.textures.size(),
+                             item.firstIndex, item.indexCount);
+                ++s_surfaceDiagLog;
+            }
         }
 
         // P0.4 (2026-07-20) — skip BlendMode::Alpha. TransparentPass

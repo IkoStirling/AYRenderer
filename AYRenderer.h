@@ -107,6 +107,11 @@ public:
     // unknown handle.
     void setMaterialBlendMode(MaterialHandle material, BlendMode blendMode);
 
+    // P2.1 diagnostics and host-side surface overrides. alphaMode uses the
+    // resource contract values: 0=Opaque, 1=Mask, 2=Blend.
+    void setMaterialSurfaceProperties(MaterialHandle material, int alphaMode,
+                                      float alphaCutoff, bool doubleSided);
+
     void setMaterialFloat(MaterialHandle material, const char* uniformName, float value);
     void setMaterialVec3(MaterialHandle material, const char* uniformName,
                          float x, float y, float z);

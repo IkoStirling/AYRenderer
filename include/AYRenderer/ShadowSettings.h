@@ -18,7 +18,9 @@ struct ShadowSettings {
     static constexpr float kLitScale = 0.65f;
 
     static constexpr const char* kPipelineBuildStamp = "v14-material-surface-contract";
-    static constexpr const char* kCasterCacheKey     = "shadow_caster_phoskia_v5_surface";
+    // v6: Phoskia skeletal lowering now emits backend-safe mul(matrix, vec4)
+    // for the shadow caster's skinningMatrix expansion.
+    static constexpr const char* kCasterCacheKey     = "shadow_caster_phoskia_v6_surface";
 };
 
 // Legacy names — keep until all call sites migrate (Phase 6 cleanup).
