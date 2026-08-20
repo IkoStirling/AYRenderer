@@ -47,6 +47,26 @@ inline void trySetUniformVec3(shader::ShaderResource& shader, const char* name, 
     shader.setUniform(binding, padded, sizeof(padded));
 }
 
+inline void tryBindWhiteTexture(shader::ShaderResource& shader,
+                                BGFXAdapter& adapter,
+                                const char* name,
+                                bool alreadyBound)
+{
+    if (alreadyBound || name == nullptr) {
+        return;
+    }
+    const shader::BindingId binding = shader.getTextureBinding(name);
+    if (binding == shader::InvalidBinding) {
+        return;
+    }
+    const bgfx::TextureHandle white = adapter.getWhiteFallbackTexture();
+    if (!BGFXAdapter::isValid(white)) {
+        return;
+    }
+    shader.setTexture(shader.getTextureStage(binding), binding,
+                      toShaderTexture(white));
+}
+
 inline void trySetUniformMat4(shader::ShaderResource& shader, const char* primaryName,
                               const char* fallbackName, const ayt::math::Float4x4& matrix)
 {

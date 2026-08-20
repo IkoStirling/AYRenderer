@@ -69,6 +69,8 @@ bool EditorOverlayPass::submitOutlineItem(
     tryBindShadowSampler(material.shader, adapter, ctx.shadowPass,
                          item.shadowFlags, frame.shadowBias);
 
+    bool baseColorTextureBound = false;
+    bool albedoMapBound = false;
     for (const GpuMaterial::TextureSlot& slot : material.textures) {
         if (slot.name.empty() || !slot.texture.isValid() || slot.name == "shadowMap") {
             continue;
@@ -85,7 +87,12 @@ bool EditorOverlayPass::submitOutlineItem(
         const uint8_t stage = material.shader.getTextureStage(binding);
         material.shader.setTexture(stage, binding,
                                    toShaderTexture(texIt->second.handle));
+        baseColorTextureBound = baseColorTextureBound || slot.name == "baseColorTexture";
+        albedoMapBound = albedoMapBound || slot.name == "albedoMap";
     }
+    tryBindWhiteTexture(material.shader, adapter, "baseColorTexture",
+                        baseColorTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "albedoMap", albedoMapBound);
 
     resolveAndApplyColorUniforms(material);
 

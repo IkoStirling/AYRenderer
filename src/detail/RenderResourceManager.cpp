@@ -890,7 +890,11 @@ void RenderResourceManager::setMaterialFloat(MaterialHandle material, const char
 
     GpuMaterial& mat = it->second;
     const shader::BindingId binding = mat.shader.getUniformBinding(uniformName);
-    storeUniformSlot(mat, uniformName, binding, &value, sizeof(float));
+    // bgfx represents float/vec2/vec3 uniforms as one 16-byte Vec4 slot.
+    // Passing only four bytes makes bgfx read beyond the stored payload and
+    // turns imported metallic/roughness values into nondeterministic data.
+    const float padded[4] = {value, 0.0f, 0.0f, 0.0f};
+    storeUniformSlot(mat, uniformName, binding, padded, sizeof(padded));
 }
 
 void RenderResourceManager::setMaterialVec2(MaterialHandle material, const char* uniformName,
@@ -905,7 +909,7 @@ void RenderResourceManager::setMaterialVec2(MaterialHandle material, const char*
         return;
     }
 
-    const float values[2] = {x, y};
+    const float values[4] = {x, y, 0.0f, 0.0f};
     GpuMaterial& mat = it->second;
     const shader::BindingId binding = mat.shader.getUniformBinding(uniformName);
     storeUniformSlot(mat, uniformName, binding, values, sizeof(values));

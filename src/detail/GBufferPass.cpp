@@ -280,6 +280,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // Imported .aymat uses baseColorTexture / diffuse; GBufferFill
         // only declares albedoMap — alias those names so characters
         // are not forced to solid white.
+        bool albedoBound = false;
         for (const GpuMaterial::TextureSlot& slot : material.textures) {
             if (slot.name.empty() || !slot.texture.isValid()) {
                 continue;
@@ -306,7 +307,9 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             const uint8_t stage = _program.getTextureStage(binding);
             _program.setTexture(stage, binding,
                                 toShaderTexture(texIt->second.handle));
+            albedoBound = true;
         }
+        tryBindWhiteTexture(_program, ctx.adapter, "albedoMap", albedoBound);
 
         ctx.adapter.setTransform(item.world);
         ctx.adapter.setVertexBuffer(mesh.vertexBuffer);

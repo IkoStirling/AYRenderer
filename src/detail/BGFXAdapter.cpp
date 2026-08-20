@@ -1020,7 +1020,7 @@ bool BGFXAdapter::requestTextureReadback(bgfx::TextureHandle tex,
     return true;
 }
 
-bgfx::TextureHandle BGFXAdapter::getLitShadowFallbackTexture()
+bgfx::TextureHandle BGFXAdapter::getWhiteFallbackTexture()
 {
     if (!_initialized) {
         return BGFX_INVALID_HANDLE;
@@ -1038,6 +1038,11 @@ bgfx::TextureHandle BGFXAdapter::getLitShadowFallbackTexture()
             | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
         mem);
     return _litShadowFallback;
+}
+
+bgfx::TextureHandle BGFXAdapter::getLitShadowFallbackTexture()
+{
+    return getWhiteFallbackTexture();
 }
 
 } // namespace ayt::render::detail

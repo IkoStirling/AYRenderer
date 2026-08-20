@@ -76,6 +76,8 @@ bool TransparentPass::submitItem(
     tryBindShadowSampler(material.shader, adapter, ctx.shadowPass,
                       item.shadowFlags, frame.shadowBias);
 
+    bool baseColorTextureBound = false;
+    bool albedoMapBound = false;
     for (const GpuMaterial::TextureSlot& slot : material.textures) {
         if (slot.name.empty() || !slot.texture.isValid()) {
             continue;
@@ -96,9 +98,25 @@ bool TransparentPass::submitItem(
         const uint8_t stage = material.shader.getTextureStage(binding);
         material.shader.setTexture(stage, binding,
                                    toShaderTexture(texIt->second.handle));
+        baseColorTextureBound = baseColorTextureBound || slot.name == "baseColorTexture";
+        albedoMapBound = albedoMapBound || slot.name == "albedoMap";
     }
+    tryBindWhiteTexture(material.shader, adapter, "baseColorTexture",
+                        baseColorTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "albedoMap", albedoMapBound);
 
     resolveAndApplyColorUniforms(material);
+
+    for (const GpuMaterial::UniformSlot& slot : material.uniformSlots) {
+        if (slot.name.empty() || slot.size == 0) {
+            continue;
+        }
+        const shader::BindingId binding =
+            material.shader.getUniformBinding(slot.name);
+        if (binding != shader::InvalidBinding) {
+            material.shader.setUniform(binding, slot.data, slot.size);
+        }
+    }
 
     ayt::shader::DrawCallContext drawCtx;
     drawCtx.viewId = viewId;

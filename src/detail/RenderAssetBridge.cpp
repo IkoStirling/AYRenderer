@@ -129,6 +129,18 @@ std::string resolveShaderPath(const std::string& materialPath,
         if (ayt::io::File::exists(rootHit)) {
             return rootHit;
         }
+
+        // Older cooked materials used "shaders/pbr.phoskia" while the
+        // editor's runtime asset root is intentionally flat. Preserve those
+        // caches by trying the basename before declaring the shader missing.
+        const std::size_t slash = shaderRef.find_last_of("/\\");
+        if (slash != std::string::npos && slash + 1u < shaderRef.size()) {
+            const std::string flatHit =
+                ayt::io::path::join(root, shaderRef.substr(slash + 1u));
+            if (ayt::io::File::exists(flatHit)) {
+                return flatHit;
+            }
+        }
     }
     return baseHit;
 }

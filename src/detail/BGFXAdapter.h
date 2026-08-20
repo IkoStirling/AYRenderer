@@ -300,9 +300,12 @@ public:
                                 void* rgba8Out,
                                 uint32_t& outReadyFrame) const;
 
-    // 1×1 RGBA8 with R=1.0 — bind as shadowMap when no real shadow
-    // producer is ready so materials that declare shadowMap stay lit
-    // instead of sampling an unbound slot (0 → fully shadowed / black).
+    // Shared 1x1 opaque-white RGBA8 fallback. Besides keeping an absent
+    // shadow producer fully lit, this is the neutral base-color texture for
+    // imported materials that only provide scalar/color factors.
+    bgfx::TextureHandle getWhiteFallbackTexture();
+
+    // Compatibility name retained for the shadow receiver path.
     bgfx::TextureHandle getLitShadowFallbackTexture();
 
     void destroy(bgfx::VertexBufferHandle h);
