@@ -58,6 +58,14 @@ TEST_CASE(runtime_pbr_frontend_and_shaderc_compile)
 #ifdef AY_SHADER_SHADERC_HINT
     pool.setShadercExecutable(AY_SHADER_SHADERC_HINT);
 #endif
+    std::vector<std::string> includeDirs;
+#ifdef AY_SHADER_BGFX_COMMON_HINT
+    includeDirs.emplace_back(AY_SHADER_BGFX_COMMON_HINT);
+#endif
+#ifdef AY_SHADER_BGFX_SRC_HINT
+    includeDirs.emplace_back(AY_SHADER_BGFX_SRC_HINT);
+#endif
+    pool.setBgfxIncludeDirs(includeDirs);
     pool.bindRendererTypeForTests(
         /*bgfxRendererType=*/0,
         /*platform=*/"linux",
@@ -73,6 +81,39 @@ TEST_CASE(runtime_pbr_frontend_and_shaderc_compile)
         }
     }
     CHECK(resource.isValid());
+}
+
+TEST_CASE(runtime_pbr_d3d_reflection_preserves_texture_binding_name)
+{
+    ayt::shader::ShaderResourcePool pool;
+#ifdef AY_SHADER_SHADERC_HINT
+    pool.setShadercExecutable(AY_SHADER_SHADERC_HINT);
+#endif
+    std::vector<std::string> includeDirs;
+#ifdef AY_SHADER_BGFX_COMMON_HINT
+    includeDirs.emplace_back(AY_SHADER_BGFX_COMMON_HINT);
+#endif
+#ifdef AY_SHADER_BGFX_SRC_HINT
+    includeDirs.emplace_back(AY_SHADER_BGFX_SRC_HINT);
+#endif
+    pool.setBgfxIncludeDirs(includeDirs);
+    pool.bindRendererTypeForTests(
+        /*bgfxRendererType=*/0,
+        /*platform=*/"windows",
+        /*profile=*/"s_5_0");
+
+    const ayt::shader::ShaderResource resource =
+        pool.acquire(ayt::render::kPbrPhoskiaSource,
+                     "runtime_pbr_phoskia_d3d_reflection_v1");
+    if (!resource.isValid()) {
+        std::cerr << "[runtime pbr d3d] acquire failed:\n";
+        for (const std::string& error : pool.lastCompileErrors()) {
+            std::cerr << "  " << error << '\n';
+        }
+    }
+    CHECK(resource.isValid());
+    CHECK(resource.getTextureBinding("baseColorTexture")
+          != ayt::shader::InvalidBinding);
 }
 
 TEST_SUITE_END
