@@ -40,6 +40,7 @@
 #include "AYRenderer.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYMath/MathTypes.h"
+#include "detail/RenderPass.h"
 
 #include <cstdio>
 #include <string>
@@ -200,6 +201,36 @@ TEST_CASE(drawitem_sortkey_default_zero) {
     item.jointCount   = 0;
     item.sortKey      = 0;  // U1++ — default 0 preserves insertion order
     CHECK(item.sortKey == 0);
+}
+
+TEST_CASE(drawitem_index_range_defaults_to_whole_mesh) {
+    DrawItem item;
+    ayt::render::detail::GpuMesh mesh;
+    mesh.indexCount = 321;
+
+    const ayt::render::detail::DrawIndexRange range =
+        ayt::render::detail::resolveDrawIndexRange(item, mesh);
+    CHECK(range.firstIndex == 0u);
+    CHECK(range.indexCount == 321u);
+}
+
+TEST_CASE(drawitem_index_range_preserves_and_clamps_submesh_slice) {
+    DrawItem item;
+    item.firstIndex = 90;
+    item.indexCount = 40;
+
+    ayt::render::detail::GpuMesh mesh;
+    mesh.indexCount = 100;
+
+    const ayt::render::detail::DrawIndexRange range =
+        ayt::render::detail::resolveDrawIndexRange(item, mesh);
+    CHECK(range.firstIndex == 90u);
+    CHECK(range.indexCount == 10u);
+
+    item.firstIndex = 100;
+    const ayt::render::detail::DrawIndexRange empty =
+        ayt::render::detail::resolveDrawIndexRange(item, mesh);
+    CHECK(empty.indexCount == 0u);
 }
 
 TEST_SUITE_END

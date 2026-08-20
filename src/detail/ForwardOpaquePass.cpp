@@ -275,9 +275,15 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
             continue;
         }
 
+        const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
+        if (drawRange.indexCount == 0) {
+            continue;
+        }
+
         adapter.setTransform(item.world);
         adapter.setVertexBuffer(mesh.vertexBuffer);
-        adapter.setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
+        adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
+                               drawRange.indexCount);
 
         // PR-F2 (2026-07-21) — ctx.shadowPass feeds flushMaterial. When
         // the active shadow producer has a ready FBO, the helper

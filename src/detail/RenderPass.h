@@ -22,6 +22,31 @@ namespace ayt::render::detail { class ShadowPass; }
 namespace ayt::render::detail
 {
 
+struct DrawIndexRange {
+    uint32_t firstIndex = 0;
+    uint32_t indexCount = 0;
+};
+
+// Resolve DrawItem's optional submesh slice against the uploaded mesh.
+// A zero item.indexCount means "draw the complete mesh" for compatibility.
+// Invalid/out-of-bounds slices resolve to an empty range and are skipped.
+inline DrawIndexRange resolveDrawIndexRange(const DrawItem& item,
+                                            const GpuMesh& mesh) noexcept
+{
+    if (mesh.indexCount == 0) {
+        return {};
+    }
+    if (item.indexCount == 0) {
+        return {0, mesh.indexCount};
+    }
+    if (item.firstIndex >= mesh.indexCount) {
+        return {};
+    }
+    const uint32_t remaining = mesh.indexCount - item.firstIndex;
+    return {item.firstIndex,
+            item.indexCount < remaining ? item.indexCount : remaining};
+}
+
 // U1.5 — shared per-material uniform-upload helpers. ForwardOpaquePass
 // and TransparentPass both need to upload MVP / cameraPos / lightDir /
 // lightColor with the same lazy-resolve + fallback semantics. Keeping

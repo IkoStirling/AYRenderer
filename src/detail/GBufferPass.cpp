@@ -311,9 +311,15 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         }
         tryBindWhiteTexture(_program, ctx.adapter, "albedoMap", albedoBound);
 
+        const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
+        if (drawRange.indexCount == 0) {
+            continue;
+        }
+
         ctx.adapter.setTransform(item.world);
         ctx.adapter.setVertexBuffer(mesh.vertexBuffer);
-        ctx.adapter.setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
+        ctx.adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
+                                   drawRange.indexCount);
 
         shader::DrawCallContext submitCtx;
         submitCtx.viewId = viewId;

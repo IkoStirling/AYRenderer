@@ -60,9 +60,15 @@ bool TransparentPass::submitItem(
         return false;
     }
 
+    const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
+    if (drawRange.indexCount == 0) {
+        return false;
+    }
+
     adapter.setTransform(worldOverride != nullptr ? *worldOverride : item.world);
     adapter.setVertexBuffer(mesh.vertexBuffer);
-    adapter.setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
+    adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
+                           drawRange.indexCount);
 
     trySetUniformVec3(material.shader, "cameraPos", frame.cameraPosition.ptr());
 

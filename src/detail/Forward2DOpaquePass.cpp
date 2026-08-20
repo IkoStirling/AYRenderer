@@ -115,9 +115,15 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
             continue;
         }
 
+        const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
+        if (drawRange.indexCount == 0) {
+            continue;
+        }
+
         adapter.setTransform(item.world);
         adapter.setVertexBuffer(mesh.vertexBuffer);
-        adapter.setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
+        adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
+                               drawRange.indexCount);
 
         // Bind albedo textures (flushMaterial loop shape; shadowMap
         // slots skipped — 2D has no shadow path).

@@ -141,9 +141,15 @@ uint32_t ShadowCaster::drawCasters(
             continue;
         }
 
+        const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
+        if (drawRange.indexCount == 0) {
+            continue;
+        }
+
         adapter.setTransform(item.world);
         adapter.setVertexBuffer(mesh.vertexBuffer, 0, UINT32_MAX);
-        adapter.setIndexBuffer(mesh.indexBuffer, 0, mesh.indexCount);
+        adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
+                               drawRange.indexCount);
 
         if (ayt::render::ShadowDiagnostics::enabled(ayt::render::ShadowLogLevel::L4_Verbose)) {
             static uint32_t s_castLog = 0;
@@ -157,7 +163,7 @@ uint32_t ShadowCaster::drawCasters(
                              std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]),
                              std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]),
                              std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]),
-                             static_cast<unsigned>(mesh.indexCount),
+                             static_cast<unsigned>(drawRange.indexCount),
                              static_cast<unsigned>(item.shadowFlags));
                 ++s_castLog;
             }

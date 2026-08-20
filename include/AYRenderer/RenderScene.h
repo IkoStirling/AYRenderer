@@ -56,6 +56,11 @@ struct DrawItem {
     // remain valid across the synchronous render() call. Default
     // nullptr ⇒ pre-CM-1 behavior — 3D passes never see this field.
     const DrawPayload2D*       payload      = nullptr;
+    // Optional submesh index range. Tail-appended to preserve every existing
+    // DrawItem field offset. indexCount == 0 keeps the whole-mesh contract;
+    // otherwise passes submit this clamped slice.
+    uint32_t                   firstIndex   = 0;
+    uint32_t                   indexCount   = 0;
 };
 
 class RenderScene {
