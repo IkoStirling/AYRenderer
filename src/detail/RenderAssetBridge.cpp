@@ -547,13 +547,9 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
         });
     }
 
-    const int alphaMode = material.hasParameter("__ayAlphaMode")
-        ? material.getInt("__ayAlphaMode") : 0;
-    const float alphaCutoff = material.hasParameter("__ayAlphaCutoff")
-        ? material.getFloat("__ayAlphaCutoff") : 0.5f;
-    const bool doubleSided = material.hasParameter("__ayDoubleSided")
-        ? material.getBool("__ayDoubleSided") : false;
-    mgr.setMaterialSurfaceProperties(handle, alphaMode, alphaCutoff, doubleSided);
+    mgr.setMaterialSurfaceProperties(
+        handle, static_cast<int>(material.getAlphaMode()),
+        material.getAlphaCutoff(), material.isDoubleSided());
 
     if (!material.hasParameter("baseColor")) {
         mgr.setMaterialColor(handle, "baseColor", 1.0f, 1.0f, 1.0f, 1.0f);

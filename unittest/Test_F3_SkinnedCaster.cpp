@@ -203,14 +203,11 @@ TEST_CASE(f3_try_upload_bone_palette_noop_when_skeleton_binding_invalid_and_no_b
     CHECK(true);  // reached ⇒ no crash
 }
 
-TEST_CASE(f3_try_upload_bone_palette_skips_castSkinned_uniform_when_no_bones) {
-    // F3.4 — pre-F3 SkinnedLit materials don't declare
-    // `castSkinned` (their VS is unconditional). When the helper
-    // is called from FO with castSkinnedBinding == Invalid +
-    // bones == nullptr, the helper must NOT probe getUniformBinding
-    // on the shader (would re-enter the pool on every draw).
-    // Instead: the helper's first conditional only sets the
-    // uniform when both haveBones && castSkinnedBinding valid.
+TEST_CASE(f3_try_upload_bone_palette_accepts_static_draw_without_cast_binding) {
+    // F3.4 — pre-F3 SkinnedLit materials don't declare `castSkinned`.
+    // A static draw with an invalid toggle binding remains a safe no-op. When
+    // the binding is valid, the helper explicitly uploads zero so a preceding
+    // skinned draw cannot leak its toggle into this draw.
     BGFXAdapter adapter;
     ayt::render::detail::GpuMaterial material;
 

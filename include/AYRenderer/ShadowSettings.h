@@ -17,8 +17,8 @@ struct ShadowSettings {
     static constexpr float kLitMin   = 0.20f;
     static constexpr float kLitScale = 0.65f;
 
-    static constexpr const char* kPipelineBuildStamp = "v13-phase7-vec4-abi";
-    static constexpr const char* kCasterCacheKey     = "shadow_caster_phoskia_v4_no_init";
+    static constexpr const char* kPipelineBuildStamp = "v14-material-surface-contract";
+    static constexpr const char* kCasterCacheKey     = "shadow_caster_phoskia_v5_surface";
 };
 
 // Legacy names — keep until all call sites migrate (Phase 6 cleanup).

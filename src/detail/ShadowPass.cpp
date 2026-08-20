@@ -19,6 +19,8 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     ayt::shader::ShaderResourcePool& pool = ctx.pool;
     const uint8_t viewId = kShadowViewId;
     const auto& meshes    = ctx.meshes;
+    const auto& textures  = ctx.textures;
+    const auto& materials = ctx.materials;
     const RenderScene& scene = ctx.scene;
 
     if (!adapter.isInitialized() || adapter.isNoopBackend()) {
@@ -213,7 +215,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             const uint64_t casterState = ShadowMapResources::casterDrawState();
             adapter.setStateDepthOnlyWrite();
             casterDrawCount += _shadowCaster.drawCasters(
-                adapter, viewId, casterState, scene, meshes);
+                adapter, viewId, casterState, scene, meshes, textures, materials);
         }
         // Reset scissor for subsequent consumers (next pass).
         adapter.setViewScissor(viewId, 0, 0,
@@ -246,7 +248,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
         }
 
         casterDrawCount = _shadowCaster.drawCasters(
-            adapter, viewId, casterState, scene, meshes);
+            adapter, viewId, casterState, scene, meshes, textures, materials);
     }
 
     _mapResources.resolveForSampling(adapter, kShadowResolveViewId);

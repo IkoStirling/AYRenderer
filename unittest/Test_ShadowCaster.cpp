@@ -16,6 +16,8 @@ using ayt::render::kShadowCastAndReceive;
 using ayt::render::makeShadowFlags;
 using ayt::render::detail::BGFXAdapter;
 using ayt::render::detail::GpuMesh;
+using ayt::render::detail::GpuMaterial;
+using ayt::render::detail::GpuTexture;
 using ayt::render::detail::ShadowCaster;
 using ayt::render::detail::ShadowMapResources;
 
@@ -44,12 +46,16 @@ TEST_CASE(draw_casters_empty_scene_returns_zero)
     ShadowCaster caster;
     RenderScene scene;
     std::unordered_map<uint64_t, GpuMesh> meshes;
+    std::unordered_map<uint64_t, GpuTexture> textures;
+    std::unordered_map<uint64_t, GpuMaterial> materials;
 
     CHECK(caster.drawCasters(adapter,
                              1,
                              ShadowMapResources::casterDrawState(),
                              scene,
-                             meshes) == 0);
+                             meshes,
+                             textures,
+                             materials) == 0);
 }
 
 TEST_SUITE_END

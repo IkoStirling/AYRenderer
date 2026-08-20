@@ -866,14 +866,23 @@ void RenderResourceManager::setMaterialColor(MaterialHandle material, const char
     }
 
     GpuMaterial& mat = it->second;
-    mat.colorOverride    = ayt::math::FVector4(r, g, b, a);
-    mat.hasColorOverride = true;
+    const shader::BindingId binding = mat.shader.getUniformBinding(propertyName);
+    const float value[4] = {r, g, b, a};
 
-    shader::BindingId binding = mat.shader.getUniformBinding(propertyName);
-    if (binding == shader::InvalidBinding) {
-        binding = mat.shader.getUniformBinding("baseColor");
+    // colorOverride is the canonical BaseColor fallback consumed by GBuffer
+    // and the alpha-mask shadow caster. Other Float4 properties (emissive,
+    // opacity, etc.) must retain independent slots; treating the last Float4
+    // as BaseColor made parameter iteration order change the rendered model.
+    if (std::strcmp(propertyName, "baseColor") == 0
+        || std::strcmp(propertyName, "color") == 0) {
+        mat.colorOverride = ayt::math::FVector4(r, g, b, a);
+        mat.hasColorOverride = true;
+        mat.colorBinding = binding != shader::InvalidBinding
+            ? binding : mat.shader.getUniformBinding("baseColor");
+        return;
     }
-    mat.colorBinding = binding;
+
+    storeUniformSlot(mat, propertyName, binding, value, sizeof(value));
 }
 
 void RenderResourceManager::setMaterialFloat(MaterialHandle material, const char* uniformName,
@@ -1009,6 +1018,25 @@ void RenderResourceManager::setMaterialSurfaceProperties(MaterialHandle material
     mat.blendMode = alphaMode == 2 ? BlendMode::Alpha : BlendMode::Opaque;
     mat.alphaCutoff = std::clamp(alphaCutoff, 0.0f, 1.0f);
     mat.doubleSided = doubleSided;
+
+    // PBR/forward shaders use this value to orient thin-sheet normals toward
+    // the viewer when culling is disabled. Store it as a regular per-draw
+    // vec4 upload so every material program sees the same surface contract.
+    GpuMaterial::UniformSlot* surfaceSlot = nullptr;
+    for (GpuMaterial::UniformSlot& slot : mat.uniformSlots) {
+        if (slot.name == "doubleSided") {
+            surfaceSlot = &slot;
+            break;
+        }
+    }
+    if (surfaceSlot == nullptr) {
+        mat.uniformSlots.push_back({});
+        surfaceSlot = &mat.uniformSlots.back();
+        surfaceSlot->name = "doubleSided";
+    }
+    const float value[4] = {doubleSided ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+    std::memcpy(surfaceSlot->data, value, sizeof(value));
+    surfaceSlot->size = static_cast<uint16_t>(sizeof(value));
 }
 
 TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint32_t height,

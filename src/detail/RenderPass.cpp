@@ -224,14 +224,16 @@ void tryUploadBonePalette(shader::ShaderResource& shader,
 {
     const bool hasBones = item.boneMatrices != nullptr && item.jointCount > 0;
 
-    // Set the castSkinned uniform ONLY when (a) it's a binding on
-    // this program and (b) we have bones. Pre-F3 SkinnedLit
-    // materials skip this branch (their castSkinned binding is
-    // Invalid — there's no such property in their .phoskia).
-    if (hasBones
-        && castSkinnedBinding != shader::InvalidBinding) {
+    // Always write the toggle when the program exposes it. Uniform values
+    // persist across bgfx draws, so leaving the previous skinned draw's value
+    // at 1 would make a following static caster index an absent bone palette.
+    if (castSkinnedBinding != shader::InvalidBinding) {
+        const float castSkinned[4] = {
+            hasBones && castSkinnedValue != 0 ? 1.0f : 0.0f,
+            0.0f, 0.0f, 0.0f
+        };
         shader.setUniform(castSkinnedBinding,
-                          &castSkinnedValue, sizeof(castSkinnedValue));
+                          castSkinned, sizeof(castSkinned));
     }
 
     if (!hasBones) {

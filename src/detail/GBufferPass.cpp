@@ -36,7 +36,9 @@ constexpr const char* kGBufferPhoskiaSource = R"(
 material GBufferFill {
     texture2d albedoMap
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
+    property doubleSided = vec4(0.0, 0.0, 0.0, 0.0)
     uniform mat4 u_prevViewProj
+    uniform vec4 cameraPos
 
     vertex {
         in pos : position
@@ -54,7 +56,11 @@ material GBufferFill {
         out gbufferAlbedo : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferMotion : color = vec4(0.0, 0.0, 0.0, 0.0)
-        let n = normalize(worldNormal)
+        let rawN = normalize(worldNormal)
+        let viewDir = normalize(cameraPos.xyz - worldPos)
+        let faceSign = mix(1.0, step(0.0, dot(rawN, viewDir)) * 2.0 - 1.0,
+                           max(0.0, min(1.0, doubleSided.x)))
+        let n = rawN * faceSign
         let albedo = sample(albedoMap, vUv) * baseColor
         gbufferAlbedo = vec4(albedo.rgb, albedo.a)
         gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0)
@@ -64,9 +70,9 @@ material GBufferFill {
 )";
 
 // Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
-static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v7_worldpos_rgba16f";
+static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v8_worldpos_double_sided";
 static constexpr const char* kGBufferAlphaCutoutCacheKey =
-    "gbuffer_fill_v9_worldpos_rgba16f_alpha_cutout_configured";
+    "gbuffer_fill_v10_worldpos_alpha_cutout_double_sided";
 
 constexpr const char* kGBufferAlphaCutoutVaryingSc = R"(
 vec3 v_normal    : NORMAL    = vec3(0.0, 0.0, 1.0);
@@ -95,6 +101,8 @@ $input v_normal, v_texcoord0, v_position
 #include <bgfx_shader.sh>
 uniform vec4 baseColor;
 uniform vec4 alphaCutoff;
+uniform vec4 cameraPos;
+uniform vec4 doubleSided;
 SAMPLER2D(albedoMap, 0);
 void main()
 {
@@ -102,7 +110,11 @@ void main()
     if (albedo.a < alphaCutoff.x) {
         discard;
     }
-    vec3 n = normalize(v_normal);
+    vec3 rawN = normalize(v_normal);
+    vec3 viewDir = normalize(cameraPos.xyz - v_position);
+    float faceSign = mix(1.0, step(0.0, dot(rawN, viewDir)) * 2.0 - 1.0,
+                         clamp(doubleSided.x, 0.0, 1.0));
+    vec3 n = rawN * faceSign;
     gl_FragData[0] = vec4(albedo.rgb, albedo.a);
     gl_FragData[1] = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0);
     gl_FragData[2] = vec4(v_position, 1.0);
@@ -349,6 +361,23 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
                 material.hasColorOverride ? material.colorOverride.w : 1.0f,
             };
             drawProgram.setUniform(baseColorBinding, base, sizeof(base));
+        }
+        const shader::BindingId cameraBinding =
+            drawProgram.getUniformBinding("cameraPos");
+        if (cameraBinding != shader::InvalidBinding) {
+            const float camera[4] = {
+                frame.cameraPosition.x, frame.cameraPosition.y,
+                frame.cameraPosition.z, 0.0f
+            };
+            drawProgram.setUniform(cameraBinding, camera, sizeof(camera));
+        }
+        const shader::BindingId doubleSidedBinding =
+            drawProgram.getUniformBinding("doubleSided");
+        if (doubleSidedBinding != shader::InvalidBinding) {
+            const float surface[4] = {
+                material.doubleSided ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f
+            };
+            drawProgram.setUniform(doubleSidedBinding, surface, sizeof(surface));
         }
         if (needsAlphaCutout) {
             const shader::BindingId cutoffBinding =

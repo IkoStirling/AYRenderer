@@ -11,14 +11,29 @@ namespace ayt::render
 // pack(≈1)→0 fights the clear/heuristic contract.)
 // Fallback hand .sc: AY_SHADOW_USE_SC=1.
 inline constexpr const char* kShadowCasterPhoskiaSource = R"(
+uniformblock Skeleton {
+    mat4 bones[128]
+}
 material ShadowCaster {
     property casterSolidTest = vec4(0.0, 0.0, 0.0, 0.0)
+    property castSkinned = vec4(0.0, 0.0, 0.0, 0.0)
     vertex {
         in pos : position
+        in boneId : boneindices
+        in boneWt : boneweights
         out clipZw : texcoord = vec2(
-            (modelViewProjection * vec4(pos, 1.0)).z,
-            (modelViewProjection * vec4(pos, 1.0)).w)
-        return modelViewProjection * vec4(pos, 1.0)
+            (modelViewProjection * mix(
+                vec4(pos, 1.0),
+                skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(pos, 1.0)),
+                castSkinned.x)).z,
+            (modelViewProjection * mix(
+                vec4(pos, 1.0),
+                skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(pos, 1.0)),
+                castSkinned.x)).w)
+        return modelViewProjection * mix(
+            vec4(pos, 1.0),
+            skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(pos, 1.0)),
+            castSkinned.x)
     }
     fragment {
         in clipZw : texcoord
@@ -66,6 +81,66 @@ void main()
     gl_FragColor = vec4(ndOut, ndOut, ndOut, 1.0);
 }
 )";
+
+// Alpha-tested shadow caster. This stays hand-authored .sc until Phoskia can
+// lower fragment `discard`. It deliberately accepts the skinning attributes
+// as well: static meshes select the original position through castSkinned=0,
+// while skinned draws upload the same bone palette as the solid caster path.
+inline constexpr const char* kShadowMaskCasterVaryingSc = R"(
+vec2 v_clipZw   : TEXCOORD0 = vec2(0.0, 0.0);
+vec2 v_texcoord0: TEXCOORD1 = vec2(0.0, 0.0);
+vec3 a_position : POSITION;
+vec2 a_texcoord0: TEXCOORD0;
+vec4 a_indices  : BLENDINDICES;
+vec4 a_weight   : BLENDWEIGHT;
+)";
+
+inline constexpr const char* kShadowMaskCasterVertexSc = R"(
+$input a_position, a_texcoord0, a_indices, a_weight
+$output v_clipZw, v_texcoord0
+
+#include <bgfx_shader.sh>
+
+uniform mat4 bones[128];
+uniform vec4 castSkinned;
+
+void main()
+{
+    vec4 bindPos = vec4(a_position, 1.0);
+    vec4 skinPos = a_weight.x * mul(bones[int(a_indices.x)], bindPos)
+                 + a_weight.y * mul(bones[int(a_indices.y)], bindPos)
+                 + a_weight.z * mul(bones[int(a_indices.z)], bindPos)
+                 + a_weight.w * mul(bones[int(a_indices.w)], bindPos);
+    vec4 localPos = mix(bindPos, skinPos, castSkinned.x);
+    vec4 clip = mul(u_modelViewProj, localPos);
+    v_clipZw = vec2(clip.z, clip.w);
+    v_texcoord0 = a_texcoord0;
+    gl_Position = clip;
+}
+)";
+
+inline constexpr const char* kShadowMaskCasterFragmentSc = R"(
+$input v_clipZw, v_texcoord0
+
+#include <bgfx_shader.sh>
+
+uniform vec4 alphaCutoff;
+uniform vec4 baseColor;
+SAMPLER2D(albedoMap, 0);
+
+void main()
+{
+    float alpha = texture2D(albedoMap, v_texcoord0).a * baseColor.a;
+    if (alpha < alphaCutoff.x) {
+        discard;
+    }
+    float ndc01 = (v_clipZw.x / v_clipZw.y) * 0.5 + 0.5;
+    gl_FragColor = vec4(ndc01, ndc01, ndc01, 1.0);
+}
+)";
+
+inline constexpr const char* kShadowMaskCasterCacheKey =
+    "shadow_mask_caster_sc_v1_skinned";
 
 // Lit receiver — ABI matches verified hand .sc (all lighting/bias as vec4,
 // swizzle .xyz / .x). Unrolled 3x3 PCF + in-map gate.

@@ -23,14 +23,22 @@ public:
                          uint8_t viewId,
                          uint64_t casterState,
                          const RenderScene& scene,
-                         const std::unordered_map<uint64_t, GpuMesh>& meshes);
+                         const std::unordered_map<uint64_t, GpuMesh>& meshes,
+                         const std::unordered_map<uint64_t, GpuTexture>& textures,
+                         const std::unordered_map<uint64_t, GpuMaterial>& materials);
 
 private:
     ayt::shader::ShaderResource _program;
     ayt::shader::BindingId      _skeletonBinding = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _castSkinnedBinding = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _solidBinding = ayt::shader::InvalidBinding;
+    ayt::shader::ShaderResource _maskProgram;
+    ayt::shader::BindingId      _maskSkeletonBinding = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _maskCastSkinnedBinding = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _maskCutoffBinding = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _maskBaseColorBinding = ayt::shader::InvalidBinding;
     bool                        _acquireFailed = false;
+    bool                        _maskAcquireFailed = false;
 };
 
 } // namespace ayt::render::detail

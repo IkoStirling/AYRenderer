@@ -24,6 +24,7 @@ material PBR {
     property ao         = vec4(1.0, 0.0, 0.0, 0.0)
     property emissive   = vec4(0.0, 0.0, 0.0, 0.0)
     property opacity    = vec4(1.0, 0.0, 0.0, 0.0)
+    property doubleSided = vec4(0.0, 0.0, 0.0, 0.0)
     property shadowBias = vec4(0.003, 0.0, 0.0, 0.0)
     property shadowPcf  = vec4(1.0, 0.0, 0.0, 0.0)
 
@@ -44,8 +45,11 @@ material PBR {
 
         let sampledBase = sample(baseColorTexture, uvOut) * baseColor
         let albedo = sampledBase.rgb
-        let N = normalize(worldNormal)
         let V = normalize(cameraPos.xyz - worldPos)
+        let rawN = normalize(worldNormal)
+        let faceSign = mix(1.0, step(0.0, dot(rawN, V)) * 2.0 - 1.0,
+                           max(0.0, min(1.0, doubleSided.x)))
+        let N = rawN * faceSign
         let L = normalize(lightDir.xyz)
         let H = normalize(V + L)
 
