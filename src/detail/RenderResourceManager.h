@@ -80,6 +80,8 @@ public:
                             const ayt::math::Float4x4& matrix);
     void setMaterialTexture(MaterialHandle material, const char* textureBindingName,
                             TextureHandle texture);
+    void setMaterialSurfaceProperties(MaterialHandle material, int alphaMode,
+                                      float alphaCutoff, bool doubleSided);
 
     TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
                                          const uint8_t* pixels,

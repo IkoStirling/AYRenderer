@@ -5,6 +5,7 @@
 
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 
@@ -68,10 +69,16 @@ TEST_CASE(debug_overlay_toggle_and_frame_stats)
     ayt::render::ClearDesc clear;
     renderer.beginFrame(clear);
     renderer.endFrame();
+    renderer.beginFrame(clear);
+    renderer.endFrame();
 
     const ayt::render::RenderFrameStats& stats = renderer.getFrameStats();
-    CHECK(stats.frameCount >= 1u);
+    CHECK(stats.frameCount >= 2u);
     CHECK(stats.frameTimeMs >= 0.0f);
+    CHECK(stats.avgFrameTimeMs >= 0.0f);
+    CHECK(stats.p95FrameTimeMs >= stats.avgFrameTimeMs);
+    CHECK(stats.p99FrameTimeMs >= stats.p95FrameTimeMs);
+    CHECK(stats.fps >= 0.0f);
 
     renderer.shutdown();
 }
@@ -113,6 +120,17 @@ TEST_CASE(debug_overlay_reports_draw_count)
     CHECK(stats.drawCalls == 1u);
     CHECK(stats.sceneItems == 1u);
     CHECK(stats.frameCount >= 1u);
+
+    const auto pass = std::find_if(stats.passes.begin(), stats.passes.end(),
+        [](const ayt::render::RenderPassFrameStats& item) {
+            return item.name == "ForwardOpaque";
+        });
+    CHECK(pass != stats.passes.end());
+    if (pass != stats.passes.end()) {
+        CHECK(pass->drawCalls == 1u);
+        CHECK(pass->cpuTimeMs >= 0.0f);
+        CHECK(pass->gpuTimeMs >= 0.0f);
+    }
 
     renderer.destroyMesh(mesh);
     renderer.destroyMaterial(material);

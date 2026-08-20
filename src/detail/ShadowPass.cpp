@@ -119,6 +119,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     // as Directional, which gives a slightly loose shadow but
     // produces correct cast/receive behavior at no extra cost).
     // Point castShadow=true ⇒ log + skip (omni-shadow out of scope).
+    uint32_t casterDrawCount = 0;
     if (useAtlas) {
         activeCount = 0;
         for (uint32_t i = 0; i < lightsPtr->count
@@ -211,7 +212,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             adapter.touch(viewId);
             const uint64_t casterState = ShadowMapResources::casterDrawState();
             adapter.setStateDepthOnlyWrite();
-            (void)_shadowCaster.drawCasters(
+            casterDrawCount += _shadowCaster.drawCasters(
                 adapter, viewId, casterState, scene, meshes);
         }
         // Reset scissor for subsequent consumers (next pass).
@@ -244,7 +245,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             }
         }
 
-        (void)_shadowCaster.drawCasters(
+        casterDrawCount = _shadowCaster.drawCasters(
             adapter, viewId, casterState, scene, meshes);
     }
 
@@ -277,7 +278,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     stats.resolveIdx  = _mapResources.sampleTexture().idx;
     logShadowFrameStatsIfNeeded(stats);
 
-    return activeCount;
+    return casterDrawCount;
 }
 
 void ShadowPass::destroyResources(BGFXAdapter& adapter)

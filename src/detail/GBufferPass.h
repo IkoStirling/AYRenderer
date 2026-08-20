@@ -187,7 +187,11 @@ private:
     // §P5 B4b (2026-07-22) �?Phoskia GBuffer VS/FS program handle
     // (mirror ShadowCaster::_program).
     ayt::shader::ShaderResource _program;
+    // Phoskia's BGFX emitter cannot emit fragment discard yet, so atlas
+    // cutouts use a raw .sc sibling with the same MRT/binding contract.
+    ayt::shader::ShaderResource _alphaCutoutProgram;
     bool _acquireFailed = false;
+    bool _alphaCutoutAcquireFailed = false;
 
     // §P5 B4c (2026-07-22) �?previous-frame view/projection cache
     // (mirror ShadowPass's `_lightView/_lightProj` private shape).

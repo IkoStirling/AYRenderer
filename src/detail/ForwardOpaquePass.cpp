@@ -275,6 +275,14 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
             continue;
         }
 
+        const uint64_t opaqueState = BGFX_STATE_WRITE_RGB
+                                   | BGFX_STATE_WRITE_A
+                                   | BGFX_STATE_WRITE_Z
+                                   | BGFX_STATE_DEPTH_TEST_LESS;
+        adapter.setState(material.doubleSided
+                             ? opaqueState
+                             : opaqueState | BGFX_STATE_CULL_CW);
+
         const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
         if (drawRange.indexCount == 0) {
             continue;

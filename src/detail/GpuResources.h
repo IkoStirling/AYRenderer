@@ -71,6 +71,13 @@ struct GpuMaterial {
         TextureHandle        texture{};
     };
     std::vector<TextureSlot> textures;
+
+    // Keep new surface-routing fields at the end of the internal record.
+    // This preserves every pre-existing member offset if a localized MSVC
+    // /showIncludes failure leaves a stale object in an incremental build.
+    bool  alphaCutout = false;
+    float alphaCutoff = 0.5f;
+    bool  doubleSided = false;
 };
 
 inline ayt::shader::TextureHandle toShaderTexture(bgfx::TextureHandle h)

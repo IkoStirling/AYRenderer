@@ -16,6 +16,16 @@ file(GLOB AYRENDERER_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/detail/*.cpp"
 )
 
+# GpuResources.h contains private records shared across nearly every render
+# translation unit.  A stale object compiled against an older GpuMaterial
+# layout is an ABI violation inside the static library (typically surfacing as
+# std::string/vector heap corruption during material destruction).  Keep this
+# dependency explicit as a fallback for MSVC/Ninja environments where the
+# localized /showIncludes stream was not recorded correctly.
+set_property(SOURCE ${AYRENDERER_SOURCES} APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/detail/GpuResources.h"
+)
+
 add_library(AYRenderer STATIC ${AYRENDERER_SOURCES})
 
 target_include_directories(AYRenderer PUBLIC

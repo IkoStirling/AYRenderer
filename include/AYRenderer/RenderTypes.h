@@ -44,13 +44,39 @@ struct InitDesc {
     bool     shadowPcf = true;
 };
 
+struct RenderPassFrameStats {
+    std::string name;
+    uint32_t    drawCalls = 0;
+    float       cpuTimeMs = 0.0f;
+    float       gpuTimeMs = 0.0f;
+};
+
 struct RenderFrameStats {
+    // Wall-clock cadence between consecutive beginFrame calls. Unlike the
+    // old render-only timer this includes simulation, event polling, VSync,
+    // hot-reload polling and host sleeps, so fps is the rate users see.
     float    fps = 0.0f;
+    float    instantaneousFps = 0.0f;
     float    frameTimeMs = 0.0f;
     float    avgFrameTimeMs = 0.0f;
+    float    p95FrameTimeMs = 0.0f;
+    float    p99FrameTimeMs = 0.0f;
+
+    // CPU time from renderer beginFrame through bgfx::frame(), plus bgfx GPU
+    // timestamps. GPU values are zero when the active backend has no timer.
+    float    renderCpuTimeMs = 0.0f;
+    float    gpuFrameTimeMs = 0.0f;
+
+    // drawCalls is the sum reported by RenderPass implementations;
+    // backendDrawCalls is bgfx's authoritative submitted draw count.
     uint32_t drawCalls = 0;
+    uint32_t backendDrawCalls = 0;
+    uint32_t backendBlitCalls = 0;
     uint32_t sceneItems = 0;
     uint64_t frameCount = 0;
+    uint32_t gpuFrameNumber = 0;
+
+    std::vector<RenderPassFrameStats> passes;
 };
 
 struct ClearDesc {

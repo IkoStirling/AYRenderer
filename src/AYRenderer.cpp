@@ -751,6 +751,7 @@ void Renderer::beginFrame(const ClearDesc& clear)
         return;
     }
     _impl->compositeSceneViewId = -1;
+    _impl->pipeline.resetFrameStats();
     _impl->debugOverlay.onBeginFrame();
     _impl->adapter.beginFrame();
     _impl->adapter.setViewClear(detail::ForwardOpaquePass::kMainViewId, clear);
@@ -761,6 +762,7 @@ void Renderer::beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uin
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+    _impl->pipeline.resetFrameStats();
     _impl->debugOverlay.onBeginFrame();
 
     // View 0: full-window clear only (never shrink this rect to the 3D hole).
@@ -1572,9 +1574,11 @@ void Renderer::endFrame()
     }
 
     _impl->debugOverlay.onEndFrame(_impl->lastDrawCalls, _impl->lastSceneItems,
+                                   _impl->pipeline.lastPassStats(),
                                    _impl->viewportX, _impl->viewportY,
                                    _impl->viewportW, _impl->viewportH);
     _impl->adapter.endFrame();
+    _impl->debugOverlay.onFrameSubmitted();
     _impl->compositeSceneViewId = -1;
 
     if (!_impl->finalizeScreenshotBase.empty()) {

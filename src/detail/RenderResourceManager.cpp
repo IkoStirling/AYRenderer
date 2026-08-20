@@ -990,6 +990,27 @@ void RenderResourceManager::setMaterialTexture(MaterialHandle material,
     mat.textures.push_back(slot);
 }
 
+void RenderResourceManager::setMaterialSurfaceProperties(MaterialHandle material,
+                                                         int alphaMode,
+                                                         float alphaCutoff,
+                                                         bool doubleSided)
+{
+    if (!material.isValid()) {
+        return;
+    }
+
+    const auto it = _materials.find(material.id);
+    if (it == _materials.end()) {
+        return;
+    }
+
+    GpuMaterial& mat = it->second;
+    mat.alphaCutout = alphaMode == 1;
+    mat.blendMode = alphaMode == 2 ? BlendMode::Alpha : BlendMode::Opaque;
+    mat.alphaCutoff = std::clamp(alphaCutoff, 0.0f, 1.0f);
+    mat.doubleSided = doubleSided;
+}
+
 TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint32_t height,
                                                             const uint8_t* pixels,
                                                             const std::string& cacheKey)

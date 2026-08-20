@@ -66,8 +66,14 @@ public:
     // caches them in GpuMaterial fields.
     uint32_t executeAll(PassExecContext& ctx);
 
+    const std::vector<RenderPassFrameStats>& lastPassStats() const noexcept {
+        return _lastPassStats;
+    }
+    void resetFrameStats() { _lastPassStats.clear(); }
+
 private:
     std::vector<std::unique_ptr<RenderPass>> _passes;
+    std::vector<RenderPassFrameStats>         _lastPassStats;
 };
 
 } // namespace ayt::render::detail

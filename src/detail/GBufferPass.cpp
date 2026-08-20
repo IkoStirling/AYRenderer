@@ -65,6 +65,50 @@ material GBufferFill {
 
 // Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
 static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v7_worldpos_rgba16f";
+static constexpr const char* kGBufferAlphaCutoutCacheKey =
+    "gbuffer_fill_v9_worldpos_rgba16f_alpha_cutout_configured";
+
+constexpr const char* kGBufferAlphaCutoutVaryingSc = R"(
+vec3 v_normal    : NORMAL    = vec3(0.0, 0.0, 1.0);
+vec2 v_texcoord0 : TEXCOORD0 = vec2(0.0, 0.0);
+vec3 v_position  : TEXCOORD1 = vec3(0.0, 0.0, 0.0);
+vec3 a_position  : POSITION;
+vec3 a_normal    : NORMAL;
+vec2 a_texcoord0 : TEXCOORD0;
+)";
+
+constexpr const char* kGBufferAlphaCutoutVertexSc = R"(
+$input a_position, a_normal, a_texcoord0
+$output v_normal, v_texcoord0, v_position
+#include <bgfx_shader.sh>
+void main()
+{
+    v_normal = mul(u_model[0], vec4(a_normal, 0.0)).xyz;
+    v_texcoord0 = a_texcoord0;
+    v_position = mul(u_model[0], vec4(a_position, 1.0)).xyz;
+    gl_Position = mul(u_modelViewProj, vec4(a_position, 1.0));
+}
+)";
+
+constexpr const char* kGBufferAlphaCutoutFragmentSc = R"(
+$input v_normal, v_texcoord0, v_position
+#include <bgfx_shader.sh>
+uniform vec4 baseColor;
+uniform vec4 alphaCutoff;
+SAMPLER2D(albedoMap, 0);
+void main()
+{
+    vec4 albedo = texture2D(albedoMap, v_texcoord0) * baseColor;
+    if (albedo.a < alphaCutoff.x) {
+        discard;
+    }
+    vec3 n = normalize(v_normal);
+    gl_FragData[0] = vec4(albedo.rgb, albedo.a);
+    gl_FragData[1] = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0);
+    gl_FragData[2] = vec4(v_position, 1.0);
+}
+)";
+
 const char* const kGBufferCacheKeyCStr = kGBufferCacheKey;
 const char* const kGBufferBuildStampCStr = kGBufferBuildStamp;
 
@@ -79,32 +123,59 @@ void GBufferPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     static const char* s_acquiredCacheKey = nullptr;
     if (s_acquiredCacheKey != kGBufferCacheKey) {
         _program.reset();
+        _alphaCutoutProgram.reset();
         _acquireFailed = false;
+        _alphaCutoutAcquireFailed = false;
         s_acquiredCacheKey = kGBufferCacheKey;
     }
 
-    if (_program.isValid() || _acquireFailed) {
-        return;
-    }
-
-    ayt::shader::ShaderResource acquired =
-        pool.acquire(kGBufferPhoskiaSource, kGBufferCacheKey);
-    if (!acquired.isValid()) {
-        _acquireFailed = true;
-        std::fprintf(stderr,
-                     "[GBufferPass] acquire failed; GBuffer fill pass will "
-                     "run as no-op (no GPU draw). Errors:\n");
-        for (const std::string& err : pool.lastCompileErrors()) {
-            std::fprintf(stderr, "[GBufferPass]   %s\n", err.c_str());
+    if (!_program.isValid() && !_acquireFailed) {
+        ayt::shader::ShaderResource acquired =
+            pool.acquire(kGBufferPhoskiaSource, kGBufferCacheKey);
+        if (!acquired.isValid()) {
+            _acquireFailed = true;
+            std::fprintf(stderr,
+                         "[GBufferPass] acquire failed; GBuffer fill pass will "
+                         "run as no-op (no GPU draw). Errors:\n");
+            for (const std::string& err : pool.lastCompileErrors()) {
+                std::fprintf(stderr, "[GBufferPass]   %s\n", err.c_str());
+            }
+        } else {
+            std::fprintf(stderr,
+                         "[GBufferPass] program ready via Phoskia (cacheKey=%s)\n",
+                         kGBufferCacheKey);
+            _program = acquired;
         }
+    }
+
+    // The cutout program is only a sibling of a working regular GBuffer
+    // program. Avoid a second compiler/driver attempt when the primary
+    // program failed (notably in Noop tests without a configured shaderc).
+    if (!_program.isValid()) {
         return;
     }
 
-    std::fprintf(stderr,
-                 "[GBufferPass] program ready via Phoskia (cacheKey=%s)\n",
-                 kGBufferCacheKey);
-
-    _program = acquired;
+    if (!_alphaCutoutProgram.isValid() && !_alphaCutoutAcquireFailed) {
+        ayt::shader::ShaderResource acquired = pool.acquireFromBgfxSc(
+            kGBufferAlphaCutoutVertexSc,
+            kGBufferAlphaCutoutFragmentSc,
+            kGBufferAlphaCutoutVaryingSc,
+            kGBufferAlphaCutoutCacheKey);
+        if (!acquired.isValid()) {
+            _alphaCutoutAcquireFailed = true;
+            std::fprintf(stderr,
+                         "[GBufferPass] alpha-cutout program acquire failed; "
+                         "using opaque fallback. Errors:\n");
+            for (const std::string& err : pool.lastCompileErrors()) {
+                std::fprintf(stderr, "[GBufferPass]   %s\n", err.c_str());
+            }
+        } else {
+            std::fprintf(stderr,
+                         "[GBufferPass] alpha-cutout program ready (cacheKey=%s)\n",
+                         kGBufferAlphaCutoutCacheKey);
+            _alphaCutoutProgram = acquired;
+        }
+    }
 }
 
 bool GBufferPass::isProgramReady() const noexcept
@@ -223,6 +294,12 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             continue;
         }
 
+        const bool needsAlphaCutout = material.alphaCutout;
+        shader::ShaderResource& drawProgram =
+            needsAlphaCutout && _alphaCutoutProgram.isValid()
+                ? _alphaCutoutProgram
+                : _program;
+
         // §P5 B4c (2026-07-22) — PREV-FRAME VP UPLOAD. Build
         // prevViewProj = prevProj * prevView (P×V same-order as
         // `setViewTransform` + `viewProjectionMatrix` builtin —
@@ -236,13 +313,13 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // B7+ TAA consumer tolerates this single-frame noise.
         {
             const shader::BindingId prevVpBinding =
-                _program.getUniformBinding("u_prevViewProj");
+                drawProgram.getUniformBinding("u_prevViewProj");
             if (prevVpBinding != shader::InvalidBinding) {
                 const ayt::math::Float4x4 prevViewProj =
                     _prevProjection * _prevView;
                 float prevVpCol[16];
                 toBgfxColumnMajor(prevViewProj, prevVpCol);
-                _program.setUniform(prevVpBinding, prevVpCol, sizeof(prevVpCol));
+                drawProgram.setUniform(prevVpBinding, prevVpCol, sizeof(prevVpCol));
             }
         }
 
@@ -263,7 +340,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // fill. Read from `_program` so the binding matches the
         // submitting program below.
         const shader::BindingId baseColorBinding =
-            _program.getUniformBinding("baseColor");
+            drawProgram.getUniformBinding("baseColor");
         if (baseColorBinding != shader::InvalidBinding) {
             const float base[4] = {
                 material.hasColorOverride ? material.colorOverride.x : 1.0f,
@@ -271,7 +348,15 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
                 material.hasColorOverride ? material.colorOverride.z : 1.0f,
                 material.hasColorOverride ? material.colorOverride.w : 1.0f,
             };
-            _program.setUniform(baseColorBinding, base, sizeof(base));
+            drawProgram.setUniform(baseColorBinding, base, sizeof(base));
+        }
+        if (needsAlphaCutout) {
+            const shader::BindingId cutoffBinding =
+                drawProgram.getUniformBinding("alphaCutoff");
+            if (cutoffBinding != shader::InvalidBinding) {
+                const float cutoff[4] = {material.alphaCutoff, 0.0f, 0.0f, 0.0f};
+                drawProgram.setUniform(cutoffBinding, cutoff, sizeof(cutoff));
+            }
         }
 
         // Forward parity: sample(albedoMap)*baseColor. Bind host
@@ -288,13 +373,13 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             if (slot.name == "shadowMap") {
                 continue;
             }
-            shader::BindingId binding = _program.getTextureBinding(slot.name);
+            shader::BindingId binding = drawProgram.getTextureBinding(slot.name);
             if (binding == shader::InvalidBinding
                 && (slot.name == "baseColorTexture"
                     || slot.name == "diffuse"
                     || slot.name == "mainTexture"
                     || slot.name == "albedo")) {
-                binding = _program.getTextureBinding("albedoMap");
+                binding = drawProgram.getTextureBinding("albedoMap");
             }
             if (binding == shader::InvalidBinding) {
                 continue;
@@ -304,18 +389,25 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
                 || !BGFXAdapter::isValid(texIt->second.handle)) {
                 continue;
             }
-            const uint8_t stage = _program.getTextureStage(binding);
-            _program.setTexture(stage, binding,
-                                toShaderTexture(texIt->second.handle));
+            const uint8_t stage = drawProgram.getTextureStage(binding);
+            drawProgram.setTexture(stage, binding,
+                                   toShaderTexture(texIt->second.handle));
             albedoBound = true;
         }
-        tryBindWhiteTexture(_program, ctx.adapter, "albedoMap", albedoBound);
+        tryBindWhiteTexture(drawProgram, ctx.adapter, "albedoMap", albedoBound);
 
         const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
         if (drawRange.indexCount == 0) {
             continue;
         }
 
+        const uint64_t opaqueState = BGFX_STATE_WRITE_RGB
+                                   | BGFX_STATE_WRITE_A
+                                   | BGFX_STATE_WRITE_Z
+                                   | BGFX_STATE_DEPTH_TEST_LESS;
+        ctx.adapter.setState(material.doubleSided
+                                 ? opaqueState
+                                 : opaqueState | BGFX_STATE_CULL_CW);
         ctx.adapter.setTransform(item.world);
         ctx.adapter.setVertexBuffer(mesh.vertexBuffer);
         ctx.adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
@@ -335,7 +427,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // untouched. Fix: bind `_program` (GBufferFill), use the
         // host material only for per-draw state (VB/IB/world) and
         // for colorOverride fallback above.
-        _program.submit(submitCtx);
+        drawProgram.submit(submitCtx);
         ++drawCount;
     }
 

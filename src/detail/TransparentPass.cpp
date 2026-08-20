@@ -209,17 +209,21 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
     }
 
-    if (deferredLitComposite && !ownsBorrowedDepthFbo) {
-        adapter.setState(BGFX_STATE_WRITE_RGB
-                       | BGFX_STATE_WRITE_A
-                       | BGFX_STATE_BLEND_ALPHA
-                       | BGFX_STATE_DEPTH_TEST_ALWAYS
-                       | BGFX_STATE_CULL_CW);
-    } else {
-        adapter.setStateAlphaBlend();
-    }
+    const bool depthAlways = deferredLitComposite && !ownsBorrowedDepthFbo;
 
     for (const DrawItem* pItem : sortedItems) {
+        const auto matIt = ctx.materials.find(pItem->material.id);
+        if (matIt != ctx.materials.end()) {
+            uint64_t state = BGFX_STATE_WRITE_RGB
+                           | BGFX_STATE_WRITE_A
+                           | BGFX_STATE_BLEND_ALPHA
+                           | (depthAlways ? BGFX_STATE_DEPTH_TEST_ALWAYS
+                                          : BGFX_STATE_DEPTH_TEST_LEQUAL);
+            if (!matIt->second.doubleSided) {
+                state |= BGFX_STATE_CULL_CW;
+            }
+            adapter.setState(state);
+        }
         if (submitItem(adapter, ctx, frame, *pItem, viewId)) {
             ++drawCount;
         }
