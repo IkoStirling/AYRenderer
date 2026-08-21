@@ -31,13 +31,20 @@ public:
                             const VertexLayoutDesc& layout,
                             const uint32_t* indices,
                             uint32_t indexCount);
+    struct MeshMorphContractDesc {
+        bool     hasMorphTargets = false;
+        uint32_t targetCount = 0;
+        uint32_t deltaCount = 0;
+        uint8_t  payloadChannels = 0;
+    };
     MeshHandle createMeshFromResourceData(const void* vertices,
                                           uint32_t vertexCount,
                                           uint32_t vertexStride,
                                           const VertexLayoutDesc& layout,
                                           const uint32_t* indices,
                                           uint32_t indexCount,
-                                          bool hasSkinWeights = false);
+                                          bool hasSkinWeights = false,
+                                          const MeshMorphContractDesc& morph = {});
     MeshHandle loadMesh(const std::string& path);
     MeshHandle createUnitCube();
     MeshHandle createTexturedUnitCube();
@@ -178,7 +185,8 @@ private:
                                   const void* indices,
                                   uint32_t indexCount,
                                   bool use32BitIndices,
-                                  bool hasSkinWeights = false);
+                                  bool hasSkinWeights = false,
+                                  const MeshMorphContractDesc& morph = {});
 };
 
 } // namespace ayt::render::detail

@@ -252,7 +252,8 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
                                                      const void* indices,
                                                      uint32_t indexCount,
                                                      bool use32BitIndices,
-                                                     bool hasSkinWeights)
+                                                     bool hasSkinWeights,
+                                                     const MeshMorphContractDesc& morph)
 {
     MeshHandle out;
     if (!_adapter.isInitialized() || vertices == nullptr || indices == nullptr
@@ -280,6 +281,10 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
     mesh.vertexCount     = vertexCount;
     mesh.indexCount      = indexCount;
     mesh.hasSkinWeights  = hasSkinWeights;
+    mesh.hasMorphTargets = morph.hasMorphTargets;
+    mesh.morphTargetCount = morph.targetCount;
+    mesh.morphDeltaCount = morph.deltaCount;
+    mesh.morphPayloadChannels = morph.payloadChannels;
     mesh.vertexBuffer = _adapter.createVertexBuffer(vertices, vertexBytes, bgfxLayout);
     mesh.indexBuffer  = _adapter.createIndexBuffer(indices, indexBytes, indexFlags);
 
@@ -324,7 +329,8 @@ MeshHandle RenderResourceManager::createMeshFromResourceData(const void* vertice
                                                              const VertexLayoutDesc& layout,
                                                              const uint32_t* indices,
                                                              uint32_t indexCount,
-                                                             bool hasSkinWeights)
+                                                             bool hasSkinWeights,
+                                                             const MeshMorphContractDesc& morph)
 {
     if (indices == nullptr || indexCount == 0) {
         return {};
@@ -341,11 +347,11 @@ MeshHandle RenderResourceManager::createMeshFromResourceData(const void* vertice
             narrowed[i] = static_cast<uint16_t>(indices[i]);
         }
         return uploadMeshInternal(vertices, vertexCount, vertexStride, layout, narrowed.data(),
-                                  indexCount, false, hasSkinWeights);
+                                  indexCount, false, hasSkinWeights, morph);
     }
 
     return uploadMeshInternal(vertices, vertexCount, vertexStride, layout, indices, indexCount,
-                              true, hasSkinWeights);
+                              true, hasSkinWeights, morph);
 }
 
 MeshHandle RenderResourceManager::loadMesh(const std::string& path)

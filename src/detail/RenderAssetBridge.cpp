@@ -4,6 +4,7 @@
 #include "detail/VertexLayoutBridge.h"
 
 #include "AYResource/AssetPath.h"
+#include "AYResource/MeshMorphContract.h"
 #include "AYResource/MaterialTextureContract.h"
 #include "AYRenderer/ShadowShaderSources.h"
 #include "AYResource/assetsImpl/Material.h"
@@ -426,6 +427,36 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
                  meshUvOffset, bgfxUvOffset, bgfxBiOffset, bgfxBwOffset,
                  meshHasSkin ? 1 : 0);
 
+    // Runtime morph contract (from IMesh extension MORP). This is diagnostics-only
+    // for now; upload keeps this summary so downstream systems can gate morph usage.
+    ayt::resource::MeshMorphContractSummary morphSummary;
+    std::string morphErr;
+    if (!ayt::resource::readMeshMorphContractSummary(mesh, morphSummary, &morphErr)) {
+        if (!morphErr.empty()) {
+            std::fprintf(stderr,
+                         "[RenderAssetBridge] MORP parse failed for mesh '%s': %s\n",
+                         mesh.getPath().c_str(),
+                         morphErr.c_str());
+        }
+    }
+
+    RenderResourceManager::MeshMorphContractDesc morphDesc;
+    morphDesc.hasMorphTargets = morphSummary.hasMorphTargets;
+    morphDesc.targetCount = morphSummary.targetCount;
+    morphDesc.deltaCount = morphSummary.totalDeltaCount;
+    morphDesc.payloadChannels = morphSummary.payloadChannels;
+
+    static std::atomic<uint32_t> s_morphContractLogCount{0};
+    if (morphDesc.hasMorphTargets && s_morphContractLogCount.fetch_add(1, std::memory_order_relaxed) < 16u) {
+        std::fprintf(stderr,
+                     "[RenderAssetBridge] MORP mesh='%s' targets=%u deltas=%u payload=0x%02X vertices=%u\n",
+                     mesh.getPath().c_str(),
+                     morphDesc.targetCount,
+                     morphDesc.deltaCount,
+                     static_cast<unsigned int>(morphDesc.payloadChannels),
+                     mesh.getVertexCount());
+    }
+
     std::vector<uint8_t> repacked;
     if (!repackMeshVertices(mesh, bgfxLayout, repacked)) {
         std::fprintf(stderr,
@@ -443,7 +474,8 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
                                           layout,
                                           mesh.getIndexData(),
                                           mesh.getIndexCount(),
-                                          meshHasSkin);
+                                          meshHasSkin,
+                                          morphDesc);
 
     // Diag closure: print once per ~256 calls so a runaway
     // upload is loud but a stable scene is silent.

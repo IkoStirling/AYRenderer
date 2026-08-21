@@ -19,6 +19,14 @@ struct GpuMesh {
     // BoneWeights channels and the IMesh supplied non-null skin weights. Phase 1's
     // SkinnedForwardPass (RD-05) uses this flag to bind bone matrices.
     bool     hasSkinWeights = false;
+
+    // Runtime morph-contract summary (no direct GPU binding yet). Recorded from
+    // IMesh extension `MORP` so render/runtime systems can inspect capability.
+    bool     hasMorphTargets = false;
+    uint32_t morphTargetCount = 0;
+    uint32_t morphDeltaCount = 0;
+    uint8_t  morphPayloadChannels = 0;
+
     VertexLayoutDesc layout{};
 };
 
