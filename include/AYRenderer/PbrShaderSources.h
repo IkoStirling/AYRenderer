@@ -10,6 +10,7 @@ namespace ayt::render
 inline constexpr const char* kPbrPhoskiaSource = R"PHOSKIA(
 material PBR {
     texture2d baseColorTexture
+    texture2d opacityTexture
     texture2d shadowMap
 
     uniform mat4 u_lightViewProj
@@ -44,6 +45,7 @@ material PBR {
         in uvOut       : texcoord
 
         let sampledBase = sample(baseColorTexture, uvOut) * baseColor
+        let sampledOpacity = sample(opacityTexture, uvOut).x
         let albedo = sampledBase.rgb
         let V = normalize(cameraPos.xyz - worldPos)
         let rawN = normalize(worldNormal)
@@ -105,7 +107,8 @@ material PBR {
         let direct = (diffuse + specular) * lightColor.xyz * NdotL * shadow
         let ambient = albedo * (0.03 * materialAo)
         let color = ambient + direct + emissive.xyz
-        let alpha = sampledBase.a * max(0.0, min(1.0, opacity.x))
+        let alpha = sampledBase.a * sampledOpacity
+                  * max(0.0, min(1.0, opacity.x))
         return vec4(color, alpha)
     }
 }

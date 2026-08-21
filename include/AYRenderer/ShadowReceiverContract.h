@@ -27,7 +27,8 @@ namespace ayt::render
 //   3. ShadowPass sample-ready → bind resolve texture + upload LVP bytes.
 //   4. Otherwise → lit fallback + identity LVP (safe fully-lit path).
 //
-// Texture stage: albedoMap = 0, shadowMap = 1 (FO skips shadowMap in albedo loop).
+// Texture stages are shader-reflection owned. PBR currently declares base
+// color, opacity, then shadow; passes must query stages rather than assume 0/1.
 struct ShadowReceiverContract {
     static constexpr std::string_view kShadowMapName     = "shadowMap";
     static constexpr std::string_view kLightViewProjName = "u_lightViewProj";

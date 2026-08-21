@@ -67,6 +67,7 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     // unit collision (both on 0 ⇒ R32F depth as "albedo" ⇒ gray) is obvious.
     uint32_t albedoBinds = 0;
     bool baseColorTextureBound = false;
+    bool opacityTextureBound = false;
     bool albedoMapBound = false;
     for (const GpuMaterial::TextureSlot& slot : material.textures) {
         if (slot.name.empty() || !slot.texture.isValid()) {
@@ -86,6 +87,7 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
         const uint8_t stage = material.shader.getTextureStage(binding);
         material.shader.setTexture(stage, binding, toShaderTexture(texIt->second.handle));
         baseColorTextureBound = baseColorTextureBound || slot.name == "baseColorTexture";
+        opacityTextureBound = opacityTextureBound || slot.name == "opacityTexture";
         albedoMapBound = albedoMapBound || slot.name == "albedoMap";
         ++albedoBinds;
         static uint32_t s_albedoLog = 0;
@@ -105,6 +107,8 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     }
     tryBindWhiteTexture(material.shader, adapter, "baseColorTexture",
                         baseColorTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "opacityTexture",
+                        opacityTextureBound);
     tryBindWhiteTexture(material.shader, adapter, "albedoMap", albedoMapBound);
     {
         const shader::BindingId shadowBinding =

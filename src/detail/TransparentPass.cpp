@@ -83,6 +83,7 @@ bool TransparentPass::submitItem(
                       item.shadowFlags, frame.shadowBias);
 
     bool baseColorTextureBound = false;
+    bool opacityTextureBound = false;
     bool albedoMapBound = false;
     for (const GpuMaterial::TextureSlot& slot : material.textures) {
         if (slot.name.empty() || !slot.texture.isValid()) {
@@ -105,10 +106,13 @@ bool TransparentPass::submitItem(
         material.shader.setTexture(stage, binding,
                                    toShaderTexture(texIt->second.handle));
         baseColorTextureBound = baseColorTextureBound || slot.name == "baseColorTexture";
+        opacityTextureBound = opacityTextureBound || slot.name == "opacityTexture";
         albedoMapBound = albedoMapBound || slot.name == "albedoMap";
     }
     tryBindWhiteTexture(material.shader, adapter, "baseColorTexture",
                         baseColorTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "opacityTexture",
+                        opacityTextureBound);
     tryBindWhiteTexture(material.shader, adapter, "albedoMap", albedoMapBound);
 
     resolveAndApplyColorUniforms(material);
@@ -201,6 +205,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     std::stable_sort(sortedItems.begin(), sortedItems.end(), SortKeyDescending{});
 
     uint32_t drawCount = 0;
+    uint32_t alphaCandidates = 0;
 
     adapter.setViewFrameBuffer(viewId, compositeFbo);
     if (BGFXAdapter::isValid(compositeFbo)) {
@@ -214,6 +219,8 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     for (const DrawItem* pItem : sortedItems) {
         const auto matIt = ctx.materials.find(pItem->material.id);
         if (matIt != ctx.materials.end()) {
+            alphaCandidates +=
+                matIt->second.blendMode == ayt::render::BlendMode::Alpha ? 1u : 0u;
             uint64_t state = BGFX_STATE_WRITE_RGB
                            | BGFX_STATE_WRITE_A
                            | BGFX_STATE_BLEND_ALPHA
@@ -231,6 +238,17 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 
     if (ownsBorrowedDepthFbo) {
         adapter.destroy(borrowedDepthFbo);
+    }
+
+    static uint32_t s_routeLogFrame = 0;
+    if (s_routeLogFrame < 8) {
+        std::fprintf(stderr,
+                     "[TransparentRoute] frame=%u items=%zu candidates=%u "
+                     "draws=%u deferred=%d borrowedDepth=%d\n",
+                     s_routeLogFrame, items.size(), alphaCandidates, drawCount,
+                     deferredLitComposite ? 1 : 0,
+                     ownsBorrowedDepthFbo ? 1 : 0);
+        ++s_routeLogFrame;
     }
 
     return drawCount;

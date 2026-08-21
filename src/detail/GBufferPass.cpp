@@ -72,7 +72,7 @@ material GBufferFill {
 // Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
 static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v8_worldpos_double_sided";
 static constexpr const char* kGBufferAlphaCutoutCacheKey =
-    "gbuffer_fill_v10_worldpos_alpha_cutout_double_sided";
+    "gbuffer_fill_v11_worldpos_alpha_cutout_opacity_double_sided";
 
 constexpr const char* kGBufferAlphaCutoutVaryingSc = R"(
 vec3 v_normal    : NORMAL    = vec3(0.0, 0.0, 1.0);
@@ -104,10 +104,12 @@ uniform vec4 alphaCutoff;
 uniform vec4 cameraPos;
 uniform vec4 doubleSided;
 SAMPLER2D(albedoMap, 0);
+SAMPLER2D(opacityMap, 1);
 void main()
 {
     vec4 albedo = texture2D(albedoMap, v_texcoord0) * baseColor;
-    if (albedo.a < alphaCutoff.x) {
+    float surfaceAlpha = albedo.a * texture2D(opacityMap, v_texcoord0).r;
+    if (surfaceAlpha < alphaCutoff.x) {
         discard;
     }
     vec3 rawN = normalize(v_normal);
@@ -115,7 +117,7 @@ void main()
     float faceSign = mix(1.0, step(0.0, dot(rawN, viewDir)) * 2.0 - 1.0,
                          clamp(doubleSided.x, 0.0, 1.0));
     vec3 n = rawN * faceSign;
-    gl_FragData[0] = vec4(albedo.rgb, albedo.a);
+    gl_FragData[0] = vec4(albedo.rgb, surfaceAlpha);
     gl_FragData[1] = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0);
     gl_FragData[2] = vec4(v_position, 1.0);
 }
@@ -277,25 +279,38 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     ctx.adapter.setStateOpaque();
 
     uint32_t drawCount = 0;
+    uint32_t skippedOutline = 0;
+    uint32_t skippedInvalidHandle = 0;
+    uint32_t skippedMissingResource = 0;
+    uint32_t skippedInvalidBuffer = 0;
+    uint32_t skippedInvalidShader = 0;
+    uint32_t skippedTransparent = 0;
+    uint32_t skippedEmptyRange = 0;
+    uint32_t alphaCutoutCount = 0;
     for (const DrawItem& item : ctx.scene.items()) {
         if (item.outlineHull) {
+            ++skippedOutline;
             continue;
         }
         if (!item.mesh.isValid() || !item.material.isValid()) {
+            ++skippedInvalidHandle;
             continue;
         }
         const auto meshIt = ctx.meshes.find(item.mesh.id);
         const auto matIt  = ctx.materials.find(item.material.id);
         if (meshIt == ctx.meshes.end() || matIt == ctx.materials.end()) {
+            ++skippedMissingResource;
             continue;
         }
         const GpuMesh& mesh = meshIt->second;
         if (!BGFXAdapter::isValid(mesh.vertexBuffer)
             || !BGFXAdapter::isValid(mesh.indexBuffer)) {
+            ++skippedInvalidBuffer;
             continue;
         }
         const GpuMaterial& material = matIt->second;
         if (!material.shader.isValid()) {
+            ++skippedInvalidShader;
             continue;
         }
         // Cutsheet deferred-pass.md §2: GBuffer receives Opaque only.
@@ -303,10 +318,12 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // shows as solid cyan and steals depth from real opaques.
         // TransparentPass composites Alpha after Lighting.
         if (material.blendMode == ayt::render::BlendMode::Alpha) {
+            ++skippedTransparent;
             continue;
         }
 
         const bool needsAlphaCutout = material.alphaCutout;
+        alphaCutoutCount += needsAlphaCutout ? 1u : 0u;
         shader::ShaderResource& drawProgram =
             needsAlphaCutout && _alphaCutoutProgram.isValid()
                 ? _alphaCutoutProgram
@@ -395,6 +412,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // only declares albedoMap — alias those names so characters
         // are not forced to solid white.
         bool albedoBound = false;
+        bool opacityBound = false;
         for (const GpuMaterial::TextureSlot& slot : material.textures) {
             if (slot.name.empty() || !slot.texture.isValid()) {
                 continue;
@@ -410,6 +428,10 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
                     || slot.name == "albedo")) {
                 binding = drawProgram.getTextureBinding("albedoMap");
             }
+            if (binding == shader::InvalidBinding && needsAlphaCutout
+                && slot.name == "opacityTexture") {
+                binding = drawProgram.getTextureBinding("opacityMap");
+            }
             if (binding == shader::InvalidBinding) {
                 continue;
             }
@@ -421,12 +443,20 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             const uint8_t stage = drawProgram.getTextureStage(binding);
             drawProgram.setTexture(stage, binding,
                                    toShaderTexture(texIt->second.handle));
-            albedoBound = true;
+            if (slot.name == "opacityTexture") {
+                opacityBound = true;
+            } else {
+                albedoBound = true;
+            }
         }
         tryBindWhiteTexture(drawProgram, ctx.adapter, "albedoMap", albedoBound);
+        if (needsAlphaCutout) {
+            tryBindWhiteTexture(drawProgram, ctx.adapter, "opacityMap", opacityBound);
+        }
 
         const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
         if (drawRange.indexCount == 0) {
+            ++skippedEmptyRange;
             continue;
         }
 
@@ -458,6 +488,20 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // for colorOverride fallback above.
         drawProgram.submit(submitCtx);
         ++drawCount;
+    }
+
+    static uint32_t s_routeLogFrame = 0;
+    if (s_routeLogFrame < 8) {
+        std::fprintf(stderr,
+                     "[GBufferRoute] frame=%u items=%zu draws=%u cutout=%u "
+                     "skip(outline=%u invalidHandle=%u missing=%u buffer=%u "
+                     "shader=%u transparent=%u range=%u)\n",
+                     s_routeLogFrame, ctx.scene.items().size(), drawCount,
+                     alphaCutoutCount, skippedOutline, skippedInvalidHandle,
+                     skippedMissingResource, skippedInvalidBuffer,
+                     skippedInvalidShader, skippedTransparent,
+                     skippedEmptyRange);
+        ++s_routeLogFrame;
     }
 
     return drawCount;

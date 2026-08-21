@@ -127,10 +127,12 @@ $input v_clipZw, v_texcoord0
 uniform vec4 alphaCutoff;
 uniform vec4 baseColor;
 SAMPLER2D(albedoMap, 0);
+SAMPLER2D(opacityMap, 1);
 
 void main()
 {
-    float alpha = texture2D(albedoMap, v_texcoord0).a * baseColor.a;
+    float alpha = texture2D(albedoMap, v_texcoord0).a
+                * texture2D(opacityMap, v_texcoord0).r * baseColor.a;
     if (alpha < alphaCutoff.x) {
         discard;
     }
@@ -140,7 +142,7 @@ void main()
 )";
 
 inline constexpr const char* kShadowMaskCasterCacheKey =
-    "shadow_mask_caster_sc_v1_skinned";
+    "shadow_mask_caster_sc_v2_skinned_opacity";
 
 // Lit receiver — ABI matches verified hand .sc (all lighting/bias as vec4,
 // swizzle .xyz / .x). Unrolled 3x3 PCF + in-map gate.

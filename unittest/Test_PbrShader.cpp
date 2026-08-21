@@ -41,6 +41,7 @@ TEST_CASE(runtime_pbr_declares_imported_material_contract)
 {
     const std::string source(ayt::render::kPbrPhoskiaSource);
     CHECK(source.find("texture2d baseColorTexture") != std::string::npos);
+    CHECK(source.find("texture2d opacityTexture") != std::string::npos);
     CHECK(source.find("texture2d shadowMap") != std::string::npos);
     CHECK(source.find("property metallic") != std::string::npos);
     CHECK(source.find("property roughness") != std::string::npos);
@@ -73,7 +74,7 @@ TEST_CASE(runtime_pbr_frontend_and_shaderc_compile)
 
     const ayt::shader::ShaderResource resource =
         pool.acquire(ayt::render::kPbrPhoskiaSource,
-                     "runtime_pbr_phoskia_v1");
+                     "runtime_pbr_phoskia_v2_opacity");
     if (!resource.isValid()) {
         std::cerr << "[runtime pbr] acquire failed:\n";
         for (const std::string& error : pool.lastCompileErrors()) {
@@ -104,7 +105,7 @@ TEST_CASE(runtime_pbr_d3d_reflection_preserves_texture_binding_name)
 
     const ayt::shader::ShaderResource resource =
         pool.acquire(ayt::render::kPbrPhoskiaSource,
-                     "runtime_pbr_phoskia_d3d_reflection_v1");
+                     "runtime_pbr_phoskia_d3d_reflection_v2_opacity");
     if (!resource.isValid()) {
         std::cerr << "[runtime pbr d3d] acquire failed:\n";
         for (const std::string& error : pool.lastCompileErrors()) {
@@ -113,6 +114,8 @@ TEST_CASE(runtime_pbr_d3d_reflection_preserves_texture_binding_name)
     }
     CHECK(resource.isValid());
     CHECK(resource.getTextureBinding("baseColorTexture")
+          != ayt::shader::InvalidBinding);
+    CHECK(resource.getTextureBinding("opacityTexture")
           != ayt::shader::InvalidBinding);
 }
 

@@ -251,31 +251,39 @@ uint32_t ShadowCaster::drawCasters(
                 }
 
                 bool albedoBound = false;
+                bool opacityBound = false;
                 const ayt::shader::BindingId albedoBinding =
                     drawProgram.getTextureBinding("albedoMap");
+                const ayt::shader::BindingId opacityBinding =
+                    drawProgram.getTextureBinding("opacityMap");
                 for (const GpuMaterial::TextureSlot& slot : material.textures) {
                     if (!slot.texture.isValid()) continue;
+                    const bool isOpacity = slot.name == "opacityTexture";
                     if (slot.name != "albedoMap"
                         && slot.name != "baseColorTexture"
                         && slot.name != "diffuse"
                         && slot.name != "mainTexture"
-                        && slot.name != "albedo") {
+                        && slot.name != "albedo"
+                        && !isOpacity) {
                         continue;
                     }
                     const auto textureIt = textures.find(slot.texture.id);
                     if (textureIt == textures.end()
-                        || !BGFXAdapter::isValid(textureIt->second.handle)
-                        || albedoBinding == ayt::shader::InvalidBinding) {
+                        || !BGFXAdapter::isValid(textureIt->second.handle)) {
                         continue;
                     }
+                    const ayt::shader::BindingId binding =
+                        isOpacity ? opacityBinding : albedoBinding;
+                    if (binding == ayt::shader::InvalidBinding) continue;
                     drawProgram.setTexture(
-                        drawProgram.getTextureStage(albedoBinding),
-                        albedoBinding,
+                        drawProgram.getTextureStage(binding),
+                        binding,
                         toShaderTexture(textureIt->second.handle));
-                    albedoBound = true;
-                    break;
+                    if (isOpacity) opacityBound = true;
+                    else albedoBound = true;
                 }
                 tryBindWhiteTexture(drawProgram, adapter, "albedoMap", albedoBound);
+                tryBindWhiteTexture(drawProgram, adapter, "opacityMap", opacityBound);
             }
 
             if (!alphaMask && _solidBinding != ayt::shader::InvalidBinding) {
