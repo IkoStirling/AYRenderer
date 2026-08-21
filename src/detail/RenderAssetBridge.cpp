@@ -4,6 +4,7 @@
 #include "detail/VertexLayoutBridge.h"
 
 #include "AYResource/AssetPath.h"
+#include "AYResource/MaterialTextureContract.h"
 #include "AYRenderer/ShadowShaderSources.h"
 #include "AYResource/assetsImpl/Material.h"
 #include <AYIO/Env.h>
@@ -95,9 +96,19 @@ void applyMaterialParameter(RenderResourceManager& mgr,
         }
         const std::string texturePath =
             ayt::resource::resolveAssetPath(materialPath, textureRef);
-        const TextureHandle texture = mgr.loadTexture(texturePath);
+        const bool srgb = ayt::resource::materialTextureUsesSrgb(name);
+        const TextureHandle texture = mgr.loadTexture(texturePath, srgb);
         if (texture.isValid()) {
             mgr.setMaterialTexture(handle, name, texture);
+            static uint32_t s_textureContractLogCount = 0;
+            if (s_textureContractLogCount++ < 128) {
+                std::fprintf(stderr,
+                             "[TextureContract] param='%s' colorSpace=%s "
+                             "textureId=%llu path='%s'\n",
+                             name, srgb ? "sRGB" : "Linear",
+                             static_cast<unsigned long long>(texture.id),
+                             texturePath.c_str());
+            }
         } else {
             std::fprintf(stderr,
                          "[RenderAssetBridge] loadTexture failed (param='%s' path='%s' mat='%s')\n",
@@ -550,6 +561,30 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     mgr.setMaterialSurfaceProperties(
         handle, static_cast<int>(material.getAlphaMode()),
         material.getAlphaCutoff(), material.isDoubleSided());
+    mgr.setMaterialPremultipliedAlpha(
+        handle, material.hasParameter("premultipliedAlpha")
+            && material.getFloat("premultipliedAlpha") >= 0.5f);
+
+    static uint32_t s_surfaceContractLogCount = 0;
+    if (s_surfaceContractLogCount++ < 96) {
+        const float normalY = material.hasParameter("normalYSign")
+            ? material.getFloat("normalYSign") : 1.0f;
+        const bool premultiplied = material.hasParameter("premultipliedAlpha")
+            && material.getFloat("premultipliedAlpha") >= 0.5f;
+        const float opacitySource = material.hasParameter("opacitySource")
+            ? material.getFloat("opacitySource") : 0.0f;
+        std::fprintf(stderr,
+                     "[MaterialContract] id=%llu name='%s' alphaMode=%d "
+                     "cutoff=%.3f doubleSided=%d alpha=%s opacitySource=%.0f "
+                     "normalY=%+g mat='%s'\n",
+                     static_cast<unsigned long long>(handle.id),
+                     material.getName() != nullptr ? material.getName() : "",
+                     static_cast<int>(material.getAlphaMode()),
+                     material.getAlphaCutoff(), material.isDoubleSided() ? 1 : 0,
+                     premultiplied ? "premultiplied" : "straight",
+                     opacitySource,
+                     normalY < 0.0f ? -1.0 : 1.0, materialPath.c_str());
+    }
 
     if (!material.hasParameter("baseColor")) {
         mgr.setMaterialColor(handle, "baseColor", 1.0f, 1.0f, 1.0f, 1.0f);
@@ -581,6 +616,14 @@ TextureHandle uploadTextureFromResource(RenderResourceManager& mgr,
                                           const ayt::resource::ITexture& texture,
                                           const std::string& cacheKey)
 {
+    return uploadTextureFromResource(mgr, texture, cacheKey, false);
+}
+
+TextureHandle uploadTextureFromResource(RenderResourceManager& mgr,
+                                          const ayt::resource::ITexture& texture,
+                                          const std::string& cacheKey,
+                                          bool srgb)
+{
     if (texture.getMipmapCount() == 0) {
         return {};
     }
@@ -595,12 +638,14 @@ TextureHandle uploadTextureFromResource(RenderResourceManager& mgr,
         return {};
     }
 
+    const bool useSrgb = srgb || texture.getSampler().sRGB;
     return mgr.createTextureFromData(texture.getWidth(),
                                      texture.getHeight(),
                                      static_cast<uint32_t>(bgfxFormat),
                                      pixels,
                                      texture.getMipmapSize(0),
-                                     cacheKey);
+                                     cacheKey,
+                                     useSrgb);
 }
 
 } // namespace ayt::render::detail

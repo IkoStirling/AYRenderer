@@ -52,6 +52,8 @@ void ShadowCaster::destroy(BGFXAdapter& /*adapter*/)
     _maskCastSkinnedBinding = ayt::shader::InvalidBinding;
     _maskCutoffBinding = ayt::shader::InvalidBinding;
     _maskBaseColorBinding = ayt::shader::InvalidBinding;
+    _maskOpacityBinding = ayt::shader::InvalidBinding;
+    _maskOpacitySourceBinding = ayt::shader::InvalidBinding;
     _acquireFailed     = false;
     _maskAcquireFailed = false;
 }
@@ -130,6 +132,9 @@ void ShadowCaster::ensureProgram(ayt::shader::ShaderResourcePool& pool)
             _maskCastSkinnedBinding = _maskProgram.getUniformBinding("castSkinned");
             _maskCutoffBinding = _maskProgram.getUniformBinding("alphaCutoff");
             _maskBaseColorBinding = _maskProgram.getUniformBinding("baseColor");
+            _maskOpacityBinding = _maskProgram.getUniformBinding("opacity");
+            _maskOpacitySourceBinding =
+                _maskProgram.getUniformBinding("opacitySource");
         }
     }
 }
@@ -248,6 +253,22 @@ uint32_t ShadowCaster::drawCasters(
                     };
                     drawProgram.setUniform(_maskBaseColorBinding,
                                            baseColor, sizeof(baseColor));
+                }
+                if (_maskOpacitySourceBinding != ayt::shader::InvalidBinding) {
+                    const float source[4] = {
+                        materialUniformScalar(material, "opacitySource", 0.0f),
+                        0.0f, 0.0f, 0.0f
+                    };
+                    drawProgram.setUniform(_maskOpacitySourceBinding,
+                                           source, sizeof(source));
+                }
+                if (_maskOpacityBinding != ayt::shader::InvalidBinding) {
+                    const float opacityValue[4] = {
+                        materialUniformScalar(material, "opacity", 1.0f),
+                        0.0f, 0.0f, 0.0f
+                    };
+                    drawProgram.setUniform(_maskOpacityBinding,
+                                           opacityValue, sizeof(opacityValue));
                 }
 
                 bool albedoBound = false;

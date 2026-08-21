@@ -132,10 +132,11 @@ public:
     // Also used for the Editor/scene color+depth RT (PostProcess sample).
     bgfx::FrameBufferHandle createColorDepthFrameBuffer(uint16_t width, uint16_t height);
 
-    // §P5 B5.5 (2026-07-23) — GBuffer MRT helper. 4-attach:
-    // RT0 albedo RGBA8 / RT1 normal RGBA8 / RT2 worldPos RGBA16F
-    // / RT3 depth D24S8 hardware. Adapter wraps `bgfx::createFrameBuffer`
-    // num=4 form (bgfx.h:3393-3397) so Pass files never see raw bgfx
+    // Deferred material GBuffer helper. 5 attachments:
+    // RT0 albedo+metallic RGBA8 / RT1 normal+roughness RGBA8 /
+    // RT2 worldPos+AO RGBA16F / RT3 emissive+coverage RGBA8 /
+    // attachment 4 depth D24S8. Adapter wraps `bgfx::createFrameBuffer`
+    // so Pass files never see raw bgfx
     // (cutsheet §6 red line — passes go through adapter only).
     //
     // bgfx 约定 depth attachment 末位(bgfx docs + verified at
@@ -304,6 +305,8 @@ public:
     // shadow producer fully lit, this is the neutral base-color texture for
     // imported materials that only provide scalar/color factors.
     bgfx::TextureHandle getWhiteFallbackTexture();
+    // Shared tangent-space neutral normal (0.5, 0.5, 1.0).
+    bgfx::TextureHandle getFlatNormalFallbackTexture();
 
     // Compatibility name retained for the shadow receiver path.
     bgfx::TextureHandle getLitShadowFallbackTexture();
@@ -327,6 +330,7 @@ private:
     uint32_t            _backbufferH = 0;
     bool                _vsync       = true;
     bgfx::TextureHandle _litShadowFallback = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle _flatNormalFallback = BGFX_INVALID_HANDLE;
 };
 
 } // namespace ayt::render::detail

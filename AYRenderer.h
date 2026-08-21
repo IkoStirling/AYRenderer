@@ -230,6 +230,11 @@ public:
     void setShadowPcfEnabled(bool enabled);
     bool shadowPcfEnabled() const noexcept;
 
+    // Live shadow producer/receiver switch. Disabling keeps the pass mounted
+    // but makes receivers bind the fully-lit fallback, which is useful both
+    // as a quality control and for isolating shadow-vs-material artifacts.
+    void setShadowsEnabled(bool enabled);
+
     // E5 (§5.4, 2026-07-22) — live read of the Shadow slot's enabled
     // flag in the current pipeline. Default ctor + configurePipeline(
     // makeDefault()) + configurePipeline(makeForwardWithShadows()) all

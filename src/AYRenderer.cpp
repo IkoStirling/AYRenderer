@@ -2019,6 +2019,16 @@ bool Renderer::shadowPcfEnabled() const noexcept
     return _impl && _impl->shadowPcfEnabled;
 }
 
+void Renderer::setShadowsEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    if (detail::RenderPass* shadow = _impl->pipeline.findPass("Shadow")) {
+        shadow->setEnabled(enabled);
+    }
+}
+
 void Renderer::setShadowBias(float bias)
 {
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias knob.

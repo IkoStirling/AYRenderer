@@ -92,6 +92,43 @@ inline void tryBindWhiteTexture(shader::ShaderResource& shader,
                       toShaderTexture(white));
 }
 
+inline void tryBindFlatNormalTexture(shader::ShaderResource& shader,
+                                     BGFXAdapter& adapter,
+                                     const char* name,
+                                     bool alreadyBound)
+{
+    if (alreadyBound || name == nullptr) {
+        return;
+    }
+    const shader::BindingId binding = shader.getTextureBinding(name);
+    if (binding == shader::InvalidBinding) {
+        return;
+    }
+    const bgfx::TextureHandle flat = adapter.getFlatNormalFallbackTexture();
+    if (!BGFXAdapter::isValid(flat)) {
+        return;
+    }
+    shader.setTexture(shader.getTextureStage(binding), binding,
+                      toShaderTexture(flat));
+}
+
+// Read one scalar from the renderer's padded Vec4 material-uniform cache.
+// Pass-specific shaders (GBuffer/Shadow) do not submit the material's own
+// ShaderResource, so semantic properties must be bridged explicitly.
+inline float materialUniformScalar(const GpuMaterial& material,
+                                   std::string_view name,
+                                   float fallback) noexcept
+{
+    for (const GpuMaterial::UniformSlot& slot : material.uniformSlots) {
+        if (slot.name == name && slot.size >= sizeof(float)) {
+            float value = fallback;
+            std::memcpy(&value, slot.data, sizeof(value));
+            return value;
+        }
+    }
+    return fallback;
+}
+
 inline void trySetUniformMat4(shader::ShaderResource& shader, const char* primaryName,
                               const char* fallbackName, const ayt::math::Float4x4& matrix)
 {

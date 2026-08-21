@@ -11,6 +11,11 @@ inline constexpr const char* kPbrPhoskiaSource = R"PHOSKIA(
 material PBR {
     texture2d baseColorTexture
     texture2d opacityTexture
+    texture2d normalTexture
+    texture2d metallicTexture
+    texture2d roughnessTexture
+    texture2d aoTexture
+    texture2d emissiveTexture
     texture2d shadowMap
 
     uniform mat4 u_lightViewProj
@@ -25,15 +30,22 @@ material PBR {
     property ao         = vec4(1.0, 0.0, 0.0, 0.0)
     property emissive   = vec4(0.0, 0.0, 0.0, 0.0)
     property opacity    = vec4(1.0, 0.0, 0.0, 0.0)
+    // 0 = BaseColor alpha only, 1 = dedicated opacity red,
+    // 2 = dedicated opacity alpha.
+    property opacitySource = vec4(0.0, 0.0, 0.0, 0.0)
     property doubleSided = vec4(0.0, 0.0, 0.0, 0.0)
+    property normalYSign = vec4(1.0, 0.0, 0.0, 0.0)
+    property premultipliedAlpha = vec4(0.0, 0.0, 0.0, 0.0)
     property shadowBias = vec4(0.003, 0.0, 0.0, 0.0)
     property shadowPcf  = vec4(1.0, 0.0, 0.0, 0.0)
 
     vertex {
         in pos : position
         in nrm : normal
+        in tan : tangent
         in uv  : texcoord
         out worldNormal : normal   = (modelMatrix * vec4(nrm, 0.0)).xyz
+        out worldTangent : tangent = vec4((modelMatrix * vec4(tan.xyz, 0.0)).xyz, tan.w)
         out worldPos    : position = (modelMatrix * vec4(pos, 1.0)).xyz
         out uvOut       : texcoord = uv
         return modelViewProjection * vec4(pos, 1.0)
@@ -41,23 +53,41 @@ material PBR {
 
     fragment {
         in worldNormal : normal
+        in worldTangent : tangent
         in worldPos    : position
         in uvOut       : texcoord
 
         let sampledBase = sample(baseColorTexture, uvOut) * baseColor
-        let sampledOpacity = sample(opacityTexture, uvOut).x
+        let sampledOpacityTexture = sample(opacityTexture, uvOut)
+        let dedicatedOpacity = mix(sampledOpacityTexture.x,
+                                   sampledOpacityTexture.w,
+                                   step(1.5, opacitySource.x))
+        let sampledOpacity = mix(1.0, dedicatedOpacity,
+                                 step(0.5, opacitySource.x))
         let albedo = sampledBase.rgb
         let V = normalize(cameraPos.xyz - worldPos)
         let rawN = normalize(worldNormal)
-        let faceSign = mix(1.0, step(0.0, dot(rawN, V)) * 2.0 - 1.0,
+        let tangentSeed = worldTangent.xyz - rawN * dot(worldTangent.xyz, rawN)
+                         + vec3(0.000001, 0.0, 0.0)
+        let T = normalize(tangentSeed)
+        let B = normalize(cross(rawN, T)) * worldTangent.w
+        let tangentNormal = sample(normalTexture, uvOut).xyz * 2.0
+                          - vec3(1.0, 1.0, 1.0)
+        let mappedN = normalize(T * tangentNormal.x
+                              + B * tangentNormal.y * normalYSign.x
+                              + rawN * tangentNormal.z)
+        let faceSign = mix(1.0, step(0.0, dot(mappedN, V)) * 2.0 - 1.0,
                            max(0.0, min(1.0, doubleSided.x)))
-        let N = rawN * faceSign
+        let N = mappedN * faceSign
         let L = normalize(lightDir.xyz)
         let H = normalize(V + L)
 
-        let materialMetallic = max(0.0, min(1.0, metallic.x))
-        let materialRoughness = max(0.045, min(1.0, roughness.x))
-        let materialAo = max(0.0, min(1.0, ao.x))
+        let materialMetallic = max(0.0, min(1.0,
+            metallic.x * sample(metallicTexture, uvOut).x))
+        let materialRoughness = max(0.045, min(1.0,
+            roughness.x * sample(roughnessTexture, uvOut).x))
+        let materialAo = max(0.0, min(1.0,
+            ao.x * sample(aoTexture, uvOut).x))
         let NdotV = max(dot(N, V), 0.001)
         let NdotL = max(dot(N, L), 0.0)
         let NdotH = max(dot(N, H), 0.0)
@@ -67,17 +97,15 @@ material PBR {
         let F = fresnelSchlick(VdotH, F0)
         let D = distributionGGX(NdotH, materialRoughness)
         let G = geometrySmith(NdotV, NdotL, materialRoughness)
-        let specular = D * G * F / max(4.0 * NdotV * NdotL, 0.001)
+        let specular = F * (D * G / max(4.0 * NdotV * NdotL, 0.001))
         let diffuse = (vec3(1.0, 1.0, 1.0) - F) * (1.0 - materialMetallic)
                     * albedo * (1.0 / 3.14159265)
 
         let clipPos  = u_lightViewProj * vec4(worldPos, 1.0)
-        let invW     = 1.0 / max(clipPos.w, 0.0001)
-        let ndcX     = clipPos.x * invW
-        let ndcY     = clipPos.y * invW
-        let refNdc01 = clipPos.z * invW * 0.5 + 0.5
-        let uy       = ndcY * 0.5 + 0.5
-        let shadowUv = vec2(ndcX * 0.5 + 0.5, 1.0 - uy)
+        let refNdc01 = clipPos.z / max(clipPos.w, 0.0001) * 0.5 + 0.5
+        let uy       = clipPos.y / max(clipPos.w, 0.0001) * 0.5 + 0.5
+        let shadowUv = vec2(clipPos.x / max(clipPos.w, 0.0001) * 0.5 + 0.5,
+                            1.0 - uy)
         let inMap    = step(0.0, shadowUv.x) * step(shadowUv.x, 1.0)
                      * step(0.0, shadowUv.y) * step(shadowUv.y, 1.0)
         let tx = shadowMapTexel.x
@@ -106,10 +134,13 @@ material PBR {
 
         let direct = (diffuse + specular) * lightColor.xyz * NdotL * shadow
         let ambient = albedo * (0.03 * materialAo)
-        let color = ambient + direct + emissive.xyz
+        let materialEmissive = emissive.xyz * sample(emissiveTexture, uvOut).rgb
+        let color = ambient + direct + materialEmissive
         let alpha = sampledBase.a * sampledOpacity
                   * max(0.0, min(1.0, opacity.x))
-        return vec4(color, alpha)
+        let outputColor = mix(color, color * alpha,
+                              max(0.0, min(1.0, premultipliedAlpha.x)))
+        return vec4(outputColor, alpha)
     }
 }
 )PHOSKIA";

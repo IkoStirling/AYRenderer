@@ -123,15 +123,16 @@ namespace {
 // the standard "golden value" pattern Test_BGFXConverter uses for
 // the builtin names.
 // Live pins (GBufferPass.h externs) — never self-compare a local mirror.
-inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v7_worldpos_rgba16f";
-inline constexpr const char* kExpectedGBufferBuildStamp = "b5p5-2026-07-23-rgba16f-rt2";
+inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v13_deferred_material_rt";
+inline constexpr const char* kExpectedGBufferBuildStamp = "material-contract-v1-rt4";
 
 // Expected substrings — deferred-shadow contract writes worldPos to
 // RT2 (still named gbufferMotion). Motion NDC encoding deferred.
 inline const char* kExpectedSourceSubstrings[] = {
     "uniform mat4 u_prevViewProj",      // retained for B7+ TAA host wire
     "modelViewProjection * vec4(pos",  // clip = MVP
-    "gbufferMotion = vec4(worldPos, 1.0)", // RT2 = worldPos (shadow PCF)
+    "gbufferMotion = vec4(worldPos, materialAo)", // RT2 = worldPos + AO
+    "out gbufferMaterial : color",
     "out gbufferAlbedo : color",
     "vec3(0.5, 0.5, 0.5)",              // HLSL-safe normal encode
     "sample(albedoMap, vUv) * baseColor", // Forward albedo parity
@@ -189,11 +190,13 @@ material GBufferFill {
         out gbufferAlbedo : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferMotion : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferMaterial : color = vec4(0.0, 0.0, 0.0, 0.0)
         let n = normalize(worldNormal)
         let albedo = sample(albedoMap, vUv) * baseColor
         gbufferAlbedo = vec4(albedo.rgb, albedo.a)
         gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0)
-        gbufferMotion = vec4(worldPos, 1.0)
+        let materialAo = max(0.0, min(1.0, ao.x * sample(aoMap, vUv).x))
+        gbufferMotion = vec4(worldPos, materialAo)
     }
 }
 )");
@@ -340,7 +343,7 @@ TEST_CASE(b4c_phoskia_gbuffer_source_motion_contract) {
     // The fragment stage MUST write worldPos into gbufferMotion
     // (deferred-shadow / B5.5 RT2 contract). Motion NDC encoding is
     // forbidden here — it breaks Lighting PCF.
-    CHECK(src.find("gbufferMotion = vec4(worldPos, 1.0)")
+    CHECK(src.find("gbufferMotion = vec4(worldPos, materialAo)")
           != std::string::npos);
     CHECK(src.find("gbufferMotion = vec4(motionNDC")
           == std::string::npos);

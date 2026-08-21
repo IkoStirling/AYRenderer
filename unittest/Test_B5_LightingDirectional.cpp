@@ -102,7 +102,7 @@ namespace {
 // key via `kLightingCacheKeyCStr` in LightingPass.h, so this test
 // compares the mirror against the live key �?drift now fails.
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v26_mix_vec2_overloads";
+    "lighting_v27_deferred_material_contract";
 inline constexpr const char* kExpectedLightingBuildStamp =
     "b5-2026-07-22";
 
@@ -110,6 +110,7 @@ inline const char* kExpectedSourceSubstrings[] = {
     "texture2d gbufferAlbedo",    // sampler declaration (Phoskia keyword)
     "texture2d gbufferNormal",
     "texture2d gbufferMotion",
+    "texture2d gbufferMaterial",
     "texturecube envCube",        // §P5.5 D: IBL ambient sampler
     "uniform vec4 u_lightDirection",
     "uniform vec4 u_lightColor",
@@ -124,7 +125,8 @@ inline const char* kExpectedSourceSubstrings[] = {
     "let ambientFlat = vec3(0.1, 0.1, 0.1)",  // §P5.5 D: pre-D floor preserved
     "let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x",
     "let ambient = ambientFlat + ambientCube",  // §P5.5 D: combined term
-    "return vec4(mix(skyColor, lit, coverage), albedo.a)",  // §Skybox0 backdrop blend
+    "let materialRoughness = max(0.045, min(1.0, normalSample.a))",
+    "let lit = ambientLit + diffuseLit + specularLit + surface.rgb",
 };
 
 // Forbidden substrings �?pins "no MRT (no `out ... : color`)".
@@ -154,6 +156,7 @@ material Lighting {
     texture2d gbufferAlbedo
     texture2d gbufferNormal
     texture2d gbufferMotion
+    texture2d gbufferMaterial
     texture2d shadowMap
     texture2d gbufferSky
     texturecube envCube
@@ -178,6 +181,7 @@ material Lighting {
         let baseUv = vec2(vUv.x, 1.0 - vUv.y)
         let albedo = sample(gbufferAlbedo, baseUv)
         let normalSample = sample(gbufferNormal, baseUv)
+        let surface = sample(gbufferMaterial, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
         let ambientFlat = vec3(0.1, 0.1, 0.1)
         let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x
@@ -203,7 +207,11 @@ material Lighting {
         let isSpot0 = step(1.5, Lights.dirs[0].w)
         let keyContrib = dirPart0 * isDir0 + pointPart0 * isPoint0 + spotPart0 * isSpot0
         let directionalSum = keyContrib
-        let lit = albedo.rgb * (ambient + directionalSum)
+        let materialRoughness = max(0.045, min(1.0, normalSample.a))
+        let ambientLit = albedo.rgb * ambient
+        let diffuseLit = albedo.rgb * directionalSum
+        let specularLit = vec3(0.0, 0.0, 0.0)
+        let lit = ambientLit + diffuseLit + specularLit + surface.rgb
         let skyColor = sample(gbufferSky, baseUv).xyz * skyMix.x
         let coverage = step(0.001, max(max(lit.r, lit.g), lit.b))
         return vec4(mix(skyColor, lit, coverage), albedo.a)

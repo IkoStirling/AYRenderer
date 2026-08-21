@@ -4,7 +4,9 @@
 #include "detail/FrameContext.h"
 #include "detail/RenderPass.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 namespace ayt::render::detail
 {
@@ -15,7 +17,7 @@ namespace ayt::render::detail
 // a re-ensure (next execute() will rebuild the FBO).
 // Stamp bump forces GBuffer FBO rebuild after RT2 format changes
 // (RGBA8 motion → RGBA16F worldPos). Pointer-equal compare in ensure().
-static constexpr const char* kGBufferBuildStamp = "b5p5-2026-07-23-rgba16f-rt2";
+static constexpr const char* kGBufferBuildStamp = "material-contract-v1-rt4";
 
 // §P5 B5.5 / deferred-shadow contract (2026-07-23):
 //   RT0 albedo RGBA8 / RT1 normal RGBA8 / RT2 worldPos RGBA16F /
@@ -35,91 +37,153 @@ static constexpr const char* kGBufferBuildStamp = "b5p5-2026-07-23-rgba16f-rt2";
 constexpr const char* kGBufferPhoskiaSource = R"(
 material GBufferFill {
     texture2d albedoMap
+    texture2d normalMap
+    texture2d metallicMap
+    texture2d roughnessMap
+    texture2d aoMap
+    texture2d emissiveMap
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
+    property metallic = vec4(0.0, 0.0, 0.0, 0.0)
+    property roughness = vec4(0.5, 0.0, 0.0, 0.0)
+    property ao = vec4(1.0, 0.0, 0.0, 0.0)
+    property emissive = vec4(0.0, 0.0, 0.0, 0.0)
     property doubleSided = vec4(0.0, 0.0, 0.0, 0.0)
+    property normalYSign = vec4(1.0, 0.0, 0.0, 0.0)
     uniform mat4 u_prevViewProj
     uniform vec4 cameraPos
 
     vertex {
         in pos : position
         in nrm : normal
+        in tan : tangent
         in uv  : texcoord
         out worldNormal : normal   = (modelMatrix * vec4(nrm, 0.0)).xyz
+        out worldTangent : tangent = vec4((modelMatrix * vec4(tan.xyz, 0.0)).xyz, tan.w)
         out worldPos    : position = (modelMatrix * vec4(pos, 1.0)).xyz
         out vUv         : texcoord = uv
         return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
         in worldNormal : normal
+        in worldTangent : tangent
         in worldPos    : position
         in vUv         : texcoord
         out gbufferAlbedo : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferMotion : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferMaterial : color = vec4(0.0, 0.0, 0.0, 0.0)
         let rawN = normalize(worldNormal)
+        let tangentSeed = worldTangent.xyz - rawN * dot(worldTangent.xyz, rawN)
+                         + vec3(0.000001, 0.0, 0.0)
+        let T = normalize(tangentSeed)
+        let B = normalize(cross(rawN, T)) * worldTangent.w
+        let tangentNormal = sample(normalMap, vUv).xyz * 2.0
+                          - vec3(1.0, 1.0, 1.0)
+        let mappedN = normalize(T * tangentNormal.x
+                              + B * tangentNormal.y * normalYSign.x
+                              + rawN * tangentNormal.z)
         let viewDir = normalize(cameraPos.xyz - worldPos)
-        let faceSign = mix(1.0, step(0.0, dot(rawN, viewDir)) * 2.0 - 1.0,
+        let faceSign = mix(1.0, step(0.0, dot(mappedN, viewDir)) * 2.0 - 1.0,
                            max(0.0, min(1.0, doubleSided.x)))
-        let n = rawN * faceSign
+        let n = mappedN * faceSign
         let albedo = sample(albedoMap, vUv) * baseColor
-        gbufferAlbedo = vec4(albedo.rgb, albedo.a)
-        gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0)
-        gbufferMotion = vec4(worldPos, 1.0)
+        let materialMetallic = max(0.0, min(1.0, metallic.x * sample(metallicMap, vUv).x))
+        let materialRoughness = max(0.045, min(1.0, roughness.x * sample(roughnessMap, vUv).x))
+        let materialAo = max(0.0, min(1.0, ao.x * sample(aoMap, vUv).x))
+        let materialEmissive = emissive.xyz * sample(emissiveMap, vUv).rgb
+        gbufferAlbedo = vec4(albedo.rgb, materialMetallic)
+        gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), materialRoughness)
+        gbufferMotion = vec4(worldPos, materialAo)
+        gbufferMaterial = vec4(materialEmissive, 1.0)
     }
 }
 )";
 
 // Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
-static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v8_worldpos_double_sided";
+static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v13_deferred_material_rt";
 static constexpr const char* kGBufferAlphaCutoutCacheKey =
-    "gbuffer_fill_v11_worldpos_alpha_cutout_opacity_double_sided";
+    "gbuffer_fill_v13_alpha_deferred_material_rt";
 
 constexpr const char* kGBufferAlphaCutoutVaryingSc = R"(
 vec3 v_normal    : NORMAL    = vec3(0.0, 0.0, 1.0);
 vec2 v_texcoord0 : TEXCOORD0 = vec2(0.0, 0.0);
 vec3 v_position  : TEXCOORD1 = vec3(0.0, 0.0, 0.0);
+vec4 v_tangent   : TEXCOORD2 = vec4(1.0, 0.0, 0.0, 1.0);
 vec3 a_position  : POSITION;
 vec3 a_normal    : NORMAL;
 vec2 a_texcoord0 : TEXCOORD0;
+vec4 a_tangent   : TANGENT;
 )";
 
 constexpr const char* kGBufferAlphaCutoutVertexSc = R"(
-$input a_position, a_normal, a_texcoord0
-$output v_normal, v_texcoord0, v_position
+$input a_position, a_normal, a_texcoord0, a_tangent
+$output v_normal, v_texcoord0, v_position, v_tangent
 #include <bgfx_shader.sh>
 void main()
 {
     v_normal = mul(u_model[0], vec4(a_normal, 0.0)).xyz;
     v_texcoord0 = a_texcoord0;
     v_position = mul(u_model[0], vec4(a_position, 1.0)).xyz;
+    v_tangent = vec4(mul(u_model[0], vec4(a_tangent.xyz, 0.0)).xyz, a_tangent.w);
     gl_Position = mul(u_modelViewProj, vec4(a_position, 1.0));
 }
 )";
 
 constexpr const char* kGBufferAlphaCutoutFragmentSc = R"(
-$input v_normal, v_texcoord0, v_position
+$input v_normal, v_texcoord0, v_position, v_tangent
 #include <bgfx_shader.sh>
 uniform vec4 baseColor;
 uniform vec4 alphaCutoff;
+uniform vec4 opacity;
+uniform vec4 opacitySource;
 uniform vec4 cameraPos;
 uniform vec4 doubleSided;
+uniform vec4 normalYSign;
+uniform vec4 metallic;
+uniform vec4 roughness;
+uniform vec4 ao;
+uniform vec4 emissive;
 SAMPLER2D(albedoMap, 0);
 SAMPLER2D(opacityMap, 1);
+SAMPLER2D(normalMap, 2);
+SAMPLER2D(metallicMap, 3);
+SAMPLER2D(roughnessMap, 4);
+SAMPLER2D(aoMap, 5);
+SAMPLER2D(emissiveMap, 6);
 void main()
 {
     vec4 albedo = texture2D(albedoMap, v_texcoord0) * baseColor;
-    float surfaceAlpha = albedo.a * texture2D(opacityMap, v_texcoord0).r;
+    vec4 opacitySample = texture2D(opacityMap, v_texcoord0);
+    float dedicatedOpacity = mix(opacitySample.r, opacitySample.a,
+                                 step(1.5, opacitySource.x));
+    float sampledOpacity = mix(1.0, dedicatedOpacity,
+                               step(0.5, opacitySource.x));
+    float surfaceAlpha = albedo.a * sampledOpacity * clamp(opacity.x, 0.0, 1.0);
     if (surfaceAlpha < alphaCutoff.x) {
         discard;
     }
     vec3 rawN = normalize(v_normal);
+    vec3 tangentSeed = v_tangent.xyz - rawN * dot(v_tangent.xyz, rawN)
+                     + vec3(0.000001, 0.0, 0.0);
+    vec3 T = normalize(tangentSeed);
+    vec3 B = normalize(cross(rawN, T)) * v_tangent.w;
+    vec3 tangentNormal = texture2D(normalMap, v_texcoord0).xyz * 2.0
+                       - vec3(1.0, 1.0, 1.0);
+    vec3 mappedN = normalize(T * tangentNormal.x
+                           + B * tangentNormal.y * normalYSign.x
+                           + rawN * tangentNormal.z);
     vec3 viewDir = normalize(cameraPos.xyz - v_position);
-    float faceSign = mix(1.0, step(0.0, dot(rawN, viewDir)) * 2.0 - 1.0,
+    float faceSign = mix(1.0, step(0.0, dot(mappedN, viewDir)) * 2.0 - 1.0,
                          clamp(doubleSided.x, 0.0, 1.0));
-    vec3 n = rawN * faceSign;
-    gl_FragData[0] = vec4(albedo.rgb, surfaceAlpha);
-    gl_FragData[1] = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0);
-    gl_FragData[2] = vec4(v_position, 1.0);
+    vec3 n = mappedN * faceSign;
+    float materialMetallic = clamp(metallic.x * texture2D(metallicMap, v_texcoord0).x, 0.0, 1.0);
+    float materialRoughness = clamp(roughness.x * texture2D(roughnessMap, v_texcoord0).x, 0.045, 1.0);
+    float materialAo = clamp(ao.x * texture2D(aoMap, v_texcoord0).x, 0.0, 1.0);
+    vec3 materialEmissive = emissive.xyz * texture2D(emissiveMap, v_texcoord0).rgb;
+    gl_FragData[0] = vec4(albedo.rgb, materialMetallic);
+    gl_FragData[1] = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), materialRoughness);
+    gl_FragData[2] = vec4(v_position, materialAo);
+    gl_FragData[3] = vec4(materialEmissive, 1.0);
 }
 )";
 
@@ -258,16 +322,24 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     // ForwardOpaquePass shape but targets an offscreen RT instead of
     // the backbuffer / sceneFbo.
     const uint8_t viewId = kGBufferViewId;
+    // Source submesh order is part of the surface-layer contract. Character
+    // formats commonly encode eyes, mouth, lace and decals as coincident
+    // geometry split across materials. bgfx's default view sorter may group
+    // the opaque and alpha-cutout programs, destroying that order. Keep this
+    // view sequential so later source submeshes deterministically replace an
+    // equal-depth earlier surface.
+    bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
     ctx.adapter.setViewTransform(viewId, frame.view, frame.projection);
     ctx.adapter.setViewFrameBuffer(viewId, _gbufferFbo);
     ctx.adapter.setViewRect(viewId, 0, 0, _gbufferW, _gbufferH);
-    // Cutsheet §5.2: 3× RGBA8 + 1× D24S8. Clears every attachment.
-    // depth=1.0 / stencil=0 is the conventional far-plane / cleared
-    // stencil (matches ForwardOpaquePass's `0x191a1cff` scene-FBO
-    // clear — same uniform-clear semantics on a different FBO).
+    // Clear every color attachment to transparent black. RT3.a is the
+    // explicit geometry-coverage channel consumed by LightingPass, so the
+    // background must start at zero; every successful GBuffer draw writes 1.
+    // Using an opaque-black clear here marks the whole viewport as geometry
+    // and suppresses the skybox even though SkyboxPass itself rendered.
     ctx.adapter.setViewClearRaw(viewId,
                                 BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                                /*rgba=*/0x000000ff,
+                                /*rgba=*/0x00000000,
                                 /*depth=*/1.0f,
                                 /*stencil=*/0);
 
@@ -396,12 +468,72 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             };
             drawProgram.setUniform(doubleSidedBinding, surface, sizeof(surface));
         }
+        const shader::BindingId normalYBinding =
+            drawProgram.getUniformBinding("normalYSign");
+        if (normalYBinding != shader::InvalidBinding) {
+            float normalY = 1.0f;
+            for (const GpuMaterial::UniformSlot& slot : material.uniformSlots) {
+                if (slot.name == "normalYSign" && slot.size >= sizeof(float)) {
+                    std::memcpy(&normalY, slot.data, sizeof(float));
+                    break;
+                }
+            }
+            const float normalConvention[4] = {normalY, 0.0f, 0.0f, 0.0f};
+            drawProgram.setUniform(normalYBinding, normalConvention,
+                                   sizeof(normalConvention));
+        }
+        const auto uploadMaterialScalar = [&](const char* name, float fallback) {
+            const shader::BindingId binding = drawProgram.getUniformBinding(name);
+            if (binding == shader::InvalidBinding) {
+                return;
+            }
+            const float value[4] = {
+                materialUniformScalar(material, name, fallback), 0.0f, 0.0f, 0.0f
+            };
+            drawProgram.setUniform(binding, value, sizeof(value));
+        };
+        uploadMaterialScalar("metallic", 0.0f);
+        uploadMaterialScalar("roughness", 0.5f);
+        uploadMaterialScalar("ao", 1.0f);
+        const shader::BindingId emissiveBinding =
+            drawProgram.getUniformBinding("emissive");
+        if (emissiveBinding != shader::InvalidBinding) {
+            float value[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            for (const GpuMaterial::UniformSlot& slot : material.uniformSlots) {
+                if (slot.name == "emissive" && slot.size >= sizeof(float) * 3u) {
+                    std::memcpy(value, slot.data,
+                                std::min<size_t>(sizeof(value), slot.size));
+                    break;
+                }
+            }
+            drawProgram.setUniform(emissiveBinding, value, sizeof(value));
+        }
         if (needsAlphaCutout) {
             const shader::BindingId cutoffBinding =
                 drawProgram.getUniformBinding("alphaCutoff");
             if (cutoffBinding != shader::InvalidBinding) {
                 const float cutoff[4] = {material.alphaCutoff, 0.0f, 0.0f, 0.0f};
                 drawProgram.setUniform(cutoffBinding, cutoff, sizeof(cutoff));
+            }
+            const shader::BindingId opacitySourceBinding =
+                drawProgram.getUniformBinding("opacitySource");
+            if (opacitySourceBinding != shader::InvalidBinding) {
+                const float source[4] = {
+                    materialUniformScalar(material, "opacitySource", 0.0f),
+                    0.0f, 0.0f, 0.0f
+                };
+                drawProgram.setUniform(opacitySourceBinding, source,
+                                       sizeof(source));
+            }
+            const shader::BindingId opacityBinding =
+                drawProgram.getUniformBinding("opacity");
+            if (opacityBinding != shader::InvalidBinding) {
+                const float opacityValue[4] = {
+                    materialUniformScalar(material, "opacity", 1.0f),
+                    0.0f, 0.0f, 0.0f
+                };
+                drawProgram.setUniform(opacityBinding, opacityValue,
+                                       sizeof(opacityValue));
             }
         }
 
@@ -413,6 +545,11 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // are not forced to solid white.
         bool albedoBound = false;
         bool opacityBound = false;
+        bool normalBound = false;
+        bool metallicBound = false;
+        bool roughnessBound = false;
+        bool aoBound = false;
+        bool emissiveBound = false;
         for (const GpuMaterial::TextureSlot& slot : material.textures) {
             if (slot.name.empty() || !slot.texture.isValid()) {
                 continue;
@@ -432,6 +569,24 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
                 && slot.name == "opacityTexture") {
                 binding = drawProgram.getTextureBinding("opacityMap");
             }
+            if (binding == shader::InvalidBinding
+                && (slot.name == "normalTexture"
+                    || slot.name == "normalCameraTexture"
+                    || slot.name == "normalMap")) {
+                binding = drawProgram.getTextureBinding("normalMap");
+            }
+            if (binding == shader::InvalidBinding && slot.name == "metallicTexture") {
+                binding = drawProgram.getTextureBinding("metallicMap");
+            }
+            if (binding == shader::InvalidBinding && slot.name == "roughnessTexture") {
+                binding = drawProgram.getTextureBinding("roughnessMap");
+            }
+            if (binding == shader::InvalidBinding && slot.name == "aoTexture") {
+                binding = drawProgram.getTextureBinding("aoMap");
+            }
+            if (binding == shader::InvalidBinding && slot.name == "emissiveTexture") {
+                binding = drawProgram.getTextureBinding("emissiveMap");
+            }
             if (binding == shader::InvalidBinding) {
                 continue;
             }
@@ -445,6 +600,18 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
                                    toShaderTexture(texIt->second.handle));
             if (slot.name == "opacityTexture") {
                 opacityBound = true;
+            } else if (slot.name == "normalTexture"
+                       || slot.name == "normalCameraTexture"
+                       || slot.name == "normalMap") {
+                normalBound = true;
+            } else if (slot.name == "metallicTexture") {
+                metallicBound = true;
+            } else if (slot.name == "roughnessTexture") {
+                roughnessBound = true;
+            } else if (slot.name == "aoTexture") {
+                aoBound = true;
+            } else if (slot.name == "emissiveTexture") {
+                emissiveBound = true;
             } else {
                 albedoBound = true;
             }
@@ -453,6 +620,11 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         if (needsAlphaCutout) {
             tryBindWhiteTexture(drawProgram, ctx.adapter, "opacityMap", opacityBound);
         }
+        tryBindFlatNormalTexture(drawProgram, ctx.adapter, "normalMap", normalBound);
+        tryBindWhiteTexture(drawProgram, ctx.adapter, "metallicMap", metallicBound);
+        tryBindWhiteTexture(drawProgram, ctx.adapter, "roughnessMap", roughnessBound);
+        tryBindWhiteTexture(drawProgram, ctx.adapter, "aoMap", aoBound);
+        tryBindWhiteTexture(drawProgram, ctx.adapter, "emissiveMap", emissiveBound);
 
         const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
         if (drawRange.indexCount == 0) {
@@ -460,10 +632,15 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             continue;
         }
 
+        // LEQUAL is intentional here. Imported character assets frequently
+        // contain exactly coincident overlay surfaces (face/eye/mouth,
+        // garment/trim). LESS makes the base surface win forever; LEQUAL plus
+        // Sequential preserves ordinary nearest-depth occlusion while making
+        // the later source submesh the stable tie-breaker.
         const uint64_t opaqueState = BGFX_STATE_WRITE_RGB
                                    | BGFX_STATE_WRITE_A
                                    | BGFX_STATE_WRITE_Z
-                                   | BGFX_STATE_DEPTH_TEST_LESS;
+                                   | BGFX_STATE_DEPTH_TEST_LEQUAL;
         ctx.adapter.setState(material.doubleSided
                                  ? opaqueState
                                  : opaqueState | BGFX_STATE_CULL_CW);
@@ -535,6 +712,7 @@ void GBufferPass::destroyResources(BGFXAdapter& adapter)
     _gbufferAlbedoRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferNormalRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferMotionRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    _gbufferMaterialRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferW = 0;
     _gbufferH = 0;
     _allocatedW = 0;
@@ -582,6 +760,7 @@ void GBufferPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
         _gbufferAlbedoRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
         _gbufferNormalRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
         _gbufferMotionRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+        _gbufferMaterialRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
         _gbufferDepthRt   = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
         _allocatedW = _allocatedH = 0;
     }
@@ -605,6 +784,7 @@ void GBufferPass::cacheAttachments(BGFXAdapter& adapter)
     _gbufferAlbedoRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferNormalRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferMotionRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    _gbufferMaterialRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferDepthRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     if (!bgfx::isValid(_gbufferFbo)) {
         return;
@@ -612,7 +792,8 @@ void GBufferPass::cacheAttachments(BGFXAdapter& adapter)
     _gbufferAlbedoRt = adapter.getFboAttachment(_gbufferFbo, 0);
     _gbufferNormalRt = adapter.getFboAttachment(_gbufferFbo, 1);
     _gbufferMotionRt = adapter.getFboAttachment(_gbufferFbo, 2);
-    _gbufferDepthRt  = adapter.getFboAttachment(_gbufferFbo, 3);
+    _gbufferMaterialRt = adapter.getFboAttachment(_gbufferFbo, 3);
+    _gbufferDepthRt  = adapter.getFboAttachment(_gbufferFbo, 4);
 }
 
 } // namespace ayt::render::detail

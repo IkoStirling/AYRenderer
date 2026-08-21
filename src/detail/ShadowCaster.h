@@ -37,6 +37,8 @@ private:
     ayt::shader::BindingId      _maskCastSkinnedBinding = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _maskCutoffBinding = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _maskBaseColorBinding = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _maskOpacityBinding = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _maskOpacitySourceBinding = ayt::shader::InvalidBinding;
     bool                        _acquireFailed = false;
     bool                        _maskAcquireFailed = false;
 };

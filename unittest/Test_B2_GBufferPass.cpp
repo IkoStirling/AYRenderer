@@ -131,7 +131,7 @@ TEST_CASE(b2_gbuffer_pass_name_and_initial_state) {
     CHECK(pass.name() == "GBuffer");
     CHECK(pass.isReady() == false);
     CHECK(GBufferPass::kGBufferViewId == 7u);
-    CHECK(GBufferPass::kGBufferAttachmentCount == 3u);
+    CHECK(GBufferPass::kGBufferAttachmentCount == 4u);
 }
 
 TEST_CASE(b2_gbuffer_pass_noop_uninitialized_returns_zero) {
@@ -166,6 +166,7 @@ TEST_CASE(b2_gbuffer_pass_accessors_return_invalid_on_shell) {
     CHECK(bgfx::isValid(pass.gbufferAlbedoRt()) == false);
     CHECK(bgfx::isValid(pass.gbufferNormalRt()) == false);
     CHECK(bgfx::isValid(pass.gbufferMotionRt()) == false);
+    CHECK(bgfx::isValid(pass.gbufferMaterialRt()) == false);
     CHECK(pass.gbufferWidth() == 0u);
     CHECK(pass.gbufferHeight() == 0u);
 

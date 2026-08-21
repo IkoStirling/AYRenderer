@@ -74,7 +74,7 @@ public:
     // view 8 for LightingPass. B2 only pins the symbolic constants
     // (do not use them yet �?no GPU work).
     static constexpr uint8_t  kGBufferViewId   = 7;
-    static constexpr uint8_t  kGBufferAttachmentCount = 3; // RT0..RT2; depth is RT3 (separate attachment)
+    static constexpr uint8_t  kGBufferAttachmentCount = 4; // RT0..RT3; depth is attachment 4
     static constexpr uint16_t kGBufferDefaultSize = 1280;
 
     GBufferPass() = default;
@@ -98,6 +98,7 @@ public:
     bgfx::TextureHandle     gbufferAlbedoRt() const noexcept { return _gbufferAlbedoRt; }
     bgfx::TextureHandle     gbufferNormalRt() const noexcept { return _gbufferNormalRt; }
     bgfx::TextureHandle     gbufferMotionRt() const noexcept { return _gbufferMotionRt; }
+    bgfx::TextureHandle     gbufferMaterialRt() const noexcept { return _gbufferMaterialRt; }
     // §P5 B4a (2026-07-22) �?depth attachment accessor. B5 LightingPass
     // doesn't sample depth (samples albedo/normal/motion only) but
     // future B7+ multi-light chain / DebugOverlay GBuffer visualization
@@ -168,6 +169,7 @@ private:
     bgfx::TextureHandle     _gbufferAlbedoRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     bgfx::TextureHandle     _gbufferNormalRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     bgfx::TextureHandle     _gbufferMotionRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle     _gbufferMaterialRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     // Requested panel size (setGbufferSize). Compared against
     // _allocatedW/H in ensure() �?must NOT reuse the request fields
     // for the cache check or a resize that only updates the request

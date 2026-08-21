@@ -53,7 +53,9 @@ public:
 
     bool hasSampleableShadow() const noexcept
     {
-        return _mapResources.hasSampleableShadow();
+        // A disabled pass may still own a valid map from the previous frame.
+        // Do not let receivers sample that stale map: disabled means fully lit.
+        return isEnabled() && _mapResources.hasSampleableShadow();
     }
 
     bool lastBlitOk() const noexcept { return _mapResources.lastBlitOk(); }

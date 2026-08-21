@@ -81,7 +81,7 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
 //   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
 //   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v26_mix_vec2_overloads";
+    "lighting_v27_deferred_material_contract";
 
 // �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -179,6 +179,7 @@ material Lighting {
     texture2d gbufferAlbedo
     texture2d gbufferNormal
     texture2d gbufferMotion
+    texture2d gbufferMaterial
     texture2d shadowMap
     texture2d gbufferSky
     texturecube envCube
@@ -212,6 +213,8 @@ material Lighting {
         let baseUv = vec2(vUv.x, 1.0 - vUv.y)
         let albedo = sample(gbufferAlbedo, baseUv)
         let normalSample = sample(gbufferNormal, baseUv)
+        let worldSample = sample(gbufferMotion, baseUv)
+        let surface = sample(gbufferMaterial, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
         // �P5.5 D (2026-07-23) ??IBL MVP ambient term. Default
         // cubeActive=0 ??ambient = ambientFlat (pre-D byte-
@@ -223,7 +226,7 @@ material Lighting {
         let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x
         let ambient = ambientFlat + ambientCube
         // �P5 B5.5 v16 ??worldPos from GBuffer RT2 (RGBA16F raw xyz).
-        let worldPos = sample(gbufferMotion, baseUv).xyz
+        let worldPos = worldSample.xyz
         // �P5.5 C (2026-07-23) ??per-light shadow factor helper.
         // Each light slot i computes its own shadow factor by
         // projecting worldPos through lightViewProjs[i] and
@@ -731,7 +734,25 @@ material Lighting {
         let isSpot7 = step(1.5, Lights.dirs[7].w)
         let f7 = dirPart7 * isDir7 + pointPart7 * isPoint7 + spotPart7 * isSpot7
         let directionalSum = keyContrib + f1 + f2 + f3 + f4 + f5 + f6 + f7
-        let lit = albedo.rgb * (ambient + directionalSum)
+        let materialMetallic = max(0.0, min(1.0, albedo.a))
+        let materialRoughness = max(0.045, min(1.0, normalSample.a))
+        let materialAo = max(0.0, min(1.0, worldSample.a))
+        let V = normalize(u_cameraPos.xyz - worldPos)
+        let keyL = normalize(Ld0 * isDir0 + Lp0 * (isPoint0 + isSpot0))
+        let H = normalize(V + keyL)
+        let NdotV = max(dot(N, V), 0.001)
+        let NdotLKey = max(dot(N, keyL), 0.001)
+        let NdotH = max(dot(N, H), 0.0)
+        let VdotH = max(dot(V, H), 0.0)
+        let F0 = mix(vec3(0.04, 0.04, 0.04), albedo.rgb, materialMetallic)
+        let F = fresnelSchlick(VdotH, F0)
+        let D = distributionGGX(NdotH, materialRoughness)
+        let G = geometrySmith(NdotV, NdotLKey, materialRoughness)
+        let diffuseWeight = (vec3(1.0, 1.0, 1.0) - F) * (1.0 - materialMetallic)
+        let diffuseLit = albedo.rgb * diffuseWeight * directionalSum
+        let specularLit = F * (D * G / max(4.0 * NdotV * NdotLKey, 0.001)) * keyContrib
+        let ambientLit = albedo.rgb * diffuseWeight * ambient * materialAo
+        let lit = ambientLit + diffuseLit + specularLit + surface.rgb
         // �Skybox0 (2026-07-23) ??backdrop blend: sky only shows
         // where lit is near zero (so geometry keeps its color;
         // sky fills gaps in scene coverage). When
@@ -740,9 +761,9 @@ material Lighting {
         // `mix(black, lit, 1) == lit` collapses to the pre-�Skybox0
         // dark-frame behavior on a Forward / non-sky host.
         let skyColor = sample(gbufferSky, baseUv).xyz * skyMix.x
-        let coverage = step(0.001, max(max(lit.r, lit.g), lit.b))
+        let coverage = step(0.5, surface.a)
         let finalColor = mix(skyColor, lit, coverage)
-        return vec4(finalColor, albedo.a)
+        return vec4(finalColor, coverage)
     }
 }
 )";
@@ -1058,6 +1079,17 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                 const uint8_t stage = _program.getTextureStage(motionBinding);
                 _program.setTexture(stage, motionBinding,
                                     toShaderTexture(motionHandle));
+            }
+        }
+        const shader::BindingId materialBinding =
+            _program.getTextureBinding("gbufferMaterial");
+        if (materialBinding != shader::InvalidBinding) {
+            const bgfx::TextureHandle materialHandle =
+                ctx.gbufferPass->gbufferMaterialRt();
+            if (bgfx::isValid(materialHandle)) {
+                const uint8_t stage = _program.getTextureStage(materialBinding);
+                _program.setTexture(stage, materialBinding,
+                                    toShaderTexture(materialHandle));
             }
         }
         // �Skybox0 (2026-07-23) ??gbufferSky backdrop sampler.

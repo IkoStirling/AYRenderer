@@ -121,7 +121,7 @@ namespace {
 // fails. Same TU-local-mirror pattern used by
 // Test_B5_LightingDirectional.cpp::kExpectedLightingCacheKey.
 inline constexpr const char* kExpectedB7LightingCacheKey =
-    "lighting_v26_mix_vec2_overloads";
+    "lighting_v27_deferred_material_contract";
 
 // §P5 B7+ (2026-07-22) �?Phoskia source substring pins. Drift =
 // test fails. Note PascalCase `Lights` block name (matches
@@ -599,7 +599,7 @@ TEST_CASE(b7_lighting_cache_key_bump_pinned_live) {
     CHECK(std::string(kExpectedB7LightingCacheKey).size() >= 20u);
     CHECK(std::string(kLightingCacheKeyCStr).size() >= 20u);
     // The literal must contain the §P5.5 D version bump marker.
-    CHECK(std::string(kLightingCacheKeyCStr).find("v26_mix_vec2_overloads")
+    CHECK(std::string(kLightingCacheKeyCStr).find("v27_deferred_material_contract")
           != std::string::npos);
 }
 

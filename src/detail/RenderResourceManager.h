@@ -82,10 +82,15 @@ public:
                             TextureHandle texture);
     void setMaterialSurfaceProperties(MaterialHandle material, int alphaMode,
                                       float alphaCutoff, bool doubleSided);
+    void setMaterialPremultipliedAlpha(MaterialHandle material, bool premultiplied);
 
     TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
                                          const uint8_t* pixels,
                                          const std::string& cacheKey = "");
+    TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
+                                         const uint8_t* pixels,
+                                         const std::string& cacheKey,
+                                         bool srgb);
     // Mutable RGBA8 texture for per-frame CPU uploads (AYVideo V3).
     // Never cached — each call allocates a fresh GPU texture.
     TextureHandle createDynamicTextureRgba8(uint32_t width, uint32_t height);
@@ -101,9 +106,18 @@ public:
                                         uint32_t bgfxTextureFormat,
                                         const void* data, uint32_t size,
                                         const std::string& cacheKey = "");
+    TextureHandle createTextureFromData(uint32_t width, uint32_t height,
+                                        uint32_t bgfxTextureFormat,
+                                        const void* data, uint32_t size,
+                                        const std::string& cacheKey,
+                                        bool srgb);
     TextureHandle createTextureFromFile(const std::string& path,
                                         const std::string& cacheKey = "");
+    TextureHandle createTextureFromFile(const std::string& path,
+                                        const std::string& cacheKey,
+                                        bool srgb);
     TextureHandle loadTexture(const std::string& path);
+    TextureHandle loadTexture(const std::string& path, bool srgb);
     void destroyTexture(TextureHandle& texture);
 
     const std::unordered_map<uint64_t, GpuMesh>& meshes() const { return _meshes; }

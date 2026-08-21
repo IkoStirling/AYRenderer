@@ -41,5 +41,9 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
 TextureHandle uploadTextureFromResource(RenderResourceManager& mgr,
                                           const ayt::resource::ITexture& texture,
                                           const std::string& cacheKey);
+TextureHandle uploadTextureFromResource(RenderResourceManager& mgr,
+                                          const ayt::resource::ITexture& texture,
+                                          const std::string& cacheKey,
+                                          bool srgb);
 
 } // namespace ayt::render::detail

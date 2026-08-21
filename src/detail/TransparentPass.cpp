@@ -85,6 +85,11 @@ bool TransparentPass::submitItem(
     bool baseColorTextureBound = false;
     bool opacityTextureBound = false;
     bool albedoMapBound = false;
+    bool normalTextureBound = false;
+    bool metallicTextureBound = false;
+    bool roughnessTextureBound = false;
+    bool aoTextureBound = false;
+    bool emissiveTextureBound = false;
     for (const GpuMaterial::TextureSlot& slot : material.textures) {
         if (slot.name.empty() || !slot.texture.isValid()) {
             continue;
@@ -108,12 +113,26 @@ bool TransparentPass::submitItem(
         baseColorTextureBound = baseColorTextureBound || slot.name == "baseColorTexture";
         opacityTextureBound = opacityTextureBound || slot.name == "opacityTexture";
         albedoMapBound = albedoMapBound || slot.name == "albedoMap";
+        normalTextureBound = normalTextureBound || slot.name == "normalTexture";
+        metallicTextureBound = metallicTextureBound || slot.name == "metallicTexture";
+        roughnessTextureBound = roughnessTextureBound || slot.name == "roughnessTexture";
+        aoTextureBound = aoTextureBound || slot.name == "aoTexture";
+        emissiveTextureBound = emissiveTextureBound || slot.name == "emissiveTexture";
     }
     tryBindWhiteTexture(material.shader, adapter, "baseColorTexture",
                         baseColorTextureBound);
     tryBindWhiteTexture(material.shader, adapter, "opacityTexture",
                         opacityTextureBound);
     tryBindWhiteTexture(material.shader, adapter, "albedoMap", albedoMapBound);
+    tryBindFlatNormalTexture(material.shader, adapter, "normalTexture",
+                             normalTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "metallicTexture",
+                        metallicTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "roughnessTexture",
+                        roughnessTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "aoTexture", aoTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "emissiveTexture",
+                        emissiveTextureBound);
 
     resolveAndApplyColorUniforms(material);
 
@@ -156,6 +175,11 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     }
 
     adapter.setViewTransform(viewId, frame.view, frame.projection);
+    // Alpha compositing is order-dependent. bgfx's default view mode may
+    // reorder submits by state/program, which silently defeats the CPU-side
+    // back-to-front stable_sort below. Sequential makes DrawItem::sortKey the
+    // actual GPU submission order for this dedicated transparent view.
+    bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
 
     // Deferred LightingOutput is color-only. Borrow GBuffer depth so
     // glass can DEPTH_TEST_LESS against opaque geometry.
@@ -216,6 +240,25 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 
     const bool depthAlways = deferredLitComposite && !ownsBorrowedDepthFbo;
 
+    static uint32_t s_orderLogFrames = 0;
+    if (s_orderLogFrames < 3) {
+        uint32_t rank = 0;
+        for (const DrawItem* item : sortedItems) {
+            const auto material = ctx.materials.find(item->material.id);
+            if (material == ctx.materials.end()
+                || material->second.blendMode != ayt::render::BlendMode::Alpha) {
+                continue;
+            }
+            std::fprintf(stderr,
+                         "[TransparentOrder] frame=%u rank=%u material=%llu "
+                         "sortKey=%d first=%u count=%u\n",
+                         s_orderLogFrames, rank++,
+                         static_cast<unsigned long long>(item->material.id),
+                         item->sortKey, item->firstIndex, item->indexCount);
+        }
+        ++s_orderLogFrames;
+    }
+
     for (const DrawItem* pItem : sortedItems) {
         const auto matIt = ctx.materials.find(pItem->material.id);
         if (matIt != ctx.materials.end()) {
@@ -223,9 +266,12 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
                 matIt->second.blendMode == ayt::render::BlendMode::Alpha ? 1u : 0u;
             uint64_t state = BGFX_STATE_WRITE_RGB
                            | BGFX_STATE_WRITE_A
-                           | BGFX_STATE_BLEND_ALPHA
                            | (depthAlways ? BGFX_STATE_DEPTH_TEST_ALWAYS
                                           : BGFX_STATE_DEPTH_TEST_LEQUAL);
+            state |= matIt->second.premultipliedAlpha
+                ? BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE,
+                                        BGFX_STATE_BLEND_INV_SRC_ALPHA)
+                : BGFX_STATE_BLEND_ALPHA;
             if (!matIt->second.doubleSided) {
                 state |= BGFX_STATE_CULL_CW;
             }

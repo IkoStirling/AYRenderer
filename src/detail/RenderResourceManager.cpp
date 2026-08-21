@@ -23,6 +23,15 @@ namespace ayt::render::detail
 
 namespace {
 
+std::string textureSamplingCacheKey(const std::string& path, bool srgb)
+{
+    std::string key = normalizeAssetPathKey(path);
+    if (!key.empty()) {
+        key += srgb ? "#srgb" : "#linear";
+    }
+    return key;
+}
+
 void storeUniformSlot(GpuMaterial& material, const char* name, shader::BindingId binding,
                       const void* data, size_t size)
 {
@@ -718,50 +727,44 @@ bool RenderResourceManager::reloadMaterialFromPath(const std::string& path)
 
 bool RenderResourceManager::reloadTextureFromPath(const std::string& path)
 {
-    const std::string key = normalizeAssetPathKey(path);
-    if (key.empty()) {
+    if (normalizeAssetPathKey(path).empty()) {
         return false;
     }
-    const auto cached = _textureCacheByKey.find(key);
-    if (cached == _textureCacheByKey.end()) {
-        return false;
-    }
-    const uint64_t id = cached->second;
 
     const auto texture =
         ayt::resource::ResourceManager::instance().load<ayt::resource::ITexture>(path);
-    if (!texture) {
-        // Raw image fallback (png/jpg) when not a typed .aytex.
+    bool refreshed = false;
+    for (const bool srgb : {false, true}) {
+        const std::string key = textureSamplingCacheKey(path, srgb);
+        const auto cached = _textureCacheByKey.find(key);
+        if (cached == _textureCacheByKey.end()) {
+            continue;
+        }
+        const uint64_t id = cached->second;
         destroyTextureGpuOnly(id);
-        _textureCacheByKey.erase(key);
-        const TextureHandle fresh = createTextureFromFile(path, key);
+        _textureCacheByKey.erase(cached);
+
+        const TextureHandle fresh = texture
+            ? uploadTextureFromResource(*this, *texture, key, srgb)
+            : createTextureFromFile(path, key, srgb);
         if (!fresh.isValid()) {
-            return false;
+            std::fprintf(stderr,
+                         "[RenderResourceManager] reloadTexture upload failed '%s' (%s)\n",
+                         path.c_str(), srgb ? "sRGB" : "linear");
+            continue;
         }
         if (fresh.id != id) {
             _textures[id] = std::move(_textures.at(fresh.id));
             _textures.erase(fresh.id);
             _textureCacheByKey[key] = id;
         }
-        return true;
+        std::fprintf(stderr,
+                     "[RenderResourceManager] reloadTexture ok '%s' id=%llu (%s)\n",
+                     path.c_str(), static_cast<unsigned long long>(id),
+                     srgb ? "sRGB" : "linear");
+        refreshed = true;
     }
-
-    destroyTextureGpuOnly(id);
-    _textureCacheByKey.erase(key);
-    const TextureHandle fresh = uploadTextureFromResource(*this, *texture, key);
-    if (!fresh.isValid()) {
-        std::fprintf(stderr, "[RenderResourceManager] reloadTexture upload failed '%s'\n",
-                     path.c_str());
-        return false;
-    }
-    if (fresh.id != id) {
-        _textures[id] = std::move(_textures.at(fresh.id));
-        _textures.erase(fresh.id);
-        _textureCacheByKey[key] = id;
-    }
-    std::fprintf(stderr, "[RenderResourceManager] reloadTexture ok '%s' id=%llu\n",
-                 path.c_str(), static_cast<unsigned long long>(id));
-    return true;
+    return refreshed;
 }
 
 bool RenderResourceManager::onResourceFileChanged(const std::string& path)
@@ -1039,9 +1042,29 @@ void RenderResourceManager::setMaterialSurfaceProperties(MaterialHandle material
     surfaceSlot->size = static_cast<uint16_t>(sizeof(value));
 }
 
+void RenderResourceManager::setMaterialPremultipliedAlpha(MaterialHandle material,
+                                                          bool premultiplied)
+{
+    if (!material.isValid()) {
+        return;
+    }
+    const auto it = _materials.find(material.id);
+    if (it != _materials.end()) {
+        it->second.premultipliedAlpha = premultiplied;
+    }
+}
+
 TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint32_t height,
                                                             const uint8_t* pixels,
                                                             const std::string& cacheKey)
+{
+    return createTextureFromRgba8(width, height, pixels, cacheKey, false);
+}
+
+TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint32_t height,
+                                                            const uint8_t* pixels,
+                                                            const std::string& cacheKey,
+                                                            bool srgb)
 {
     TextureHandle out;
     if (!_adapter.isInitialized() || width == 0 || height == 0 || pixels == nullptr) {
@@ -1059,7 +1082,9 @@ TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint
     GpuTexture gpuTex;
     gpuTex.width  = static_cast<uint16_t>(width);
     gpuTex.height = static_cast<uint16_t>(height);
-    gpuTex.handle = _adapter.createTexture2D(gpuTex.width, gpuTex.height, pixels);
+    gpuTex.srgb = srgb;
+    const uint64_t flags = srgb ? BGFX_TEXTURE_SRGB : BGFX_TEXTURE_NONE;
+    gpuTex.handle = _adapter.createTexture2D(gpuTex.width, gpuTex.height, pixels, flags);
     if (!bgfx::isValid(gpuTex.handle)) {
         return out;
     }
@@ -1154,6 +1179,16 @@ TextureHandle RenderResourceManager::createTextureFromData(uint32_t width, uint3
                                                            const void* data, uint32_t size,
                                                            const std::string& cacheKey)
 {
+    return createTextureFromData(width, height, bgfxTextureFormat, data, size,
+                                 cacheKey, false);
+}
+
+TextureHandle RenderResourceManager::createTextureFromData(uint32_t width, uint32_t height,
+                                                           uint32_t bgfxTextureFormat,
+                                                           const void* data, uint32_t size,
+                                                           const std::string& cacheKey,
+                                                           bool srgb)
+{
     TextureHandle out;
     if (!_adapter.isInitialized() || width == 0 || height == 0 || data == nullptr || size == 0) {
         return out;
@@ -1170,10 +1205,12 @@ TextureHandle RenderResourceManager::createTextureFromData(uint32_t width, uint3
     GpuTexture gpuTex;
     gpuTex.width  = static_cast<uint16_t>(width);
     gpuTex.height = static_cast<uint16_t>(height);
+    gpuTex.srgb = srgb;
+    const uint64_t flags = srgb ? BGFX_TEXTURE_SRGB : BGFX_TEXTURE_NONE;
     gpuTex.handle = _adapter.createTexture2DFromData(
         gpuTex.width, gpuTex.height,
         static_cast<bgfx::TextureFormat::Enum>(bgfxTextureFormat),
-        data, size);
+        data, size, flags);
     if (!bgfx::isValid(gpuTex.handle)) {
         return out;
     }
@@ -1190,6 +1227,13 @@ TextureHandle RenderResourceManager::createTextureFromData(uint32_t width, uint3
 TextureHandle RenderResourceManager::createTextureFromFile(const std::string& path,
                                                            const std::string& cacheKey)
 {
+    return createTextureFromFile(path, cacheKey, false);
+}
+
+TextureHandle RenderResourceManager::createTextureFromFile(const std::string& path,
+                                                           const std::string& cacheKey,
+                                                           bool srgb)
+{
     const std::string key = !cacheKey.empty() ? cacheKey : normalizeAssetPathKey(path);
     if (!key.empty()) {
         const auto cached = _textureCacheByKey.find(key);
@@ -1205,16 +1249,21 @@ TextureHandle RenderResourceManager::createTextureFromFile(const std::string& pa
         return {};
     }
 
-    return createTextureFromRgba8(image.width, image.height, image.rgba8.data(), key);
+    return createTextureFromRgba8(image.width, image.height, image.rgba8.data(), key, srgb);
 }
 
 TextureHandle RenderResourceManager::loadTexture(const std::string& path)
+{
+    return loadTexture(path, false);
+}
+
+TextureHandle RenderResourceManager::loadTexture(const std::string& path, bool srgb)
 {
     if (path.empty()) {
         return {};
     }
 
-    const std::string key = normalizeAssetPathKey(path);
+    const std::string key = textureSamplingCacheKey(path, srgb);
     if (!key.empty()) {
         const auto cached = _textureCacheByKey.find(key);
         if (cached != _textureCacheByKey.end()) {
@@ -1229,10 +1278,10 @@ TextureHandle RenderResourceManager::loadTexture(const std::string& path)
     const std::shared_ptr<ayt::resource::ITexture> texture =
         ayt::resource::ResourceManager::instance().load<ayt::resource::ITexture>(path);
     if (!texture) {
-        return createTextureFromFile(path, key);
+        return createTextureFromFile(path, key, srgb);
     }
 
-    return uploadTextureFromResource(*this, *texture, key);
+    return uploadTextureFromResource(*this, *texture, key, srgb);
 }
 
 void RenderResourceManager::destroyTexture(TextureHandle& texture)

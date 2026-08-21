@@ -126,13 +126,20 @@ $input v_clipZw, v_texcoord0
 
 uniform vec4 alphaCutoff;
 uniform vec4 baseColor;
+uniform vec4 opacity;
+uniform vec4 opacitySource;
 SAMPLER2D(albedoMap, 0);
 SAMPLER2D(opacityMap, 1);
 
 void main()
 {
+    vec4 opacitySample = texture2D(opacityMap, v_texcoord0);
+    float dedicatedOpacity = mix(opacitySample.r, opacitySample.a,
+                                 step(1.5, opacitySource.x));
+    float sampledOpacity = mix(1.0, dedicatedOpacity,
+                               step(0.5, opacitySource.x));
     float alpha = texture2D(albedoMap, v_texcoord0).a
-                * texture2D(opacityMap, v_texcoord0).r * baseColor.a;
+                * sampledOpacity * baseColor.a * clamp(opacity.x, 0.0, 1.0);
     if (alpha < alphaCutoff.x) {
         discard;
     }
@@ -142,7 +149,7 @@ void main()
 )";
 
 inline constexpr const char* kShadowMaskCasterCacheKey =
-    "shadow_mask_caster_sc_v2_skinned_opacity";
+    "shadow_mask_caster_sc_v3_opacity_source_channel";
 
 // Lit receiver — ABI matches verified hand .sc (all lighting/bias as vec4,
 // swizzle .xyz / .x). Unrolled 3x3 PCF + in-map gate.

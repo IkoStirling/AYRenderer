@@ -201,7 +201,7 @@ TEST_CASE(b4b_gbuffer_pass_empty_scene_returns_zero) {
     CHECK((pass.isProgramReady() == true || pass.isProgramReady() == false));
 }
 
-TEST_CASE(b4b_phoskia_gbuffer_source_declares_three_mrt_color_slots) {
+TEST_CASE(b4b_phoskia_gbuffer_source_declares_deferred_material_mrt_slots) {
     // B4b.4 — MRT output contract: the embedded Phoskia GBufferFill
     // source declares exactly 3 `out color` slots (albedo / normal /
     // motion). A future refactor that silently drops one of these
@@ -239,7 +239,7 @@ TEST_CASE(b4b_gbuffer_view_id_is_locked_to_seven) {
     // Cutsheet §5.2 also locks 3 color attachments (RT0..RT2).
     // RT3 is depth (separate attachment, not counted in the color
     // count). Test_B4_GBufferMRT case 4 verifies the constant.
-    CHECK(GBufferPass::kGBufferAttachmentCount == 3u);
+    CHECK(GBufferPass::kGBufferAttachmentCount == 4u);
 }
 
 TEST_CASE(b4b_phoskia_gbuffer_source_has_base_color_property) {

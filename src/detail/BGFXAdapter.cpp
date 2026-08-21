@@ -190,6 +190,10 @@ void BGFXAdapter::shutdown()
         bgfx::destroy(_litShadowFallback);
         _litShadowFallback = BGFX_INVALID_HANDLE;
     }
+    if (bgfx::isValid(_flatNormalFallback)) {
+        bgfx::destroy(_flatNormalFallback);
+        _flatNormalFallback = BGFX_INVALID_HANDLE;
+    }
 
     // Drain pending submits before dropping our claim (or tearing down).
     bgfx::frame();
@@ -583,13 +587,16 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
         return BGFX_INVALID_HANDLE;
     }
 
-    constexpr uint8_t kNumColor = 3;
-    // RT0 albedo RGBA8 / RT1 normal RGBA8 / RT2 worldPos RGBA16F.
+    constexpr uint8_t kNumColor = 4;
+    // Deferred material contract:
+    // RT0 albedo+metallic RGBA8 / RT1 normal+roughness RGBA8 /
+    // RT2 worldPos+AO RGBA16F / RT3 emissive+coverage RGBA8.
     // RGBA8 on RT2 quantized worldPos (~0.16m) → mosaic shadow UVs.
     const bgfx::TextureFormat::Enum colorFmts[kNumColor] = {
         bgfx::TextureFormat::RGBA8,
         bgfx::TextureFormat::RGBA8,
         bgfx::TextureFormat::RGBA16F,
+        bgfx::TextureFormat::RGBA8,
     };
     const uint64_t colorFlags = BGFX_TEXTURE_RT
                               | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
@@ -597,6 +604,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
     const uint64_t depthFlags = colorFlags;  // D24S8 same flags
 
     bgfx::TextureHandle colors[kNumColor] = {
+        bgfx::TextureHandle{BGFX_INVALID_HANDLE},
         bgfx::TextureHandle{BGFX_INVALID_HANDLE},
         bgfx::TextureHandle{BGFX_INVALID_HANDLE},
         bgfx::TextureHandle{BGFX_INVALID_HANDLE},
@@ -644,12 +652,12 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
 
-    // 4-attach order: [albedo, normal, worldPos, depth]
-    const bgfx::TextureHandle attachments[4] = {
-        colors[0], colors[1], colors[2], depth
+    // 5-attach order: [albedo, normal, worldPos, material, depth]
+    const bgfx::TextureHandle attachments[5] = {
+        colors[0], colors[1], colors[2], colors[3], depth
     };
     bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
-        /*num=*/4, attachments, /*destroyTextures=*/true);
+        /*num=*/5, attachments, /*destroyTextures=*/true);
 
     if (!bgfx::isValid(fb)) {
         // FBO creation failed — textures are owned by bgfx when
@@ -1043,6 +1051,24 @@ bgfx::TextureHandle BGFXAdapter::getWhiteFallbackTexture()
 bgfx::TextureHandle BGFXAdapter::getLitShadowFallbackTexture()
 {
     return getWhiteFallbackTexture();
+}
+
+bgfx::TextureHandle BGFXAdapter::getFlatNormalFallbackTexture()
+{
+    if (!_initialized) {
+        return BGFX_INVALID_HANDLE;
+    }
+    if (bgfx::isValid(_flatNormalFallback)) {
+        return _flatNormalFallback;
+    }
+    const uint8_t pixel[4] = {128, 128, 255, 255};
+    const bgfx::Memory* mem = bgfx::copy(pixel, sizeof(pixel));
+    _flatNormalFallback = bgfx::createTexture2D(
+        1, 1, false, 1, bgfx::TextureFormat::RGBA8,
+        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
+            | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
+        mem);
+    return _flatNormalFallback;
 }
 
 } // namespace ayt::render::detail

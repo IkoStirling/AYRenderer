@@ -69,6 +69,11 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     bool baseColorTextureBound = false;
     bool opacityTextureBound = false;
     bool albedoMapBound = false;
+    bool normalTextureBound = false;
+    bool metallicTextureBound = false;
+    bool roughnessTextureBound = false;
+    bool aoTextureBound = false;
+    bool emissiveTextureBound = false;
     for (const GpuMaterial::TextureSlot& slot : material.textures) {
         if (slot.name.empty() || !slot.texture.isValid()) {
             continue;
@@ -89,6 +94,11 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
         baseColorTextureBound = baseColorTextureBound || slot.name == "baseColorTexture";
         opacityTextureBound = opacityTextureBound || slot.name == "opacityTexture";
         albedoMapBound = albedoMapBound || slot.name == "albedoMap";
+        normalTextureBound = normalTextureBound || slot.name == "normalTexture";
+        metallicTextureBound = metallicTextureBound || slot.name == "metallicTexture";
+        roughnessTextureBound = roughnessTextureBound || slot.name == "roughnessTexture";
+        aoTextureBound = aoTextureBound || slot.name == "aoTexture";
+        emissiveTextureBound = emissiveTextureBound || slot.name == "emissiveTexture";
         ++albedoBinds;
         static uint32_t s_albedoLog = 0;
         if (s_albedoLog < 4) {
@@ -110,6 +120,15 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     tryBindWhiteTexture(material.shader, adapter, "opacityTexture",
                         opacityTextureBound);
     tryBindWhiteTexture(material.shader, adapter, "albedoMap", albedoMapBound);
+    tryBindFlatNormalTexture(material.shader, adapter, "normalTexture",
+                             normalTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "metallicTexture",
+                        metallicTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "roughnessTexture",
+                        roughnessTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "aoTexture", aoTextureBound);
+    tryBindWhiteTexture(material.shader, adapter, "emissiveTexture",
+                        emissiveTextureBound);
     {
         const shader::BindingId shadowBinding =
             material.shader.getTextureBinding("shadowMap");
@@ -160,6 +179,10 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     BGFXAdapter& adapter = ctx.adapter;
     const FrameContext& frame = ctx.frame;
     const uint8_t viewId = ctx.viewId;
+    // Preserve source submesh order for coincident opaque/masked surface
+    // layers. This mirrors GBufferPass so switching render paths does not
+    // change which eye/mouth/decal layer wins an equal-depth tie.
+    bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
     const auto& meshes    = ctx.meshes;
     const auto& textures  = ctx.textures;
     auto& materials       = ctx.materials;
@@ -313,7 +336,7 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         const uint64_t opaqueState = BGFX_STATE_WRITE_RGB
                                    | BGFX_STATE_WRITE_A
                                    | BGFX_STATE_WRITE_Z
-                                   | BGFX_STATE_DEPTH_TEST_LESS;
+                                   | BGFX_STATE_DEPTH_TEST_LEQUAL;
         adapter.setState(material.doubleSided
                              ? opaqueState
                              : opaqueState | BGFX_STATE_CULL_CW);

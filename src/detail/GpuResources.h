@@ -29,6 +29,9 @@ struct GpuTexture {
     // True when created via createDynamicTextureRgba8 (mem=nullptr) so
     // updateTextureFromRgba8 may rewrite pixels each frame (AYVideo V3).
     bool dynamic = false;
+    // Sampling transfer function is part of the GPU resource identity.
+    // Same file + different material semantic must not alias in the cache.
+    bool srgb = false;
 };
 
 struct GpuMaterial {
@@ -78,6 +81,7 @@ struct GpuMaterial {
     bool  alphaCutout = false;
     float alphaCutoff = 0.5f;
     bool  doubleSided = false;
+    bool  premultipliedAlpha = false;
 };
 
 inline ayt::shader::TextureHandle toShaderTexture(bgfx::TextureHandle h)
