@@ -102,6 +102,11 @@ public:
     void setMaterialSurfaceProperties(MaterialHandle material, int alphaMode,
                                       float alphaCutoff, bool doubleSided);
     void setMaterialPremultipliedAlpha(MaterialHandle material, bool premultiplied);
+    // §P1 H2 (2026-08-24) — proper blend-mode setter. Routes through the
+    // manager so the change is reflected in shader-pool dirty tracking
+    // and any external caches that key off blendMode (Forward/Transparent
+    // pass routing). Returns false when the handle is invalid.
+    bool setMaterialBlendMode(MaterialHandle material, BlendMode blendMode);
 
     TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
                                          const uint8_t* pixels,

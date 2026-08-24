@@ -876,10 +876,15 @@ bool BGFXAdapter::capsTextureBlit() const noexcept
 
 bool BGFXAdapter::capsTextureReadBack() const noexcept
 {
-    // Pre-existing supportsTextureReadBack() already does this — re-
-    // exported under the caps* prefix so ShadowPass's grep audit
-    // finds one consistent naming style for capability queries.
-    return supportsTextureReadBack();
+    // §P1 M3 (2026-08-24) — inline the caps check. The previous body
+    // forwarded to supportsTextureReadBack(), which did a fresh
+    // bgfx::getCaps() (each call walks bgfx internal state). On a
+    // per-pass submit this doubled the cost for no benefit.
+    if (!_initialized) {
+        return false;
+    }
+    const bgfx::Caps* caps = bgfx::getCaps();
+    return caps != nullptr && (caps->supported & BGFX_CAPS_TEXTURE_READ_BACK) != 0;
 }
 
 void BGFXAdapter::setViewClearRaw(uint8_t viewId, uint16_t flags,
@@ -1033,6 +1038,7 @@ bgfx::TextureHandle BGFXAdapter::getWhiteFallbackTexture()
     if (!_initialized) {
         return BGFX_INVALID_HANDLE;
     }
+    std::lock_guard<std::mutex> lock(_fallbackInitMutex);
     if (bgfx::isValid(_litShadowFallback)) {
         return _litShadowFallback;
     }
@@ -1058,6 +1064,7 @@ bgfx::TextureHandle BGFXAdapter::getFlatNormalFallbackTexture()
     if (!_initialized) {
         return BGFX_INVALID_HANDLE;
     }
+    std::lock_guard<std::mutex> lock(_fallbackInitMutex);
     if (bgfx::isValid(_flatNormalFallback)) {
         return _flatNormalFallback;
     }

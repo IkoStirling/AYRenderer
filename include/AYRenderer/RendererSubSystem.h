@@ -12,6 +12,7 @@
 #include <AYApplication/AppEventHost.h>
 #include <AYEventSystem/Events/WindowEvents.h>
 
+#include <atomic>
 #include <cstddef>
 #include <functional>
 
@@ -19,6 +20,14 @@ namespace ayt::render
 {
 
 class UIRenderBackend;
+
+// §P1 L5 (2026-08-24) — named default camera so the editor freecam
+// fallback is no longer a bare magic (4, 3, 5). Used when no
+// camera override is set (legacy / non-GameLoop callers) and as the
+// staging ground before an Editor freecam takes over.
+inline constexpr float kDefaultEditorCameraEyeX = 4.0f;
+inline constexpr float kDefaultEditorCameraEyeY = 3.0f;
+inline constexpr float kDefaultEditorCameraEyeZ = 5.0f;
 
 using SceneBuildCallback = std::function<void(RenderScene&)>;
 // AI-1 (2026-07-20): CompositeUiPass now takes an enum so the host
@@ -116,9 +125,15 @@ private:
     Renderer           _renderer;
     RenderScene        _scene;
     SceneBuildCallback _sceneBuilder;
+    // §P1 L2 (2026-08-24) — atomic valid flag so the scene packet
+    // can't be torn between the renderFrame() polling path and the
+    // renderScenePass() consumer path if a future caller drives them
+    // from different threads (editor preview pane on worker thread,
+    // say). Today both are main-thread, but the load cost is zero and
+    // it future-proofs the contract.
     uint64_t           _scenePacketFrame = 0;
     float              _scenePacketInterpolationAlpha = 0.0f;
-    bool               _scenePacketValid = false;
+    std::atomic<bool>  _scenePacketValid{false};
     void*              _windowHandle = nullptr;
     uint32_t           _width        = 1280;
     uint32_t           _height       = 720;

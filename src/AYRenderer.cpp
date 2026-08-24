@@ -38,7 +38,9 @@
 
 #include <AYIO/Env.h>
 
+#include <atomic>
 #include <chrono>
+#include <memory>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -482,6 +484,16 @@ struct Renderer::Impl {
     // Rebuild pipeline.passes from pipelineDesc. Preserves UI backend.
     void applyPipelineDesc(const RenderPipelineDesc& desc);
 
+    // §P1 H3 (2026-08-24) — shared alive flag. The ResourceManager
+    // hot-reload lambda captures the shared_ptr by value and checks
+    // `*aliveToken` (atomic load) before touching any Impl member.
+    // shutdown() flips it to false before destroying bgfx resources
+    // so a callback that races past setOnHotReload({}) sees the dead
+    // flag and skips the draw-side work (no UAF on the dying
+    // Renderer). Lifetime is owned by Impl; Renderer is the sole
+    // producer.
+    std::shared_ptr<std::atomic<bool>> aliveToken;
+
     // §5.5 cleanup (2026-07-22) — `lastFrameShadowFbo` cache removed.
     // It lived under #if AY_F1_DIAG_FRAME_SHADOW and was used only by
     // the now-retired F1 diagnostic path. E5 ships default-on Shadow
@@ -493,6 +505,12 @@ struct Renderer::Impl {
     Impl()
         : resources(adapter, shaderPool)
     {
+        // §P1 H3 (2026-08-24) — alive token shared with the
+        // ResourceManager hot-reload lambda. shutdown() flips it to
+        // false before destroying bgfx resources so a callback that
+        // races past setOnHotReload({}) sees the dead flag and skips
+        // the draw-side work (no UAF on the dying Renderer).
+        aliveToken = std::make_shared<std::atomic<bool>>(true);
         // E5 (§5.4, 2026-07-22): makeDefault() mounts Shadow
         // enabled (not disabled) — pre-E4 the canonical default
         // disabled Shadow to keep the 0-behavior-change baseline,
@@ -718,8 +736,16 @@ bool Renderer::initialize(const InitDesc& desc)
     _impl->renderClockOrigin = std::chrono::steady_clock::now();
 
     // P2: L2 file change → L3 GPU re-upload (stable handle ids).
+    // §P1 H3 (2026-08-24) — capture the alive token (shared_ptr) and
+    // check it before dereferencing Impl. If the Renderer was destroyed
+    // and the callback raced past setOnHotReload({}), the token will
+    // be false and we skip silently instead of touching dead memory.
+    auto aliveToken = _impl->aliveToken;
     ayt::resource::ResourceManager::instance().setOnHotReload(
-        [this](const std::string& path) {
+        [this, aliveToken](const std::string& path) {
+            if (!aliveToken || !aliveToken->load(std::memory_order_acquire)) {
+                return;
+            }
             if (_impl) {
                 (void)_impl->resources.onResourceFileChanged(path);
             }
@@ -731,6 +757,14 @@ void Renderer::shutdown()
 {
     if (!_impl) {
         return;
+    }
+
+    // §P1 H3 (2026-08-24) — flip the alive flag FIRST so any hot-reload
+    // callback racing past setOnHotReload({}) sees the dead state. Must
+    // run before any bgfx resource destruction so the callback never
+    // touches a half-torn-down Impl.
+    if (_impl->aliveToken) {
+        _impl->aliveToken->store(false, std::memory_order_release);
     }
 
     // P2 (PR-D) — release the scene FBO before tearing down the
@@ -1805,20 +1839,14 @@ void Renderer::setMaterialColor(MaterialHandle material, const char* propertyNam
 
 void Renderer::setMaterialBlendMode(MaterialHandle material, BlendMode blendMode)
 {
-    // Inline mutates RenderResourceManager's _materials map directly —
-    // the GpuMaterial field is a single POD byte (BlendMode uint8_t)
-    // and threading the setter through RenderResourceManager for one
-    // byte is not worth the surface. Public API no-throws on bad
-    // handle, mirroring setMaterialColor above.
+    // §P1 H2 (2026-08-24) — route through RenderResourceManager so the
+    // dirty mark + pass-routing comment lands with the change instead
+    // of poking the internal map directly (which was a cutsheet §6
+    // violation: passes must not access GPU resource state directly).
     if (!_impl) {
         return;
     }
-    auto& mats = _impl->resources.materials();
-    auto it = mats.find(material.id);
-    if (it == mats.end()) {
-        return;
-    }
-    it->second.blendMode = blendMode;
+    (void)_impl->resources.setMaterialBlendMode(material, blendMode);
 }
 
 void Renderer::setMaterialSurfaceProperties(MaterialHandle material, int alphaMode,

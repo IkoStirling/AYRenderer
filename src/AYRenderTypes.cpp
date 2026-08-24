@@ -1,13 +1,24 @@
 #include "AYRenderer/RenderTypes.h"
 
+#include <cstdio>
+
 namespace ayt::render
 {
 
 namespace {
 
-uint32_t elementSizeBytes(const VertexElement& el)
+// §P1 L4 (2026-08-24) — silent 0 hides malformed layouts. add() and
+// isValid() callers see "invalid" but never learn why. Now the
+// rejection path logs componentCount/componentType/normalized once
+// per shape so the developer can pinpoint the bad attribute.
+uint32_t elementSizeBytes(const VertexElement& el, bool& outOk)
 {
+    outOk = true;
     if (el.componentCount == 0 || el.componentCount > 4) {
+        std::fprintf(stderr,
+                     "[AYRenderTypes] elementSizeBytes: invalid componentCount=%u\n",
+                     static_cast<unsigned>(el.componentCount));
+        outOk = false;
         return 0;
     }
     switch (el.componentType) {
@@ -16,7 +27,19 @@ uint32_t elementSizeBytes(const VertexElement& el)
     case VertexComponentType::Uint8:
         return static_cast<uint32_t>(el.componentCount) * sizeof(uint8_t);
     }
+    std::fprintf(stderr,
+                 "[AYRenderTypes] elementSizeBytes: unknown componentType=%u\n",
+                 static_cast<unsigned>(el.componentType));
+    outOk = false;
     return 0;
+}
+
+// Wrapper for callers that just want the size and don't care about
+// the ok flag (keeps the internal helper signature private).
+uint32_t elementSizeBytes(const VertexElement& el)
+{
+    bool ok = true;
+    return elementSizeBytes(el, ok);
 }
 
 } // namespace

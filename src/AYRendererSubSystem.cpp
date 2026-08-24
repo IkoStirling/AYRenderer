@@ -336,7 +336,7 @@ void RendererSubSystem::update(float /*deltaTime*/)
     auto& loop = ayt::game::GameLoop::instance();
     _scenePacketFrame = loop.getFrameCount();
     _scenePacketInterpolationAlpha = loop.getInterpolationFactor();
-    _scenePacketValid = true;
+    _scenePacketValid.store(true, std::memory_order_release);
 }
 
 
@@ -361,7 +361,7 @@ void RendererSubSystem::shutdown()
 
         _sceneBuilder = nullptr;
 
-        _scenePacketValid = false;
+        _scenePacketValid.store(false, std::memory_order_release);
 
         _renderer.shutdown();
 
@@ -428,7 +428,7 @@ void RendererSubSystem::setSceneBuilder(SceneBuildCallback callback)
     // share the same per-frame scene buffer without one overwriting
     // the other. Order of registration = order of execution.
     if (!callback) return;
-    _scenePacketValid = false;
+    _scenePacketValid.store(false, std::memory_order_release);
     if (_sceneBuilder) {
         SceneBuildCallback previous = _sceneBuilder;
         _sceneBuilder = [previous, callback](RenderScene& scene) {
@@ -502,7 +502,9 @@ void RendererSubSystem::renderScenePass()
     } else {
         // Default elevated 3/4 view (Editor freecam replaces via setCameraLookAt).
         _renderer.setMainCameraLookAtPerspective(
-            ayt::math::FVector3(4.0f, 3.0f, 5.0f),
+            ayt::math::FVector3(kDefaultEditorCameraEyeX,
+                                kDefaultEditorCameraEyeY,
+                                kDefaultEditorCameraEyeZ),
             ayt::math::FVector3(0.0f, 0.0f, 0.0f),
             ayt::math::FVector3(0.0f, 1.0f, 0.0f),
             50.0f, aspect, 0.1f, 100.0f);
@@ -510,19 +512,19 @@ void RendererSubSystem::renderScenePass()
 
     // Non-GameLoop editor callers still get a packet on demand. In the staged
     // path update() has already populated it before submission.
-    if (!_scenePacketValid) {
+    if (!_scenePacketValid.load(std::memory_order_acquire)) {
         _scene.clear();
         if (_sceneBuilder) _sceneBuilder(_scene);
         _scenePacketInterpolationAlpha =
             ayt::game::GameLoop::instance().getInterpolationFactor();
         _scenePacketFrame = ayt::game::GameLoop::instance().getFrameCount();
-        _scenePacketValid = true;
+        _scenePacketValid.store(true, std::memory_order_release);
     }
 
     _renderer.render(_scene);
     // The packet has been consumed. This also preserves legacy/editor callers
     // that invoke renderFrame() without a preceding GameLoop Presentation tick.
-    _scenePacketValid = false;
+    _scenePacketValid.store(false, std::memory_order_release);
 }
 
 // INT-04: WindowResize handler. Called on the main thread by EventBus pump

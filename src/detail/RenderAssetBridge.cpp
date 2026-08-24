@@ -16,12 +16,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -376,11 +378,21 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
     // uploadMeshFromResource is called per editor frame; if it is
     // called >1x/frame on a stable scene, something is forcing the
     // scene-bridge to re-decode or re-upload every tick.
+    //
+    // §P1 M5/M7 (2026-08-24) — previous version declared
+    // s_uploadLastReport and s_frameMarker but never wrote to them.
+    // Now s_frameMarker tracks the per-frame count and s_uploadLastReport
+    // records the last value where a per-frame summary was emitted; a
+    // stable scene logs "uploads=1/frame" while a runaway re-upload
+    // loop logs the actual count to stderr. Threshold (16/frame) is
+    // a single material re-cook; anything above this should not be
+    // happening on a stable scene.
     static std::atomic<uint64_t> s_uploadCount{0};
     static std::atomic<uint64_t> s_uploadLastReport{0};
     static std::atomic<uint64_t> s_frameMarker{0};
     using namespace std::chrono;
-    const auto t0 = ayt::io::env::get("AY_RENDERER_UPLOAD_TIMING").has_value()
+    const bool timingEnabled = ayt::io::env::get("AY_RENDERER_UPLOAD_TIMING").has_value();
+    const auto t0 = timingEnabled
                         ? high_resolution_clock::now() : high_resolution_clock::time_point{};
     s_uploadCount.fetch_add(1, std::memory_order_relaxed);
     const uint64_t callIdx = s_uploadCount.load(std::memory_order_relaxed);
@@ -490,7 +502,7 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
 
     // Diag closure: print once per ~256 calls so a runaway
     // upload is loud but a stable scene is silent.
-    if (ayt::io::env::get("AY_RENDERER_UPLOAD_TIMING").has_value()) {
+    if (timingEnabled) {
         const auto t1 = high_resolution_clock::now();
         const double ms = duration<double, std::milli>(t1 - t0).count();
         std::fprintf(stderr,
@@ -500,6 +512,29 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
                      ms,
                      mesh.getVertexCount(), mesh.getIndexCount(),
                      mesh.getVertexStride());
+
+        // §P1 M5/M7 (2026-08-24) — per-frame upload count summary.
+        // Threshold (16) is one full material re-cook; values above
+        // this on a stable scene indicate the scene-bridge is
+        // re-decoding or re-uploading every tick. Atomic CAS on
+        // s_uploadLastReport prevents two threads logging the same
+        // summary for the same delta.
+        const uint64_t countThisCall = s_uploadCount.load(std::memory_order_relaxed);
+        s_frameMarker.fetch_add(1, std::memory_order_relaxed);
+        uint64_t expected = s_uploadLastReport.load(std::memory_order_acquire);
+        if (countThisCall - expected >= 16u
+            && s_uploadLastReport.compare_exchange_strong(
+                expected,
+                countThisCall,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            std::fprintf(stderr,
+                         "[RenderAssetBridge diag] uploaded %llu meshes "
+                         "since last summary (frame in-flight=%llu)\n",
+                         static_cast<unsigned long long>(countThisCall),
+                         static_cast<unsigned long long>(s_frameMarker.load(std::memory_order_relaxed)));
+            s_frameMarker.store(0, std::memory_order_relaxed);
+        }
     }
     return handle;
 }
@@ -518,30 +553,49 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     const std::string shaderPath =
         resolveShaderPath(materialPath, shaderRef);
 
+    // §P1 M4 (2026-08-24) — proper bool parse. The old check
+    // `useScEnv[0] != '0'` returned true for "no"/"off"/"false" because
+    // only the first character was inspected, silently flipping hosts
+    // to the bgfx .sc path. Accepts 1/true/yes/on as truthy,
+    // 0/false/no/off as falsy; anything else falls back to default
+    // (false). Same parser handles the legacy AY_SHADOW_USE_PHOSKIA=0
+    // sentinel so the two envs share one definition.
+    auto parseEnvBool = [](const std::string& v) -> std::optional<bool> {
+        if (v.empty()) return std::nullopt;
+        std::string lower;
+        lower.reserve(v.size());
+        for (char c : v) lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        if (lower == "1" || lower == "true" || lower == "yes" || lower == "on") return true;
+        if (lower == "0" || lower == "false" || lower == "no" || lower == "off") return false;
+        return std::nullopt;
+    };
+
     // Default: Phoskia file path. Force hand .sc with AY_SHADOW_USE_SC=1
     // (PowerShell: $env:AY_SHADOW_USE_SC="1").
     MaterialHandle handle{};
     const std::string useScEnv = ayt::io::env::get("AY_SHADOW_USE_SC").value_or("");
-    const bool forceSc =
-        !useScEnv.empty()
-        && useScEnv[0] != '0';
+    const std::optional<bool> forceScOpt = parseEnvBool(useScEnv);
+    const bool forceSc = forceScOpt.value_or(false);
     // Legacy: AY_SHADOW_USE_PHOSKIA=0 also forces .sc (compat with old docs).
     const std::string usePhoskiaEnv = ayt::io::env::get("AY_SHADOW_USE_PHOSKIA").value_or("");
-    const bool forcePhoskiaOff =
-        usePhoskiaEnv == "0";
+    const std::optional<bool> forcePhoskiaOffOpt = parseEnvBool(usePhoskiaEnv);
+    const bool forcePhoskiaOff = !forcePhoskiaOffOpt.value_or(true);
     const bool preferSc =
         (std::strstr(shaderRef, "simple_lit_shadow") != nullptr)
         && (forceSc || forcePhoskiaOff);
     {
-        static bool s_loggedOnce = false;
-        if (!s_loggedOnce && std::strstr(shaderRef, "simple_lit_shadow") != nullptr) {
+        static std::atomic<uint32_t> s_logCount{0};
+        const uint32_t seen = s_logCount.fetch_add(1, std::memory_order_relaxed);
+        if (seen < 8 && std::strstr(shaderRef, "simple_lit_shadow") != nullptr) {
+            // §P1 M6 (2026-08-24) — bound the diagnostic log so a
+            // development loop of material reloads stays useful without
+            // flooding stderr.
             std::fprintf(stderr,
                          "[RenderAssetBridge] simple_lit_shadow path=%s "
                          "(AY_SHADOW_USE_SC=%s AY_SHADOW_USE_PHOSKIA=%s)\n",
                          preferSc ? "bgfx .sc" : "Phoskia file",
                          useScEnv.empty() ? "(unset)" : useScEnv.c_str(),
                          usePhoskiaEnv.empty() ? "(unset)" : usePhoskiaEnv.c_str());
-            s_loggedOnce = true;
         }
     }
     if (preferSc) {

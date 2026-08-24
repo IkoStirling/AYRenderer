@@ -5,6 +5,7 @@
 #include <bgfx/bgfx.h>
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 namespace ayt::render::detail
@@ -329,8 +330,16 @@ private:
     uint32_t            _backbufferW = 0;
     uint32_t            _backbufferH = 0;
     bool                _vsync       = true;
-    bgfx::TextureHandle _litShadowFallback = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle _litShadowFallback  = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle _flatNormalFallback = BGFX_INVALID_HANDLE;
+    // §P1 H1 (2026-08-24) — guard lazy fallback texture init against
+    // TOCTOU races when concurrent first-frame draws (editor multi-view,
+    // hot-reload + initial render, unit-test fixtures) hit two getter
+    // threads simultaneously. Without this, both threads see isValid()
+    // == false, both call bgfx::createTexture2D, and the second handle
+    // evicts the first from the bgfx handle table — first handle then
+    // points at a destroyed texture (crash / black frame).
+    mutable std::mutex  _fallbackInitMutex;
 };
 
 } // namespace ayt::render::detail

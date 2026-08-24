@@ -84,6 +84,18 @@ bool configureShaderPool(shader::ShaderResourcePool& pool)
 {
     const std::string shadercPath = AY_SHADER_SHADERC_HINT;
     if (!fileExists(shadercPath)) {
+        // §P1 L6 (2026-08-24) — surface the missing shaderc at the call
+        // site. Previously the function returned false silently and the
+        // host saw only "all Phoskia materials compile to white" much
+        // later. Print the path + build-time hint so the developer can
+        // act immediately (vcpkg install shaderc, point AY_SHADER_SHADERC_HINT,
+        // etc.).
+        std::fprintf(stderr,
+                     "[ShaderPoolSetup] shaderc executable not found at '%s' "
+                     "(build-time AY_SHADER_SHADERC_HINT). Phoskia material "
+                     "compiles will fail until resolved.\n",
+                     shadercPath.c_str());
+        std::fflush(stderr);
         return false;
     }
 

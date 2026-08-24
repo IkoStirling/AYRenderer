@@ -55,6 +55,18 @@ struct DrawItem {
     // SceneLights / boneMatrices): the pointed-to DrawPayload2D must
     // remain valid across the synchronous render() call. Default
     // nullptr ⇒ pre-CM-1 behavior — 3D passes never see this field.
+    //
+    // §P1 L3 (2026-08-24) — lifetime contract is a HOST responsibility.
+    // The DrawPayload2D* is borrowed; if the host frees the backing
+    // memory before render() returns, the pass will read freed data
+    // (UB / crash). Two safe shapes:
+    //   1) Heap-allocate per-frame with shared ownership and pass via
+    //      std::shared_ptr<const DrawPayload2D> through a wrapper.
+    //   2) Pool the payload alongside the DrawItem so the host's
+    //      scene-builder owns both for the full frame.
+    // Today the engine does neither; tests that exercise Forward2D
+    // allocate payload on the stack of the scene-builder lambda and
+    // rely on render() being synchronous, which is true but undocumented.
     const DrawPayload2D*       payload      = nullptr;
     // Optional submesh index range. Tail-appended to preserve every existing
     // DrawItem field offset. indexCount == 0 keeps the whole-mesh contract;

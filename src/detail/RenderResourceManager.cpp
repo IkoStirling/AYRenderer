@@ -34,12 +34,28 @@ std::string textureSamplingCacheKey(const std::string& path, bool srgb)
     return key;
 }
 
-void storeUniformSlot(GpuMaterial& material, const char* name, shader::BindingId binding,
+// §P1 M1 (2026-08-24) — return bool + log on drop. Previously silent:
+// a 128B array or null binding would silently not register, leaving
+// the shader uniform un-set with no signal to the host. Now callers
+// can react and the diag log tells the developer exactly which
+// uniform was dropped and why (size / binding / null).
+bool storeUniformSlot(GpuMaterial& material, const char* name,
+                      shader::BindingId binding,
                       const void* data, size_t size)
 {
     if (name == nullptr || binding == shader::InvalidBinding || data == nullptr
         || size == 0 || size > 64) {
-        return;
+        std::fprintf(stderr,
+                     "[RenderResourceManager] storeUniformSlot dropped name=%s "
+                     "binding=%u size=%zu (cause: %s)\n",
+                     name ? name : "(null)",
+                     static_cast<unsigned>(binding), size,
+                     (name == nullptr) ? "null name"
+                     : (binding == shader::InvalidBinding) ? "invalid binding"
+                     : (data == nullptr) ? "null data"
+                     : (size == 0) ? "zero size"
+                     : "size > 64");
+        return false;
     }
 
     for (GpuMaterial::UniformSlot& slot : material.uniformSlots) {
@@ -47,7 +63,7 @@ void storeUniformSlot(GpuMaterial& material, const char* name, shader::BindingId
             slot.binding = binding;
             std::memcpy(slot.data, data, size);
             slot.size = static_cast<uint16_t>(size);
-            return;
+            return true;
         }
     }
 
@@ -57,6 +73,7 @@ void storeUniformSlot(GpuMaterial& material, const char* name, shader::BindingId
     std::memcpy(slot.data, data, size);
     slot.size = static_cast<uint16_t>(size);
     material.uniformSlots.push_back(slot);
+    return true;
 }
 
 struct PosVertex {
@@ -242,8 +259,14 @@ void RenderResourceManager::destroyMaterialGpuOnly(uint64_t id)
     if (it == _materials.end()) {
         return;
     }
-    // ShaderResource is ref-counted via the pool; dropping the GpuMaterial
-    // releases our view. Uniform/texture slots are plain data.
+    // §P1 M2 (2026-08-24) — release the ShaderResource too. Without
+    // this, hot-reload paths that swap GPU-only (keep handle id) but
+    // never go through destroyMaterial() leak shader compile slots in
+    // the pool until shutdown drains. Also keeps the "GpuMaterial
+    // owns a shader ref" invariant consistent with destroyMaterial().
+    if (it->second.shader.isValid()) {
+        _shaderPool.release(it->second.shader);
+    }
     _materials.erase(it);
 }
 
@@ -345,22 +368,36 @@ MeshHandle RenderResourceManager::createMeshFromResourceData(const void* vertice
         return {};
     }
 
-    uint32_t maxIndex = 0;
-    for (uint32_t i = 0; i < indexCount; ++i) {
-        maxIndex = std::max(maxIndex, indices[i]);
-    }
-
-    if (maxIndex < 65536u) {
-        std::vector<uint16_t> narrowed(indexCount);
+    // §P1 L1 (2026-08-24) — short-circuit the O(N) index scan when
+    // the mesh has fewer than 65536 vertices. maxIndex cannot exceed
+    // vertexCount-1 for any well-formed mesh, so the scan is
+    // guaranteed-safe to skip. Hot-reload paths re-call this function
+    // every frame for the same mesh, so the elimination matters more
+    // than the bound itself.
+    if (vertexCount >= 65536u) {
+        uint32_t maxIndex = 0;
         for (uint32_t i = 0; i < indexCount; ++i) {
-            narrowed[i] = static_cast<uint16_t>(indices[i]);
+            maxIndex = std::max(maxIndex, indices[i]);
         }
-        return uploadMeshInternal(vertices, vertexCount, vertexStride, layout, narrowed.data(),
-                                  indexCount, false, hasSkinWeights, morph);
+        if (maxIndex < 65536u) {
+            std::vector<uint16_t> narrowed(indexCount);
+            for (uint32_t i = 0; i < indexCount; ++i) {
+                narrowed[i] = static_cast<uint16_t>(indices[i]);
+            }
+            return uploadMeshInternal(vertices, vertexCount, vertexStride, layout, narrowed.data(),
+                                      indexCount, false, hasSkinWeights, morph);
+        }
+        return uploadMeshInternal(vertices, vertexCount, vertexStride, layout, indices,
+                                  indexCount, true, hasSkinWeights, morph);
     }
-
-    return uploadMeshInternal(vertices, vertexCount, vertexStride, layout, indices, indexCount,
-                              true, hasSkinWeights, morph);
+    // vertexCount < 65536 ⇒ every index fits in uint16. Narrow
+    // without scanning.
+    std::vector<uint16_t> narrowed(indexCount);
+    for (uint32_t i = 0; i < indexCount; ++i) {
+        narrowed[i] = static_cast<uint16_t>(indices[i]);
+    }
+    return uploadMeshInternal(vertices, vertexCount, vertexStride, layout, narrowed.data(),
+                              indexCount, false, hasSkinWeights, morph);
 }
 
 MeshHandle RenderResourceManager::loadMesh(const std::string& path)
@@ -445,7 +482,12 @@ void RenderResourceManager::destroyMesh(MeshHandle& mesh)
     }
 
     removeMeshCacheEntry(mesh.id);
-    _meshCacheByKey.clear();  // Phase 1: invalidate on destroy; full LRU is future work.
+    // §P1 M7 (2026-08-24) — only the entry for this mesh was stale;
+    // clearing the entire cache forced every other mesh to re-upload on
+    // its next loadMesh(samePath). The path-keyed cache is dedup-safe
+    // (one key = one mesh), so removing the dead entry is sufficient.
+    // Full LRU eviction remains future work; until then any cross-key
+    // stale lookup is no worse than before and we avoid the O(n) clear.
 
     const auto it = _meshes.find(mesh.id);
     if (it != _meshes.end()) {
@@ -1130,6 +1172,24 @@ void RenderResourceManager::setMaterialPremultipliedAlpha(MaterialHandle materia
     if (it != _materials.end()) {
         it->second.premultipliedAlpha = premultiplied;
     }
+}
+
+bool RenderResourceManager::setMaterialBlendMode(MaterialHandle material,
+                                                 BlendMode blendMode)
+{
+    if (!material.isValid()) {
+        return false;
+    }
+    const auto it = _materials.find(material.id);
+    if (it == _materials.end()) {
+        return false;
+    }
+    // §P1 H2 (2026-08-24) — blend mode drives forward/transparent pass
+    // routing at submit time. Callers that flip Opaque↔AlphaBlend must
+    // re-add the DrawItem to RenderScene so the next frame's pass
+    // selection sees the new value (no global re-routing pass exists).
+    it->second.blendMode = blendMode;
+    return true;
 }
 
 TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint32_t height,
