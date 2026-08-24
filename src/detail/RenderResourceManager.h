@@ -6,7 +6,12 @@
 #include "detail/GpuResources.h"
 
 #include <string>
+#include <memory>
 #include <unordered_map>
+
+namespace ayt::resource {
+struct MeshMorphContract;
+}
 
 namespace ayt::render::detail
 {
@@ -36,6 +41,7 @@ public:
         uint32_t targetCount = 0;
         uint32_t deltaCount = 0;
         uint8_t  payloadChannels = 0;
+        std::shared_ptr<const ayt::resource::MeshMorphContract> contract;
     };
     MeshHandle createMeshFromResourceData(const void* vertices,
                                           uint32_t vertexCount,
@@ -51,6 +57,12 @@ public:
     // CM-1 (2026-08-11) — unit quad (XY plane, z=0), UV (0,0)..(1,1).
     MeshHandle createUnitQuad();
     void destroyMesh(MeshHandle& mesh);
+    bool hasMorphTargets(MeshHandle mesh) const noexcept;
+    uint32_t morphTargetCount(MeshHandle mesh) const noexcept;
+    std::string morphTargetName(MeshHandle mesh, uint32_t targetIndex) const;
+    bool setMorphWeight(MeshHandle mesh, uint32_t targetIndex, float weight);
+    bool setMorphWeight(MeshHandle mesh, const std::string& targetName, float weight);
+    float morphWeight(MeshHandle mesh, uint32_t targetIndex) const noexcept;
 
     MaterialHandle createMaterialFromPhoskia(const std::string& source,
                                              const std::string& cacheKey = "");

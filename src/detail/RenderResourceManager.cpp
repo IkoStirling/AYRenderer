@@ -5,6 +5,7 @@
 #include "detail/VertexLayoutBridge.h"
 
 #include "AYResource/AssetPath.h"
+#include "AYResource/MeshMorphContract.h"
 #include "AYResource/ResourceManager.h"
 #include "AYResource/assetsDefs/IMaterial.h"
 #include "AYResource/assetsDefs/IMesh.h"
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include <vector>
 
 namespace ayt::render::detail
@@ -285,6 +287,13 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
     mesh.morphTargetCount = morph.targetCount;
     mesh.morphDeltaCount = morph.deltaCount;
     mesh.morphPayloadChannels = morph.payloadChannels;
+    mesh.morphContract = morph.contract;
+    if (mesh.morphContract != nullptr) {
+        mesh.morphWeights.reserve(mesh.morphContract->targets.size());
+        for (const ayt::resource::MeshMorphTarget& target : mesh.morphContract->targets) {
+            mesh.morphWeights.push_back(target.defaultWeight);
+        }
+    }
     mesh.vertexBuffer = _adapter.createVertexBuffer(vertices, vertexBytes, bgfxLayout);
     mesh.indexBuffer  = _adapter.createIndexBuffer(indices, indexBytes, indexFlags);
 
@@ -445,6 +454,69 @@ void RenderResourceManager::destroyMesh(MeshHandle& mesh)
         _meshes.erase(it);
     }
     mesh = {};
+}
+
+bool RenderResourceManager::hasMorphTargets(MeshHandle mesh) const noexcept
+{
+    const auto it = _meshes.find(mesh.id);
+    return it != _meshes.end() && it->second.hasMorphTargets
+        && it->second.morphContract != nullptr;
+}
+
+uint32_t RenderResourceManager::morphTargetCount(MeshHandle mesh) const noexcept
+{
+    const auto it = _meshes.find(mesh.id);
+    return it != _meshes.end() ? it->second.morphTargetCount : 0u;
+}
+
+std::string RenderResourceManager::morphTargetName(MeshHandle mesh, uint32_t targetIndex) const
+{
+    const auto it = _meshes.find(mesh.id);
+    if (it == _meshes.end() || it->second.morphContract == nullptr
+        || targetIndex >= it->second.morphContract->targets.size()) {
+        return {};
+    }
+    return it->second.morphContract->targets[targetIndex].name;
+}
+
+bool RenderResourceManager::setMorphWeight(MeshHandle mesh,
+                                           uint32_t targetIndex,
+                                           float weight)
+{
+    const auto it = _meshes.find(mesh.id);
+    if (it == _meshes.end() || !std::isfinite(weight)
+        || targetIndex >= it->second.morphWeights.size()) {
+        return false;
+    }
+    it->second.morphWeights[targetIndex] = weight;
+    return true;
+}
+
+bool RenderResourceManager::setMorphWeight(MeshHandle mesh,
+                                           const std::string& targetName,
+                                           float weight)
+{
+    const auto it = _meshes.find(mesh.id);
+    if (it == _meshes.end() || it->second.morphContract == nullptr
+        || !std::isfinite(weight)) {
+        return false;
+    }
+    const auto& targets = it->second.morphContract->targets;
+    const auto targetIt = std::find_if(targets.begin(), targets.end(),
+        [&](const ayt::resource::MeshMorphTarget& target) {
+            return target.name == targetName;
+        });
+    if (targetIt == targets.end()) return false;
+    return setMorphWeight(mesh, static_cast<uint32_t>(targetIt - targets.begin()), weight);
+}
+
+float RenderResourceManager::morphWeight(MeshHandle mesh, uint32_t targetIndex) const noexcept
+{
+    const auto it = _meshes.find(mesh.id);
+    if (it == _meshes.end() || targetIndex >= it->second.morphWeights.size()) {
+        return 0.0f;
+    }
+    return it->second.morphWeights[targetIndex];
 }
 
 MaterialHandle RenderResourceManager::createMaterialFromPhoskia(const std::string& source,

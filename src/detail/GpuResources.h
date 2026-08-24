@@ -5,7 +5,12 @@
 
 #include <bgfx/bgfx.h>
 
+#include <memory>
 #include <vector>
+
+namespace ayt::resource {
+struct MeshMorphContract;
+}
 
 namespace ayt::render::detail
 {
@@ -20,12 +25,15 @@ struct GpuMesh {
     // SkinnedForwardPass (RD-05) uses this flag to bind bone matrices.
     bool     hasSkinWeights = false;
 
-    // Runtime morph-contract summary (no direct GPU binding yet). Recorded from
-    // IMesh extension `MORP` so render/runtime systems can inspect capability.
+    // Runtime-owned morph contract and mutable weights. The contract is shared
+    // because a mesh cache entry may be inspected by animation/render systems
+    // while reload replaces the owning GPU object.
     bool     hasMorphTargets = false;
     uint32_t morphTargetCount = 0;
     uint32_t morphDeltaCount = 0;
     uint8_t  morphPayloadChannels = 0;
+    std::shared_ptr<const ayt::resource::MeshMorphContract> morphContract;
+    std::vector<float> morphWeights;
 
     VertexLayoutDesc layout{};
 };

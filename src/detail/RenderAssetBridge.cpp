@@ -21,6 +21,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <utility>
 #include <vector>
 
 namespace ayt::render::detail
@@ -427,17 +429,25 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
                  meshUvOffset, bgfxUvOffset, bgfxBiOffset, bgfxBwOffset,
                  meshHasSkin ? 1 : 0);
 
-    // Runtime morph contract (from IMesh extension MORP). This is diagnostics-only
-    // for now; upload keeps this summary so downstream systems can gate morph usage.
+    // Runtime morph contract (from IMesh extension MORP). Keep the complete
+    // sparse payload alive with the GPU mesh; animation and deformation code
+    // must not have to reopen or reparse the asset.
+    std::shared_ptr<ayt::resource::MeshMorphContract> morphContract =
+        std::make_shared<ayt::resource::MeshMorphContract>();
     ayt::resource::MeshMorphContractSummary morphSummary;
     std::string morphErr;
-    if (!ayt::resource::readMeshMorphContractSummary(mesh, morphSummary, &morphErr)) {
+    if (!ayt::resource::readMeshMorphContract(mesh, *morphContract, &morphErr)
+        || !ayt::resource::buildMeshMorphContractSummary(*morphContract, morphSummary)) {
         if (!morphErr.empty()) {
             std::fprintf(stderr,
                          "[RenderAssetBridge] MORP parse failed for mesh '%s': %s\n",
                          mesh.getPath().c_str(),
                          morphErr.c_str());
         }
+        morphContract.reset();
+        morphSummary = {};
+    } else if (morphContract->targets.empty()) {
+        morphContract.reset();
     }
 
     RenderResourceManager::MeshMorphContractDesc morphDesc;
@@ -445,6 +455,7 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
     morphDesc.targetCount = morphSummary.targetCount;
     morphDesc.deltaCount = morphSummary.totalDeltaCount;
     morphDesc.payloadChannels = morphSummary.payloadChannels;
+    morphDesc.contract = std::move(morphContract);
 
     static std::atomic<uint32_t> s_morphContractLogCount{0};
     if (morphDesc.hasMorphTargets && s_morphContractLogCount.fetch_add(1, std::memory_order_relaxed) < 16u) {

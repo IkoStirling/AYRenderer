@@ -1619,6 +1619,40 @@ MeshHandle Renderer::loadMesh(const std::string& path)
     return _impl->resources.loadMesh(path);
 }
 
+bool Renderer::hasMorphTargets(MeshHandle mesh) const noexcept
+{
+    return _impl != nullptr && _impl->resources.hasMorphTargets(mesh);
+}
+
+uint32_t Renderer::morphTargetCount(MeshHandle mesh) const noexcept
+{
+    return _impl != nullptr ? _impl->resources.morphTargetCount(mesh) : 0u;
+}
+
+std::string Renderer::morphTargetName(MeshHandle mesh, uint32_t targetIndex) const
+{
+    return _impl != nullptr
+        ? _impl->resources.morphTargetName(mesh, targetIndex)
+        : std::string{};
+}
+
+bool Renderer::setMorphWeight(MeshHandle mesh, uint32_t targetIndex, float weight)
+{
+    return _impl != nullptr && _impl->resources.setMorphWeight(mesh, targetIndex, weight);
+}
+
+bool Renderer::setMorphWeight(MeshHandle mesh,
+                              const std::string& targetName,
+                              float weight)
+{
+    return _impl != nullptr && _impl->resources.setMorphWeight(mesh, targetName, weight);
+}
+
+float Renderer::morphWeight(MeshHandle mesh, uint32_t targetIndex) const noexcept
+{
+    return _impl != nullptr ? _impl->resources.morphWeight(mesh, targetIndex) : 0.0f;
+}
+
 MeshHandle Renderer::createUnitCube()
 {
     if (!_impl || !_impl->adapter.isInitialized()) {

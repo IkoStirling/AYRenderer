@@ -61,6 +61,12 @@ public:
                             const uint32_t* indices,
                             uint32_t indexCount);
     MeshHandle loadMesh(const std::string& path);
+    bool hasMorphTargets(MeshHandle mesh) const noexcept;
+    uint32_t morphTargetCount(MeshHandle mesh) const noexcept;
+    std::string morphTargetName(MeshHandle mesh, uint32_t targetIndex) const;
+    bool setMorphWeight(MeshHandle mesh, uint32_t targetIndex, float weight);
+    bool setMorphWeight(MeshHandle mesh, const std::string& targetName, float weight);
+    float morphWeight(MeshHandle mesh, uint32_t targetIndex) const noexcept;
     MeshHandle createUnitCube();
     MeshHandle createTexturedUnitCube();
     // CM-1 (2026-08-11) — unit quad in the XY plane (z=0), UV (0,0)..(1,1),
