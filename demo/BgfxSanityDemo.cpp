@@ -12,7 +12,9 @@
 #include <Windows.h>
 
 #include <bgfx/bgfx.h>
-#include <bx/math.h>
+
+#include "AYMath/MathTypes.h"
+#include "AYMath/MathUtils.h"
 
 #include "AYShader/ShadercDriver.h"
 #include "AYIO/File.h"
@@ -36,6 +38,19 @@ namespace {
 
 constexpr int kWindowWidth  = 1280;
 constexpr int kWindowHeight = 720;
+
+// AYMath Float4x4 is row-major (translation in row[i].w); bgfx expects
+// column-major (translation in m[12..14]). Local mirror of the renderer
+// detail helper so the demo stays self-contained (it links AYShader,
+// bgfx, and AYIO but not AYRenderer).
+inline void toBgfxColumnMajor(const ayt::math::Float4x4& src, float dst[16])
+{
+    const float* s = src.ptr();
+    dst[0]  = s[0];  dst[1]  = s[4];  dst[2]  = s[8];  dst[3]  = s[12];
+    dst[4]  = s[1];  dst[5]  = s[5];  dst[6]  = s[9];  dst[7]  = s[13];
+    dst[8]  = s[2];  dst[9]  = s[6];  dst[10] = s[10]; dst[11] = s[14];
+    dst[12] = s[3];  dst[13] = s[7];  dst[14] = s[11]; dst[15] = s[15];
+}
 
 const char* kVaryingDef = R"(
 vec4 v_color0    : COLOR0    = vec4(1.0, 0.0, 0.0, 1.0);
@@ -331,20 +346,33 @@ int main()
         const float aspect  = static_cast<float>(kWindowWidth)
                             / static_cast<float>(kWindowHeight);
 
-        float view[16];
-        float proj[16];
-        bx::mtxLookAt(view, bx::Vec3{0.0f, 0.0f, -4.0f}, bx::Vec3{0.0f, 0.0f, 0.0f}, bx::Vec3{0.0f, 1.0f, 0.0f});
-        bx::mtxProj(proj, 60.0f, aspect, 0.1f, 100.0f, bgfx::getCaps()->homogeneousDepth);
+        // Engine convention is LH (see AYMath/MathUtils.h lh::). bgfx
+        // expects column-major bytes for setViewTransform/setTransform,
+        // so we build the AYMath Float4x4 and convert at the GPU boundary.
+        const ayt::math::Float4x4 view = ayt::math::lh::lookAt(
+            ayt::math::FVector3(0.0f, 0.0f, -4.0f),
+            ayt::math::FVector3(0.0f, 0.0f,  0.0f),
+            ayt::math::FVector3(0.0f, 1.0f,  0.0f));
+        const ayt::math::Float4x4 proj = ayt::math::lh::perspective(
+            60.0f, aspect, 0.1f, 100.0f);
+
+        float viewCol[16];
+        float projCol[16];
+        toBgfxColumnMajor(view, viewCol);
+        toBgfxColumnMajor(proj, projCol);
 
         bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(kWindowWidth),
                           static_cast<uint16_t>(kWindowHeight));
         bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303540ff, 1.0f, 0);
-        bgfx::setViewTransform(0, view, proj);
+        bgfx::setViewTransform(0, viewCol, projCol);
 
-        float model[16];
-        bx::mtxRotateXY(model, elapsed * 0.6f, elapsed * 0.35f);
+        // mtxRotateXY(ax, ay) ≡ Euler XYZ with z = 0.
+        const ayt::math::Float4x4 model = ayt::math::eulerAngleXYZ(
+            elapsed * 0.6f, elapsed * 0.35f, 0.0f);
+        float modelCol[16];
+        toBgfxColumnMajor(model, modelCol);
 
-        bgfx::setTransform(model);
+        bgfx::setTransform(modelCol);
         bgfx::setVertexBuffer(0, vbh);
         bgfx::setIndexBuffer(ibh);
         bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z

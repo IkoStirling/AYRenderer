@@ -22,7 +22,9 @@ ShadowSceneBounds computeShadowSceneBounds(
     const RenderScene& scene,
     const std::unordered_map<uint64_t, GpuMesh>& meshes);
 
-// Scene-fitted directional shadow matrices (bgfx example 16 ortho Z convention).
+// Scene-fitted directional shadow matrices (AYMath lh:: — engine LH
+// convention, [0,1] depth clip space; `homogeneousDepth` retained for
+// ABI symmetry but is implicit because the engine is LH).
 void buildDirectionalShadowMatricesForScene(
     const RenderScene& scene,
     const std::unordered_map<uint64_t, GpuMesh>& meshes,

@@ -31,6 +31,7 @@ target_link_libraries(AYRenderer_BgfxSanityDemo PRIVATE
     AYShader
     bgfx::bgfx
     AYIO
+    AYMath
 )
 
 if(WIN32)

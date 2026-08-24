@@ -33,7 +33,6 @@
 #include "AYResource/ResourceManager.h"
 
 #include <bgfx/bgfx.h>
-#include <bx/math.h>
 
 #include <AYIO/Env.h>
 
@@ -2374,20 +2373,15 @@ void Renderer::setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,
         return;
     }
 
-    // bx for lookAt/proj (homogeneousDepth for D3D). Store as true AYMath
-    // via fromBgfxColumnMajor — never memcpy column-major bytes into Float4x4.
-    float viewBx[16];
-    float projBx[16];
-    const bx::Vec3 eyeBx = {eye.x, eye.y, eye.z};
-    const bx::Vec3 atBx  = {at.x, at.y, at.z};
-    const bx::Vec3 upBx  = {up.x, up.y, up.z};
-    bx::mtxLookAt(viewBx, eyeBx, atBx, upBx);
-    bx::mtxProj(projBx, fovYDegrees, aspect, nearZ, farZ,
-                bgfx::getCaps()->homogeneousDepth);
+    // Engine convention is LH (see AYMath/MathUtils.h lh::). External API
+    // surfaces LH Float4x4; BGFXAdapter::setViewTransform converts to
+    // column-major bytes at the GPU upload boundary.
+    const ayt::math::Float4x4 view = ayt::math::lh::lookAt(eye, at, up);
+    const ayt::math::Float4x4 proj = ayt::math::lh::perspective(
+        fovYDegrees, aspect, nearZ, farZ);
 
     _impl->mainCameraPosition = eye;
-    setMainCamera(detail::fromBgfxColumnMajor(viewBx),
-                  detail::fromBgfxColumnMajor(projBx));
+    setMainCamera(view, proj);
 }
 
 ayt::math::FVector3 Renderer::mainCameraPosition() const noexcept

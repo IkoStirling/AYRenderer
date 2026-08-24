@@ -3,9 +3,10 @@
 
 #include "AYRenderer/ShadowConfig.h"
 
-#include <bx/math.h>
+#include "AYMath/MathUtils.h"
 
 #include <cmath>
+#include <cstring>
 
 namespace ayt::render::detail
 {
@@ -20,7 +21,7 @@ void buildDirectionalShadowMatrices(
     float outViewProjColMajor[16],
     ayt::math::FVector3 focus,
     float radius,
-    bool homogeneousDepth)
+    bool /*homogeneousDepth*/)
 {
     if (radius <= 0.0f) {
         radius = 50.0f;
@@ -44,27 +45,23 @@ void buildDirectionalShadowMatrices(
         up = ayt::math::FVector3(0.0f, 0.0f, 1.0f);
     }
 
-    float viewBx[16];
-    float projBx[16];
-    bx::mtxLookAt(viewBx,
-                  bx::Vec3{eye.x, eye.y, eye.z},
-                  bx::Vec3{focus.x, focus.y, focus.z},
-                  bx::Vec3{up.x, up.y, up.z});
-    bx::mtxOrtho(projBx,
-                 -radius, radius,
-                 -radius, radius,
-                 ayt::render::kShadowNearPlane, ayt::render::kShadowFarPlane,
-                 0.0f,
-                 homogeneousDepth);
+    // Engine convention is LH (see AYMath/MathUtils.h lh::). Shadow maps
+    // therefore use [0,1] depth clip space (D3D-style homogeneousDepth).
+    // The legacy `homogeneousDepth` parameter is kept for ABI symmetry;
+    // bgfx::getCaps()->homogeneousDepth == true is implicit.
+    outView = ayt::math::lh::lookAt(eye, focus, up);
+    outProj = ayt::math::lh::ortho(-radius, radius,
+                                   -radius, radius,
+                                   ayt::render::kShadowNearPlane,
+                                   ayt::render::kShadowFarPlane);
 
-    outView = fromBgfxColumnMajor(viewBx);
-    outProj = fromBgfxColumnMajor(projBx);
-    bx::memCopy(outViewColMajor, viewBx, sizeof(viewBx));
-    bx::memCopy(outProjColMajor, projBx, sizeof(projBx));
-    // Exact P*V bytes matching setViewTransform(view, proj).
-    // bx::mtxMul(result, a, b) = b * a — pass (view, proj) for P * V.
-    bx::mtxMul(outViewProjColMajor, viewBx, projBx);
-    outViewProj = fromBgfxColumnMajor(outViewProjColMajor);
+    toBgfxColumnMajor(outView, outViewColMajor);
+    toBgfxColumnMajor(outProj, outProjColMajor);
+    // bgfx setViewTransform(view, proj) → clip = P * V * M. AYMath uses
+    // operator* with the standard convention: (P * V) * M == P * (V * M).
+    const ayt::math::Float4x4 viewProj = outProj * outView;
+    toBgfxColumnMajor(viewProj, outViewProjColMajor);
+    outViewProj = viewProj;
 }
 
 } // namespace ayt::render::detail

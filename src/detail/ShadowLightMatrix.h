@@ -5,9 +5,8 @@
 // the blocked C' F1 (Light struct + FrameContext shadowFbo/lightViewProj
 // + default-enabled Shadow) SIGSEGV'd; see docs/execution-plan.md §5.5.
 //
-// Matrices use bx (same convention as Renderer::setMainCameraLookAtPerspective)
-// so D3D11 homogeneousDepth matches the rest of the pipeline. AYMath
-// lookAt/ortho are intentionally NOT used here.
+// Matrices use AYMath lh:: (LH convention, same as Renderer::setMainCameraLookAtPerspective)
+// so D3D11 homogeneousDepth matches the rest of the pipeline.
 
 #include "AYMath/MathTypes.h"
 
@@ -16,8 +15,9 @@ namespace ayt::render::detail
 
 // Fixed-radius orthographic frustum centered at `focus`, looking along
 // `lightDirection` (travel direction, same as setDirectionalLight).
-// `homogeneousDepth` must match bgfx::getCaps()->homogeneousDepth when
-// the adapter is live; unit tests may pass false.
+// `homogeneousDepth` is retained for ABI symmetry with previous bx-based
+// callers; the engine convention is LH so the result always uses [0,1]
+// depth clip space (D3D-style). Unit tests may pass any value.
 void buildDirectionalShadowMatrices(
     const ayt::math::FVector3& lightDirection,
     ayt::math::Float4x4& outView,

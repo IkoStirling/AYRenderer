@@ -4,10 +4,11 @@
 
 #include "AYRenderer/ShadowConfig.h"
 
-#include <bx/math.h>
+#include "AYMath/MathUtils.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <utility>
 
 namespace ayt::render::detail
@@ -95,7 +96,7 @@ void buildFromBoundsInternal(
     float outViewColMajor[16],
     float outProjColMajor[16],
     float outViewProjColMajor[16],
-    bool homogeneousDepth)
+    bool /*homogeneousDepth*/)
 {
     ShadowSceneBounds bounds = boundsIn.valid ? boundsIn : defaultEditorPlayBounds();
 
@@ -120,11 +121,11 @@ void buildFromBoundsInternal(
         up = ayt::math::FVector3(0.0f, 0.0f, 1.0f);
     }
 
-    float viewBx[16];
-    bx::mtxLookAt(viewBx,
-                  bx::Vec3{eye.x, eye.y, eye.z},
-                  bx::Vec3{center.x, center.y, center.z},
-                  bx::Vec3{up.x, up.y, up.z});
+    // Engine convention is LH (see AYMath/MathUtils.h lh::). lh::lookAt
+    // returns a row-major Float4x4 — same numerical basis vectors as the
+    // previous bx::mtxLookAt (column-major) since storage layout is just
+    // transposed.
+    outView = ayt::math::lh::lookAt(eye, center, up);
 
     // Project world AABB corners into light view, then use a STABLE SQUARE
     // ortho (max half-extent). Tight non-square fit + per-frame rotation
@@ -142,13 +143,14 @@ void buildFromBoundsInternal(
     for (float x : xs) {
         for (float y : ys) {
             for (float z : zs) {
-                const bx::Vec3 view = bx::mul(bx::Vec3{x, y, z}, viewBx);
-                minX = std::fmin(minX, view.x);
-                maxX = std::fmax(maxX, view.x);
-                minY = std::fmin(minY, view.y);
-                maxY = std::fmax(maxY, view.y);
-                minZ = std::fmin(minZ, view.z);
-                maxZ = std::fmax(maxZ, view.z);
+                const ayt::math::FVector4 viewH = outView
+                    * ayt::math::FVector4(x, y, z, 1.0f);
+                minX = std::fmin(minX, viewH.x);
+                maxX = std::fmax(maxX, viewH.x);
+                minY = std::fmin(minY, viewH.y);
+                maxY = std::fmax(maxY, viewH.y);
+                minZ = std::fmin(minZ, viewH.z);
+                maxZ = std::fmax(maxZ, viewH.z);
             }
         }
     }
@@ -178,22 +180,17 @@ void buildFromBoundsInternal(
         z1 = midZ + 0.5f * kMinZSpan;
     }
 
-    float projBx[16];
-    bx::mtxOrtho(projBx,
-                 minX, maxX,
-                 minY, maxY,
-                 z0, z1,
-                 0.0f,
-                 homogeneousDepth);
+    outProj = ayt::math::lh::ortho(minX, maxX,
+                                   minY, maxY,
+                                   z0, z1);
 
-    outView = fromBgfxColumnMajor(viewBx);
-    outProj = fromBgfxColumnMajor(projBx);
-    bx::memCopy(outViewColMajor, viewBx, sizeof(viewBx));
-    bx::memCopy(outProjColMajor, projBx, sizeof(projBx));
-    // bgfx setViewTransform(view, proj) → clip = P * V * M.
-    // bx::mtxMul(_result, _a, _b) computes _result = _b * _a.
-    bx::mtxMul(outViewProjColMajor, viewBx, projBx);
-    outViewProj = fromBgfxColumnMajor(outViewProjColMajor);
+    toBgfxColumnMajor(outView, outViewColMajor);
+    toBgfxColumnMajor(outProj, outProjColMajor);
+    // bgfx setViewTransform(view, proj) → clip = P * V * M. AYMath uses
+    // operator* with the standard convention: (P * V) * M == P * (V * M).
+    const ayt::math::Float4x4 viewProj = outProj * outView;
+    toBgfxColumnMajor(viewProj, outViewProjColMajor);
+    outViewProj = viewProj;
 }
 
 } // namespace
