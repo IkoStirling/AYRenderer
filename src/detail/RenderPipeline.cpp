@@ -1,6 +1,7 @@
 #include "detail/RenderPipeline.h"
 
 #include <chrono>
+#include <cstdio>
 
 namespace ayt::render::detail
 {
@@ -44,19 +45,41 @@ uint32_t RenderPipeline::executeAll(PassExecContext& ctx)
     _lastPassStats.clear();
     _lastPassStats.reserve(_passes.size());
     for (auto& pass : _passes) {
-        if (pass && pass->isEnabled()) {
-            const auto begin = Clock::now();
-            const uint32_t draws = pass->execute(ctx);
-            const auto end = Clock::now();
-
-            RenderPassFrameStats stats;
-            stats.name.assign(pass->name().data(), pass->name().size());
-            stats.drawCalls = draws;
-            stats.cpuTimeMs = std::chrono::duration<float, std::milli>(
-                end - begin).count();
-            _lastPassStats.push_back(std::move(stats));
-            total += draws;
+        if (!pass || !pass->isEnabled()) {
+            continue;
         }
+        const std::string_view passName = pass->name();
+        const auto begin = Clock::now();
+        uint32_t draws = 0;
+        // §P2 M15 (2026-08-24) — wrap each pass dispatch in try/catch so
+        // a single failing pass (bad_alloc on uniform upload, bgfx driver
+        // error surface) doesn't abort the frame. The remaining passes
+        // still run; the failed one's stats entry records 0 draws and
+        // carries the CPU time spent up to the throw. Hosts can detect
+        // via RenderFrameStats.drawCalls < expected.
+        try {
+            draws = pass->execute(ctx);
+        } catch (const std::exception& ex) {
+            std::fprintf(stderr,
+                         "[RenderPipeline] pass '%.*s' threw std::exception: %s\n",
+                         static_cast<int>(passName.size()), passName.data(),
+                         ex.what());
+            draws = 0;
+        } catch (...) {
+            std::fprintf(stderr,
+                         "[RenderPipeline] pass '%.*s' threw non-std exception\n",
+                         static_cast<int>(passName.size()), passName.data());
+            draws = 0;
+        }
+        const auto end = Clock::now();
+
+        RenderPassFrameStats stats;
+        stats.name.assign(passName.data(), passName.size());
+        stats.drawCalls = draws;
+        stats.cpuTimeMs = std::chrono::duration<float, std::milli>(
+            end - begin).count();
+        _lastPassStats.push_back(std::move(stats));
+        total += draws;
     }
     return total;
 }

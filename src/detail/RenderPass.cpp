@@ -23,6 +23,49 @@
 namespace ayt::render::detail
 {
 
+namespace {
+
+// §P2 M14 / L2 (2026-08-24) — shared env-var bool parser. Used by
+// tryBindShadowSampler (force-lit / use-map) and RenderAssetBridge
+// (Phoskia toggle). Truth table:
+//   unset / empty  → fallback
+//   "1","true","yes","on"  → true
+//   "0","false","no","off" → false
+// Anything else → fallback (with one stderr log per unique garbage value).
+bool parseEnvBool(const char* envName, bool fallback) noexcept
+{
+    const std::string raw = ayt::io::env::get(envName).value_or("");
+    if (raw.empty()) {
+        return fallback;
+    }
+    std::string v;
+    v.reserve(raw.size());
+    for (char c : raw) {
+        if (c >= 'A' && c <= 'Z') v.push_back(c - 'A' + 'a');
+        else v.push_back(c);
+    }
+    if (v == "1" || v == "true" || v == "yes" || v == "on") {
+        return true;
+    }
+    if (v == "0" || v == "false" || v == "no" || v == "off") {
+        return false;
+    }
+    // Garbage: log once per unique value (avoid spam from same-bad
+    // value hitting every frame) and return fallback.
+    static std::atomic<uint32_t> s_logged{0};
+    if (s_logged.load() < 4u) {
+        std::fprintf(stderr,
+                     "[RenderPass] parseEnvBool(%s): unrecognized value '%s', "
+                     "falling back to %s\n",
+                     envName, raw.c_str(),
+                     fallback ? "true" : "false");
+        s_logged.fetch_add(1u);
+    }
+    return fallback;
+}
+
+} // namespace
+
 void RenderPass::resolveAndApplyColorUniforms(GpuMaterial& material)
 {
     // Lazily resolve colorBinding on first use (hot-reload friendly:
@@ -79,14 +122,17 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
 
     // Isolation: AY_SHADOW_FORCE_LIT=1 → white fallback (no map).
     // Default: sample the map (AY_SHADOW_USE_MAP=0 forces lit).
+    //
+    // §P2 M14 (2026-08-24) — routed through shared parseEnvBool helper
+    // (matches the AY_SHADOW_USE_SC / AY_SHADOW_USE_PHOSKIA handling in
+    // RenderAssetBridge; truth table: 1/true/yes/on vs 0/false/no/off).
     const bool forceLit = []() noexcept {
-        if (const std::string v = ayt::io::env::get("AY_SHADOW_FORCE_LIT").value_or(""); !v.empty()) {
-            return v[0] != '\0' && v[0] != '0';
-        }
-        if (const std::string v = ayt::io::env::get("AY_SHADOW_USE_MAP").value_or(""); !v.empty()) {
-            return !(v[0] != '\0' && v[0] != '0');
-        }
-        return false;
+        const bool forcedLit =
+            parseEnvBool("AY_SHADOW_FORCE_LIT", false);
+        if (forcedLit) return true;
+        // AY_SHADOW_USE_MAP=0 → force lit; default true (sample map).
+        const bool useMap = parseEnvBool("AY_SHADOW_USE_MAP", true);
+        return !useMap;
     }();
 
     const bool wantSample = !forceLit && Contract::shouldSampleShadowMap(flags);
@@ -154,6 +200,27 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
     }
 
     if (!BGFXAdapter::isValid(shadowTex)) {
+        // §P2 M8 (2026-08-24) — was silent; receivers with shadowMap sampler
+        // would sample unbound texture (undefined on real GPUs). Log at L2_Frame
+        // (which is the project's "first N frames" diagnostic level) AND at L4
+        // verbose, plus emit an explicit "fallback unavailable" diagnostic so a
+        // Noop backend + shader declaring shadowMap surfaces immediately.
+        if (ayt::render::ShadowDiagnostics::enabled(ayt::render::ShadowLogLevel::L2_Frame)) {
+            static uint32_t s_errLog = 0;
+            if (s_errLog < 4) {
+                std::fprintf(stderr,
+                             "[ShadowDbg][ERROR] shadow bind FAILED — "
+                             "neither producer FBO nor lit-fallback texture "
+                             "valid (pass=%p receive=%d sampleReady=%d "
+                             "adapterInit=%d). Receiver shader will read "
+                             "unbound texture.\n",
+                             static_cast<const void*>(shadowPass),
+                             wantSample ? 1 : 0,
+                             shadowPass != nullptr && shadowPass->hasSampleableShadow() ? 1 : 0,
+                             adapter.isInitialized() ? 1 : 0);
+                ++s_errLog;
+            }
+        }
         if (ayt::render::ShadowDiagnostics::enabled(ayt::render::ShadowLogLevel::L4_Verbose)) {
             static uint32_t s_failLog = 0;
             if (s_failLog < 2) {
@@ -275,6 +342,18 @@ void tryUploadBonePalette(shader::ShaderResource& shader,
                 shader.getUniformBinding("bones");
             if (bonesUniform != shader::InvalidBinding) {
                 shader.setUniform(bonesUniform, heapBuf.data(), byteCount);
+            } else {
+                // §P2 M6 (2026-08-24) — heap path was silent. Same
+                // rate-limited diagnostic as the stack path; the
+                // condition is rare (jointCount > 16) but the silent
+                // version made diagnostic hunting painful.
+                static uint32_t s_missingBoneBindingLog = 0;
+                if (s_missingBoneBindingLog < 3) {
+                    std::fprintf(stderr,
+                                 "[RenderPass] skinned draw (heap) skipped bone "
+                                 "upload (Skeleton UBO / bones[] binding missing)\n");
+                    ++s_missingBoneBindingLog;
+                }
             }
         }
     }

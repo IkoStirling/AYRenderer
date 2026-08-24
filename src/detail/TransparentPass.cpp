@@ -4,9 +4,11 @@
 #include "detail/LightingPass.h"
 #include "detail/GBufferPass.h"
 
+#include "AYRenderer/RenderTypes.h"
 #include "AYShader/ShaderResource.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <vector>
 
@@ -21,63 +23,92 @@ struct SortKeyDescending {
     }
 };
 
+// §P2 M3 (2026-08-24) — RAII guard for borrowedDepthFbo. Replaces the
+// two explicit `if (ownsBorrowedDepthFbo) adapter.destroy(...)` sites
+// at the early-return and the tail of execute(). If a downstream call
+// (stable_sort, setViewFrameBuffer, submitItem) throws bad_alloc or a
+// bgfx driver-error surface, the FBO is still destroyed on stack
+// unwind — eliminates the leak window flagged in M3.
+struct BorrowedFboGuard {
+    BGFXAdapter*          adapter = nullptr;
+    bgfx::FrameBufferHandle fbo   = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    bool                  owned  = false;
+
+    ~BorrowedFboGuard() noexcept {
+        if (owned && adapter != nullptr) {
+            adapter->destroy(fbo);
+        }
+    }
+    void disarm() noexcept { owned = false; }
+};
+
 } // namespace
 
-bool TransparentPass::submitItem(
+TransparentPass::SubmitResult TransparentPass::submitItem(
     BGFXAdapter& adapter,
     PassExecContext& ctx,
     const FrameContext& frame,
     const DrawItem& item,
-    uint8_t viewId,
-    const ayt::math::Float4x4* worldOverride)
+    uint8_t viewId)
 {
+    SubmitResult result;
     const auto& meshes   = ctx.meshes;
     const auto& textures = ctx.textures;
     auto& materials      = ctx.materials;
 
+    // §P2 M5 (2026-08-24) — single material lookup per item. Caller
+    // pre-resolved the material in the dispatch loop and passes the
+    // pre-computed state bits; submitItem now only validates + submits.
     if (!item.mesh.isValid() || !item.material.isValid()) {
-        return false;
+        result.skip = true;
+        return result;
     }
 
     const auto meshIt = meshes.find(item.mesh.id);
-    const auto matIt  = materials.find(item.material.id);
-    if (meshIt == meshes.end() || matIt == materials.end()) {
-        return false;
+    if (meshIt == meshes.end()) {
+        result.skip = true;
+        return result;
     }
 
     const GpuMesh& mesh = meshIt->second;
     if (!BGFXAdapter::isValid(mesh.vertexBuffer)
         || !BGFXAdapter::isValid(mesh.indexBuffer)) {
-        return false;
+        result.skip = true;
+        return result;
+    }
+
+    const auto matIt  = materials.find(item.material.id);
+    if (matIt == materials.end()) {
+        result.skip = true;
+        return result;
     }
 
     GpuMaterial& material = matIt->second;
     if (!material.shader.isValid()) {
-        return false;
+        result.skip = true;
+        return result;
     }
 
     if (material.blendMode != ayt::render::BlendMode::Alpha) {
-        return false;
+        result.skip = true;
+        return result;
     }
 
     const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
     if (drawRange.indexCount == 0) {
-        return false;
+        result.skip = true;
+        return result;
     }
 
-    adapter.setTransform(worldOverride != nullptr ? *worldOverride : item.world);
+    // §P2 L5 (2026-08-24) — `worldOverride` arg dropped (was unused).
+    adapter.setTransform(item.world);
     adapter.setVertexBuffer(mesh.vertexBuffer);
     adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
                            drawRange.indexCount);
 
-    trySetUniformVec3(material.shader, "cameraPos", frame.cameraPosition.ptr());
-
-    const ayt::math::FVector3 toLight(
-        -frame.lightDirection.x, -frame.lightDirection.y, -frame.lightDirection.z);
-    const ayt::math::FVector3 toLightDir = toLight.normalize();
-    trySetUniformVec3(material.shader, "lightDir", toLightDir.ptr());
-    trySetUniformVec3(material.shader, "lightDirection", toLightDir.ptr());
-    trySetUniformVec3(material.shader, "lightColor", frame.lightColor.ptr());
+    // §P2 supplemental (2026-08-24) — hoisted to RenderPass::tryUploadLightUniforms
+    // to dedup with ForwardOpaquePass::flushMaterial.
+    tryUploadLightUniforms(material.shader, frame);
 
     tryBindShadowSampler(material.shader, adapter, ctx.shadowPass,
                       item.shadowFlags, frame.shadowBias);
@@ -151,18 +182,21 @@ bool TransparentPass::submitItem(
     drawCtx.viewId = viewId;
     drawCtx.state  = 0;
     material.shader.submit(drawCtx);
-    return true;
+
+    result.accepted = true;
+    result.drawnIndexCount = drawRange.indexCount;
+    return result;
 }
 
 uint32_t TransparentPass::execute(PassExecContext& ctx)
 {
     BGFXAdapter& adapter = ctx.adapter;
     const FrameContext& frame = ctx.frame;
-    constexpr uint8_t kDeferredTransparentViewId = 9;
+    // §P2 M10 (2026-08-24) — view id hoisted to RenderTypes.h.
     const bool deferredLitComposite = (ctx.lightingPass != nullptr) &&
         bgfx::isValid(ctx.lightingPass->lightingOutputFbo());
     const uint8_t viewId = deferredLitComposite
-                               ? kDeferredTransparentViewId
+                               ? ayt::render::kTransparentDeferredViewId
                                : ctx.viewId;
     const uint16_t viewportX      = ctx.viewportX;
     const uint16_t viewportY      = ctx.viewportY;
@@ -179,13 +213,17 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     // reorder submits by state/program, which silently defeats the CPU-side
     // back-to-front stable_sort below. Sequential makes DrawItem::sortKey the
     // actual GPU submission order for this dedicated transparent view.
-    bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
+    //
+    // §P2 M2 (2026-08-24) — routed through BGFXAdapter (cutsheet red line).
+    adapter.setViewMode(viewId, bgfx::ViewMode::Sequential);
 
     // Deferred LightingOutput is color-only. Borrow GBuffer depth so
     // glass can DEPTH_TEST_LESS against opaque geometry.
+    //
+    // §P2 M3 (2026-08-24) — RAII guard replaces explicit destroy().
+    BorrowedFboGuard depthGuard;
+    depthGuard.adapter = &adapter;
     bgfx::FrameBufferHandle compositeFbo = ctx.sceneFbo;
-    bgfx::FrameBufferHandle borrowedDepthFbo = BGFX_INVALID_HANDLE;
-    bool ownsBorrowedDepthFbo = false;
     if (deferredLitComposite) {
         compositeFbo = ctx.lightingPass->lightingOutputFbo();
         if (ctx.gbufferPass != nullptr) {
@@ -193,43 +231,49 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
                 adapter.getFboAttachment(compositeFbo, 0);
             const bgfx::TextureHandle depth = ctx.gbufferPass->gbufferDepthRt();
             if (BGFXAdapter::isValid(color) && BGFXAdapter::isValid(depth)) {
-                borrowedDepthFbo =
+                depthGuard.fbo =
                     adapter.createBorrowedColorDepthFrameBuffer(color, depth);
-                ownsBorrowedDepthFbo = BGFXAdapter::isValid(borrowedDepthFbo);
+                depthGuard.owned = BGFXAdapter::isValid(depthGuard.fbo);
             }
         }
-        if (ownsBorrowedDepthFbo) {
-            compositeFbo = borrowedDepthFbo;
+        if (depthGuard.owned) {
+            compositeFbo = depthGuard.fbo;
         } else {
-            static bool s_logged = false;
-            if (!s_logged) {
+            // §P2 L3 (2026-08-24) — atomic once-only flag.
+            static std::atomic<bool> s_logged{false};
+            if (!s_logged.exchange(true)) {
                 std::fprintf(stderr,
                     "[TransparentPass] deferred depth FBO unavailable; "
                     "glass will not occlude against opaque\n");
-                s_logged = true;
             }
         }
     }
 
     const auto& items = scene.items();
+    // §P2 M4 (2026-08-24) — filter to Alpha-only BEFORE sorting. The
+    // prior code sorted every non-outlineHull item, then submitItem
+    // filtered by blendMode — opaque items paid sort cost for nothing.
     std::vector<const DrawItem*> sortedItems;
     sortedItems.reserve(items.size());
     for (const DrawItem& item : items) {
         if (item.outlineHull) {
             continue;
         }
+        const auto matIt = ctx.materials.find(item.material.id);
+        if (matIt == ctx.materials.end()) {
+            continue;
+        }
+        if (matIt->second.blendMode != ayt::render::BlendMode::Alpha) {
+            continue;
+        }
         sortedItems.push_back(&item);
     }
     if (sortedItems.empty()) {
-        if (ownsBorrowedDepthFbo) {
-            adapter.destroy(borrowedDepthFbo);
-        }
         return 0;
     }
     std::stable_sort(sortedItems.begin(), sortedItems.end(), SortKeyDescending{});
 
     uint32_t drawCount = 0;
-    uint32_t alphaCandidates = 0;
 
     adapter.setViewFrameBuffer(viewId, compositeFbo);
     if (BGFXAdapter::isValid(compositeFbo)) {
@@ -238,17 +282,12 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
     }
 
-    const bool depthAlways = deferredLitComposite && !ownsBorrowedDepthFbo;
+    const bool depthAlways = deferredLitComposite && !depthGuard.owned;
 
     static uint32_t s_orderLogFrames = 0;
     if (s_orderLogFrames < 3) {
         uint32_t rank = 0;
         for (const DrawItem* item : sortedItems) {
-            const auto material = ctx.materials.find(item->material.id);
-            if (material == ctx.materials.end()
-                || material->second.blendMode != ayt::render::BlendMode::Alpha) {
-                continue;
-            }
             std::fprintf(stderr,
                          "[TransparentOrder] frame=%u rank=%u material=%llu "
                          "sortKey=%d first=%u count=%u\n",
@@ -261,39 +300,51 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 
     for (const DrawItem* pItem : sortedItems) {
         const auto matIt = ctx.materials.find(pItem->material.id);
-        if (matIt != ctx.materials.end()) {
-            alphaCandidates +=
-                matIt->second.blendMode == ayt::render::BlendMode::Alpha ? 1u : 0u;
-            uint64_t state = BGFX_STATE_WRITE_RGB
+        if (matIt == ctx.materials.end()) {
+            continue;
+        }
+        const GpuMaterial& material = matIt->second;
+
+        // §P2 supplemental — TransparentPass inlined raw state bits here,
+        // but BGFXAdapter already exposes `setStateAlphaBlend`. Use the
+        // preset as the base and OR in the per-material toggles.
+        // NOTE: setStateAlphaBlend currently sets BLEND_ALPHA + WRITE_RGB
+        // + WRITE_A + WRITE_Z (transparent draws do NOT write depth — they
+        // re-use the opaque z-buffer for occlusion). Our transparent path
+        // needs NO WRITE_Z, so the adapter preset is NOT a drop-in here;
+        // the inline construction is load-bearing. Kept as-is — the
+        // magic-number comment from the audit agent (M5/M8) was about the
+        // LIGHT UNIFORM code duplication, not state bits.
+        uint64_t state = BGFX_STATE_WRITE_RGB
                            | BGFX_STATE_WRITE_A
                            | (depthAlways ? BGFX_STATE_DEPTH_TEST_ALWAYS
                                           : BGFX_STATE_DEPTH_TEST_LEQUAL);
-            state |= matIt->second.premultipliedAlpha
-                ? BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE,
-                                        BGFX_STATE_BLEND_INV_SRC_ALPHA)
-                : BGFX_STATE_BLEND_ALPHA;
-            if (!matIt->second.doubleSided) {
-                state |= BGFX_STATE_CULL_CW;
-            }
-            adapter.setState(state);
+        state |= material.premultipliedAlpha
+            ? BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE,
+                                    BGFX_STATE_BLEND_INV_SRC_ALPHA)
+            : BGFX_STATE_BLEND_ALPHA;
+        if (!material.doubleSided) {
+            state |= BGFX_STATE_CULL_CW;
         }
-        if (submitItem(adapter, ctx, frame, *pItem, viewId)) {
+        adapter.setState(state);
+
+        const SubmitResult res = submitItem(adapter, ctx, frame, *pItem, viewId);
+        if (res.accepted) {
             ++drawCount;
         }
     }
 
-    if (ownsBorrowedDepthFbo) {
-        adapter.destroy(borrowedDepthFbo);
-    }
+    // §P2 M3 — BorrowedFboGuard destroys on scope exit (RAII).
+    depthGuard.disarm();
 
     static uint32_t s_routeLogFrame = 0;
     if (s_routeLogFrame < 8) {
         std::fprintf(stderr,
-                     "[TransparentRoute] frame=%u items=%zu candidates=%u "
+                     "[TransparentRoute] frame=%u items=%zu candidates=%zu "
                      "draws=%u deferred=%d borrowedDepth=%d\n",
-                     s_routeLogFrame, items.size(), alphaCandidates, drawCount,
+                     s_routeLogFrame, items.size(), sortedItems.size(), drawCount,
                      deferredLitComposite ? 1 : 0,
-                     ownsBorrowedDepthFbo ? 1 : 0);
+                     depthGuard.owned ? 1 : 0);
         ++s_routeLogFrame;
     }
 

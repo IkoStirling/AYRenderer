@@ -202,6 +202,24 @@ void tryUploadBonePalette(shader::ShaderResource& shader,
                           uint8_t castSkinnedValue,
                           const DrawItem& item);
 
+// §P2 supplemental (2026-08-24) — upload the per-frame light / camera
+// uniforms (cameraPos, lightDir, lightDirection, lightColor) that both
+// ForwardOpaquePass::flushMaterial and TransparentPass::submitItem were
+// writing byte-for-byte. Hoisted to keep the two passes from drifting.
+// All four writes are best-effort — the shader may not declare any of
+// the names, in which case trySetUniformVec3 no-ops.
+inline void tryUploadLightUniforms(shader::ShaderResource& shader,
+                                   const FrameContext& frame)
+{
+    trySetUniformVec3(shader, "cameraPos", frame.cameraPosition.ptr());
+    const ayt::math::FVector3 toLight(
+        -frame.lightDirection.x, -frame.lightDirection.y, -frame.lightDirection.z);
+    const ayt::math::FVector3 toLightDir = toLight.normalize();
+    trySetUniformVec3(shader, "lightDir", toLightDir.ptr());
+    trySetUniformVec3(shader, "lightDirection", toLightDir.ptr());
+    trySetUniformVec3(shader, "lightColor", frame.lightColor.ptr());
+}
+
 // U0 (Phase 2 Pass scaffold) — abstract base for one rendering pass.
 // One subclass = one logical draw on one bgfx view. The pipeline
 // (implemented in U1+ at detail/RenderPipeline.{h,cpp}) calls

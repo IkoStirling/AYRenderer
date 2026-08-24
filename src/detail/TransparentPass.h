@@ -38,12 +38,17 @@ public:
     uint32_t execute(PassExecContext& ctx) override;
 
 private:
-    static bool submitItem(BGFXAdapter& adapter,
-                           PassExecContext& ctx,
-                           const FrameContext& frame,
-                           const DrawItem& item,
-                           uint8_t viewId,
-                           const ayt::math::Float4x4* worldOverride = nullptr);
+    struct SubmitResult {
+        bool accepted = false;
+        bool skip = false;
+        uint32_t drawnIndexCount = 0;
+    };
+
+    static SubmitResult submitItem(BGFXAdapter& adapter,
+                                   PassExecContext& ctx,
+                                   const FrameContext& frame,
+                                   const DrawItem& item,
+                                   uint8_t viewId);
 };
 
 } // namespace ayt::render::detail

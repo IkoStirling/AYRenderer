@@ -1,5 +1,6 @@
 #include "detail/ForwardOpaquePass.h"
 
+#include "AYRenderer/RenderTypes.h"
 #include "detail/FrameContext.h"
 #include "detail/ShadowPass.h"
 
@@ -24,12 +25,13 @@ bool surfaceDiagnosticEnabled()
 void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
                                       const std::unordered_map<uint64_t, GpuTexture>& textures,
                                       const FrameContext& frame,
-                                      const ayt::math::Float4x4& world,
                                       BGFXAdapter& adapter,
                                       const ShadowPass* shadowPass,
                                       ShadowFlags shadowFlags)
 {
-    (void)world;
+    // §P2 L4 (2026-08-24) — `world` parameter was unused; the world
+    // matrix is uploaded separately via `adapter.setTransform(item.world)`
+    // in execute(). Drop the dead arg.
     if (!material.shader.isValid()) {
         return;
     }
@@ -45,15 +47,17 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
     // Do NOT upload u_modelViewProj manually — Phoskia maps
     // modelViewProjection → bgfx builtin filled by setViewTransform+setTransform.
     // A second upload was a regression risk (bad MVP → silhouette-only / black).
-    trySetUniformVec3(material.shader, "cameraPos", frame.cameraPosition.ptr());
-
-    const ayt::math::FVector3 toLight(
-        -frame.lightDirection.x, -frame.lightDirection.y, -frame.lightDirection.z);
-    const ayt::math::FVector3 toLightDir = toLight.normalize();
-    trySetUniformVec3(material.shader, "lightDir", toLightDir.ptr());
-    trySetUniformVec3(material.shader, "lightDirection", toLightDir.ptr());
-    trySetUniformVec3(material.shader, "lightColor", frame.lightColor.ptr());
+    //
+    // §P2 supplemental (2026-08-24) — hoisted to RenderPass::tryUploadLightUniforms
+    // to dedup with TransparentPass.
+    tryUploadLightUniforms(material.shader, frame);
     {
+        // §P2 supplemental (2026-08-24) — toLightDir computation hoisted
+        // to RenderPass::tryUploadLightUniforms. Recompute here for the
+        // local log so we don't lose the FOLight diagnostic.
+        const ayt::math::FVector3 toLight(
+            -frame.lightDirection.x, -frame.lightDirection.y, -frame.lightDirection.z);
+        const ayt::math::FVector3 toLightDir = toLight.normalize();
         static uint32_t s_lightLog = 0;
         if (s_lightLog < 2) {
             std::fprintf(stderr,
@@ -182,7 +186,10 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     // Preserve source submesh order for coincident opaque/masked surface
     // layers. This mirrors GBufferPass so switching render paths does not
     // change which eye/mouth/decal layer wins an equal-depth tie.
-    bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
+    //
+    // §P2 M1 (2026-08-24) — routed through BGFXAdapter (cutsheet red line:
+    // pass files never call bgfx::* functions directly).
+    adapter.setViewMode(viewId, bgfx::ViewMode::Sequential);
     const auto& meshes    = ctx.meshes;
     const auto& textures  = ctx.textures;
     auto& materials       = ctx.materials;
@@ -235,9 +242,10 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
         // Scene FBO is offscreen — clear it each frame (backbuffer clear
         // on view 0 does not touch this target).
+        // §P2 M9 (2026-08-24) — magic clear color hoisted to kSceneClearRgba.
         adapter.setViewClearRaw(viewId,
                                 BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                                /*rgba=*/0x191a1cff,
+                                /*rgba=*/ayt::render::kSceneClearRgba,
                                 /*depth=*/1.0f,
                                 /*stencil=*/0);
     } else {
@@ -247,17 +255,14 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
         adapter.setViewClearRaw(viewId,
                                 BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                                /*rgba=*/0x191a1cff,
+                                /*rgba=*/ayt::render::kSceneClearRgba,
                                 /*depth=*/1.0f,
                                 /*stencil=*/0);
     }
 
-    // P6.5 (2026-07-22) — preset state combination replaces the
-    // pre-P6.5 inline `BGFX_STATE_WRITE_RGB | WRITE_A | WRITE_Z |
-    // DEPTH_TEST_LESS | CULL_CW`. Bit combination identical; called
-    // once per execute() because BGFXAdapter::setStateOpaque resets
-    // the cached state on each pass.
-    adapter.setStateOpaque();
+    // §P2 M7 (2026-08-24) — `setStateOpaque()` here was dead: the per-draw
+    // state rebuild at the bottom of the loop overrides it on every
+    // iteration (doubleSided toggles CULL_CW). Removed.
 
     uint32_t drawCount = 0;
 
@@ -355,7 +360,9 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         // the active shadow producer has a ready FBO, the helper
         // uploads `u_lightViewProj` and binds `shadowMap`; otherwise
         // the shader binding misses are no-ops.
-        flushMaterial(material, textures, frame, item.world, adapter,
+        //
+        // §P2 L4 (2026-08-24) — `world` arg dropped (was unused).
+        flushMaterial(material, textures, frame, adapter,
                       ctx.shadowPass, item.shadowFlags);
 
         static uint32_t s_foDrawLog = 0;
@@ -385,13 +392,15 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         // `castSkinned` binding is Invalid here (no such property
         // in skinned_lit.phoskia) so the helper silently skips the
         // uniform write.
-        if (material.shader.isValid()) {
-            tryUploadBonePalette(material.shader,
-                                 material.boneBlockBinding,
-                                 /*castSkinnedBinding=*/shader::InvalidBinding,
-                                 /*castSkinnedValue=*/0u,
-                                 item);
-        }
+        //
+        // §P2 L1 (2026-08-24) — redundant `material.shader.isValid()`
+        // guard removed; same check already gated `continue` at the
+        // top of the loop body.
+        tryUploadBonePalette(material.shader,
+                             material.boneBlockBinding,
+                             /*castSkinnedBinding=*/shader::InvalidBinding,
+                             /*castSkinnedValue=*/0u,
+                             item);
 
         shader::DrawCallContext ctx;
         ctx.viewId = viewId;

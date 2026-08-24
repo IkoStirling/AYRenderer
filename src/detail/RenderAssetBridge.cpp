@@ -516,24 +516,33 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
         // §P1 M5/M7 (2026-08-24) — per-frame upload count summary.
         // Threshold (16) is one full material re-cook; values above
         // this on a stable scene indicate the scene-bridge is
-        // re-decoding or re-uploading every tick. Atomic CAS on
-        // s_uploadLastReport prevents two threads logging the same
-        // summary for the same delta.
+        // re-decoding or re-uploading every tick.
+        //
+        // §P2 M13 (2026-08-24) — original code did ONE CAS attempt; if
+        // a concurrent thread won the CAS, the loser saw `expected`
+        // updated but never re-evaluated the threshold and silently
+        // dropped the diagnostic. Wrap in a CAS loop so the threshold
+        // is honored on every delta.
         const uint64_t countThisCall = s_uploadCount.load(std::memory_order_relaxed);
         s_frameMarker.fetch_add(1, std::memory_order_relaxed);
         uint64_t expected = s_uploadLastReport.load(std::memory_order_acquire);
-        if (countThisCall - expected >= 16u
-            && s_uploadLastReport.compare_exchange_strong(
-                expected,
-                countThisCall,
-                std::memory_order_acq_rel,
-                std::memory_order_acquire)) {
-            std::fprintf(stderr,
-                         "[RenderAssetBridge diag] uploaded %llu meshes "
-                         "since last summary (frame in-flight=%llu)\n",
-                         static_cast<unsigned long long>(countThisCall),
-                         static_cast<unsigned long long>(s_frameMarker.load(std::memory_order_relaxed)));
-            s_frameMarker.store(0, std::memory_order_relaxed);
+        while (countThisCall - expected >= 16u) {
+            if (s_uploadLastReport.compare_exchange_strong(
+                    expected,
+                    countThisCall,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire)) {
+                std::fprintf(stderr,
+                             "[RenderAssetBridge diag] uploaded %llu meshes "
+                             "since last summary (frame in-flight=%llu)\n",
+                             static_cast<unsigned long long>(countThisCall),
+                             static_cast<unsigned long long>(s_frameMarker.load(std::memory_order_relaxed)));
+                s_frameMarker.store(0, std::memory_order_relaxed);
+                break;
+            }
+            // CAS failed; `expected` was updated by the winner. Re-check
+            // the threshold against the new expected; loop until either
+            // the threshold is no longer met or this thread wins.
         }
     }
     return handle;
@@ -577,9 +586,18 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     const std::optional<bool> forceScOpt = parseEnvBool(useScEnv);
     const bool forceSc = forceScOpt.value_or(false);
     // Legacy: AY_SHADOW_USE_PHOSKIA=0 also forces .sc (compat with old docs).
+    //
+    // §P2 M12 (2026-08-24) — rename for polarity clarity. The original
+    // `forcePhoskiaOffOpt` was an optional<true=Phoskia enabled> that we
+    // inverted into `forcePhoskiaOff` (true=disable Phoskia). The polarity
+    // was confusing because both env vars negate themselves via inversion.
+    // Read it as positive intent: `phoskiaEnabledOpt` is true when the host
+    // explicitly enables Phoskia; we invert into `forcePhoskiaOff` only at
+    // the preferSc decision site. Also gated on a test.
     const std::string usePhoskiaEnv = ayt::io::env::get("AY_SHADOW_USE_PHOSKIA").value_or("");
-    const std::optional<bool> forcePhoskiaOffOpt = parseEnvBool(usePhoskiaEnv);
-    const bool forcePhoskiaOff = !forcePhoskiaOffOpt.value_or(true);
+    const std::optional<bool> phoskiaEnabledOpt = parseEnvBool(usePhoskiaEnv);
+    const bool phoskiaEnabled = phoskiaEnabledOpt.value_or(true);
+    const bool forcePhoskiaOff = !phoskiaEnabled;
     const bool preferSc =
         (std::strstr(shaderRef, "simple_lit_shadow") != nullptr)
         && (forceSc || forcePhoskiaOff);
@@ -684,6 +702,17 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     }
 
     if (!material.hasParameter("baseColor")) {
+        // §P2 M11 (2026-08-24) — rate-limited diagnostic. Was silent;
+        // a host that ships without a baseColor parameter would get
+        // white default with no log, masking content-asset bugs.
+        static std::atomic<uint32_t> s_baseColorMissingLog{0};
+        const uint32_t seen = s_baseColorMissingLog.fetch_add(1, std::memory_order_relaxed);
+        if (seen < 4) {
+            std::fprintf(stderr,
+                         "[RenderAssetBridge] material '%s' has no baseColor "
+                         "parameter; defaulting to opaque white\n",
+                         materialPath.c_str());
+        }
         mgr.setMaterialColor(handle, "baseColor", 1.0f, 1.0f, 1.0f, 1.0f);
     }
 

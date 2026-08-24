@@ -46,6 +46,11 @@ public:
     bool requestScreenshot(const std::string& filePath);
 
     void setViewRect(uint8_t viewId, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+    // §P2 M1+M2 (2026-08-24) — pass files used to call
+    // `bgfx::setViewMode` directly (cutsheet red line — Pass files
+    // go through adapter only). Routes the call so the Noop short-circuit
+    // and adapter lifecycle gates apply.
+    void setViewMode(uint8_t viewId, bgfx::ViewMode::Enum mode);
     // §P5.5 C (2026-07-23) — per-light shadow atlas sub-rect clip.
     // bgfx::setViewScissor wraps the fragment-cull rect (orthogonal
     // to setViewRect which is the viewport). ShadowPass calls this

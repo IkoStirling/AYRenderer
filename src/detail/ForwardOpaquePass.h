@@ -33,7 +33,6 @@ private:
     static void flushMaterial(GpuMaterial& material,
                               const std::unordered_map<uint64_t, GpuTexture>& textures,
                               const FrameContext& frame,
-                              const ayt::math::Float4x4& world,
                               BGFXAdapter& adapter,
                               const ShadowPass* shadowPass,
                               ShadowFlags shadowFlags = kShadowCastAndReceive);

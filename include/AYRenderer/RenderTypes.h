@@ -372,4 +372,31 @@ struct RenderPipelineDesc {
     bool isDeferred() const noexcept { return path == RenderPath::Deferred; }
 };
 
+// ─────────────────────────────────────────────────────────────────────
+// §P2 M9+M10 (2026-08-24) — hoist magic numbers used by Pass files
+// into the public header. Both constants were duplicated across
+// ForwardOpaquePass (clear color, two sites) and TransparentPass
+// (view id 9, single site). Pulling them here keeps the cut-sheet
+// red-line "one source of truth" rule and gives test code a place
+// to verify the values.
+// ─────────────────────────────────────────────────────────────────────
+
+// §P2 M9 (2026-08-24) — editor / scene clear color used by
+// ForwardOpaquePass (both FBO-bound and backbuffer-bound branches),
+// RendererSubSystem composite clear, and any future Pass that wants
+// to clear an offscreen RT to match the host's "panel placeholder"
+// color. Stored as 0xAABBGGRR (bgfx packed layout).
+inline constexpr uint32_t kSceneClearRgba = 0x191a1cffu;
+
+// §P2 M10 (2026-08-24) — view id dedicated to TransparentPass when
+// the active composite target is LightingPass::lightingOutputFbo()
+// (deferred-lit composite path). Distinct from the Forward path's
+// view id (0) because bgfx binds one FBO+VP per view for the whole
+// frame; switching views mid-frame is the only way to retarget the
+// transparent composite without disturbing the GBuffer / Lighting
+// views (7/8). The cut-sheet comment-table elsewhere in this file
+// enumerates the slot assignments; this constant is the runtime
+// reflection of that table.
+inline constexpr uint8_t kTransparentDeferredViewId = 9;
+
 } // namespace ayt::render

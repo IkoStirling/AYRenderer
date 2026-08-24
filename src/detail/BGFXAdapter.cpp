@@ -265,6 +265,16 @@ void BGFXAdapter::setViewRect(uint8_t viewId, uint16_t x, uint16_t y, uint16_t w
     bgfx::setViewRect(viewId, x, y, w, h);
 }
 
+void BGFXAdapter::setViewMode(uint8_t viewId, bgfx::ViewMode::Enum mode)
+{
+    // §P2 M1+M2 (2026-08-24) — pass files used to call this directly.
+    // Noop-gate mirrors setViewRect's caller convention (caller already
+    // returned early on uninit via isInitialized() check; the bgfx::
+    // function itself is a safe no-op on an uninitialized adapter since
+    // bgfx::setViewMode does not dereference internal state).
+    bgfx::setViewMode(viewId, mode);
+}
+
 void BGFXAdapter::setViewScissor(uint8_t viewId, uint16_t x, uint16_t y,
                                  uint16_t w, uint16_t h)
 {
