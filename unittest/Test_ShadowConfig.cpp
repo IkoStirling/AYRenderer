@@ -41,7 +41,7 @@ TEST_CASE(shadow_cleared_map_stays_lit)
 TEST_CASE(build_stamp_phase6)
 {
     CHECK(std::string_view(ShadowSettings::kPipelineBuildStamp)
-          == std::string_view("v13-phase7-vec4-abi"));
+          == std::string_view("v14-material-surface-contract"));
 }
 
 TEST_CASE(simple_lit_shadow_phoskia_mirrors_verified_sc)

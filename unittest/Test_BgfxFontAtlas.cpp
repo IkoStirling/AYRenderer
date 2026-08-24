@@ -115,7 +115,7 @@ TEST_CASE(ui_render_backend_shaped_cjk_draw)
     CHECK(metrics.width > 1.0f);
 
     ui.beginFrame();
-    ui.drawText(ayt::math::FRectangle(10.0f, 40.0f, 200.0f, 40.0f), cjk, 16,
+    ui.drawText(ayt::math::FRectangle(10.0f, 40.0f, 200.0f, 80.0f), cjk, 16,
                 ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
     ui.endFrame();
     CHECK(ui.getDrawCallCount() > 0);
