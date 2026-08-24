@@ -244,7 +244,7 @@ void GBufferPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
             _alphaCutoutAcquireFailed = true;
             std::fprintf(stderr,
                          "[GBufferPass] alpha-cutout program acquire failed; "
-                         "using opaque fallback. Errors:\n");
+                         "alpha-cutout draws will be skipped. Errors:\n");
             for (const std::string& err : pool.lastCompileErrors()) {
                 std::fprintf(stderr, "[GBufferPass]   %s\n", err.c_str());
             }
@@ -404,10 +404,15 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
 
         const bool needsAlphaCutout = material.alphaCutout;
         alphaCutoutCount += needsAlphaCutout ? 1u : 0u;
+        if (needsAlphaCutout && !_alphaCutoutProgram.isValid()) {
+            // Drawing a cutout with the opaque fill shader writes solid depth
+            // and coverage for transparent texels. A missing specialized
+            // program is therefore a skipped draw, not an opaque fallback.
+            ++skippedInvalidShader;
+            continue;
+        }
         shader::ShaderResource& drawProgram =
-            needsAlphaCutout && _alphaCutoutProgram.isValid()
-                ? _alphaCutoutProgram
-                : _program;
+            needsAlphaCutout ? _alphaCutoutProgram : _program;
 
         // §P5 B4c (2026-07-22) — PREV-FRAME VP UPLOAD. Build
         // prevViewProj = prevProj * prevView (P×V same-order as

@@ -45,7 +45,7 @@ private:
     size_t _frameTimeCount = 0;
     size_t _frameTimeCursor = 0;
     // §P5 M5 (2026-08-24) — cached bgfx::Stats pointer set by
-    // sampleBgfxStats() (called from onFrameSubmitted). Used by
+    // sampleBgfxStats() (called at the start of onEndFrame). Used by
     // onEndFrame() to read triPrims without a second
     // bgfx::getStats() call (bgfx::getStats() is cheap but the
     // duplicated call was untidy and the cache makes the "stats

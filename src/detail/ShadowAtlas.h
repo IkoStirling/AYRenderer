@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AYRenderer/RenderScene.h"
+
 // §P5.5 C (2026-07-23) — Per-light shadow atlas layout.
 // One large RGBA8 depth-equivalent texture (atlasSize x atlasSize)
 // is split into a 2D grid of up to kMaxSlots sub-rects. Each
@@ -53,6 +55,20 @@ struct ShadowAtlasConfig {
     uint32_t atlasSize = kShadowAtlasDefaultSize;
     uint32_t slotCount = kShadowAtlasDefaultSlots;
 };
+
+// Shared light ordering for the shadow producer and deferred-lighting
+// consumer. Shadow-casting Directional/Spot lights are packed first in
+// stable scene order, followed by all remaining lights. Keeping this in one
+// helper prevents atlas slot N from being applied to a different scene-light
+// index when non-shadowing or Point lights precede a caster.
+struct ShadowLightOrder {
+    uint32_t indices[kShadowAtlasMaxSlots]{};
+    uint32_t lightCount = 0;
+    uint32_t shadowCasterCount = 0;
+};
+
+ShadowLightOrder computeShadowLightOrder(
+    const ayt::render::SceneLights& lights) noexcept;
 
 // §P5.5 C — compute a ShadowAtlasLayout for the given config.
 // Algorithm:

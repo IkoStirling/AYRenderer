@@ -644,10 +644,6 @@ void PostProcessPass::ensureFbo(BGFXAdapter& adapter, uint16_t width, uint16_t h
         // under a resize storm would spam stderr at frame rate).
         rateLimitedEarlyReturn("PostProcessPass",
                                "FBO create failed (post-process disabled)");
-        std::fprintf(stderr,
-                     "[PostProcessPass] FBO create failed at %ux%u; "
-                     "post-process disabled for this run\n",
-                     width, height);
     }
 }
 

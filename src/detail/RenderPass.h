@@ -9,6 +9,7 @@
 #include "detail/PassExecContext.h"
 
 #include <cstdint>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
@@ -246,15 +247,81 @@ inline void tryUploadLightUniforms(shader::ShaderResource& shader,
 // elapsed (matches the console-noise ceiling of 1 line / ~4s at
 // 60fps). The pass name + reason are baked into the message so
 // the host can grep / pinpoint without consulting a code map.
+class RateLimitedLogTable {
+public:
+    bool shouldEmit(const char* passName,
+                    const char* reason,
+                    uint32_t interval = 256u) noexcept
+    {
+        const uint64_t key = makeKey(passName, reason);
+        Entry* freeEntry = nullptr;
+        for (Entry& entry : _entries) {
+            if (entry.used && entry.key == key) {
+                const bool emit = entry.count == 0u
+                    || (interval != 0u && (entry.count % interval) == 0u);
+                ++entry.count;
+                return emit;
+            }
+            if (!entry.used && freeEntry == nullptr) {
+                freeEntry = &entry;
+            }
+        }
+
+        if (freeEntry != nullptr) {
+            freeEntry->used = true;
+            freeEntry->key = key;
+            freeEntry->count = 1u;
+            return true;
+        }
+
+        // The renderer currently has fewer than 64 static diagnostic keys.
+        // If that invariant is exceeded, stay loud instead of hiding a new
+        // failure behind an exhausted diagnostics table.
+        return true;
+    }
+
+private:
+    struct Entry {
+        uint64_t key = 0;
+        uint32_t count = 0;
+        bool used = false;
+    };
+
+    static uint64_t hashText(const char* text) noexcept
+    {
+        constexpr uint64_t kOffset = 1469598103934665603ull;
+        constexpr uint64_t kPrime = 1099511628211ull;
+        uint64_t hash = kOffset;
+        if (text == nullptr) {
+            return hash;
+        }
+        while (*text != '\0') {
+            hash ^= static_cast<unsigned char>(*text++);
+            hash *= kPrime;
+        }
+        return hash;
+    }
+
+    static uint64_t makeKey(const char* passName, const char* reason) noexcept
+    {
+        const uint64_t passHash = hashText(passName);
+        const uint64_t reasonHash = hashText(reason);
+        return passHash ^ (reasonHash + 0x9e3779b97f4a7c15ull
+                           + (passHash << 6u) + (passHash >> 2u));
+    }
+
+    std::array<Entry, 64> _entries{};
+};
+
 inline void rateLimitedEarlyReturn(const char* passName, const char* reason)
 {
-    static thread_local uint32_t s_total = 0;
-    if (s_total == 0 || (s_total % 256u) == 0) {
+    static thread_local RateLimitedLogTable s_table;
+    if (s_table.shouldEmit(passName, reason)) {
         std::fprintf(stderr,
-                     "[%s] early-return (rate-limited) frame=%u reason=%s\n",
-                     passName, s_total, reason);
+                     "[%s] early-return (rate-limited) reason=%s\n",
+                     passName != nullptr ? passName : "<null>",
+                     reason != nullptr ? reason : "<null>");
     }
-    ++s_total;
 }
 
 // U0 (Phase 2 Pass scaffold) — abstract base for one rendering pass.

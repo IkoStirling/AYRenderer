@@ -81,7 +81,7 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
 //   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
 //   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v27_deferred_material_contract";
+    "lighting_v28_shadow_light_order";
 
 // �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -593,8 +593,9 @@ material Lighting {
         // the per-slot shadow; otherwise the legacy global shadowKey.
         let _keyShadow = mix(_shadowKey, perLightShadow0.x, step(0.5, perLightShadowCount.x))
         let dirPart0  = NdotDir0 * _keyShadow * Lights.colors[0].xyz
-        let pointPart0 = NdotPos0 * attenPoint0 * Lights.colors[0].xyz
-        let spotPart0  = NdotPos0 * attenSpot0  * Lights.colors[0].xyz
+        let _atlasShadow0 = mix(1.0, perLightShadow0.x, step(0.5, perLightShadowCount.x))
+        let pointPart0 = NdotPos0 * attenPoint0 * _atlasShadow0 * Lights.colors[0].xyz
+        let spotPart0  = NdotPos0 * attenSpot0  * _atlasShadow0 * Lights.colors[0].xyz
         let isDir0  = 1.0 - step(0.5, Lights.dirs[0].w)
         let isPoint0 = step(0.5, Lights.dirs[0].w) - step(1.5, Lights.dirs[0].w)
         let isSpot0 = step(1.5, Lights.dirs[0].w)
@@ -1304,9 +1305,14 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     const bool useMulti = (sceneLights != nullptr) && (sceneLights->count > 0u);
 
     if (useMulti) {
-        const uint32_t n = sceneLights->count;
-        for (uint32_t i = 0; i < n && i < ayt::render::kMaxSceneLights; ++i) {
-            const ayt::render::Light& L = sceneLights->lights[i];
+        // Use the exact same stable packing as ShadowPass: active
+        // Directional/Spot casters first, then the unshadowed suffix. Lighting
+        // is additive, so this preserves the image while making packed atlas
+        // slot i refer to Lights[i] even when scene slot 0 does not cast.
+        const ShadowLightOrder lightOrder = computeShadowLightOrder(*sceneLights);
+        for (uint32_t i = 0; i < lightOrder.lightCount; ++i) {
+            const ayt::render::Light& L =
+                sceneLights->lights[lightOrder.indices[i]];
             // dirs[i] (16-byte vec4) ??per LightType CPU-side split.
             // xyz + .w = float(LightType). Point/Spot branches land
             // at zero CPU cost (the switch is a jump table).

@@ -5,6 +5,7 @@
 #include "detail/ShadowDiagnostics.h"
 #include "detail/ShadowMatrixBuilder.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 // §P4 H1 (2026-08-24) — <bgfx/bgfx.h> removed from this TU. The
@@ -137,13 +138,18 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     // Point castShadow=true ⇒ log + skip (omni-shadow out of scope).
     uint32_t casterDrawCount = 0;
     if (useAtlas) {
-        activeCount = 0;
-        for (uint32_t i = 0; i < lightsPtr->count
-                               && activeCount < _atlasLayout.slotCount;
-             ++i) {
-            const ayt::render::Light& L = lightsPtr->lights[i];
-            if (!L.castShadow) continue;
-            if (L.type == ayt::render::LightType::Point) {
+        const ShadowLightOrder lightOrder = computeShadowLightOrder(*lightsPtr);
+        activeCount = std::min(lightOrder.shadowCasterCount,
+                               _atlasLayout.slotCount);
+
+        // Point lights are deliberately excluded from the packed caster range.
+        // Keep the existing diagnostic for hosts that request unsupported omni
+        // shadows, while the shared order puts those lights in the unshadowed
+        // suffix consumed by LightingPass.
+        for (uint32_t i = 0; i < lightOrder.lightCount; ++i) {
+            const uint32_t sourceIndex = lightOrder.indices[i];
+            const ayt::render::Light& L = lightsPtr->lights[sourceIndex];
+            if (L.castShadow && L.type == ayt::render::LightType::Point) {
                 // Point omni-shadow out of scope for §P5.5 C.
                 if (ayt::render::ShadowDiagnostics::enabled(
                         ayt::render::ShadowLogLevel::L1_Caps)) {
@@ -161,12 +167,16 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
                                      "[ShadowPass] Point light slot %u "
                                      "castShadow=true skipped (omni-shadow "
                                      "out of scope for §P5.5 C)\n",
-                                     i);
+                                     sourceIndex);
                         ++s_omniSkipLog;
                     }
                 }
-                continue;
             }
+        }
+
+        for (uint32_t slot = 0; slot < activeCount; ++slot) {
+            const uint32_t sourceIndex = lightOrder.indices[slot];
+            const ayt::render::Light& L = lightsPtr->lights[sourceIndex];
             // Directional + Spot both use the scene-fit ortho VP
             // built from light direction. For Directional, this
             // matches pre-C behavior; for Spot, the cone isn't
@@ -175,19 +185,18 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             // §P4 L9 (2026-08-24) — reset the active slot
             // before overwriting (the L9 helper replaces the
             // old "reset all slots up front" pattern).
-            resetAtlasSlot(activeCount);
+            resetAtlasSlot(slot);
             buildDirectionalShadowMatricesForScene(
                 scene,
                 meshes,
                 L.direction,
-                _atlasLightViewProjs[activeCount],
+                _atlasLightViewProjs[slot],
                 _lightProj,        // tmp scratch — same matrix used per slot
                 _lightViewProj,    // tmp scratch
-                _atlasLightViewProjsCol[activeCount],
+                _atlasLightViewProjsCol[slot],
                 _lightProjCol,
                 _lightViewProjCol);
-            _atlasShadowBiases[activeCount] = L.shadowBias;
-            ++activeCount;
+            _atlasShadowBiases[slot] = L.shadowBias;
         }
     } else {
         // Pre-C byte-equivalent path: single key light from

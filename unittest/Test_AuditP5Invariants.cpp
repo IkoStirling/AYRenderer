@@ -79,6 +79,11 @@ std::string readEntireFile(const std::string& path)
     return ss.str();
 }
 
+std::string rendererSourcePath(const char* relativePath)
+{
+    return std::string(AY_RENDERER_SOURCE_DIR) + "/" + relativePath;
+}
+
 } // namespace
 
 // ─────────────────────────────────────────────────────────────────────
@@ -126,14 +131,10 @@ TEST_CASE(post_process_source_has_six_rate_limited_calls) {
     // is gated on the file existing (otherwise it's a no-op
     // CHECK(true) — build systems can relocate the tree).
     const std::string path =
-        "src/detail/PostProcessPass.cpp";
+        rendererSourcePath("src/detail/PostProcessPass.cpp");
     const std::string src = readEntireFile(path);
+    CHECK(!src.empty());
     if (src.empty()) {
-        // Source not findable from the test CWD — skip
-        // silently (the test only protects against in-tree
-        // regression; CI builds where CWD != src will not
-        // exercise this).
-        CHECK(true);
         return;
     }
 
@@ -165,10 +166,10 @@ TEST_CASE(post_process_ensure_fbo_log_calls_helper) {
     // for the helper invocation within 50 lines of the
     // "FBO create failed" comment marker.
     const std::string path =
-        "src/detail/PostProcessPass.cpp";
+        rendererSourcePath("src/detail/PostProcessPass.cpp");
     const std::string src = readEntireFile(path);
+    CHECK(!src.empty());
     if (src.empty()) {
-        CHECK(true);
         return;
     }
 
@@ -187,6 +188,7 @@ TEST_CASE(post_process_ensure_fbo_log_calls_helper) {
         src.substr(windowBegin, windowEnd - windowBegin);
     CHECK(window.find("rateLimitedEarlyReturn(")
           != std::string::npos);
+    CHECK(window.find("std::fprintf") == std::string::npos);
 }
 
 TEST_SUITE_END
@@ -219,14 +221,15 @@ TEST_CASE(debug_overlay_source_has_no_duplicate_get_stats_call) {
     // source — should be exactly 1 (only inside
     // sampleBgfxStats).
     const std::string path =
-        "src/detail/DebugOverlay.cpp";
+        rendererSourcePath("src/detail/DebugOverlay.cpp");
     const std::string src = readEntireFile(path);
+    CHECK(!src.empty());
     if (src.empty()) {
-        CHECK(true);
         return;
     }
+    // Count the executable assignment, not comments that mention the API.
     const std::size_t calls =
-        countSubstr(src, "bgfx::getStats()");
+        countSubstr(src, "= bgfx::getStats();");
     CHECK(calls == 1u);
 }
 
@@ -237,10 +240,10 @@ TEST_CASE(debug_overlay_source_uses_cached_pointer_in_on_end_frame) {
     // _lastBgfxStats in sampleBgfxStats and a read in
     // onEndFrame.
     const std::string path =
-        "src/detail/DebugOverlay.cpp";
+        rendererSourcePath("src/detail/DebugOverlay.cpp");
     const std::string src = readEntireFile(path);
+    CHECK(!src.empty());
     if (src.empty()) {
-        CHECK(true);
         return;
     }
     // Pin the write side (sampleBgfxStats sets the cache).
@@ -252,6 +255,20 @@ TEST_CASE(debug_overlay_source_uses_cached_pointer_in_on_end_frame) {
     // Pin the reset side (resetStats clears the cache).
     CHECK(src.find("_lastBgfxStats = nullptr")
           != std::string::npos);
+
+    // The refresh must happen in onEndFrame before the cached pointer is
+    // consumed; sampling later from onFrameSubmitted adds another frame of
+    // latency to the displayed counters.
+    const std::size_t onEnd = src.find("void DebugOverlay::onEndFrame");
+    const std::size_t sample = src.find("sampleBgfxStats();", onEnd);
+    const std::size_t consume = src.find(
+        "const bgfx::Stats* bgfxStats = _lastBgfxStats", onEnd);
+    const std::size_t submitted = src.find("void DebugOverlay::onFrameSubmitted");
+    CHECK(onEnd != std::string::npos);
+    CHECK(sample != std::string::npos);
+    CHECK(consume != std::string::npos);
+    CHECK(sample < consume);
+    CHECK(submitted == std::string::npos || sample < submitted);
 }
 
 TEST_SUITE_END

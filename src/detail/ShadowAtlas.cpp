@@ -6,6 +6,28 @@
 namespace ayt::render::detail
 {
 
+ShadowLightOrder computeShadowLightOrder(
+    const ayt::render::SceneLights& lights) noexcept
+{
+    ShadowLightOrder out{};
+    const uint32_t count = std::min(lights.count, kShadowAtlasMaxSlots);
+
+    for (uint32_t i = 0; i < count; ++i) {
+        const ayt::render::Light& light = lights.lights[i];
+        if (light.castShadow && light.type != ayt::render::LightType::Point) {
+            out.indices[out.lightCount++] = i;
+            ++out.shadowCasterCount;
+        }
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        const ayt::render::Light& light = lights.lights[i];
+        if (!light.castShadow || light.type == ayt::render::LightType::Point) {
+            out.indices[out.lightCount++] = i;
+        }
+    }
+    return out;
+}
+
 ShadowAtlasLayout computeShadowAtlasLayout(const ShadowAtlasConfig& cfg)
 {
     ShadowAtlasLayout out{};

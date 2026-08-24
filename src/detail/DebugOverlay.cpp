@@ -171,6 +171,10 @@ void DebugOverlay::onEndFrame(uint32_t drawCalls, uint32_t sceneItems,
                               uint16_t viewportX, uint16_t viewportY,
                               uint16_t width, uint16_t height)
 {
+    // Capture the latest completed bgfx frame immediately before consuming
+    // the cache. Sampling from onFrameSubmitted() happens after this method
+    // and adds an avoidable extra frame of latency to the overlay.
+    sampleBgfxStats();
     _stats.drawCalls   = drawCalls;
     _stats.sceneItems  = sceneItems;
     _stats.passes      = passStats;
@@ -224,7 +228,6 @@ void DebugOverlay::onFrameSubmitted()
         _stats.renderCpuTimeMs = std::chrono::duration<float, std::milli>(
             now - _frameStart).count();
     }
-    sampleBgfxStats();
     ++_stats.frameCount;
 }
 
