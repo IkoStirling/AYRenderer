@@ -214,40 +214,48 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
     const FrameContext& frame = ctx.frame;
 
     if (!adapter.isInitialized()) {
+        rateLimitedEarlyReturn("SSAOPass", "adapter not initialized");
         return 0;
     }
     if (adapter.isNoopBackend()) {
+        rateLimitedEarlyReturn("SSAOPass", "noop backend");
         return 0;
     }
 
     if (ctx.frameGraph == nullptr) {
+        rateLimitedEarlyReturn("SSAOPass", "ctx.frameGraph == nullptr");
         return 0;
     }
 
     const uint16_t viewportWidth  = ctx.viewportWidth;
     const uint16_t viewportHeight = ctx.viewportHeight;
     if (viewportWidth == 0 || viewportHeight == 0) {
+        rateLimitedEarlyReturn("SSAOPass", "viewport==0");
         return 0;
     }
 
     const bgfx::FrameBufferHandle target =
         ctx.frameGraph->resolve(FgResourceId::SSAOTexture);
     if (!BGFXAdapter::isValid(target)) {
+        rateLimitedEarlyReturn("SSAOPass", "SSAOTexture resolve invalid");
         return 0;
     }
 
     if (ctx.gbufferPass == nullptr) {
+        rateLimitedEarlyReturn("SSAOPass", "gbufferPass == nullptr");
         return 0;
     }
     const bgfx::TextureHandle worldPosRt = ctx.gbufferPass->gbufferMotionRt();
     const bgfx::TextureHandle worldNrmRt = ctx.gbufferPass->gbufferNormalRt();
     if (!BGFXAdapter::isValid(worldPosRt) || !BGFXAdapter::isValid(worldNrmRt)) {
+        rateLimitedEarlyReturn("SSAOPass", "gbuffer motion/normal RT invalid");
         return 0;
     }
 
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
         || !BGFXAdapter::isValid(_fullscreenIB)) {
+        rateLimitedEarlyReturn("SSAOPass", "fullscreen VB/IB invalid");
         return 0;
     }
 
@@ -261,6 +269,7 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
         && _tWorldPosition  != ayt::shader::InvalidBinding
         && _tWorldNormal    != ayt::shader::InvalidBinding;
     if (!programReady) {
+        rateLimitedEarlyReturn("SSAOPass", "program not ready");
         return 0;
     }
 
@@ -269,7 +278,14 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
     adapter.setViewFrameBuffer(viewId, target);
     adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
     adapter.setViewTransform(viewId, frame.view, frame.projection);
-    adapter.setViewClearRaw(viewId, BGFX_CLEAR_NONE, 0, 1.0f, 0);
+    // §P3 M9 (2026-08-24) - explicitly BGFX_CLEAR_COLOR
+    // (was BGFX_CLEAR_NONE). SSAO writes to the FG-resolved
+    // SSAOTexture; clearing to black each frame prevents occlusion
+    // history from accumulating across frames on the same view
+    // id (otherwise the FS sees stale color in unwritten slots).
+    // §P3 L7 (2026-08-24) — dropped trailing `, 1.0f, 0` (matches
+    // setViewClearRaw defaults — see BGFXAdapter.h:262).
+    adapter.setViewClearRaw(viewId, BGFX_CLEAR_COLOR, 0x00000000u);
 
     const ayt::shader::TextureHandle worldPosHandle =
         ayt::render::detail::toShaderTexture(worldPosRt);
@@ -296,11 +312,18 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
         _program.setTexture(stageWorld, _tWorldPosition, worldPosHandle);
         _program.setTexture(stageNrm,   _tWorldNormal,   worldNrmHandle);
     }
-    _program.setUniform(_uSSAOStrength,  strengthPad, sizeof(strengthPad));
-    _program.setUniform(_uSSAORadius,    radiusPad,   sizeof(radiusPad));
-    _program.setUniform(_uSSAOBias,      biasPad,     sizeof(biasPad));
-    _program.setUniform(_uCamPos,        camPosPad,   sizeof(camPosPad));
-    _program.setUniform(_uViewportTexel, vpTexelPad,  sizeof(vpTexelPad));
+    // §P3 M2 (2026-08-24) - 5 setUniform calls collapsed to the
+    // shared RenderPass::trySetUniformVec4 helper. Cached
+    // _uSSAOStrength / _uSSAORadius / _uSSAOBias / _uCamPos /
+    // _uViewportTexel binding fields stay (they're still useful for
+    // the early-out `isReady()` shape); the helper re-resolves by
+    // name internally — negligible cost (5× unordered_map lookup
+    // per frame) and removes 5 lines of pad/setUniform boilerplate.
+    trySetUniformVec4(_program, "ssaoStrength", strengthPad);
+    trySetUniformVec4(_program, "ssaoRadius",   radiusPad);
+    trySetUniformVec4(_program, "ssaoBias",     biasPad);
+    trySetUniformVec4(_program, "camPos",       camPosPad);
+    trySetUniformVec4(_program, "viewportTexel", vpTexelPad);
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
@@ -308,11 +331,17 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
     adapter.setStateDepthTestAlways();
     _program.submit(sub);
 
-    static bool s_loggedFirst = false;
-    if (!s_loggedFirst) {
+    // §P3 M5+L2 (2026-08-24) - was one-shot (`s_loggedFirst`
+    // latch). Replaced with a rate-limited pattern (1 line per
+    // 64 frames) so we keep the first-dispatch signal loud
+    // without flooding the console on long-running captures.
+    static uint32_t s_firstFrame = 0;
+    const uint32_t kFirstRateLimit = 64u;
+    if (s_firstFrame == 0 || (s_firstFrame % kFirstRateLimit) == 0) {
         std::fprintf(stderr,
-            "[SSAOPass] A3 first dispatch view=%u viewport=%ux%u "
+            "[SSAOPass] A3 frame=%u dispatch view=%u viewport=%ux%u "
             "enabled=%d strength=%.2f radius=%.2f bias=%.3f\n",
+            s_firstFrame,
             static_cast<unsigned>(viewId),
             static_cast<unsigned>(viewportWidth),
             static_cast<unsigned>(viewportHeight),
@@ -320,8 +349,8 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
             frame.ssaoStrength,
             frame.ssaoRadius,
             frame.ssaoBias);
-        s_loggedFirst = true;
     }
+    ++s_firstFrame;
     return 1;
 }
 
@@ -373,14 +402,8 @@ void SSAOPass::ensureProgram(shader::ShaderResourcePool& pool)
     _uViewportTexel    = _program.getUniformBinding("viewportTexel");
     _tWorldPosition    = _program.getTextureBinding("worldPosition");
     _tWorldNormal      = _program.getTextureBinding("worldNormal");
-    _tNoise            = ayt::shader::InvalidBinding;  // v4: fixed kernel, no noise
-}
-
-void SSAOPass::ensureNoise(BGFXAdapter& adapter)
-{
-    // v4: fixed kernel — noise texture unused. Keep stub so destroy /
-    // field layout stay stable.
-    (void)adapter;
+    // §P3 M13 (2026-08-24) — _tNoise reset removed (fixed-kernel SSAO
+    // in v4 has no noise sampler).
 }
 
 void SSAOPass::destroyResources(BGFXAdapter& adapter)
@@ -393,11 +416,9 @@ void SSAOPass::destroyResources(BGFXAdapter& adapter)
         adapter.destroy(_fullscreenIB);
         _fullscreenIB = BGFX_INVALID_HANDLE;
     }
-    if (BGFXAdapter::isValid(_noiseTex)) {
-        adapter.destroy(_noiseTex);
-        _noiseTex = BGFX_INVALID_HANDLE;
-        _noiseUploaded = false;
-    }
+    // §P3 M13 (2026-08-24) — _noiseTex destroy block deleted; SSAO
+    // went to a fixed kernel in v4 (see _tNoise = InvalidBinding
+    // above) so the noise texture is dead state.
     if (_program.isValid()) {
         _program.reset();
     }
@@ -408,7 +429,8 @@ void SSAOPass::destroyResources(BGFXAdapter& adapter)
     _uViewportTexel   = ayt::shader::InvalidBinding;
     _tWorldPosition   = ayt::shader::InvalidBinding;
     _tWorldNormal     = ayt::shader::InvalidBinding;
-    _tNoise           = ayt::shader::InvalidBinding;
+    // §P3 M13 (2026-08-24) — _tNoise reset removed (fixed-kernel SSAO
+    // in v4 has no noise sampler).
     _programAcquireFailed = false;
 }
 

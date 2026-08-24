@@ -201,10 +201,17 @@ public:
     //                                never depth-tested against the
     //                                scene FBO's leftover depth).
     //   setStateDepthOnlyWrite   — ShadowPass caster depth write.
+    //   setStateOpaqueLEQUAL     — GBufferPass default draw. Same
+    //                                as setStateOpaque but with
+    //                                DEPTH_TEST_LEQUAL so coincident
+    //                                overlay sub-meshes (face/eye/
+    //                                mouth, garment/trim) preserve
+    //                                source-order tie-breaking.
     void setStateOpaque();
     void setStateAlphaBlend();
     void setStateDepthTestAlways();
     void setStateDepthOnlyWrite();
+    void setStateOpaqueLEQUAL(bool doubleSided);
     // Selection inverted-hull: cull front faces (CCW), depth LESS,
     // no blend — rim stays outside the already-drawn mesh.
     void setStateOutlineHull();

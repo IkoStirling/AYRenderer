@@ -1110,16 +1110,21 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                 const uint8_t stage = _program.getTextureStage(skyBinding);
                 _program.setTexture(stage, skyBinding,
                                     toShaderTexture(skyHandle));
-                _gbufferSkyRt = skyHandle;
+                // §P3 M6 / L10 (2026-08-24) — `_gbufferSkyRt` field
+                // deleted; the live handle is rebound every frame.
             } else {
-                _gbufferSkyRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+                // Sky handle invalid: sampler stays unbound; FS samples
+                // a black gbufferSky and the backdrop blend collapses
+                // to `lit` (pre-§Skybox0 behavior).
             }
         }
     }
 
     // �Skybox0 (2026-07-23) ??upload `skyMix` uniform. Default =
-    // 1.0 (full intensity). Host can override per-material via
-    // `Renderer::setMaterialVec3(material, "skyMix", v)`. Phoskia
+    // ayt::render::kDefaultSkyMix (full intensity; hoisted to
+    // RenderTypes.h by â§P3 M1, 2026-08-24). Per-frame override
+    // remains the host\u’s responsibility via the uniform binding
+    // acquired here; this constant is the in-pass default, not an override. Phoskia
     // Vec4 ABI (bgfx Vec4 slot, see docs/pass-lessons-from-shadow.md
     // �3.1) ??scalar in .x, pad .yzw = 0. Bound unconditionally ??
     // when the gbufferSky sampler is unbound the skyMix value has
@@ -1128,7 +1133,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     const shader::BindingId skyMixBinding =
         _program.getUniformBinding("skyMix");
     if (skyMixBinding != shader::InvalidBinding) {
-        const float skyMixPad[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+        const float skyMixPad[4] = { ayt::render::kDefaultSkyMix, 0.0f, 0.0f, 0.0f };
         _program.setUniform(skyMixBinding, skyMixPad, sizeof(skyMixPad));
     }
 
@@ -1206,43 +1211,38 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // vec4 = bgfx Vec4 slot ??see docs/pass-lessons-from-shadow.md
     // �3.1). 3-float vec3 ??4-float padded with .w = 0 (or 1 for
     // position-like).
-    const shader::BindingId lightDirBinding =
-        _program.getUniformBinding("u_lightDirection");
-    if (lightDirBinding != shader::InvalidBinding) {
-        // Match ForwardOpaquePass / TransparentPass: FrameContext stores
-        // FROM-light; Phoskia NdotL expects TO-light ??negate once.
-        const float lightDir[4] = {
-            -frame.lightDirection.x,
-            -frame.lightDirection.y,
-            -frame.lightDirection.z,
-            0.0f,
-        };
-        _program.setUniform(lightDirBinding, lightDir, sizeof(lightDir));
-    }
+    // §P3 M2 (2026-08-24) - hoisted to
+    // RenderPass::trySetUniformVec4. The three blocks below
+    // used to be byte-for-byte identical inline
+    // `if (binding != Invalid) { float pad[4] = {...};
+    // setUniform(...); }` pattern; now a single helper call
+    // each. lightDirection negation stays inline (one extra
+    // .w=0 pad). Phoskia uniform ABI: vec4 uniforms uploaded
+    // as vec4 (one vec4 = bgfx Vec4 slot, see docs/pass-
+    // lessons-from-shadow.md §3.1). 3-float vec3 padded
+    // with .w = 0 (or 1 for position-like).
+    const float lightDir[4] = {
+        -frame.lightDirection.x,  // Match ForwardOpaquePass /
+        -frame.lightDirection.y,  // TransparentPass: Phoskia
+        -frame.lightDirection.z,  // NdotL expects TO-light,
+        0.0f,                     // FrameContext stores FROM-light
+    };
+    const float lightColor[4] = {
+        frame.lightColor.x,
+        frame.lightColor.y,
+        frame.lightColor.z,
+        0.0f,
+    };
+    const float cameraPos[4] = {
+        frame.cameraPosition.x,
+        frame.cameraPosition.y,
+        frame.cameraPosition.z,
+        1.0f,  // position-like: .w = 1
+    };
+    trySetUniformVec4(_program, "u_lightDirection", lightDir);
+    trySetUniformVec4(_program, "u_lightColor",      lightColor);
+    trySetUniformVec4(_program, "u_cameraPos",       cameraPos);
 
-    const shader::BindingId lightColorBinding =
-        _program.getUniformBinding("u_lightColor");
-    if (lightColorBinding != shader::InvalidBinding) {
-        const float lightColor[4] = {
-            frame.lightColor.x,
-            frame.lightColor.y,
-            frame.lightColor.z,
-            0.0f,
-        };
-        _program.setUniform(lightColorBinding, lightColor, sizeof(lightColor));
-    }
-
-    const shader::BindingId cameraPosBinding =
-        _program.getUniformBinding("u_cameraPos");
-    if (cameraPosBinding != shader::InvalidBinding) {
-        const float cameraPos[4] = {
-            frame.cameraPosition.x,
-            frame.cameraPosition.y,
-            frame.cameraPosition.z,
-            1.0f,  // position-like ??.w = 1
-        };
-        _program.setUniform(cameraPosBinding, cameraPos, sizeof(cameraPos));
-    }
 
     // �P5 B7+ (2026-07-22) + �P5.5 A (2026-07-23) + �P5.5 B (2026-07-23)
     // ??multi-light DataSource upload via the host-supplied
@@ -1440,14 +1440,25 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         // fields. If any binding is missing, the cache key was bumped
         // without updating the Phoskia source (or vice versa). Loud
         // fail so we don't silently ship a black image.
-        static bool s_loggedMissing = false;
-        if (!s_loggedMissing) {
-            s_loggedMissing = true;
-            std::fprintf(stderr,
-                         "[LightingPass] FATAL: missing one of "
-                         "dirs/colors/params/spotDir uniforms ??"
-                         "check Phoskia source vs cache-key bump\n");
-        }
+            // §P3 M7 (2026-08-24) - was one-shot (`s_loggedMissing`
+            // latch). Replaced with a rate-limited pattern (1 line per
+            // 64 frames), matching the Part 2 M8 shadow-bind diagnostic
+            // style. Keeps the first frame loud but stops the console
+            // from drowning in repeats.
+            static uint32_t s_fatalFrame = 0;
+            static uint32_t s_fatalCount = 0;
+            const uint32_t kFatalRateLimit = 64u;
+            if (s_fatalFrame == 0 || (s_fatalFrame % kFatalRateLimit) == 0) {
+                std::fprintf(stderr,
+                         "[LightingPass] FATAL frame=%u missing one of "
+                         "dirs/colors/params/spotDir uniforms (suppressed=%u, "
+                                                  "check Phoskia source vs cache-key bump\n",
+                 s_fatalFrame, s_fatalCount);
+                s_fatalCount = 0;
+            } else {
+                ++s_fatalCount;
+            }
+            ++s_fatalFrame;
     }
 
     // �P5.5 C (2026-07-23) ??per-light shadow atlas array uniforms.
@@ -1464,32 +1475,48 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // equivalent. The atlas-rect / LVP / bias packs still ship
     // (all-zero / identity) so the binding contract is satisfied on
     // every host.
+    // §P3 M3 (2026-08-24) - the four upload slots below
+    // (_uShadowAtlasRects / _uLightViewProjs / _uShadowBiases /
+    // _uPerLightShadowCount) MUST stay in sync with the Phoskia
+    // source (see LightingPass.cpp top-of-file uniform block +
+    // LightingPass.h §P5.5 C field matrix). Array sizes,
+    // packing convention (vec4 pad for biases / col-major mat4
+    // for LVPs), and the count uniform are load-bearing for the
+    // FS unroll — if any one drifts, the FS indexes into
+    // wrong ranges and lights fall off. The slot count (8) is
+    // shared with ShadowPass::kMaxShadowCasters; bump both at
+    // once when the cap changes.
     {
-        float atlasRects[8 * 4] = {};   // 8 � vec4 = 32 floats
-        float atlasBiases[8 * 4] = {};  // 8 � vec4 = 32 floats (.x used)
-        float atlasLvp[8 * 16] = {};    // 8 � mat4 col-major
+        float atlasRects[8 * 4] = {};   // 8 × vec4 = 32 floats
+        float atlasBiases[8 * 4] = {};  // 8 × vec4 = 32 floats (.x used)
+        float atlasLvp[8 * 16] = {};    // 8 × mat4 col-major
 
         uint32_t perLightCount = 0;
         if (ctx.shadowPass != nullptr) {
-            // Copy atlas sub-rects (already in UV [0,1]).
-            const float* srcRects = ctx.shadowPass->atlasSubRects();
-            for (uint32_t i = 0; i < 8u * 4u; ++i) {
-                atlasRects[i] = srcRects[i];
-            }
-            // Copy per-slot bias (pad into vec4 slots for bgfx).
-            const float* srcBiases = ctx.shadowPass->atlasShadowBiases();
-            for (uint32_t i = 0; i < 8u; ++i) {
-                atlasBiases[i * 4 + 0] = srcBiases[i];
-                atlasBiases[i * 4 + 1] = 0.0f;
-                atlasBiases[i * 4 + 2] = 0.0f;
-                atlasBiases[i * 4 + 3] = 0.0f;
-            }
-            // Copy per-slot LVP matrices (col-major float[16]).
-            const float* srcLvp = ctx.shadowPass->atlasLightViewProjsColumnMajor();
-            for (uint32_t i = 0; i < 8u * 16u; ++i) {
-                atlasLvp[i] = srcLvp[i];
-            }
             perLightCount = ctx.shadowPass->perLightShadowCount();
+            // §P3 M8 (2026-08-24) - guard the three
+            // memcopy loops behind `count > 0` so the all-zero
+            // baseline from the array `{}` initializers stays
+            // cheap when no per-light shadows are active. The
+            // source-pointer reads stay unconditional so the
+            // bind contract is satisfied on every host.
+            if (perLightCount > 0) {
+                const float* srcRects = ctx.shadowPass->atlasSubRects();
+                for (uint32_t i = 0; i < 8u * 4u; ++i) {
+                    atlasRects[i] = srcRects[i];
+                }
+                const float* srcBiases = ctx.shadowPass->atlasShadowBiases();
+                for (uint32_t i = 0; i < 8u; ++i) {
+                    atlasBiases[i * 4 + 0] = srcBiases[i];
+                    atlasBiases[i * 4 + 1] = 0.0f;
+                    atlasBiases[i * 4 + 2] = 0.0f;
+                    atlasBiases[i * 4 + 3] = 0.0f;
+                }
+                const float* srcLvp = ctx.shadowPass->atlasLightViewProjsColumnMajor();
+                for (uint32_t i = 0; i < 8u * 16u; ++i) {
+                    atlasLvp[i] = srcLvp[i];
+                }
+            }
         }
         // else: all-zero / identity baseline; perLightCount stays 0
         // ??the FS collapses every perLightShadow{i} to vec4(1.0).

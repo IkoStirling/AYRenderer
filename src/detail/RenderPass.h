@@ -9,6 +9,7 @@
 #include "detail/PassExecContext.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string_view>
 #include <unordered_map>
@@ -70,6 +71,23 @@ inline void trySetUniformVec3(shader::ShaderResource& shader, const char* name, 
     }
     const float padded[4] = {values[0], values[1], values[2], 0.0f};
     shader.setUniform(binding, padded, sizeof(padded));
+}
+
+// §P3 M2 (2026-08-24) — explicit Vec4 helper. Mirrors trySetUniformVec3
+// (no Vec4 padding when the shader already declares Vec4). Used by the
+// per-light cameraPos / lightDirection / lightColor / viewportTexel
+// upload blocks in LightingPass + SSAOPass + PostProcessPass — those
+// wrote byte-for-byte identical `if (binding != Invalid) { padded[4] =
+// {...}; setUniform(...) }` blocks four times in a row. Hoisted so a
+// future scalar/vec2 helper or uniform-format change lands in one
+// place instead of N.
+inline void trySetUniformVec4(shader::ShaderResource& shader, const char* name, const float* values)
+{
+    const shader::BindingId binding = shader.getUniformBinding(name);
+    if (binding == shader::InvalidBinding || values == nullptr) {
+        return;
+    }
+    shader.setUniform(binding, values, sizeof(float) * 4);
 }
 
 inline void tryBindWhiteTexture(shader::ShaderResource& shader,
@@ -218,6 +236,25 @@ inline void tryUploadLightUniforms(shader::ShaderResource& shader,
     trySetUniformVec3(shader, "lightDir", toLightDir.ptr());
     trySetUniformVec3(shader, "lightDirection", toLightDir.ptr());
     trySetUniformVec3(shader, "lightColor", frame.lightColor.ptr());
+}
+
+// §P3 L11 (2026-08-24) — rate-limited early-return diagnostic.
+// Replaces the previous pattern of "loud log on every frame when
+// a path is unready" that drowned the host's stderr on long
+// captures. Uses a per-(pass,reason) counter; the first frame is
+// always loud, subsequent frames are suppressed until 256 have
+// elapsed (matches the console-noise ceiling of 1 line / ~4s at
+// 60fps). The pass name + reason are baked into the message so
+// the host can grep / pinpoint without consulting a code map.
+inline void rateLimitedEarlyReturn(const char* passName, const char* reason)
+{
+    static thread_local uint32_t s_total = 0;
+    if (s_total == 0 || (s_total % 256u) == 0) {
+        std::fprintf(stderr,
+                     "[%s] early-return (rate-limited) frame=%u reason=%s\n",
+                     passName, s_total, reason);
+    }
+    ++s_total;
 }
 
 // U0 (Phase 2 Pass scaffold) — abstract base for one rendering pass.

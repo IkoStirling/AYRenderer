@@ -1,5 +1,6 @@
 #include "detail/GBufferPass.h"
 
+#include "AYRenderer/RenderTypes.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/FrameContext.h"
 #include "detail/RenderPass.h"
@@ -328,7 +329,10 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     // the opaque and alpha-cutout programs, destroying that order. Keep this
     // view sequential so later source submeshes deterministically replace an
     // equal-depth earlier surface.
-    bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
+    //
+    // §P3 H1 (2026-08-24) — routed through BGFXAdapter (cutsheet red line:
+    // pass files never call bgfx::* functions directly).
+    ctx.adapter.setViewMode(viewId, bgfx::ViewMode::Sequential);
     ctx.adapter.setViewTransform(viewId, frame.view, frame.projection);
     ctx.adapter.setViewFrameBuffer(viewId, _gbufferFbo);
     ctx.adapter.setViewRect(viewId, 0, 0, _gbufferW, _gbufferH);
@@ -337,9 +341,13 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     // background must start at zero; every successful GBuffer draw writes 1.
     // Using an opaque-black clear here marks the whole viewport as geometry
     // and suppresses the skybox even though SkyboxPass itself rendered.
+    //
+    // §P3 M4 (2026-08-24) — magic clear RGBA hoisted to
+    // ayt::render::kGBufferClearRgba (0x00000000u). RT3.a's coverage
+    // channel must start at zero; every draw writes 1.
     ctx.adapter.setViewClearRaw(viewId,
                                 BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                                /*rgba=*/0x00000000,
+                                /*rgba=*/ayt::render::kGBufferClearRgba,
                                 /*depth=*/1.0f,
                                 /*stencil=*/0);
 
@@ -637,13 +645,11 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // garment/trim). LESS makes the base surface win forever; LEQUAL plus
         // Sequential preserves ordinary nearest-depth occlusion while making
         // the later source submesh the stable tie-breaker.
-        const uint64_t opaqueState = BGFX_STATE_WRITE_RGB
-                                   | BGFX_STATE_WRITE_A
-                                   | BGFX_STATE_WRITE_Z
-                                   | BGFX_STATE_DEPTH_TEST_LEQUAL;
-        ctx.adapter.setState(material.doubleSided
-                                 ? opaqueState
-                                 : opaqueState | BGFX_STATE_CULL_CW);
+        //
+        // §P3 M11 (2026-08-24) — routed through BGFXAdapter state preset
+        // (cutsheet red line + named state helpers preferred over inline
+        // bit assembly).
+        ctx.adapter.setStateOpaqueLEQUAL(material.doubleSided);
         ctx.adapter.setTransform(item.world);
         ctx.adapter.setVertexBuffer(mesh.vertexBuffer);
         ctx.adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,

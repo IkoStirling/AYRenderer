@@ -153,14 +153,11 @@ private:
     // Duplicate-constant is cheaper than the coupling.
     void ensureFullscreenQuad(BGFXAdapter& adapter);
 
-    // §Skybox0 (2026-07-23) — gbufferSkyRt cached binding (mirror
-    // gbufferAlbedoRt / gbufferNormalRt / gbufferMotionRt shape).
-    // LightingPass FS samples the sky FBO that SkyboxPass produces
-    // (via `ctx.skyboxPass->skyRt()`) to blend a backdrop into
-    // unlit areas. Stored here for symmetry with the other GBuffer
-    // RTs even though the actual handle comes from SkyboxPass — we
-    // don't own the FBO, just cache the lookup result for tests.
-    bgfx::TextureHandle     _gbufferSkyRt   = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    // §Skybox0 (2026-07-23) — was originally going to cache the
+    // gbufferSkyRt lookup here for test access (mirror of
+    // gbufferAlbedoRt / gbufferNormalRt). The planned test accessor
+    // never shipped; the field was orphan state (private, never
+    // read by anyone). §P3 M6 / L10 (2026-08-24) — deleted.
 
     bgfx::FrameBufferHandle _lightingFbo     = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     bgfx::VertexBufferHandle _fullscreenVB   = bgfx::VertexBufferHandle{BGFX_INVALID_HANDLE};
@@ -216,7 +213,9 @@ private:
 
     // §P5.5 D — IBL ambient cube strength (.x of ambientStrength vec4).
     // Host: Renderer::setAmbientStrength → per-frame broadcast in render().
-    float _ambientStrength = 0.6f;
+    // §P3 L12 (2026-08-24) — magic 0.6f hoisted to
+    // ayt::render::kDefaultAmbientStrength (RenderTypes.h).
+    float _ambientStrength = ayt::render::kDefaultAmbientStrength;
 };
 
 // §P5.5 B (2026-07-23) — Bug fix #3: externalize the cache-key

@@ -47,6 +47,24 @@
 namespace ayt::render::detail
 {
 
+// §P3 M12 (2026-08-24) — sky-texture bind helper. Was inline at
+// SkyboxPass::execute() with two near-identical branches (cube vs
+// equirect); hoisted so the binding-stage lookup + setTexture call
+// lives in one place. No-op when the binding is InvalidBinding (the
+// shader didn't declare that texture); the matching TextureHandle is
+// unused in that branch.
+inline void tryBindSkyTexture(ayt::shader::ShaderResource& shader,
+                              ayt::shader::BindingId binding,
+                              bgfx::TextureHandle handle)
+{
+    if (binding == ayt::shader::InvalidBinding) {
+        return;
+    }
+    const uint8_t stage = shader.getTextureStage(binding);
+    shader.setTexture(stage, binding,
+                      toShaderTexture(handle));
+}
+
 class SkyboxPass : public RenderPass {
 public:
     // §Skybox0 (2026-07-23) — view-id allocation per cutsheet

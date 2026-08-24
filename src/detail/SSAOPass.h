@@ -27,10 +27,7 @@
 // Lifetime model:
 //   - program + BindingId fields are private to this file. Acquire
 //     happens lazily on first execute() and on cache-key bump.
-//   - _noiseTex lazy-upload on first execute(). RGBA8 4×4 = 64 bytes
-//     generated procedurally (tangent-rotation look-up). Destroyed
-//     by destroyResources(); never enters FG (per cutsheet red line
-//     #6: SSAO-owned internal resources stay with the pass).
+//   - (noise texture removed in v4 — fixed kernel; §P3 M13, 2026-08-24)
 //   - SSAOTexture RT is FG-owned (lazy create-on-first-resolve;
 //     released by FrameGraph::resize / ::shutdown).
 //
@@ -116,21 +113,17 @@ private:
     ayt::shader::BindingId      _uViewportTexel   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tWorldPosition   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tWorldNormal     = ayt::shader::InvalidBinding;
-    ayt::shader::BindingId      _tNoise           = ayt::shader::InvalidBinding;
+    // §P3 M13 (2026-08-24) — _tNoise removed (fixed-kernel SSAO in v4).
 
     // Latch so a failed acquire does not re-run shaderc every frame.
     bool                        _programAcquireFailed = false;
 
-    // A3 will populate this (4×4 RGBA8 tangent-rotation noise).
-    // A1 ships it as INVALID so destroyResources() is a clean no-op.
-    bgfx::TextureHandle         _noiseTex          = BGFX_INVALID_HANDLE;
-    bool                        _noiseUploaded      = false;
-
     void ensureFullscreenQuad(BGFXAdapter& adapter);
     void ensureProgram(shader::ShaderResourcePool& pool);
-    // A3 helper — A1 ships with a body that's a no-op so the field
-    // above can be tested without needing the shader to compile.
-    void ensureNoise(BGFXAdapter& adapter);
+    // §P3 M13 (2026-08-24) — ensureNoise() removed. SSAO went to a
+    // fixed-kernel implementation in v4; the noise-texture lazy-upload
+    // path is dead. Bindings (_tNoise = InvalidBinding) and the
+    // destroy stub both go away with it.
 };
 
 // §A1 (2026-07-24) — Bug-fix-#3 mirror (same pattern as

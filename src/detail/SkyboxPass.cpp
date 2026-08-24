@@ -15,7 +15,11 @@ namespace ayt::render::detail
 // LightingPass.cpp:21 `kLightingBuildStamp`). Pointer-equal compare;
 // bumping this triggers a FBO rebuild on next execute(). Bumping
 // is safe across future Skybox cuts.
-static constexpr const char* kSkyboxBuildStamp = "sky0-2026-07-23";
+// §P3 L1 (2026-08-24) — bumped to "skybox-v3-camera-aware". Old
+// "sky0-2026-07-23" was misleading (it predates the §P5.5 D
+// camera-aware backdrop path that picks equirect vs cube via
+// ctx.skySource->kind).
+static constexpr const char* kSkyboxBuildStamp = "skybox-v3-camera-aware";
 
 // §Skybox0 (2026-07-23) — cache key literal (mirror
 // LightingPass.cpp:70-71 `kLightingCacheKey`). Pointer-equal
@@ -370,6 +374,10 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
     // doesn't include this slot at all (cutsheet §5.3 red line
     // #4 — Forward host 0 behavior change).
     if (!ctx.adapter.isInitialized() || ctx.adapter.isNoopBackend()) {
+        // §P3 L11 (2026-08-24) — rate-limited early-return
+        // diagnostic (1 line per 256 frames). Keeps the first
+        // failure loud without flooding on long-running captures.
+        rateLimitedEarlyReturn("SkyboxPass", "adapter not initialized");
         return 0;
     }
 
@@ -377,6 +385,7 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
     // called it). Mirror LightingPass.cpp:438-440 size==0
     // early-out.
     if (_skyW == 0 || _skyH == 0) {
+        rateLimitedEarlyReturn("SkyboxPass", "size==0");
         return 0;
     }
 
@@ -395,6 +404,7 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
     //      consulted below when deciding skyKind=0 vs skyKind=1.
     const ayt::render::SkySource* sky = ctx.skySource;
     if (sky == nullptr || !sky->isActive()) {
+        rateLimitedEarlyReturn("SkyboxPass", "skySource null/inactive");
         return 0;
     }
 
@@ -406,17 +416,20 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
 
     ensure(ctx.adapter, _skyW, _skyH);
     if (!bgfx::isValid(_skyFbo)) {
+        rateLimitedEarlyReturn("SkyboxPass", "skyFbo invalid");
         return 0;
     }
 
     ensureFullscreenQuad(ctx.adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
         || !BGFXAdapter::isValid(_fullscreenIB)) {
+        rateLimitedEarlyReturn("SkyboxPass", "fullscreen VB/IB invalid");
         return 0;
     }
 
     ensureProgram(ctx.pool);
     if (!_program.isValid()) {
+        rateLimitedEarlyReturn("SkyboxPass", "program not ready");
         return 0;
     }
 
@@ -436,6 +449,7 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
         const auto texIt = ctx.textures.find(sky->equirect.id);
         if (texIt == ctx.textures.end()
             || !BGFXAdapter::isValid(texIt->second.handle)) {
+            rateLimitedEarlyReturn("SkyboxPass", "equirect handle missing");
             return 0;
         }
         equirectHandle = texIt->second.handle;
@@ -449,30 +463,28 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
         const auto cubeIt = ctx.textures.find(_skyCubeTexture.id);
         if (cubeIt == ctx.textures.end()
             || !BGFXAdapter::isValid(cubeIt->second.handle)) {
+            rateLimitedEarlyReturn("SkyboxPass", "cube handle missing");
             return 0;
         }
         cubeHandle = cubeIt->second.handle;
     }
 
-    if (!cubeActive
-        && _tSkyEquirect != ayt::shader::InvalidBinding) {
-        const uint8_t stage = _program.getTextureStage(_tSkyEquirect);
-        _program.setTexture(stage, _tSkyEquirect,
-                            toShaderTexture(equirectHandle));
-    } else if (cubeActive
-               && _tSkyCube != ayt::shader::InvalidBinding) {
-        const uint8_t stage = _program.getTextureStage(_tSkyCube);
-        _program.setTexture(stage, _tSkyCube,
-                            toShaderTexture(cubeHandle));
-    }
+    // §P3 M12 (2026-08-24) - sky texture bind hoisted
+    // to tryBindSkyTexture (declared in SkyboxPass.h). The
+    // helper no-ops when the binding is InvalidBinding so the
+    // `if/else if` switch on cubeActive becomes two flat calls.
+    tryBindSkyTexture(_program, _tSkyEquirect, equirectHandle);
+    tryBindSkyTexture(_program, _tSkyCube, cubeHandle);
 
     // §Skybox0 (2026-07-23) — upload `skyMix` uniform. Default
-    // = 1.0 (full intensity). Host can override per-material via
-    // `Renderer::setMaterialVec3(material, "skyMix", v)`. Phoskia
+    // = ayt::render::kDefaultSkyMix (full intensity; hoisted to
+    // RenderTypes.h by §P3 M1, 2026-08-24). Per-frame host
+    // override happens via the uniform binding acquired here; this
+    // constant is the in-pass default, not an override. Phoskia
     // Vec4 ABI (bgfx Vec4 slot, see docs/pass-lessons-from-shadow.md
     // §3.1) — scalar in .x, pad .yzw = 0.
     if (_uSkyMix != ayt::shader::InvalidBinding) {
-        const float skyMixPad[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+        const float skyMixPad[4] = { ayt::render::kDefaultSkyMix, 0.0f, 0.0f, 0.0f };
         _program.setUniform(_uSkyMix, skyMixPad, sizeof(skyMixPad));
     }
 

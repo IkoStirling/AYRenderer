@@ -60,15 +60,18 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
     // RT/program access. V2 keeps these guards and adds the
     // per-channel sampler bind + Phoskia submit.
     if (!adapter.isInitialized()) {
+        rateLimitedEarlyReturn("GBufferDebugPass", "adapter not initialized");
         return 0;
     }
     if (adapter.isNoopBackend()) {
+        rateLimitedEarlyReturn("GBufferDebugPass", "noop backend");
         return 0;
     }
 
     const uint16_t viewportWidth  = ctx.viewportWidth;
     const uint16_t viewportHeight = ctx.viewportHeight;
     if (viewportWidth == 0 || viewportHeight == 0) {
+        rateLimitedEarlyReturn("GBufferDebugPass", "viewport==0");
         return 0;
     }
 
@@ -77,6 +80,7 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
     // allocation ⇒ 0 draw.
     const bgfx::FrameBufferHandle target = ctx.gbufferDebugFbo;
     if (!BGFXAdapter::isValid(target)) {
+        rateLimitedEarlyReturn("GBufferDebugPass", "gbufferDebugFbo invalid");
         return 0;
     }
 
@@ -84,12 +88,14 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
     // also gates on gbufferPassPtr != nullptr, so this is a
     // double-check (cutsheet §5.5 redundancy rule).
     if (ctx.gbufferPass == nullptr) {
+        rateLimitedEarlyReturn("GBufferDebugPass", "gbufferPass == nullptr");
         return 0;
     }
 
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
         || !BGFXAdapter::isValid(_fullscreenIB)) {
+        rateLimitedEarlyReturn("GBufferDebugPass", "fullscreen VB/IB invalid");
         return 0;
     }
 
@@ -101,6 +107,7 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
         && _tWorldPos     != ayt::shader::InvalidBinding
         && _tDepth        != ayt::shader::InvalidBinding;
     if (!programReady) {
+        rateLimitedEarlyReturn("GBufferDebugPass", "program not ready");
         // V1 stub: the placeholder Phoskia source is intentionally
         // never compiled (the cache-key is also a placeholder; V2
         // will lift the acquire path). Returning 0 here is
@@ -109,13 +116,22 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
         return 0;
     }
 
+    // V2-ONLY BEGIN (§P3 M10, 2026-08-24 — pinned for grep). V1
+    // returns 0 at the `return 0` above; the block below is the
+    // per-channel sampler-bind + uniform-upload + fullscreen-submit
+    // wire that V2 lights up. Tests should pin
+    // `Test_AuditP3Invariants` substring "V2-ONLY BEGIN" so a
+    // future V3 refactor that lifts V1 to live code is forced to
+    // touch this banner.
     // V2: view 250 wire + per-channel sampler bind + uniform
     // upload + fullscreen submit. V1 dead code path.
     constexpr uint8_t viewId = kGBufferDebugViewId;
     adapter.setViewFrameBuffer(viewId, target);
     adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
     adapter.setViewTransform(viewId, ctx.frame.view, ctx.frame.projection);
-    adapter.setViewClearRaw(viewId, BGFX_CLEAR_COLOR, 0x000000FF, 1.0f, 0);
+    // §P3 L7 (2026-08-24) — dropped trailing `, 1.0f, 0` (matches
+    // setViewClearRaw defaults — see BGFXAdapter.h:262).
+    adapter.setViewClearRaw(viewId, BGFX_CLEAR_COLOR, 0x000000FF);
 
     // V2: per-channel Phoskia FS. The 4 texture inputs (albedoRt
     // / normalRt / motionRt-as-worldPos / depthRt) are bound
@@ -128,18 +144,24 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
     adapter.setStateDepthTestAlways();
     _program.submit(sub);
 
-    static bool s_loggedFirst = false;
-    if (!s_loggedFirst) {
+    // §P3 M5+L2 (2026-08-24) - was one-shot (`s_loggedFirst`
+    // latch). Replaced with a rate-limited pattern (1 line per
+    // 64 frames) so the first-dispatch signal stays loud
+    // without flooding the console on long-running captures.
+    static uint32_t s_firstFrame = 0;
+    const uint32_t kFirstRateLimit = 64u;
+    if (s_firstFrame == 0 || (s_firstFrame % kFirstRateLimit) == 0) {
         std::fprintf(stderr,
-            "[GBufferDebugPass] V2 first dispatch view=%u "
+            "[GBufferDebugPass] V2 frame=%u dispatch view=%u "
             "viewport=%ux%u enabled=%d channel=%u\n",
+            s_firstFrame,
             static_cast<unsigned>(viewId),
             static_cast<unsigned>(viewportWidth),
             static_cast<unsigned>(viewportHeight),
             ctx.frame.gbufferDebugEnabled ? 1 : 0,
             static_cast<unsigned>(ctx.frame.gbufferDebugChannel));
-        s_loggedFirst = true;
     }
+    ++s_firstFrame;
     return 1;
 }
 
@@ -149,11 +171,13 @@ void GBufferDebugPass::ensureFullscreenQuad(BGFXAdapter& adapter)
         && BGFXAdapter::isValid(_fullscreenIB)) {
         return;
     }
-    // V1 ships without lazy-allocating the fullscreen quad. V2
-    // fills in the kFullscreenTriangle / kFullscreenIndices
-    // mirrors (copy from SSAOPass.cpp:22-35). The early return at
-    // the `isValid` check above keeps V1 byte-equivalent to the
-    // pre-V1 state (no draws, no allocs).
+    // V2-ONLY BEGIN (§P3 M10, 2026-08-24). V1 ships without
+    // lazy-allocating the fullscreen quad. V2 fills in the
+    // kFullscreenTriangle / kFullscreenIndices mirrors (copy from
+    // SSAOPass.cpp:22-35). The early return at the `isValid` check
+    // above keeps V1 byte-equivalent to the pre-V1 state (no
+    // draws, no allocs).
+    // §P3 M10 (2026-08-24) — V2-ONLY END.
     (void)adapter;
 }
 
@@ -170,12 +194,13 @@ void GBufferDebugPass::ensureProgram(shader::ShaderResourcePool& pool)
         return;
     }
 
-    // V1 intentionally does NOT call pool.acquire() — the
-    // placeholder Phoskia source above is a skeleton, not the
-    // real per-channel FS. V2 will replace this with the actual
-    // acquire + binding resolution block. We set
-    // _programAcquireFailed = false so V2 can run the real
-    // acquire path without tripping the latch.
+    // V2-ONLY BEGIN (§P3 M10, 2026-08-24). V1 intentionally does NOT
+    // call pool.acquire() — the placeholder Phoskia source above
+    // is a skeleton, not the real per-channel FS. V2 will replace
+    // this with the actual acquire + binding resolution block.
+    // We set _programAcquireFailed = false so V2 can run the
+    // real acquire path without tripping the latch.
+    // §P3 M10 (2026-08-24) — V2-ONLY END.
     (void)pool;
     _programAcquireFailed = true;
 }

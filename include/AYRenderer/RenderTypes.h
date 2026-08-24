@@ -399,4 +399,28 @@ inline constexpr uint32_t kSceneClearRgba = 0x191a1cffu;
 // reflection of that table.
 inline constexpr uint8_t kTransparentDeferredViewId = 9;
 
+// §P3 M4 (2026-08-24) — hoisted magic clear colors used by the
+// deferred path. The editor / composite stack expects a black
+// backdrop for the lighting output (0x000000ff = transparent black;
+// the alpha byte is preserved by bgfx's packed 0xAABBGGRR layout)
+// and a fully-zero GBuffer RT3 (the explicit geometry-coverage
+// channel starts at 0 and every successful GBuffer draw writes 1).
+// Centralizing these values here prevents bit-drift if a future
+// "match editor background" cut picks a non-black color.
+inline constexpr uint32_t kLightingClearRgba = 0x000000ffu;
+inline constexpr uint32_t kGBufferClearRgba  = 0x00000000u;
+
+// §P3 L12 (2026-08-24) — IBL ambient intensity default. Mirrored
+// from LightingPass::_ambientStrength's hard-coded initializer so a
+// future Renderer::setAmbientStrength(float) can use the same
+// value without a magic-number round-trip.
+inline constexpr float kDefaultAmbientStrength = 0.6f;
+
+// §P3 M1 (2026-08-24) — skyMix uniform default. The LightingPass
+// and SkyboxPass both upload this every frame; no per-material
+// override hook exists today (the audit caught a misleading comment
+// that claimed one did). Documenting the constant here is the
+// interim fix until a future cut ships the per-material lookup.
+inline constexpr float kDefaultSkyMix = 1.0f;
+
 } // namespace ayt::render

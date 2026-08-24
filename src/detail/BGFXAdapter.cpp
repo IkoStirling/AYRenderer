@@ -800,6 +800,23 @@ void BGFXAdapter::setStateDepthOnlyWrite()
                  | BGFX_STATE_DEPTH_TEST_LESS);
 }
 
+void BGFXAdapter::setStateOpaqueLEQUAL(bool doubleSided)
+{
+    // §P3 M11 (2026-08-24) — same bits as the inline LEQUAL block
+    // GBufferPass used to assemble. Coincident-overlay tie-breaking
+    // (face/eye/mouth, garment/trim) needs LEQUAL so the later
+    // source submesh deterministically replaces an equal-depth
+    // earlier surface; LESS makes the base surface win forever.
+    uint64_t state = BGFX_STATE_WRITE_RGB
+                   | BGFX_STATE_WRITE_A
+                   | BGFX_STATE_WRITE_Z
+                   | BGFX_STATE_DEPTH_TEST_LEQUAL;
+    if (!doubleSided) {
+        state |= BGFX_STATE_CULL_CW;
+    }
+    bgfx::setState(state);
+}
+
 void BGFXAdapter::setStateOutlineHull()
 {
     // Cull front faces (CCW in our mesh winding — mirror setStateOpaque).
