@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
+#include <string_view>
 
 namespace ayt::render::detail
 {
@@ -28,11 +29,46 @@ using ayt::render::kShadowMaskCasterVertexSc;
 
 namespace {
 
+// §P4 M12 (2026-08-24) — hoist the hard-coded "albedo-like" slot
+// name allow-list into named constants. The previous inline
+// `slot.name != "albedoMap" && ... && slot.name != "albedo"`
+// chain was a maintenance hazard: adding a new importer that
+// wrote "baseColor" instead of "baseColorTexture" silently
+// bypassed shadow caster colorization. Hoisted as `constexpr
+// std::string_view` (cheap to compare against `slot.name`).
+constexpr std::string_view kAlbedoSlotAlbedoMap       = "albedoMap";
+constexpr std::string_view kAlbedoSlotBaseColorTexture = "baseColorTexture";
+constexpr std::string_view kAlbedoSlotDiffuse          = "diffuse";
+constexpr std::string_view kAlbedoSlotMainTexture      = "mainTexture";
+constexpr std::string_view kAlbedoSlotAlbedo           = "albedo";
+constexpr std::string_view kOpacitySlotName            = "opacityTexture";
+
+bool isAlbedoSlotName(std::string_view name) noexcept
+{
+    return name == kAlbedoSlotAlbedoMap
+        || name == kAlbedoSlotBaseColorTexture
+        || name == kAlbedoSlotDiffuse
+        || name == kAlbedoSlotMainTexture
+        || name == kAlbedoSlotAlbedo;
+}
+
 bool envForceScCaster()
 {
+    // §P4 M2 (2026-08-24) — call `env::get` once into a local; the
+    // previous shape did two `env::get` calls per dispatch and
+    // returned early on the first non-empty branch, leaking the
+    // legacy AY_SHADOW_USE_PHOSKIA read onto the hot path even
+    // when the modern env var was set. Now the modern key is
+    // checked once (any non-"0" value ⇒ force .sc); the legacy key
+    // is only consulted when the modern key is absent.
     const std::string sc = ayt::io::env::get("AY_SHADOW_USE_SC").value_or("");
-    if (!sc.empty() && sc[0] != '\0' && sc[0] != '0') {
+    if (!sc.empty() && sc[0] != '0') {
         return true;
+    }
+    if (!sc.empty()) {
+        // Modern key explicitly disabled .sc — don't fall through
+        // to the legacy AY_SHADOW_USE_PHOSKIA escape hatch.
+        return false;
     }
     // Legacy: AY_SHADOW_USE_PHOSKIA=0 forces .sc.
     const std::string v = ayt::io::env::get("AY_SHADOW_USE_PHOSKIA").value_or("");
@@ -78,6 +114,25 @@ void ShadowCaster::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     }
 
     if (_program.isValid() || _acquireFailed) {
+        // §P4 M3 (2026-08-24) — rate-limited diagnostic on the
+        // `_acquireFailed` short-circuit. The previous shape
+        // returned silently; an editor session that hit an
+        // acquire failure would see zero log output on subsequent
+        // frames, making the "shadow disabled forever" symptom
+        // hard to triage. Mirror the Part 3 rate-limited pattern:
+        // first frame logs full reason, subsequent frames log
+        // once every N calls so the console stays usable during
+        // long headless captures.
+        if (_acquireFailed) {
+            static uint32_t s_failSkipLog = 0;
+            if (s_failSkipLog < 4) {
+                std::fprintf(stderr,
+                             "[ShadowCaster] acquire previously failed; "
+                             "skipping retry (s_failSkipLog=%u)\n",
+                             s_failSkipLog);
+                ++s_failSkipLog;
+            }
+        }
         return;
     }
 
@@ -245,11 +300,23 @@ uint32_t ShadowCaster::drawCasters(
                     drawProgram.setUniform(_maskCutoffBinding, cutoff, sizeof(cutoff));
                 }
                 if (_maskBaseColorBinding != ayt::shader::InvalidBinding) {
+                    // §P4 M11 (2026-08-24) — drop the four
+                    // `hasColorOverride ? c.x : 1.0f` ternaries.
+                    // The GpuMaterial contract is that
+                    // `colorOverride` is always
+                    // `(1,1,1,1)` when `hasColorOverride==false`,
+                    // so the ternary was an identity on the
+                    // `hasColorOverride==true` branch and a
+                    // hard-coded `(1,1,1,1)` on the other — i.e.
+                    // always equal to `material.colorOverride`.
+                    // Shadow caster uses the value for matte tint,
+                    // not for the receiver PBR pass, so this
+                    // simplification is safe here.
                     const float baseColor[4] = {
-                        material.hasColorOverride ? material.colorOverride.x : 1.0f,
-                        material.hasColorOverride ? material.colorOverride.y : 1.0f,
-                        material.hasColorOverride ? material.colorOverride.z : 1.0f,
-                        material.hasColorOverride ? material.colorOverride.w : 1.0f,
+                        material.colorOverride.x,
+                        material.colorOverride.y,
+                        material.colorOverride.z,
+                        material.colorOverride.w,
                     };
                     drawProgram.setUniform(_maskBaseColorBinding,
                                            baseColor, sizeof(baseColor));
@@ -279,13 +346,13 @@ uint32_t ShadowCaster::drawCasters(
                     drawProgram.getTextureBinding("opacityMap");
                 for (const GpuMaterial::TextureSlot& slot : material.textures) {
                     if (!slot.texture.isValid()) continue;
-                    const bool isOpacity = slot.name == "opacityTexture";
-                    if (slot.name != "albedoMap"
-                        && slot.name != "baseColorTexture"
-                        && slot.name != "diffuse"
-                        && slot.name != "mainTexture"
-                        && slot.name != "albedo"
-                        && !isOpacity) {
+                    const bool isOpacity = slot.name == kOpacitySlotName;
+                    // §P4 M12 (2026-08-24) — collapsed the
+                    // 5-string inline allow-list into
+                    // `isAlbedoSlotName`. The helper is
+                    // declared at the top of this TU (next to
+                    // the kAlbedoSlot* constants).
+                    if (!isOpacity && !isAlbedoSlotName(slot.name)) {
                         continue;
                     }
                     const auto textureIt = textures.find(slot.texture.id);

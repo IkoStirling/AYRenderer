@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AYRenderer/ShadowReceiverContract.h"
 #include "AYRenderer/ShadowSettings.h"
 
 #include <algorithm>
@@ -89,7 +90,15 @@ struct ShadowDepthCodec {
         const auto step = [](float edge, float x) -> float {
             return x >= edge ? 1.0f : 0.0f;
         };
-        const float cleared = step(0.999f, occluderNdc01) * step(occluderNdc01, 1.001f);
+        // §P4 L10 (2026-08-24) — use
+        // ShadowReceiverContract::kClearedOccluderMin instead
+        // of the magic 0.999f. The cleared-map sentinel
+        // belongs in one place; if someone tightens the FS
+        // threshold they shouldn't have to remember to
+        // re-sync this CPU predictor.
+        const float cleared =
+            step(ShadowReceiverContract::kClearedOccluderMin, occluderNdc01)
+            * step(occluderNdc01, 1.001f);
         const float inShadow = step(occluderNdc01 + shadowBias, refNdc01);
         const float compared = 1.0f - inShadow;
         return std::fmax(compared, cleared);

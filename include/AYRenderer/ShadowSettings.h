@@ -17,10 +17,21 @@ struct ShadowSettings {
     static constexpr float kLitMin   = 0.20f;
     static constexpr float kLitScale = 0.65f;
 
-    static constexpr const char* kPipelineBuildStamp = "v14-material-surface-contract";
-    // v6: Phoskia skeletal lowering now emits backend-safe mul(matrix, vec4)
-    // for the shadow caster's skinningMatrix expansion.
-    static constexpr const char* kCasterCacheKey     = "shadow_caster_phoskia_v6_surface";
+    // §P4 L5 (2026-08-24) — bumped v14 → v15 to invalidate
+    // any FBO + resolve texture already cached by
+    // ShadowMapResources::ensure (the build stamp is the
+    // invalidation key for `_buildStamp != buildStamp`). The
+    // audit patches ShadowMapResources with new
+    // rate-limited diagnostics + L4's `kProbeLogLimit` for the
+    // resolve-fail log; downstream consumers shouldn't see
+    // stale FBO handles across the bump.
+    static constexpr const char* kPipelineBuildStamp = "v15-shadow-diag-bump";
+    // §P4 L6 (2026-08-24) — bumped v6 → v7 to invalidate the
+    // shader cache for ShadowCaster after the audit patches:
+    // M2 env::get consolidation, M3 rate-limited acquire-fail
+    // diagnostic, M11 colorOverride ternary removal, M12
+    // slot-name helper hoisting.
+    static constexpr const char* kCasterCacheKey     = "shadow_caster_phoskia_v7_audit_p4";
 };
 
 // Legacy names — keep until all call sites migrate (Phase 6 cleanup).

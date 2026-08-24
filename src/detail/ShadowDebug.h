@@ -228,7 +228,12 @@ inline void logShadowPassCpuDiag(
 
     static uint32_t s_frames = 0;
 
-    if (s_frames >= 5) {
+    // §P4 L2 (2026-08-24) — replace the magic 5 with
+    // ShadowDiagnostics::kProbeLogLimit (= 5, matches). The
+    // constant is the canonical "verbose probe" log limit and
+    // was the source of the magic number in the first place.
+    if (s_frames
+        >= ayt::render::ShadowDiagnostics::kProbeLogLimit) {
 
         return;
 

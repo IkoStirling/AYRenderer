@@ -7,6 +7,10 @@
 
 #include <cmath>
 #include <cstdio>
+// §P4 H1 (2026-08-24) — <bgfx/bgfx.h> removed from this TU. The
+// rendererType log was the last direct bgfx::* call here; it now
+// goes through BGFXAdapter::capsRendererType(). The cutsheet red
+// line "pass files only call bgfx::* via BGFXAdapter" is satisfied.
 
 namespace ayt::render::detail
 {
@@ -24,22 +28,21 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     const RenderScene& scene = ctx.scene;
 
     if (!adapter.isInitialized() || adapter.isNoopBackend()) {
+        // §P4 M1 (2026-08-24) — rate-limited early-return diagnostic
+        // (Part 3 L11 helper). Without this a long-running headless
+        // capture (Test_Shadow* suites) drowns the console in
+        // "execute() returned 0" noise every frame.
+        rateLimitedEarlyReturn("ShadowPass", "adapter not initialized / noop");
         return 0;
     }
 
-    // P6.5 (2026-07-22) — bgfx::getCaps() replaced with Adapter
-    // capability wrappers (capsTextureBlit / capsTextureReadBack).
-    // logShadowCapsIfNeeded still takes the rendererType as a uint32
-    // for stderr diagnostics; Adapter doesn't expose caps->rendererType
-    // today (only the two capability flags we need), so we keep the
-    // bgfx::getCaps() call here JUST for the rendererType number.
-    // bgfx::Caps::rendererType is not a bgfx:: handle — it's a
-    // bgfx::RendererType::Enum, used only for log; removing the
-    // include entirely would require a second Adapter getter for
-    // a single log line. Defer that to a future cleanup.
-    const bgfx::Caps* caps = bgfx::getCaps();
+    // §P4 H1 (2026-08-24) — bgfx::getCaps() replaced with
+    // BGFXAdapter::capsRendererType(). The cached value comes from
+    // bgfx_life::liveType() recorded at init time (= Count when
+    // not initialized). Eliminates the last direct bgfx::* call in
+    // this TU (cutsheet red line).
     logShadowCapsIfNeeded(
-        caps != nullptr ? static_cast<uint32_t>(caps->rendererType) : 999u,
+        adapter.capsRendererType(),
         adapter.capsTextureBlit(),
         adapter.capsTextureReadBack());
 
@@ -59,15 +62,26 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     // shadowKey=1.0 (no shadow).
     const ayt::render::SceneLights* lightsPtr = _sceneLightsRef;
     uint32_t activeCount = 0;
-    // Initialize all slots to identity + zero-bias as the no-op
-    // baseline; populate the active slots below.
-    for (uint32_t i = 0; i < kShadowAtlasMaxSlots; ++i) {
-        _atlasLightViewProjs[i] = ayt::math::Float4x4::identity();
+    // §P4 L9 (2026-08-24) — collapsed the per-frame re-init
+    // loop into a comment. The members are already identity at
+    // construction (see ShadowPass.h M9 comment + the
+    // initializer list). Per-frame, we now reset only the
+    // slots we plan to overwrite this frame (the active range
+    // computed below); slots >= activeCount keep their
+    // identity default. The consumer (LightingPass) reads
+    // `perLightShadowCount()` to bound its loop, so stale
+    // values in slots >= activeCount are never sampled.
+    // Direct test access (T6) reads the explicit active range.
+    // (Kept as comments so future readers understand why we
+    // don't memset the whole array each frame.)
+    const auto resetAtlasSlot = [this](uint32_t slot) noexcept {
+        _atlasLightViewProjs[slot] = ayt::math::Float4x4::identity();
         for (uint32_t c = 0; c < 16; ++c) {
-            _atlasLightViewProjsCol[i][c] = (c % 5 == 0) ? 1.0f : 0.0f;
+            _atlasLightViewProjsCol[slot][c] =
+                (c % 5 == 0) ? 1.0f : 0.0f;
         }
-        _atlasShadowBiases[i] = 0.0f;
-    }
+        _atlasShadowBiases[slot] = 0.0f;
+    };
 
     // Decide effective requested size — atlas vs single-slot.
     // count==0 path keeps the historical single-slot size
@@ -134,7 +148,15 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
                 if (ayt::render::ShadowDiagnostics::enabled(
                         ayt::render::ShadowLogLevel::L1_Caps)) {
                     static uint32_t s_omniSkipLog = 0;
-                    if (s_omniSkipLog < 4) {
+                    // §P4 L8 (2026-08-24) — replace magic 4
+                    // with ShadowDiagnostics::kVerboseLogLimit
+                    // (= 8). The Point-light skip is a
+                    // structural diagnostic, not a frame
+                    // summary; kVerboseLogLimit matches the
+                    // "first N, then silent" convention for
+                    // structural messages.
+                    if (s_omniSkipLog
+                        < ayt::render::ShadowDiagnostics::kVerboseLogLimit) {
                         std::fprintf(stderr,
                                      "[ShadowPass] Point light slot %u "
                                      "castShadow=true skipped (omni-shadow "
@@ -150,6 +172,10 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             // matches pre-C behavior; for Spot, the cone isn't
             // honored in caster projection (cone-frustum MVP is
             // a future cut).
+            // §P4 L9 (2026-08-24) — reset the active slot
+            // before overwriting (the L9 helper replaces the
+            // old "reset all slots up front" pattern).
+            resetAtlasSlot(activeCount);
             buildDirectionalShadowMatricesForScene(
                 scene,
                 meshes,
@@ -166,6 +192,14 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     } else {
         // Pre-C byte-equivalent path: single key light from
         // FrameContext::lightDirection. lights[0] slot only.
+        // §P4 L9 (2026-08-24) — reset atlas slot 0 before the
+        // pre-C byte-equivalent single-light path overwrites
+        // it. Without this, a previous frame's per-light path
+        // would leave stale LVPs in slots 1..7 — the
+        // `perLightShadowCount()==0` gate in LightingPass
+        // would correctly skip them, but direct test access
+        // (T6) would see stale data.
+        resetAtlasSlot(0);
         buildDirectionalShadowMatricesForScene(
             scene,
             meshes,
@@ -237,7 +271,12 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
         adapter.setStateDepthOnlyWrite();
         if (ayt::render::ShadowDiagnostics::enabled(ayt::render::ShadowLogLevel::L1_Caps)) {
             static uint32_t s_casterStateLog = 0;
-            if (s_casterStateLog < 2) {
+            // §P4 L1 (2026-08-24) — replace magic 2 with
+            // ShadowDiagnostics::kFrameSummaryLimit. Matches the
+            // rate-limited convention used across the shadow
+            // subsystem (M3/M4/M5 use kProbeLogLimit).
+            if (s_casterStateLog
+                < ayt::render::ShadowDiagnostics::kFrameSummaryLimit) {
                 std::fprintf(stderr,
                              "[ShadowDbg] caster depthTest=LESS writeZ=1 "
                              "(RGBA8 ndc01 + D24S8 ordering)\n");

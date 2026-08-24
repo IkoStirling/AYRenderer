@@ -22,19 +22,23 @@ ShadowAtlasLayout computeShadowAtlasLayout(const ShadowAtlasConfig& cfg)
         return out;  // subRects stays all-zero, gridCols/gridRows stay 0
     }
 
-    // Pick a roughly-square grid: rows = ceil(sqrt(N)),
-    // cols = ceil(N / rows). This minimizes aspect-ratio skew on
-    // the sub-rects (cube-like) and keeps the shader's atlas
-    // UV math readable. Worked examples:
+    // §P4 M7+M8 (2026-08-24) — pick a roughly-square grid with the
+    // canonical near-square formula: rows = floor(sqrt(N)),
+    // cols = ceil(N / rows). The previous `rows = ceil(sqrt(N))`
+    // produced a 3x3 grid with one empty slot for N=8 (sqrt(8)≈2.83
+    // → rows=3 → cols=ceil(8/3)=3 → 9 slots, one empty). The new
+    // formula yields the desired 2x4 grid for N=8.
+    // Worked examples:
     //   N=1 → rows=1, cols=1
     //   N=2 → rows=1, cols=2
     //   N=4 → rows=2, cols=2
     //   N=8 → rows=2, cols=4  ← §P5.5 C default
     const float nF = static_cast<float>(n);
     const uint32_t rows = static_cast<uint32_t>(
-        std::ceil(std::sqrt(nF)));
+        std::floor(std::sqrt(nF)));
+    const float rowsF = static_cast<float>(std::max(rows, 1u));
     const uint32_t cols = static_cast<uint32_t>(
-        std::ceil(nF / static_cast<float>(rows)));
+        std::ceil(nF / rowsF));
     out.gridRows = rows;
     out.gridCols = cols;
 

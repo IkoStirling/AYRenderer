@@ -148,8 +148,14 @@ void main()
 }
 )";
 
+// §P4 L7 (2026-08-24) — bumped v3 → v4 to invalidate the
+// shader cache for the mask caster after the audit patches
+// (M11 colorOverride ternary removal changes the uniform
+// payload, even though the FS source is unchanged). Pinned
+// here rather than in ShadowSettings because the mask caster
+// uses its own Phoskia/`.sc` switch path.
 inline constexpr const char* kShadowMaskCasterCacheKey =
-    "shadow_mask_caster_sc_v3_opacity_source_channel";
+    "shadow_mask_caster_sc_v4_audit_p4_coloroverride";
 
 // Lit receiver — ABI matches verified hand .sc (all lighting/bias as vec4,
 // swizzle .xyz / .x). Unrolled 3x3 PCF + in-map gate.

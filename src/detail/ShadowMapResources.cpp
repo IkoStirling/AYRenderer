@@ -1,5 +1,7 @@
 #include "detail/ShadowMapResources.h"
 
+#include "AYRenderer/ShadowDiagnostics.h"
+
 #include <cstdio>
 
 namespace ayt::render::detail
@@ -56,7 +58,12 @@ bool ShadowMapResources::resolveForSampling(BGFXAdapter& adapter, uint8_t resolv
     // readback tools — FO samples _color directly.
     adapter.setViewFrameBuffer(resolveViewId, BGFX_INVALID_HANDLE);
     adapter.setViewRect(resolveViewId, 0, 0, _size, _size);
-    adapter.setViewClearRaw(resolveViewId, BGFX_CLEAR_NONE, 0, 1.0f, 0);
+    // §P4 L7 (2026-08-24) — CLEAR_NONE doesn't read the
+    // depth/stencil args. The `1.0f, 0` trailer was a leftover
+    // from copy-paste of the caster-view CLEAR_COLOR|DEPTH
+    // pattern. Drop them for clarity (matches the Part 3
+    // SkyboxPass clear-none cleanup).
+    adapter.setViewClearRaw(resolveViewId, BGFX_CLEAR_NONE);
     _lastBlitOk = adapter.blitTexture(resolveViewId, _resolve, color, _size, _size);
     return _lastBlitOk;
 }
@@ -79,7 +86,13 @@ void ShadowMapResources::ensureResolve(BGFXAdapter& adapter,
     _resolve = adapter.createBlitDstTexture2D(size, size);
     if (!BGFXAdapter::isValid(_resolve)) {
         static uint32_t s_resolveFailLog = 0;
-        if (s_resolveFailLog < 2) {
+        // §P4 L4 (2026-08-24) — use the ShadowDiagnostics
+        // `kProbeLogLimit` constant instead of the magic `2`.
+        // Matches the rate-limited convention used across the
+        // shadow subsystem (ShadowCaster uses
+        // kVerboseLogLimit = 8).
+        if (s_resolveFailLog
+            < ayt::render::ShadowDiagnostics::kProbeLogLimit) {
             std::fprintf(stderr,
                          "[ShadowMapResources] resolve tex create failed %ux%u "
                          "(FO samples color RT directly; blit optional)\n",
@@ -95,6 +108,21 @@ void ShadowMapResources::ensure(BGFXAdapter& adapter,
                                 const char* buildStamp)
 {
     if (!adapter.isInitialized() || size == 0) {
+        // §P4 M4 (2026-08-24) — rate-limited diagnostic on the
+        // silent early-return. The previous shape returned
+        // without logging; an editor session starting with bgfx
+        // not initialized would silently skip shadow FBO
+        // creation forever. Mirror the Part 3 rate-limited
+        // pattern: first frame logs full reason.
+        static uint32_t s_ensureSkipLog = 0;
+        if (s_ensureSkipLog < 4) {
+            std::fprintf(stderr,
+                         "[ShadowMapResources] ensure() skipped: "
+                         "initialized=%d size=%u\n",
+                         adapter.isInitialized() ? 1 : 0,
+                         static_cast<unsigned>(size));
+            ++s_ensureSkipLog;
+        }
         return;
     }
 
@@ -121,6 +149,25 @@ void ShadowMapResources::ensure(BGFXAdapter& adapter,
     if (BGFXAdapter::isValid(_fbo)) {
         _size = size;
         cacheColorAttachment(adapter);
+    } else {
+        // §P4 M5 (2026-08-24) — rate-limited diagnostic on
+        // FBO-create failure. The previous shape was silent;
+        // ShadowPass already logged "FBO create failed at
+        // %ux%u" but ShadowMapResources itself gave no
+        // signal. Mirror the Part 3 rate-limited pattern.
+        static uint32_t s_fboCreateFailLog = 0;
+        if (s_fboCreateFailLog
+            < ayt::render::ShadowDiagnostics::kProbeLogLimit) {
+            std::fprintf(stderr,
+                         "[ShadowMapResources] color+depth FBO create "
+                         "failed at %ux%u (capsTextureBlit=%d, "
+                         "capsTextureReadBack=%d)\n",
+                         static_cast<unsigned>(size),
+                         static_cast<unsigned>(size),
+                         adapter.capsTextureBlit() ? 1 : 0,
+                         adapter.capsTextureReadBack() ? 1 : 0);
+            ++s_fboCreateFailLog;
+        }
     }
     ensureResolve(adapter, size, buildStamp);
 }

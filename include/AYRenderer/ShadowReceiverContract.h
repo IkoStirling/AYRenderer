@@ -39,6 +39,20 @@ struct ShadowReceiverContract {
     static constexpr std::string_view kShadowPcfName     = "shadowPcf";
     static constexpr uint8_t          kShadowSamplerStage = 1;
 
+    // §P4 L12 (2026-08-24) — kClearedOccluderMin is the
+    // sentinel for "no occluder in this pixel ⇒ fully lit".
+    // ShadowMapResources clears the shadow color RT to
+    // 0xffffffff (RGBA8 = 1.0 in every channel) before each
+    // caster pass; depth values stored in .r are therefore
+    // exactly 1.0 in any pixel the caster never touched.
+    // The shader compares `occluder.r >= kClearedOccluderMin`
+    // to short-circuit "lit" without sampling depth. 0.999
+    // (vs the more obvious 0.9999 or 1.0) leaves headroom
+    // for half-precision FS round-off when shadow casts are
+    // RGBA8-encoded depths. Tightening this to >= 1.0 would
+    // cause self-shadow acne on the first frame after a
+    // shadowPass clear (RGBA8 round-off makes the encoded
+    // "1.0" actually 0.99853...).
     static constexpr float kClearedOccluderMin = 0.999f;
     static constexpr float kDefaultBias = ShadowSettings::kBiasDefault;
 

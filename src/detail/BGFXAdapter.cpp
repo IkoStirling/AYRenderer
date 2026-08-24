@@ -914,6 +914,16 @@ bool BGFXAdapter::capsTextureReadBack() const noexcept
     return caps != nullptr && (caps->supported & BGFX_CAPS_TEXTURE_READ_BACK) != 0;
 }
 
+// §P4 H1 (2026-08-24) — return the cached bgfx::RendererType
+// recorded at init time. Shadows consumed this via bgfx::getCaps()
+// directly until H1 closed the cutsheet red line. The Count
+// sentinel from `bgfx_life::liveType()` is returned for an
+// uninitialized adapter (matches the prior "999u" fallback).
+uint32_t BGFXAdapter::capsRendererType() const noexcept
+{
+    return static_cast<uint32_t>(bgfx_life::liveType());
+}
+
 void BGFXAdapter::setViewClearRaw(uint8_t viewId, uint16_t flags,
                                   uint32_t rgba, float depth, uint8_t stencil)
 {

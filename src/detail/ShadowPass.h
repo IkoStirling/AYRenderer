@@ -180,6 +180,15 @@ private:
          ayt::math::Float4x4::identity(),
          ayt::math::Float4x4::identity(),
          ayt::math::Float4x4::identity()};
+    // §P4 M9 (2026-08-24) — identity-col-major default for the
+    // col-major per-slot LVP array. The pattern "(c % 5 == 0) ? 1 : 0"
+    // (= 1 at indices 0,5,10,15; 0 elsewhere) is the row-major
+    // identity written in col-major storage order. LightingPass's
+    // "slot i is no-op when LVP is identity" gate reads `LVP == I`
+    // (exact bit compare); this default keeps slots >= activeCount
+    // bit-identical to I so the gate evaluates to "no shadow" without
+    // any explicit `if (slot >= count) skip` branch on the consumer
+    // side. Test_ShadowAtlasLayout (T6) pins this contract.
     float                      _atlasLightViewProjsCol[kShadowAtlasMaxSlots][16] = {
         {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
         {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},

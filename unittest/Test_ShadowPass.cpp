@@ -309,26 +309,28 @@ TEST_CASE(r5plus_bgfxaadapter_pass_side_helpers_noop_safe) {
 // regressions (e.g. someone changing rows=ceil(sqrt(N)) to a
 // different heuristic that breaks sub-rect UV computation in
 // LightingPass).
-TEST_CASE(shadow_pass_atlas_layout_default_3x3_grid_for_8_slots) {
+TEST_CASE(shadow_pass_atlas_layout_default_2x4_grid_for_8_slots) {
     using namespace ayt::render::detail;
     ShadowAtlasConfig cfg{4096, 8};
     ShadowAtlasLayout layout = computeShadowAtlasLayout(cfg);
     CHECK(layout.slotCount == 8u);
     CHECK(layout.atlasSize == 4096u);
-    // N=8 ⇒ rows=ceil(sqrt(8))=3, cols=ceil(8/3)=3
-    CHECK(layout.gridCols == 3u);
-    CHECK(layout.gridRows == 3u);
+    // §P4 M7 (2026-08-24) — bumped rows=ceil(sqrt(8))=3 →
+    // floor(sqrt(8))=2 ⇒ 2×4 grid (was 3×3 with one empty slot).
+    // cols=ceil(8/2)=4.
+    CHECK(layout.gridCols == 4u);
+    CHECK(layout.gridRows == 2u);
     // Slot 0 lands in the top-left tile (col=0, row=0):
-    //   u0=0, v0=0, u1=1/3, v1=1/3
+    //   u0=0, v0=0, u1=1/4, v1=1/2
     CHECK(layout.subRects[0][0] == 0.0f);
     CHECK(layout.subRects[0][1] == 0.0f);
-    CHECK_FLOAT_EQ(layout.subRects[0][2], 1.0f / 3.0f, 1e-5f);
-    CHECK_FLOAT_EQ(layout.subRects[0][3], 1.0f / 3.0f, 1e-5f);
-    // Slot 7 lands in col=1, row=2 (slot/cols = 7/3 = 2 rem 1):
-    //   u0=1/3, v0=2/3, u1=2/3, v1=1.0
-    CHECK_FLOAT_EQ(layout.subRects[7][0], 1.0f / 3.0f, 1e-5f);
-    CHECK_FLOAT_EQ(layout.subRects[7][1], 2.0f / 3.0f, 1e-5f);
-    CHECK_FLOAT_EQ(layout.subRects[7][2], 2.0f / 3.0f, 1e-5f);
+    CHECK_FLOAT_EQ(layout.subRects[0][2], 1.0f / 4.0f, 1e-5f);
+    CHECK_FLOAT_EQ(layout.subRects[0][3], 1.0f / 2.0f, 1e-5f);
+    // Slot 7 lands in col=7%4=3, row=7/4=1 (slot/cols = 7/4 = 1 rem 3):
+    //   u0=3/4, v0=1/2, u1=1.0, v1=1.0
+    CHECK_FLOAT_EQ(layout.subRects[7][0], 3.0f / 4.0f, 1e-5f);
+    CHECK_FLOAT_EQ(layout.subRects[7][1], 1.0f / 2.0f, 1e-5f);
+    CHECK(layout.subRects[7][2] == 1.0f);
     CHECK(layout.subRects[7][3] == 1.0f);
 }
 
@@ -354,19 +356,18 @@ TEST_CASE(shadow_pass_atlas_subrects_within_unit_square) {
 
 TEST_CASE(shadow_pass_atlas_slot_pixel_rects_default) {
     using namespace ayt::render::detail;
-    // Default 4096 atlas, 8 slots, 3×3 grid ⇒ each slot is
-    // 1365×1365 (atlasSize/cols × atlasSize/rows, integer
-    // truncation — floor division; the last column/row absorbs the
-    // remainder).
+    // §P4 M7 (2026-08-24) — bumped 3×3 → 2×4 grid (was 4096/3
+    // ≈ 1365 × 1365 per slot). Now 4096/4 = 1024 wide ×
+    // 4096/2 = 2048 tall per slot — each slot is 1024×2048.
     ShadowAtlasLayout layout = computeShadowAtlasLayout(
         ShadowAtlasConfig{4096, 8});
     const ShadowAtlasPixelRect r0 = shadowAtlasSlotPixelRect(layout, 0);
     CHECK(r0.x == 0);    CHECK(r0.y == 0);
-    CHECK(r0.w == 1365); CHECK(r0.h == 1365);
+    CHECK(r0.w == 1024); CHECK(r0.h == 2048);
     const ShadowAtlasPixelRect r7 = shadowAtlasSlotPixelRect(layout, 7);
-    // col = 7 % 3 = 1, row = 7 / 3 = 2
-    CHECK(r7.x == 1365); CHECK(r7.y == 2730);
-    CHECK(r7.w == 1365); CHECK(r7.h == 1365);
+    // col = 7 % 4 = 3, row = 7 / 4 = 1
+    CHECK(r7.x == 3072); CHECK(r7.y == 2048);
+    CHECK(r7.w == 1024); CHECK(r7.h == 2048);
 }
 
 TEST_CASE(shadow_pass_per_light_shadow_count_zero_default) {
@@ -375,17 +376,18 @@ TEST_CASE(shadow_pass_per_light_shadow_count_zero_default) {
     // identity baseline.
     ayt::render::detail::ShadowPass sp;
     CHECK(sp.perLightShadowCount() == 0u);
-    // atlas config defaults — 4096 + 8 slots, 3×3 grid for N=8.
+    // atlas config defaults — 4096 + 8 slots, §P4 M7 2×4 grid
+    // for N=8 (was 3×3 with one empty slot).
     CHECK(sp.atlasConfig().atlasSize == 4096u);
     CHECK(sp.atlasConfig().slotCount == 8u);
-    CHECK(sp.atlasLayout().gridCols == 3u);
-    CHECK(sp.atlasLayout().gridRows == 3u);
-    // Sub-rects for slot 0 = (0, 0, 1/3, 1/3)
+    CHECK(sp.atlasLayout().gridCols == 4u);
+    CHECK(sp.atlasLayout().gridRows == 2u);
+    // Sub-rects for slot 0 = (0, 0, 1/4, 1/2)
     const float* rects = sp.atlasSubRects();
     CHECK(rects[0] == 0.0f);
     CHECK(rects[1] == 0.0f);
-    CHECK_FLOAT_EQ(rects[2], 1.0f / 3.0f, 1e-5f);
-    CHECK_FLOAT_EQ(rects[3], 1.0f / 3.0f, 1e-5f);
+    CHECK_FLOAT_EQ(rects[2], 1.0f / 4.0f, 1e-5f);
+    CHECK_FLOAT_EQ(rects[3], 1.0f / 2.0f, 1e-5f);
     // Per-slot LVP[0] = identity (col-major float[16]).
     const float* lvps = sp.atlasLightViewProjsColumnMajor();
     CHECK(lvps[0] == 1.0f);   // (0,0) = 1

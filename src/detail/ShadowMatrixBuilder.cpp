@@ -77,6 +77,18 @@ void expandItemBounds(ShadowSceneBounds& bounds,
     }
 }
 
+// §P4 L11 (2026-08-24) — documented the LH-ortho contract for
+// the default editor/play bounds. The bounds here are
+// hand-tuned for a 10×2.5×10 box centered at (0, 0.5, 0) in
+// AYMath left-handed world space (camera looks down +Z;
+// +Y is up; +X is right). The downstream lh::lookAt +
+// lh::ortho (LH convention) reads these bounds as
+// axis-aligned corners — see `buildFromBoundsInternal` for
+// the LH/Z+ view+proj setup. Don't swap these to a right-
+// handed (RH) value set without also migrating
+// `buildDirectionalShadowMatricesForScene` to the rh::
+// namespace (see cutsheet "保持左手系" / "将手性坐标移入
+// rh 命名空间下").
 ShadowSceneBounds defaultEditorPlayBounds()
 {
     ShadowSceneBounds bounds{};

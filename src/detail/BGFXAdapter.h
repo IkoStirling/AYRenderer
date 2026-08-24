@@ -249,6 +249,12 @@ public:
     bool capsHomogeneousDepth() const noexcept;
     bool capsTextureBlit() const noexcept;
     bool capsTextureReadBack() const noexcept;
+    // §P4 H1 (2026-08-24) — cached rendererType getter. Returns
+    // bgfx::RendererType::Count when the adapter is not initialized
+    // (= `bgfx_life::liveType()` initial value, sentinel for "no live
+    // bgfx"). Eliminates the last direct `bgfx::getCaps()` call in
+    // ShadowPass.cpp (cutsheet red line).
+    uint32_t capsRendererType() const noexcept;
 
     void setViewClearRaw(uint8_t viewId, uint16_t flags,
                          uint32_t rgba = 0,
