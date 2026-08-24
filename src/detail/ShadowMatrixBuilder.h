@@ -23,8 +23,7 @@ ShadowSceneBounds computeShadowSceneBounds(
     const std::unordered_map<uint64_t, GpuMesh>& meshes);
 
 // Scene-fitted directional shadow matrices (AYMath lh:: — engine LH
-// convention, [0,1] depth clip space; `homogeneousDepth` retained for
-// ABI symmetry but is implicit because the engine is LH).
+// convention, [0,1] depth clip space).
 void buildDirectionalShadowMatricesForScene(
     const RenderScene& scene,
     const std::unordered_map<uint64_t, GpuMesh>& meshes,
@@ -34,8 +33,7 @@ void buildDirectionalShadowMatricesForScene(
     ayt::math::Float4x4& outViewProj,
     float outViewColMajor[16],
     float outProjColMajor[16],
-    float outViewProjColMajor[16],
-    bool homogeneousDepth);
+    float outViewProjColMajor[16]);
 
 // Test / fallback entry when bounds are supplied directly.
 void buildDirectionalShadowMatricesFromBounds(
@@ -46,7 +44,6 @@ void buildDirectionalShadowMatricesFromBounds(
     ayt::math::Float4x4& outViewProj,
     float outViewColMajor[16],
     float outProjColMajor[16],
-    float outViewProjColMajor[16],
-    bool homogeneousDepth);
+    float outViewProjColMajor[16]);
 
 } // namespace ayt::render::detail

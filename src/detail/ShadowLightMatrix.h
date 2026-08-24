@@ -15,9 +15,8 @@ namespace ayt::render::detail
 
 // Fixed-radius orthographic frustum centered at `focus`, looking along
 // `lightDirection` (travel direction, same as setDirectionalLight).
-// `homogeneousDepth` is retained for ABI symmetry with previous bx-based
-// callers; the engine convention is LH so the result always uses [0,1]
-// depth clip space (D3D-style). Unit tests may pass any value.
+// Engine convention is LH (AYMath/MathUtils.h lh::) so depth clip space
+// is always [0, 1] (D3D-style) regardless of the live bgfx backend.
 void buildDirectionalShadowMatrices(
     const ayt::math::FVector3& lightDirection,
     ayt::math::Float4x4& outView,
@@ -27,7 +26,6 @@ void buildDirectionalShadowMatrices(
     float outProjColMajor[16],
     float outViewProjColMajor[16],
     ayt::math::FVector3 focus = ayt::math::FVector3(0.0f, 0.0f, 0.0f),
-    float radius = 50.0f,
-    bool homogeneousDepth = false);
+    float radius = 50.0f);
 
 } // namespace ayt::render::detail

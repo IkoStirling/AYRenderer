@@ -54,8 +54,7 @@ TEST_CASE(scene_fit_ortho_maps_ground_depth_to_ndc01)
         viewProj,
         viewCol,
         projCol,
-        lvpCol,
-        /*homogeneousDepth=*/false);
+        lvpCol);
 
     const ShadowProjectSample ground =
         projectWorldThroughLvpColMajor(lvpCol, FVector3(0.0f, 0.0f, 0.0f));
@@ -92,8 +91,7 @@ TEST_CASE(scene_fit_depth_in_valid_clip_range_for_scene_points)
         viewProj,
         viewCol,
         projCol,
-        lvpCol,
-        false);
+        lvpCol);
 
     const FVector3 probes[] = {
         FVector3(0.0f, 0.85f, 0.0f),

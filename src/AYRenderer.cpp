@@ -29,6 +29,8 @@
 #include "detail/UIPass.h"
 #include "AYRenderer/UIRenderBackend.h"
 
+#include "AYMath/CoordinateConvention.h"
+
 #include "AYShader/ShaderResourcePool.h"
 #include "AYResource/ResourceManager.h"
 
@@ -650,6 +652,26 @@ bool Renderer::initialize(const InitDesc& desc)
     if (_impl->adapter.isInitialized()) {
         return true;
     }
+
+    // Engine coordinate-convention sanity. CoordinateConvention.h bakes the
+    // contract (LH / Y-up / Z-forward / CCW / V-top) as a static_assert on
+    // every TU that includes it; here we re-verify at runtime so the check
+    // survives across the linker boundary (the static_assert can be defeated
+    // by a stale cached .obj). Bail loudly in debug; release stays quiet
+    // because the contract is fixed at compile time and the cost of a
+    // spurious failure on a deployed build outweighs the diagnostic value.
+#ifndef NDEBUG
+    if (!ayt::math::EngineCoordinateConvention::validate()) {
+        std::fprintf(stderr,
+                     "[Renderer] FATAL: EngineCoordinateConvention::validate() "
+                     "failed at runtime; cacheTag='%s'.\n"
+                     "[Renderer]   Someone edited CoordinateConvention.h and "
+                     "broke the engine contract. Restore LH / Y-up / Z-forward "
+                     "/ CCW / V-top or bump cacheTag.\n",
+                     ayt::math::EngineCoordinateConvention::cacheTag);
+        std::abort();
+    }
+#endif
 
     detail::BGFXInitParams bgfxParams;
     bgfxParams.nativeWindowHandle = desc.windowHandle;

@@ -20,8 +20,7 @@ void buildDirectionalShadowMatrices(
     float outProjColMajor[16],
     float outViewProjColMajor[16],
     ayt::math::FVector3 focus,
-    float radius,
-    bool /*homogeneousDepth*/)
+    float radius)
 {
     if (radius <= 0.0f) {
         radius = 50.0f;
@@ -45,10 +44,10 @@ void buildDirectionalShadowMatrices(
         up = ayt::math::FVector3(0.0f, 0.0f, 1.0f);
     }
 
-    // Engine convention is LH (see AYMath/MathUtils.h lh::). Shadow maps
-    // therefore use [0,1] depth clip space (D3D-style homogeneousDepth).
-    // The legacy `homogeneousDepth` parameter is kept for ABI symmetry;
-    // bgfx::getCaps()->homogeneousDepth == true is implicit.
+    // Engine convention is LH (see AYMath/MathUtils.h lh::) → [0,1] depth
+    // clip space (D3D-style homogeneousDepth), regardless of the live
+    // bgfx backend. If a GL backend is ever enabled, configure bgfx's
+    // shader to expect [0,1] instead of doing the conversion here.
     outView = ayt::math::lh::lookAt(eye, focus, up);
     outProj = ayt::math::lh::ortho(-radius, radius,
                                    -radius, radius,

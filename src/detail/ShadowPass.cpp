@@ -159,8 +159,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
                 _lightViewProj,    // tmp scratch
                 _atlasLightViewProjsCol[activeCount],
                 _lightProjCol,
-                _lightViewProjCol,
-                homogeneousDepth);
+                _lightViewProjCol);
             _atlasShadowBiases[activeCount] = L.shadowBias;
             ++activeCount;
         }
@@ -176,8 +175,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             _lightViewProj,
             _lightViewCol,
             _lightProjCol,
-            _lightViewProjCol,
-            homogeneousDepth);
+            _lightViewProjCol);
         _atlasLightViewProjs[0] = _lightView;
         for (uint32_t c = 0; c < 16; ++c) {
             _atlasLightViewProjsCol[0][c] = _lightViewProjCol[c];

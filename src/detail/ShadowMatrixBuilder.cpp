@@ -95,8 +95,7 @@ void buildFromBoundsInternal(
     ayt::math::Float4x4& outViewProj,
     float outViewColMajor[16],
     float outProjColMajor[16],
-    float outViewProjColMajor[16],
-    bool /*homogeneousDepth*/)
+    float outViewProjColMajor[16])
 {
     ShadowSceneBounds bounds = boundsIn.valid ? boundsIn : defaultEditorPlayBounds();
 
@@ -215,8 +214,7 @@ void buildDirectionalShadowMatricesForScene(
     ayt::math::Float4x4& outViewProj,
     float outViewColMajor[16],
     float outProjColMajor[16],
-    float outViewProjColMajor[16],
-    bool homogeneousDepth)
+    float outViewProjColMajor[16])
 {
     ShadowSceneBounds bounds = computeShadowSceneBounds(scene, meshes);
     if (!bounds.valid) {
@@ -229,8 +227,7 @@ void buildDirectionalShadowMatricesForScene(
                             outViewProj,
                             outViewColMajor,
                             outProjColMajor,
-                            outViewProjColMajor,
-                            homogeneousDepth);
+                            outViewProjColMajor);
 }
 
 void buildDirectionalShadowMatricesFromBounds(
@@ -241,8 +238,7 @@ void buildDirectionalShadowMatricesFromBounds(
     ayt::math::Float4x4& outViewProj,
     float outViewColMajor[16],
     float outProjColMajor[16],
-    float outViewProjColMajor[16],
-    bool homogeneousDepth)
+    float outViewProjColMajor[16])
 {
     buildFromBoundsInternal(bounds,
                             lightDirection,
@@ -251,8 +247,7 @@ void buildDirectionalShadowMatricesFromBounds(
                             outViewProj,
                             outViewColMajor,
                             outProjColMajor,
-                            outViewProjColMajor,
-                            homogeneousDepth);
+                            outViewProjColMajor);
 }
 
 } // namespace ayt::render::detail
