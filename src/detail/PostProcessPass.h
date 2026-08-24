@@ -257,4 +257,12 @@ private:
 // PostProcessPass.cpp as the canonical definition.
 extern const char* const kPostProcessCacheKeyCStr;
 
+// §P5 L3 (2026-08-24) — color-format constant extern. Pre-L3 the
+// color format was an inline `bgfx::TextureFormat::RGBA8` literal
+// inside ensureFbo(); a future sRGB post-process pass flipping the
+// format would have to grep the .cpp. Now the enum value is named
+// (kPostProcessColorFormat) and exported via this extern so tests
+// can pin the choice against the live enum value.
+extern const bgfx::TextureFormat::Enum kPostProcessColorFormat;
+
 } // namespace ayt::render::detail

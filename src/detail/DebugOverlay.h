@@ -2,6 +2,8 @@
 
 #include "AYRenderer/RenderTypes.h"
 
+#include <bgfx/bgfx.h>
+
 #include <chrono>
 #include <cstdint>
 #include <array>
@@ -42,6 +44,15 @@ private:
     std::array<float, kFrameWindow> _frameTimes{};
     size_t _frameTimeCount = 0;
     size_t _frameTimeCursor = 0;
+    // §P5 M5 (2026-08-24) — cached bgfx::Stats pointer set by
+    // sampleBgfxStats() (called from onFrameSubmitted). Used by
+    // onEndFrame() to read triPrims without a second
+    // bgfx::getStats() call (bgfx::getStats() is cheap but the
+    // duplicated call was untidy and the cache makes the "stats
+    // come from one place per frame" contract explicit). Cleared
+    // to nullptr on resetStats() so a stale pointer can't outlive
+    // a frame.
+    const bgfx::Stats* _lastBgfxStats = nullptr;
 };
 
 } // namespace ayt::render::detail

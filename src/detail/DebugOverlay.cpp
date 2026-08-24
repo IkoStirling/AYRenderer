@@ -50,6 +50,9 @@ void DebugOverlay::resetStats()
     _frameTimes.fill(0.0f);
     _frameTimeCount = 0;
     _frameTimeCursor = 0;
+    // §P5 M5 (2026-08-24) — clear the cached stats pointer on
+    // reset so a stale pointer can't survive a frame boundary.
+    _lastBgfxStats = nullptr;
 }
 
 void DebugOverlay::pushFrameCadence(float frameMs)
@@ -126,6 +129,12 @@ float ticksToMs(int64_t begin, int64_t end, int64_t frequency)
 void DebugOverlay::sampleBgfxStats()
 {
     const bgfx::Stats* bgfxStats = bgfx::getStats();
+    // §P5 M5 (2026-08-24) — cache the pointer so onEndFrame()
+    // can read triPrims (and any future stats) without a second
+    // bgfx::getStats() call. bgfx::getStats() is cheap but the
+    // duplicated call was untidy; the cache makes the "stats
+    // come from one place per frame" contract explicit.
+    _lastBgfxStats = bgfxStats;
     if (bgfxStats == nullptr) {
         return;
     }
@@ -179,7 +188,10 @@ void DebugOverlay::onEndFrame(uint32_t drawCalls, uint32_t sceneItems,
     const uint16_t row = static_cast<uint16_t>(viewportY / kCellH);
 
     uint32_t triPrims = 0;
-    const bgfx::Stats* bgfxStats = bgfx::getStats();
+    // §P5 M5 (2026-08-24) — read from cached pointer set by
+    // sampleBgfxStats() (called from onFrameSubmitted earlier in
+    // the frame). Avoids a second bgfx::getStats() call.
+    const bgfx::Stats* bgfxStats = _lastBgfxStats;
     if (bgfxStats != nullptr) {
         triPrims = bgfxStats->numPrims[bgfx::Topology::TriList]
                  + bgfxStats->numPrims[bgfx::Topology::TriStrip];

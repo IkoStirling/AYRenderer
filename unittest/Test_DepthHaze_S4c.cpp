@@ -139,10 +139,13 @@ constexpr const char* kS4cExpectedSubstrings[] = {
 
 // Mirror the live cache-key literal after the pre-hazed bump.
 // §A3 SSAO MVP (2026-07-24) — bumped v5 → v6 to add ssaoTexture
-// + ssaoStrength composite gate. Drift detection guard (mirror
-// must match the file-scope literal in PostProcessPass.cpp).
+// + ssaoStrength composite gate.
+// §P5 L1 (2026-08-24) — bumped v7 → v8_audit_p5 to invalidate
+// the shader cache after the rate-limited logging refactor.
+// Drift detection guard (mirror must match the file-scope
+// literal in PostProcessPass.cpp).
 constexpr const char* kExpectedS4cCacheKey =
-    "postprocess_tonemap_aces_v7_ssao_blur5_fs";
+    "postprocess_tonemap_aces_v8_audit_p5_ssao_blur5_fs";
 
 // Mirror of PostProcessPass.cpp's kPostProcessPhoskiaSource — uses
 // DepthHazePass's already-mixed RGB (no re-fog from alpha).
@@ -280,17 +283,18 @@ TEST_CASE(s4c_finalpp_inlined_source_has_canonical_substrings) {
 TEST_CASE(s4c_finalpp_cache_key_literal_pinned) {
     // §A3 SSAO MVP (2026-07-24) — §S4 pre-hazed composite was v5;
     // A3 bumps to v6 to incorporate ssaoTexture + ssaoStrength.
-    // Mirror catches drift (Bug-fix-#3) on FS changes that forget
-    // to bump.
+    // §P5 L1 (2026-08-24) — bumped v7 → v8_audit_p5 after the
+    // rate-limited logging refactor. Mirror catches drift
+    // (Bug-fix-#3) on FS changes that forget to bump.
     CHECK(std::string(kExpectedS4cCacheKey)
-          == "postprocess_tonemap_aces_v7_ssao_blur5_fs");
+          == "postprocess_tonemap_aces_v8_audit_p5_ssao_blur5_fs");
 }
 
 TEST_CASE(s4c_finalpp_cache_key_extern_addressable) {
     // §S4c §A3 — Bug fix #3 mirror. Extern in PostProcessPass.h
     // must bind to the file-scope literal in PostProcessPass.cpp.
     // A3 v6 cache-key bump inserts the ssao composite gate.
-    const char* const mirror = "postprocess_tonemap_aces_v7_ssao_blur5_fs";
+    const char* const mirror = "postprocess_tonemap_aces_v8_audit_p5_ssao_blur5_fs";
     CHECK(std::string(ayt::render::detail::kPostProcessCacheKeyCStr)
           == std::string(mirror));
 }

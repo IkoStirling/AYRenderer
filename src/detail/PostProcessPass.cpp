@@ -6,6 +6,7 @@
 #include "detail/GpuResources.h"
 #include "detail/GBufferPass.h"
 #include "detail/LightingPass.h"
+#include "detail/RenderPass.h"     // §P5 (2026-08-24) — rateLimitedEarlyReturn helper
 
 #include "AYShader/ShaderResource.h"
 
@@ -145,7 +146,18 @@ material PostProcess {
 }
 )";
 
-constexpr const char* kPostProcessCacheKey = "postprocess_tonemap_aces_v7_ssao_blur5_fs";
+// §P5 L1 (2026-08-24) — bumped v7 → v8_audit_p5 to invalidate
+// the shader cache after the rate-limited logging refactor (M1+M2
+// + M3 + M4). Consumers can't tell when the cache needs bumping
+// from the bare v7 suffix; the audit-p5 marker documents the
+// source event that triggered the bump. Kept the trailing
+// "ssao_blur5_fs" tag so Test_SSAO_A3's substring check still
+// pins the SSAO composite marker.
+constexpr const char* kPostProcessCacheKey =
+    "postprocess_tonemap_aces_v8_audit_p5_ssao_blur5_fs";
+
+// (kPostProcessColorFormat is defined below alongside
+// kPostProcessCacheKeyCStr — see §P5 L3 in this file.)
 
 // Fallback if primary program fails to acquire — same tonemap+gamma
 // contract so Editor composite does not go black / linear-washed.
@@ -256,6 +268,15 @@ constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough
 // MUST live at file scope inside the `ayt::render::detail`
 // namespace so the extern declaration in PostProcessPass.h finds it.
 const char* const kPostProcessCacheKeyCStr = kPostProcessCacheKey;
+// §P5 L3 (2026-08-24) — extern definition for kPostProcessColorFormat
+// (header declares `extern const bgfx::TextureFormat::Enum
+// kPostProcessColorFormat`; the `constexpr` above gives the value
+// but isn't a separate storage location that an `extern` reference
+// can bind to without ODR-use ambiguity in older MSVC. Pinning it
+// here as a `const` definition gives tests a single addressable
+// symbol; the value is identical to the constexpr.)
+const bgfx::TextureFormat::Enum kPostProcessColorFormat =
+    bgfx::TextureFormat::RGBA8;
 
 uint32_t PostProcessPass::execute(PassExecContext& ctx)
 {
@@ -278,6 +299,10 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     // (the FBO path inside ensureFbo would otherwise race against
     // bgfx::createFrameBuffer with no init context).
     if (!adapter.isInitialized()) {
+        // §P5 M3 (2026-08-24) — rate-limited log so a stuck
+        // pipeline doesn't silently produce black frames for hours.
+        rateLimitedEarlyReturn("PostProcessPass",
+                               "adapter not initialized");
         return 0;
     }
     if (adapter.isNoopBackend()) {
@@ -289,10 +314,21 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         // Test_CaptureScreenshot path. Skip the pass entirely here:
         // it preserves the P0 contract (post-process is opt-in via
         // FrameContext knobs; default values = no-op image).
+        // §P5 M3 (2026-08-24) — rate-limited log on the Noop path
+        // (was silent; the host couldn't tell from a black viewport
+        // whether the pipeline was actually drawing or stuck on the
+        // Noop early-return).
+        rateLimitedEarlyReturn("PostProcessPass",
+                               "noop backend — post-process skipped");
         return 0;
     }
 
     if (viewportWidth == 0 || viewportHeight == 0) {
+        // §P5 M3 (2026-08-24) — rate-limited log; zero-dim viewport
+        // is a legitimate state (panel collapsed) but a sustained
+        // zero during a normal frame is a pipeline regression.
+        rateLimitedEarlyReturn("PostProcessPass",
+                               "zero viewport");
         return 0;
     }
 
@@ -312,12 +348,23 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     // new shader, no new uniform path.
     const bgfx::FrameBufferHandle sourceFbo = selectSourceFbo(ctx);
     if (!BGFXAdapter::isValid(sourceFbo)) {
+        // §P5 M3 (2026-08-24) — rate-limited log on the
+        // selectSourceFbo invalid path. Both deferred and forward
+        // paths can produce this when their producers aren't
+        // mounted yet (startup race); a sustained invalid is a
+        // render-graph regression.
+        rateLimitedEarlyReturn("PostProcessPass",
+                               "sourceFbo invalid");
         return 0;
     }
 
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
         || !BGFXAdapter::isValid(_fullscreenIB)) {
+        // §P5 M3 (2026-08-24) — rate-limited log; fullscreen-quad
+        // VB/IB create-fail is rare but should leave a trail.
+        rateLimitedEarlyReturn("PostProcessPass",
+                               "fullscreen quad VB/IB invalid");
         return 0;
     }
     ensureProgram(pool);
@@ -349,6 +396,10 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
 
     const bgfx::TextureHandle fboColor = adapter.getFboAttachment(sourceFbo, 0);
     if (!BGFXAdapter::isValid(fboColor)) {
+        // §P5 M3 (2026-08-24) — rate-limited log; missing color
+        // attachment on a mounted FBO is a producer-side bug.
+        rateLimitedEarlyReturn("PostProcessPass",
+                               "sourceFbo color attachment invalid");
         return 0;
     }
 
@@ -367,6 +418,13 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     adapter.setViewClearRaw(viewId, BGFX_CLEAR_NONE, 0, 1.0f, 0);
 
     if (!programReady) {
+        // §P5 M1 (2026-08-24) — kept the always-loud first-time
+        // FATAL log (the very first occurrence is the signal that
+        // something is wrong; it must not be suppressed), but
+        // added a rate-limited periodic log so a sustained missing-
+        // program state during long headless captures isn't silent.
+        // rateLimitedEarlyReturn fires on frame==0 then every 256
+        // frames — the helper handles suppression.
         static bool s_loggedMissing = false;
         if (!s_loggedMissing) {
             std::fprintf(stderr,
@@ -374,6 +432,8 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
                 "(Game View may be black). Check Phoskia acquire errors above.\n");
             s_loggedMissing = true;
         }
+        rateLimitedEarlyReturn("PostProcessPass",
+                               "no blit program — Phoskia acquire failed");
         return 0;
     }
 
@@ -546,6 +606,13 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
             frame.timeSeconds);
         s_loggedSubmit = true;
     }
+    // §P5 M2 (2026-08-24) — periodic re-log via the shared
+    // rate-limited helper so blit-state drift over many frames
+    // (sampler flip-flop, fallback→pong→fallback) leaves a trail.
+    // The verbose per-frame payload above is suppressed after the
+    // first frame; this fires on frame==0 then every 256 frames
+    // to confirm post-process is still alive.
+    rateLimitedEarlyReturn("PostProcessPass", "blit submitted");
     return 1;
 }
 
@@ -564,7 +631,7 @@ void PostProcessPass::ensureFbo(BGFXAdapter& adapter, uint16_t width, uint16_t h
     }
 
     _fbo = adapter.createFrameBuffer(width, height,
-                                      bgfx::TextureFormat::RGBA8,
+                                      kPostProcessColorFormat,
                                       /*withDepth=*/true);
     if (BGFXAdapter::isValid(_fbo)) {
         _fboWidth  = width;
@@ -572,6 +639,11 @@ void PostProcessPass::ensureFbo(BGFXAdapter& adapter, uint16_t width, uint16_t h
     } else {
         _fboWidth  = 0;
         _fboHeight = 0;
+        // §P5 M4 (2026-08-24) — rate-limited log on FBO create
+        // failure (was unconditional fprintf; sustained failure
+        // under a resize storm would spam stderr at frame rate).
+        rateLimitedEarlyReturn("PostProcessPass",
+                               "FBO create failed (post-process disabled)");
         std::fprintf(stderr,
                      "[PostProcessPass] FBO create failed at %ux%u; "
                      "post-process disabled for this run\n",

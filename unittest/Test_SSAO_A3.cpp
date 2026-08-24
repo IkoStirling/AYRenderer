@@ -16,7 +16,8 @@
 //      * step(0.0001, strength), 0, 1) — byte-equivalent to v5
 //      when strength = 0
 //   4) PostProcessPass FS contains `texture2d ssaoTexture` (slot 3)
-//   5) kPostProcessCacheKeyCStr bumped v5 → v6 (Bug-fix-#3 mirror)
+//   5) kPostProcessCacheKeyCStr bumped v5 → v6 (Bug-fix-#3 mirror),
+//      then v7 5-tap blur, then §P5 L1 v7 → v8_audit_p5
 //   6) SSAOPass::isReady() reflects program + noise upload
 //   7) FrameContext ssaoEnabled/ssaoStrength already exercised by
 //      A1 tests; A3 verifies the composite is wired into PP
@@ -55,10 +56,15 @@ TEST_CASE(a3_ssao_cache_key_bumped_v4) {
     CHECK(key.find("_v4_") != std::string::npos);
 }
 
-TEST_CASE(a3_post_process_cache_key_bumped_v7) {
+TEST_CASE(a3_post_process_cache_key_bumped_v8_audit_p5) {
     // §A3 — v6 SSAO sample → v7 5-tap SSAO blur in composite.
+    // §P5 L1 (2026-08-24) — bumped v7 → v8_audit_p5 after the
+    // rate-limited logging refactor. The "ssao" substring is
+    // still in the key (the bump is documented as audit-p5, not
+    // ssao-related); the substring check pins that the bump
+    // didn't accidentally drop the SSAO marker.
     const std::string key(ayt::render::detail::kPostProcessCacheKeyCStr);
-    CHECK(key.find("v7_") != std::string::npos);
+    CHECK(key.find("v8_audit_p5") != std::string::npos);
     CHECK(key.find("ssao") != std::string::npos);
 }
 
