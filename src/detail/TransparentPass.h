@@ -12,7 +12,7 @@ namespace ayt::render::detail
 {
 
 // U1 — third concrete RenderPass subclass. Filters scene.items()
-// for `material.blendMode == BlendMode::Alpha` and submits them with
+// for transparent material blend modes and submits them with
 // BGFX_STATE_BLEND_ALPHA so the alpha-blended geometry composites
 // over the opaque result.
 //

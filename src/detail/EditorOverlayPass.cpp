@@ -1,4 +1,5 @@
 #include "detail/EditorOverlayPass.h"
+#include "detail/RasterConvention.h"
 
 #include "detail/GpuResources.h"
 #include "detail/ShadowPass.h"
@@ -183,16 +184,15 @@ uint32_t EditorOverlayPass::execute(PassExecContext& ctx)
     adapter.setViewTransform(viewId, frame.view, frame.projection);
     adapter.setViewClearRaw(viewId, BGFX_CLEAR_NONE, 0, 1.0f, 0);
 
-    adapter.setState(BGFX_STATE_WRITE_RGB
-                   | BGFX_STATE_WRITE_A
-                   | BGFX_STATE_BLEND_ALPHA
-                   | BGFX_STATE_DEPTH_TEST_ALWAYS
-                   | BGFX_STATE_CULL_CW);
-
     std::stable_sort(outlineItems.begin(), outlineItems.end(), SortKeyDescending{});
 
     uint32_t drawCount = 0;
     for (const DrawItem* pItem : outlineItems) {
+        adapter.setState(BGFX_STATE_WRITE_RGB
+                       | BGFX_STATE_WRITE_A
+                       | BGFX_STATE_BLEND_ALPHA
+                       | BGFX_STATE_DEPTH_TEST_ALWAYS
+                       | cullBackFacesForTransform(pItem->world));
         if (submitOutlineItem(adapter, ctx, frame, *pItem, viewId)) {
             ++drawCount;
         }

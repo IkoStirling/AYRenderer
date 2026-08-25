@@ -1,4 +1,5 @@
 #include "detail/BGFXAdapter.h"
+#include "detail/RasterConvention.h"
 #include "detail/BgfxMatrix.h"
 
 #include "AYMath/MathTypes.h"
@@ -773,7 +774,7 @@ void BGFXAdapter::setStateOpaque()
                  | BGFX_STATE_WRITE_A
                  | BGFX_STATE_WRITE_Z
                  | BGFX_STATE_DEPTH_TEST_LESS
-                 | BGFX_STATE_CULL_CW);
+                 | kCullBackFaces);
 }
 
 void BGFXAdapter::setStateAlphaBlend()
@@ -782,7 +783,7 @@ void BGFXAdapter::setStateAlphaBlend()
                  | BGFX_STATE_WRITE_A
                  | BGFX_STATE_BLEND_ALPHA
                  | BGFX_STATE_DEPTH_TEST_LESS
-                 | BGFX_STATE_CULL_CW);
+                 | kCullBackFaces);
 }
 
 void BGFXAdapter::setStateDepthTestAlways()
@@ -800,7 +801,7 @@ void BGFXAdapter::setStateDepthOnlyWrite()
                  | BGFX_STATE_DEPTH_TEST_LESS);
 }
 
-void BGFXAdapter::setStateOpaqueLEQUAL(bool doubleSided)
+void BGFXAdapter::setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding)
 {
     // §P3 M11 (2026-08-24) — same bits as the inline LEQUAL block
     // GBufferPass used to assemble. Coincident-overlay tie-breaking
@@ -812,14 +813,14 @@ void BGFXAdapter::setStateOpaqueLEQUAL(bool doubleSided)
                    | BGFX_STATE_WRITE_Z
                    | BGFX_STATE_DEPTH_TEST_LEQUAL;
     if (!doubleSided) {
-        state |= BGFX_STATE_CULL_CW;
+        state |= reverseWinding ? kCullFrontFaces : kCullBackFaces;
     }
     bgfx::setState(state);
 }
 
 void BGFXAdapter::setStateOutlineHull()
 {
-    // Cull front faces (CCW in our mesh winding — mirror setStateOpaque).
+    // Cull front faces — mirror the normal kCullBackFaces state.
     // Inverted hull: only expanded back faces contribute.
     //
     // Forward opaque uses DEPTH_TEST_LESS (setStateOpaque). Inverted hull
@@ -828,7 +829,7 @@ void BGFXAdapter::setStateOutlineHull()
     bgfx::setState(BGFX_STATE_WRITE_RGB
                  | BGFX_STATE_WRITE_A
                  | BGFX_STATE_DEPTH_TEST_GREATER
-                 | BGFX_STATE_CULL_CCW);
+                 | kCullFrontFaces);
 }
 
 bgfx::FrameBufferHandle BGFXAdapter::createBorrowedColorDepthFrameBuffer(

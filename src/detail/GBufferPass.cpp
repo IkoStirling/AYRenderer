@@ -3,6 +3,7 @@
 #include "AYRenderer/RenderTypes.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/FrameContext.h"
+#include "detail/RasterConvention.h"
 #include "detail/RenderPass.h"
 
 #include <algorithm>
@@ -397,7 +398,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // Alpha glass must not write albedo/depth here — otherwise it
         // shows as solid cyan and steals depth from real opaques.
         // TransparentPass composites Alpha after Lighting.
-        if (material.blendMode == ayt::render::BlendMode::Alpha) {
+        if (ayt::render::isTransparentBlendMode(material.blendMode)) {
             ++skippedTransparent;
             continue;
         }
@@ -654,7 +655,8 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // §P3 M11 (2026-08-24) — routed through BGFXAdapter state preset
         // (cutsheet red line + named state helpers preferred over inline
         // bit assembly).
-        ctx.adapter.setStateOpaqueLEQUAL(material.doubleSided);
+        ctx.adapter.setStateOpaqueLEQUAL(
+            material.doubleSided, reversesWinding(item.world));
         ctx.adapter.setTransform(item.world);
         ctx.adapter.setVertexBuffer(mesh.vertexBuffer);
         ctx.adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,

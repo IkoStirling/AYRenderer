@@ -1,4 +1,5 @@
 #include "detail/TransparentPass.h"
+#include "detail/RasterConvention.h"
 #include "detail/GpuResources.h"
 #include "detail/ShadowPass.h"
 #include "detail/LightingPass.h"
@@ -89,7 +90,7 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
         return result;
     }
 
-    if (material.blendMode != ayt::render::BlendMode::Alpha) {
+    if (!ayt::render::isTransparentBlendMode(material.blendMode)) {
         result.skip = true;
         return result;
     }
@@ -263,7 +264,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         if (matIt == ctx.materials.end()) {
             continue;
         }
-        if (matIt->second.blendMode != ayt::render::BlendMode::Alpha) {
+        if (!ayt::render::isTransparentBlendMode(matIt->second.blendMode)) {
             continue;
         }
         sortedItems.push_back(&item);
@@ -319,12 +320,17 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
                            | BGFX_STATE_WRITE_A
                            | (depthAlways ? BGFX_STATE_DEPTH_TEST_ALWAYS
                                           : BGFX_STATE_DEPTH_TEST_LEQUAL);
-        state |= material.premultipliedAlpha
-            ? BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE,
-                                    BGFX_STATE_BLEND_INV_SRC_ALPHA)
-            : BGFX_STATE_BLEND_ALPHA;
+        if (material.blendMode == ayt::render::BlendMode::Additive) {
+            state |= BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE,
+                                           BGFX_STATE_BLEND_ONE);
+        } else {
+            state |= material.premultipliedAlpha
+                ? BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE,
+                                        BGFX_STATE_BLEND_INV_SRC_ALPHA)
+                : BGFX_STATE_BLEND_ALPHA;
+        }
         if (!material.doubleSided) {
-            state |= BGFX_STATE_CULL_CW;
+            state |= cullBackFacesForTransform(pItem->world);
         }
         adapter.setState(state);
 

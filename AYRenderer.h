@@ -108,7 +108,7 @@ public:
 
     // U1 — material-level blend mode. Default = Opaque for all
     // materials created before this PR (no behavior change). Set to
-    // BlendMode::Alpha to make TransparentPass submit this material
+    // A transparent BlendMode (Alpha/Additive) makes TransparentPass submit it.
     // with BGFX_STATE_BLEND_ALPHA in its second-pass slot. No-op on
     // unknown handle.
     void setMaterialBlendMode(MaterialHandle material, BlendMode blendMode);
@@ -131,7 +131,8 @@ public:
     void setMainCamera(const ayt::math::Float4x4& view,
                        const ayt::math::Float4x4& projection);
 
-    // Build view/proj with bgfx/bx conventions (homogeneous depth, left-handed).
+    // Build a left-handed view/projection pair. fovYDegrees is expressed in
+    // degrees for compatibility with the original bx-backed API.
     void setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,
                                         const ayt::math::FVector3& at,
                                         const ayt::math::FVector3& up,

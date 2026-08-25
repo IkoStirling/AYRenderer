@@ -1,4 +1,5 @@
 #include "detail/ForwardOpaquePass.h"
+#include "detail/RasterConvention.h"
 
 #include "AYRenderer/RenderTypes.h"
 #include "detail/FrameContext.h"
@@ -262,7 +263,7 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
 
     // §P2 M7 (2026-08-24) — `setStateOpaque()` here was dead: the per-draw
     // state rebuild at the bottom of the loop overrides it on every
-    // iteration (doubleSided toggles CULL_CW). Removed.
+    // iteration (doubleSided toggles back-face culling). Removed.
 
     uint32_t drawCount = 0;
 
@@ -318,9 +319,9 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
             }
         }
 
-        // P0.4 (2026-07-20) — skip BlendMode::Alpha. TransparentPass
+        // P0.4 (2026-07-20) — skip transparent blend modes. TransparentPass
         // already draws Alpha materials (it gates on
-        // `material.blendMode == BlendMode::Alpha`). Without this
+        // `isTransparentBlendMode(material.blendMode)`). Without this
         // skip, Alpha items are submitted TWICE per frame:
         //   1) ForwardOpaquePass — WRITE_RGB|WRITE_A|WRITE_Z,
         //      so the alpha pixels are written to the depth buffer
@@ -334,7 +335,7 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         //      on real GPU backends and pinches throughput on all.
         // ForwardOpaquePass owns Opaque only; the pass name is the
         // contract. See docs/execution-plan.md §1.2 + §P0.4.
-        if (material.blendMode == ayt::render::BlendMode::Alpha) {
+        if (ayt::render::isTransparentBlendMode(material.blendMode)) {
             continue;
         }
 
@@ -344,7 +345,7 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
                                    | BGFX_STATE_DEPTH_TEST_LEQUAL;
         adapter.setState(material.doubleSided
                              ? opaqueState
-                             : opaqueState | BGFX_STATE_CULL_CW);
+                             : opaqueState | cullBackFacesForTransform(item.world));
 
         const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
         if (drawRange.indexCount == 0) {

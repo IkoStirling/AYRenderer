@@ -106,12 +106,13 @@ const PosColorVertex kCubeVertices[] = {
 };
 
 const uint16_t kCubeIndices[] = {
-    0, 1, 2, 1, 3, 2,
-    4, 6, 5, 5, 6, 7,
-    0, 2, 4, 4, 2, 6,
-    1, 5, 3, 5, 7, 3,
-    0, 4, 1, 4, 5, 1,
-    2, 3, 6, 3, 7, 6,
+    // Canonical engine convention: CW front faces, CULL_CCW back faces.
+    0, 2, 1, 1, 2, 3,
+    4, 5, 6, 5, 7, 6,
+    0, 4, 2, 4, 6, 2,
+    1, 3, 5, 5, 3, 7,
+    0, 1, 4, 4, 1, 5,
+    2, 6, 3, 3, 6, 7,
 };
 
 bool pathExists(const std::string& path)
@@ -354,7 +355,7 @@ int main()
             ayt::math::FVector3(0.0f, 0.0f,  0.0f),
             ayt::math::FVector3(0.0f, 1.0f,  0.0f));
         const ayt::math::Float4x4 proj = ayt::math::lh::perspective(
-            60.0f, aspect, 0.1f, 100.0f);
+            ayt::math::radians(60.0f), aspect, 0.1f, 100.0f);
 
         float viewCol[16];
         float projCol[16];
@@ -376,7 +377,7 @@ int main()
         bgfx::setVertexBuffer(0, vbh);
         bgfx::setIndexBuffer(ibh);
         bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z
-                     | BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_CULL_CW);
+                     | BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_CULL_CCW);
         bgfx::submit(0, program);
 
         bgfx::frame();

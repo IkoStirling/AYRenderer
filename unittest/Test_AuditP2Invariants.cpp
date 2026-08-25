@@ -95,6 +95,16 @@ TEST_CASE(borrowed_fbo_get_attachment_on_invalid_returns_invalid) {
 
 TEST_SUITE_END
 
+TEST_SUITE(MaterialBlendFunctionContract)
+
+TEST_CASE(additive_material_uses_the_transparent_route) {
+    CHECK(ayt::render::isTransparentBlendMode(BlendMode::Alpha));
+    CHECK(ayt::render::isTransparentBlendMode(BlendMode::Additive));
+    CHECK_FALSE(ayt::render::isTransparentBlendMode(BlendMode::Opaque));
+}
+
+TEST_SUITE_END
+
 // ─────────────────────────────────────────────────────────────────────
 // T2 — SortKeyDescending + stable_sort behavior (M4 sort filter)
 // ─────────────────────────────────────────────────────────────────────

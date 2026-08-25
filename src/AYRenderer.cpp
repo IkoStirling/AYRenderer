@@ -3,6 +3,7 @@
 #include "AYRenderer/F1DiagFlags.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/BgfxMatrix.h"
+#include "detail/CameraMath.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
 #include "detail/DepthHazePass.h"  // S4b (2026-07-23) — borrowed-ptr source for PassExecContext::depthHazePass + destroyResources.
@@ -2427,8 +2428,14 @@ void Renderer::setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,
     // surfaces LH Float4x4; BGFXAdapter::setViewTransform converts to
     // column-major bytes at the GPU upload boundary.
     const ayt::math::Float4x4 view = ayt::math::lh::lookAt(eye, at, up);
-    const ayt::math::Float4x4 proj = ayt::math::lh::perspective(
-        fovYDegrees, aspect, nearZ, farZ);
+    // Keep the public API compatible with the old bx::mtxProj call: callers
+    // provide degrees, while AYMath projection helpers intentionally accept
+    // radians. Passing degrees through directly can make tan(fov/2) negative
+    // (for the Editor default 50 degrees), flipping both clip-space X and Y
+    // and producing an incorrect focal length.
+    const ayt::math::Float4x4 proj =
+        detail::makeLeftHandedPerspectiveDegrees(
+            fovYDegrees, aspect, nearZ, farZ);
 
     _impl->mainCameraPosition = eye;
     setMainCamera(view, proj);

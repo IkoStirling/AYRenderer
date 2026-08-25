@@ -3,6 +3,7 @@
 #include "AYRenderer/ShadowConfig.h"
 #include "AYRenderer/ShadowDiagnostics.h"
 #include "AYRenderer/ShadowShaderSources.h"
+#include "detail/RasterConvention.h"
 #include "detail/RenderPass.h"
 
 #include <bgfx/bgfx.h>
@@ -234,7 +235,7 @@ uint32_t ShadowCaster::drawCasters(
         // Transparent surfaces do not cast by default. This avoids opaque
         // rectangular cards in the shadow map; an explicit translucent
         // shadow model can be introduced as a separate material feature.
-        if (material.blendMode == ayt::render::BlendMode::Alpha) {
+        if (ayt::render::isTransparentBlendMode(material.blendMode)) {
             continue;
         }
         const bool alphaMask = material.alphaCutout;
@@ -384,9 +385,10 @@ uint32_t ShadowCaster::drawCasters(
 
             ayt::shader::DrawCallContext sub;
             sub.viewId = viewId;
-            sub.state  = material.doubleSided
-                ? (casterState & ~BGFX_STATE_CULL_MASK)
-                : casterState;
+            sub.state = casterState & ~BGFX_STATE_CULL_MASK;
+            if (!material.doubleSided) {
+                sub.state |= cullBackFacesForTransform(item.world);
+            }
             drawProgram.submit(sub);
         } else {
             adapter.submit(viewId,

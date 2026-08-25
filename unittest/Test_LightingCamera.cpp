@@ -1,6 +1,9 @@
 #include "AYRenderer.h"
 #include "AYTest.h"
+#include "detail/CameraMath.h"
+#include "detail/RasterConvention.h"
 
+#include <cmath>
 #include <iostream>
 #include <string>
 #include <sys/stat.h>
@@ -33,6 +36,41 @@ bool fileExists(const std::string& path)
 } // namespace
 
 TEST_SUITE(RenderLightingCameraTests)
+
+TEST_CASE(lh_clockwise_front_faces_cull_counter_clockwise_backs)
+{
+    using namespace ayt::render::detail;
+
+    CHECK(kCullBackFaces == BGFX_STATE_CULL_CCW);
+    CHECK(kCullFrontFaces == BGFX_STATE_CULL_CW);
+    CHECK((kCullBackFaces & BGFX_STATE_CULL_MASK) != 0u);
+    CHECK((kCullFrontFaces & BGFX_STATE_CULL_MASK) != 0u);
+    CHECK(kCullBackFaces != kCullFrontFaces);
+
+    ayt::math::Float4x4 mirrored = ayt::math::Float4x4::identity();
+    mirrored.row[0].x = -1.0f;
+    CHECK_FALSE(reversesWinding(ayt::math::Float4x4::identity()));
+    CHECK(reversesWinding(mirrored));
+    CHECK(cullBackFacesForTransform(mirrored) == kCullFrontFaces);
+    CHECK(cullFrontFacesForTransform(mirrored) == kCullBackFaces);
+}
+
+TEST_CASE(camera_projection_converts_public_degrees_to_aymath_radians)
+{
+    constexpr float fovYDegrees = 50.0f;
+    constexpr float aspect = 16.0f / 9.0f;
+
+    const ayt::math::Float4x4 projection =
+        ayt::render::detail::makeLeftHandedPerspectiveDegrees(
+            fovYDegrees, aspect, 0.1f, 100.0f);
+    const float expectedY = 1.0f / std::tan(
+        ayt::math::radians(fovYDegrees) * 0.5f);
+
+    CHECK(std::fabs(projection.row[1].y - expectedY) < 1.0e-5f);
+    CHECK(std::fabs(projection.row[0].x - expectedY / aspect) < 1.0e-5f);
+    CHECK(projection.row[0].x > 0.0f);
+    CHECK(projection.row[1].y > 0.0f);
+}
 
 TEST_CASE(frame_uniforms_allow_rotated_cube_draw)
 {

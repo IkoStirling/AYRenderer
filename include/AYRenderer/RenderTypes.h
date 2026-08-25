@@ -28,7 +28,13 @@ enum class Backend : uint8_t {
 enum class BlendMode : uint8_t {
     Opaque = 0,  // default: no blending, depth-write
     Alpha  = 1,  // BGFX_STATE_BLEND_ALPHA (srcA*src + (1-srcA)*dst)
+    Additive = 2, // source + destination
 };
+
+constexpr bool isTransparentBlendMode(BlendMode mode) noexcept
+{
+    return mode != BlendMode::Opaque;
+}
 
 struct InitDesc {
     void*    windowHandle = nullptr;

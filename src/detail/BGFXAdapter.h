@@ -211,8 +211,8 @@ public:
     void setStateAlphaBlend();
     void setStateDepthTestAlways();
     void setStateDepthOnlyWrite();
-    void setStateOpaqueLEQUAL(bool doubleSided);
-    // Selection inverted-hull: cull front faces (CCW), depth LESS,
+    void setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding = false);
+    // Selection inverted-hull: cull front faces (CW), depth LESS,
     // no blend — rim stays outside the already-drawn mesh.
     void setStateOutlineHull();
 

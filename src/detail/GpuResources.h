@@ -71,7 +71,7 @@ struct GpuMaterial {
 
     // U1 — material-level blend state. ForwardOpaquePass ignores this
     // (it always draws opaque); TransparentPass::execute filters
-    // scene.items() by `blendMode == Alpha`. Default = Opaque so
+    // scene.items() by transparent blend mode. Default = Opaque so
     // pre-existing materials (all created before this PR) keep their
     // prior no-blend draw path with no behavior change.
     ayt::render::BlendMode      blendMode = ayt::render::BlendMode::Opaque;

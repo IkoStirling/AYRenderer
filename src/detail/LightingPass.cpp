@@ -1034,11 +1034,11 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // so use the inline form via setStateOpaque() + override: we
     // bypass setStateOpaque and use bgfx::setState directly via
     // adapter.setStateOpaque() as the base (DEPTH_TEST_LESS +
-    // CULL_CW) ??but for a fullscreen post-process pass CULL_CW is
+    // back-face culling) — but for a fullscreen post-process pass culling is
     // wrong (the oversize triangle needs no culling). Use
     // setStateDepthTestAlways() (verified at BGFXAdapter.cpp:171-178
     // documentation: "PostProcessPass fullscreen blit"). That's
-    // WRITE_RGB | WRITE_A | DEPTH_TEST_ALWAYS + no CULL_CW.
+    // WRITE_RGB | WRITE_A | DEPTH_TEST_ALWAYS + no face culling.
     ctx.adapter.setStateDepthTestAlways();
 
     // �P5 B5 (2026-07-22) ??BIND 3 GBuffer samplers via borrowed

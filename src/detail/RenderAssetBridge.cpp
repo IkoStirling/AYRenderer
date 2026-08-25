@@ -676,6 +676,14 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     mgr.setMaterialSurfaceProperties(
         handle, static_cast<int>(material.getAlphaMode()),
         material.getAlphaCutoff(), material.isDoubleSided());
+    // Source blend composition is independent from alpha pass routing. The
+    // importer serializes this reserved parameter so Assimp and a future FBX
+    // SDK adapter feed the same renderer contract.
+    if (material.getAlphaMode() == ayt::resource::MaterialAlphaMode::Blend
+        && material.hasParameter("__ayBlendFunction")
+        && material.getInt("__ayBlendFunction") == 1) {
+        (void)mgr.setMaterialBlendMode(handle, BlendMode::Additive);
+    }
     mgr.setMaterialPremultipliedAlpha(
         handle, material.hasParameter("premultipliedAlpha")
             && material.getFloat("premultipliedAlpha") >= 0.5f);
