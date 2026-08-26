@@ -50,7 +50,7 @@ TEST_CASE(frame_stats_pod_defaults)
 TEST_CASE(build_stamp_is_phase6)
 {
     CHECK(std::string_view(ShadowSettings::kPipelineBuildStamp)
-          == std::string_view("v14-material-surface-contract"));
+          == std::string_view("v15-shadow-diag-bump"));
 }
 
 TEST_SUITE_END

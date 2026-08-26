@@ -55,6 +55,14 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
 {
     BGFXAdapter& adapter = ctx.adapter;
 
+    // The debug pass is part of the fixed pipeline but is intentionally
+    // dormant unless the host asks for a GBuffer visualization.  An invalid
+    // debug FBO is therefore the normal disabled state, not a condition that
+    // should periodically fill an application's log.
+    if (!ctx.frame.gbufferDebugEnabled) {
+        return 0;
+    }
+
     // Mirror SSAOPass.cpp:210-225 early-return ladder. V1 K-GBD-1
     // is enforced here: every short-circuit returns 0 BEFORE any
     // RT/program access. V2 keeps these guards and adds the

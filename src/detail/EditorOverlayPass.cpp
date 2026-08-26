@@ -131,8 +131,8 @@ bool EditorOverlayPass::submitOutlineItem(
         }
         tryUploadBonePalette(material.shader,
                              material.boneBlockBinding,
-                             /*castSkinnedBinding=*/shader::InvalidBinding,
-                             /*castSkinnedValue=*/0u,
+                             material.shader.getUniformBinding("castSkinned"),
+                             /*castSkinnedValue=*/1u,
                              item);
     }
 

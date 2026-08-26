@@ -112,7 +112,7 @@ TEST_CASE(vertex_layout_adds_skin_channels_when_imesh_has_skinweight)
 
     ayt::render::VertexLayoutDesc layout;
     CHECK(ayt::render::detail::vertexLayoutFromMesh(mesh, layout));
-    // pos+norm+uv = 32, BoneIndices = 4 (u8x4 normalized), BoneWeights = 16 (f32x4)
+    // pos+norm+uv = 32, BoneIndices = 4 (u8x4 non-normalized), BoneWeights = 16 (f32x4)
     CHECK(layout.strideBytes() == 52u);
 
     // The layout must contain BoneIndices + BoneWeights channels.
@@ -129,6 +129,16 @@ TEST_CASE(vertex_layout_adds_skin_channels_when_imesh_has_skinweight)
     CHECK(bgfxLayout.getStride() == 52u);
     CHECK(bgfxLayout.has(bgfx::Attrib::Indices));
     CHECK(bgfxLayout.has(bgfx::Attrib::Weight));
+    uint8_t componentCount = 0;
+    bgfx::AttribType::Enum componentType = bgfx::AttribType::Count;
+    bool normalized = true;
+    bool asInt = true;
+    bgfxLayout.decode(bgfx::Attrib::Indices, componentCount, componentType,
+                      normalized, asInt);
+    CHECK(componentCount == 4u);
+    CHECK(componentType == bgfx::AttribType::Uint8);
+    CHECK_FALSE(normalized);
+    CHECK_FALSE(asInt);
 }
 
 TEST_CASE(repack_writes_skin_weights_into_gpu_buffer)

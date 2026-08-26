@@ -19,7 +19,7 @@ namespace ayt::render::detail
 // a re-ensure (next execute() will rebuild the FBO).
 // Stamp bump forces GBuffer FBO rebuild after RT2 format changes
 // (RGBA8 motion → RGBA16F worldPos). Pointer-equal compare in ensure().
-static constexpr const char* kGBufferBuildStamp = "material-contract-v1-rt4";
+static constexpr const char* kGBufferBuildStamp = "material-contract-v2-skinned-palette";
 
 // §P5 B5.5 / deferred-shadow contract (2026-07-23):
 //   RT0 albedo RGBA8 / RT1 normal RGBA8 / RT2 worldPos RGBA16F /
@@ -37,6 +37,9 @@ static constexpr const char* kGBufferBuildStamp = "material-contract-v1-rt4";
 //   gl_FragData[1] = gbufferNormal
 //   gl_FragData[2] = gbufferMotion  (xyz = worldPos, w = 1)
 constexpr const char* kGBufferPhoskiaSource = R"(
+uniformblock Skeleton {
+    mat4 bones[128]
+}
 material GBufferFill {
     texture2d albedoMap
     texture2d normalMap
@@ -51,6 +54,7 @@ material GBufferFill {
     property emissive = vec4(0.0, 0.0, 0.0, 0.0)
     property doubleSided = vec4(0.0, 0.0, 0.0, 0.0)
     property normalYSign = vec4(1.0, 0.0, 0.0, 0.0)
+    property castSkinned = vec4(0.0, 0.0, 0.0, 0.0)
     uniform mat4 u_prevViewProj
     uniform vec4 cameraPos
 
@@ -59,11 +63,25 @@ material GBufferFill {
         in nrm : normal
         in tan : tangent
         in uv  : texcoord
-        out worldNormal : normal   = (modelMatrix * vec4(nrm, 0.0)).xyz
-        out worldTangent : tangent = vec4((modelMatrix * vec4(tan.xyz, 0.0)).xyz, tan.w)
-        out worldPos    : position = (modelMatrix * vec4(pos, 1.0)).xyz
+        in boneId : boneindices
+        in boneWt : boneweights
+        out worldNormal : normal = (modelMatrix * mix(
+            vec4(nrm, 0.0),
+            skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(nrm, 0.0)),
+            castSkinned.x)).xyz
+        out worldTangent : tangent = vec4((modelMatrix * mix(
+            vec4(tan.xyz, 0.0),
+            skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(tan.xyz, 0.0)),
+            castSkinned.x)).xyz, tan.w)
+        out worldPos : position = (modelMatrix * mix(
+            vec4(pos, 1.0),
+            skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(pos, 1.0)),
+            castSkinned.x)).xyz
         out vUv         : texcoord = uv
-        return modelViewProjection * vec4(pos, 1.0)
+        return modelViewProjection * mix(
+            vec4(pos, 1.0),
+            skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(pos, 1.0)),
+            castSkinned.x)
     }
     fragment {
         in worldNormal : normal
@@ -102,9 +120,9 @@ material GBufferFill {
 )";
 
 // Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
-static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v13_deferred_material_rt";
+static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v14_skinned_palette";
 static constexpr const char* kGBufferAlphaCutoutCacheKey =
-    "gbuffer_fill_v13_alpha_deferred_material_rt";
+    "gbuffer_fill_v14_alpha_skinned_palette";
 
 constexpr const char* kGBufferAlphaCutoutVaryingSc = R"(
 vec3 v_normal    : NORMAL    = vec3(0.0, 0.0, 1.0);
@@ -115,19 +133,41 @@ vec3 a_position  : POSITION;
 vec3 a_normal    : NORMAL;
 vec2 a_texcoord0 : TEXCOORD0;
 vec4 a_tangent   : TANGENT;
+vec4 a_indices   : BLENDINDICES;
+vec4 a_weight    : BLENDWEIGHT;
 )";
 
 constexpr const char* kGBufferAlphaCutoutVertexSc = R"(
-$input a_position, a_normal, a_texcoord0, a_tangent
+$input a_position, a_normal, a_texcoord0, a_tangent, a_indices, a_weight
 $output v_normal, v_texcoord0, v_position, v_tangent
 #include <bgfx_shader.sh>
+uniform mat4 bones[128];
+uniform vec4 castSkinned;
 void main()
 {
-    v_normal = mul(u_model[0], vec4(a_normal, 0.0)).xyz;
+    vec4 bindPos = vec4(a_position, 1.0);
+    vec4 bindNormal = vec4(a_normal, 0.0);
+    vec4 bindTangent = vec4(a_tangent.xyz, 0.0);
+    vec4 skinPos = a_weight.x * mul(bones[int(a_indices.x)], bindPos)
+                 + a_weight.y * mul(bones[int(a_indices.y)], bindPos)
+                 + a_weight.z * mul(bones[int(a_indices.z)], bindPos)
+                 + a_weight.w * mul(bones[int(a_indices.w)], bindPos);
+    vec4 skinNormal = a_weight.x * mul(bones[int(a_indices.x)], bindNormal)
+                    + a_weight.y * mul(bones[int(a_indices.y)], bindNormal)
+                    + a_weight.z * mul(bones[int(a_indices.z)], bindNormal)
+                    + a_weight.w * mul(bones[int(a_indices.w)], bindNormal);
+    vec4 skinTangent = a_weight.x * mul(bones[int(a_indices.x)], bindTangent)
+                     + a_weight.y * mul(bones[int(a_indices.y)], bindTangent)
+                     + a_weight.z * mul(bones[int(a_indices.z)], bindTangent)
+                     + a_weight.w * mul(bones[int(a_indices.w)], bindTangent);
+    vec4 localPos = mix(bindPos, skinPos, castSkinned.x);
+    vec4 localNormal = mix(bindNormal, skinNormal, castSkinned.x);
+    vec4 localTangent = mix(bindTangent, skinTangent, castSkinned.x);
+    v_normal = mul(u_model[0], localNormal).xyz;
     v_texcoord0 = a_texcoord0;
-    v_position = mul(u_model[0], vec4(a_position, 1.0)).xyz;
-    v_tangent = vec4(mul(u_model[0], vec4(a_tangent.xyz, 0.0)).xyz, a_tangent.w);
-    gl_Position = mul(u_modelViewProj, vec4(a_position, 1.0));
+    v_position = mul(u_model[0], localPos).xyz;
+    v_tangent = vec4(mul(u_model[0], localTangent).xyz, a_tangent.w);
+    gl_Position = mul(u_modelViewProj, localPos);
 }
 )";
 
@@ -661,6 +701,13 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         ctx.adapter.setVertexBuffer(mesh.vertexBuffer);
         ctx.adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
                                    drawRange.indexCount);
+
+        tryUploadBonePalette(
+            drawProgram,
+            drawProgram.getUniformBlockBinding("Skeleton"),
+            drawProgram.getUniformBinding("castSkinned"),
+            /*castSkinnedValue=*/1u,
+            item);
 
         shader::DrawCallContext submitCtx;
         submitCtx.viewId = viewId;

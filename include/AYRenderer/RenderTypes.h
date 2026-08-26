@@ -10,6 +10,10 @@
 namespace ayt::render
 {
 
+// Capability of the current uniform-buffer skinning backend. It limits one
+// draw palette, never the size of an imported/runtime skeleton.
+inline constexpr uint32_t kUniformSkinPaletteCapacity = 128u;
+
 enum class Backend : uint8_t {
     Auto = 0,
     Direct3D11,
@@ -100,7 +104,7 @@ enum class VertexAttribute : uint8_t {
     TexCoord0,
     Tangent,
     Color0,
-    BoneIndices,   // uint4 (4x u8, normalized) — for skeletal skinning (Phase 0 RD-02)
+    BoneIndices,   // uint4 (4x u8, non-normalized) — draw-local palette slots
     BoneWeights,   // float4 (4x f32)            — for skeletal skinning (Phase 0 RD-02)
 };
 
@@ -132,7 +136,7 @@ struct VertexLayoutDesc {
     static VertexLayoutDesc position3TexCoord2();
     static VertexLayoutDesc position3Normal3TexCoord2();
 
-    // Skinning addon: BoneIndices (4x u8 normalized) + BoneWeights (4x f32).
+    // Skinning addon: BoneIndices (4x u8 non-normalized) + BoneWeights (4x f32).
     // 24 bytes total. Phase 0 RD-02.
     static VertexLayoutDesc skinnedAddon();
 };

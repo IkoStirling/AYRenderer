@@ -1,3 +1,6 @@
+uniformblock Skeleton {
+    mat4 bones[128]
+}
 material PBR {
     texture2d baseColorTexture
     texture2d opacityTexture
@@ -28,17 +31,32 @@ material PBR {
     property premultipliedAlpha = vec4(0.0, 0.0, 0.0, 0.0)
     property shadowBias = vec4(0.003, 0.0, 0.0, 0.0)
     property shadowPcf  = vec4(1.0, 0.0, 0.0, 0.0)
+    property castSkinned = vec4(0.0, 0.0, 0.0, 0.0)
 
     vertex {
         in pos : position
         in nrm : normal
         in tan : tangent
         in uv  : texcoord
-        out worldNormal : normal   = (modelMatrix * vec4(nrm, 0.0)).xyz
-        out worldTangent : tangent = vec4((modelMatrix * vec4(tan.xyz, 0.0)).xyz, tan.w)
-        out worldPos    : position = (modelMatrix * vec4(pos, 1.0)).xyz
+        in boneId : boneindices
+        in boneWt : boneweights
+        out worldNormal : normal = (modelMatrix * mix(
+            vec4(nrm, 0.0),
+            skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(nrm, 0.0)),
+            castSkinned.x)).xyz
+        out worldTangent : tangent = vec4((modelMatrix * mix(
+            vec4(tan.xyz, 0.0),
+            skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(tan.xyz, 0.0)),
+            castSkinned.x)).xyz, tan.w)
+        out worldPos : position = (modelMatrix * mix(
+            vec4(pos, 1.0),
+            skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(pos, 1.0)),
+            castSkinned.x)).xyz
         out uvOut       : texcoord = uv
-        return modelViewProjection * vec4(pos, 1.0)
+        return modelViewProjection * mix(
+            vec4(pos, 1.0),
+            skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(pos, 1.0)),
+            castSkinned.x)
     }
 
     fragment {

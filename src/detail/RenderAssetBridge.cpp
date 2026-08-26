@@ -224,7 +224,7 @@ bool vertexLayoutFromMesh(const ayt::resource::IMesh& mesh, VertexLayoutDesc& ou
     }
 
     // Phase 0 RD-02: append skin channels last (deterministic order).
-    // The skinnedAddon() preset adds BoneIndices (4x u8 normalized) + BoneWeights (4x f32).
+    // The skinnedAddon() preset adds BoneIndices (4x u8 non-normalized) + BoneWeights (4x f32).
     if (hasSkin) {
         const VertexLayoutDesc addon = VertexLayoutDesc::skinnedAddon();
         if (!out.add(addon.elements[0]) || !out.add(addon.elements[1])) {
@@ -295,7 +295,7 @@ bool repackMeshVertices(const ayt::resource::IMesh& mesh,
     };
 
     // Phase 0 RD-02: the SkinWeight mesh attr maps to TWO bgfx channels
-    // (Indices u8 normalized + Weight f32, in this bgfx fork). Listed here so
+    // (Indices u8 non-normalized + Weight f32, in this bgfx fork). Listed here so
     // the loop handles both halves in deterministic order.
     static const ChannelMap kChannels[] = {
         {MeshAttribute::Position,   bgfx::Attrib::Position,   3},

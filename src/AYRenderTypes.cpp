@@ -116,9 +116,11 @@ VertexLayoutDesc VertexLayoutDesc::position3Normal3TexCoord2()
 VertexLayoutDesc VertexLayoutDesc::skinnedAddon()
 {
     VertexLayoutDesc layout;
-    // BoneIndices: 4 x u8, normalized to [0,1] so bgfx exposes them as float in the shader.
+    // BoneIndices are integer-valued u8 slots carried through a vec4 shader
+    // input. They must NOT be normalized: shaders use int(a_indices.*), so
+    // UNORM would collapse every local palette index below 255 to slot 0.
     layout.add(VertexElement{
-        VertexAttribute::BoneIndices, 4, VertexComponentType::Uint8, true});
+        VertexAttribute::BoneIndices, 4, VertexComponentType::Uint8, false});
     // BoneWeights: 4 x f32.
     layout.add(VertexElement{
         VertexAttribute::BoneWeights, 4, VertexComponentType::Float, false});

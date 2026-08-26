@@ -331,17 +331,14 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
     adapter.setStateDepthTestAlways();
     _program.submit(sub);
 
-    // §P3 M5+L2 (2026-08-24) - was one-shot (`s_loggedFirst`
-    // latch). Replaced with a rate-limited pattern (1 line per
-    // 64 frames) so we keep the first-dispatch signal loud
-    // without flooding the console on long-running captures.
-    static uint32_t s_firstFrame = 0;
-    const uint32_t kFirstRateLimit = 64u;
-    if (s_firstFrame == 0 || (s_firstFrame % kFirstRateLimit) == 0) {
+    // A successful SSAO dispatch is steady-state.  Log the first submission
+    // as a configuration breadcrumb; failures retain their rate-limited
+    // diagnostics elsewhere in this pass.
+    static bool s_loggedFirstDispatch = false;
+    if (!s_loggedFirstDispatch) {
         std::fprintf(stderr,
-            "[SSAOPass] A3 frame=%u dispatch view=%u viewport=%ux%u "
+            "[SSAOPass] A3 first dispatch view=%u viewport=%ux%u "
             "enabled=%d strength=%.2f radius=%.2f bias=%.3f\n",
-            s_firstFrame,
             static_cast<unsigned>(viewId),
             static_cast<unsigned>(viewportWidth),
             static_cast<unsigned>(viewportHeight),
@@ -349,8 +346,8 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
             frame.ssaoStrength,
             frame.ssaoRadius,
             frame.ssaoBias);
+        s_loggedFirstDispatch = true;
     }
-    ++s_firstFrame;
     return 1;
 }
 

@@ -123,8 +123,8 @@ namespace {
 // the standard "golden value" pattern Test_BGFXConverter uses for
 // the builtin names.
 // Live pins (GBufferPass.h externs) — never self-compare a local mirror.
-inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v13_deferred_material_rt";
-inline constexpr const char* kExpectedGBufferBuildStamp = "material-contract-v1-rt4";
+inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v14_skinned_palette";
+inline constexpr const char* kExpectedGBufferBuildStamp = "material-contract-v2-skinned-palette";
 
 // Expected substrings — deferred-shadow contract writes worldPos to
 // RT2 (still named gbufferMotion). Motion NDC encoding deferred.

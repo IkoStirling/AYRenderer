@@ -15,8 +15,7 @@
 //           API exists and the slot count invariants (8 slots) hold.
 //           The M3 fix added a comment block listing the 4 atlas
 //           slots that must stay in sync.
-//   T5  M5 — rate-limited s_firstFrame counter increments once per
-//           dispatch (gated by % 64 == 0).
+//   T5  M5 — successful SSAO dispatch logging uses a one-shot latch.
 //   T6  M7 — rate-limited FATAL log frame counter for LightingPass.
 //   T7  M8 — Atlas memcpy is gated on perLightCount > 0 (verified
 //           by inspecting the conditional shape in source).
@@ -147,25 +146,21 @@ TEST_CASE(shadow_pass_atlas_sub_rects_is_non_null) {
 TEST_SUITE_END
 
 // ─────────────────────────────────────────────────────────────────────
-// T5 — M5: rate-limited s_firstFrame counter (gated by % 64)
+// T5 — M5: successful SSAO dispatch diagnostics are one-shot
 // ─────────────────────────────────────────────────────────────────────
 
-TEST_SUITE(AuditP3_T5_RateLimitedFirstFrame)
+TEST_SUITE(AuditP3_T5_OneShotFirstFrame)
 
-TEST_CASE(rate_limit_modulus_produces_correct_windows) {
-    // M5 fix replaced one-shot s_loggedFirst with
-    //   static uint32_t s_firstFrame = 0;
-    //   if (s_firstFrame == 0 || (s_firstFrame % 64u) == 0)
-    // Pin the windows: in [0,256) frames 0, 64, 128, 192 fire
-    // (frame 256 is out of range, so fire_count == 4).
-    const uint32_t kRate = 64u;
-    uint32_t fire_count = 0;
-    for (uint32_t f = 0; f < 256; ++f) {
-        if (f == 0 || (f % kRate) == 0) {
-            ++fire_count;
+TEST_CASE(one_shot_latch_only_emits_first_success) {
+    bool logged = false;
+    uint32_t fireCount = 0;
+    for (uint32_t frame = 0; frame < 256; ++frame) {
+        if (!logged) {
+            ++fireCount;
+            logged = true;
         }
     }
-    CHECK(fire_count == 4u);  // frames 0, 64, 128, 192 in [0,256)
+    CHECK(fireCount == 1u);
 }
 
 TEST_SUITE_END

@@ -2,11 +2,8 @@
 // + Docs invariants regression net. Pins the contracts introduced
 // by the Part 5 audit fixes (5M + 2L + 5T).
 //
-//   T1  M1+M2 — PostProcessPass's two one-shot bool logs
-//                (s_loggedMissing, s_loggedSubmit) are paired
-//                with rateLimitedEarlyReturn calls so the
-//                periodic re-fire fires on every 256th frame
-//                after the first.
+//   T1  M1+M2 — PostProcess failure diagnostics remain rate-limited;
+//                successful submit logging is one-shot.
 //   T2  M3    — All 6 silent early-returns in PostProcessPass
 //                ::execute invoke rateLimitedEarlyReturn before
 //                `return 0;` (verified by string-grep on the
@@ -118,7 +115,7 @@ TEST_SUITE_END
 
 TEST_SUITE(AuditP5_T2_SilentEarlyReturnsLogged)
 
-TEST_CASE(post_process_source_has_six_rate_limited_calls) {
+TEST_CASE(post_process_source_rate_limits_failure_exits) {
     // M3 fix: PostProcessPass::execute() gained 6
     // rateLimitedEarlyReturn calls (one per silent
     // early-return site). We pin the count by reading the
@@ -139,15 +136,14 @@ TEST_CASE(post_process_source_has_six_rate_limited_calls) {
     }
 
     // Count "rateLimitedEarlyReturn(" calls in PostProcessPass.cpp.
-    // The fix introduced exactly 6: 5 in execute() (1 each for
+    // The fix introduced diagnostics for failure exits in execute() (1 each for
     // !isInitialized, isNoopBackend, zero-viewport, sourceFbo
     // invalid, VB/IB invalid, fboColor invalid) + 1 in ensureFbo
-    // (M4) + 1 before the s_loggedMissing return (M1) + 1 at end
-    // of execute (M2 periodic re-fire) = 8. Allow >=8 (future
-    // fixes may add more).
+    // (M4) + 1 before the s_loggedMissing return (M1). Successful
+    // blits deliberately do not use an early-return diagnostic.
     const std::size_t calls = countSubstr(
         src, "rateLimitedEarlyReturn(");
-    CHECK(calls >= 8u);
+    CHECK(calls >= 7u);
 }
 
 TEST_SUITE_END

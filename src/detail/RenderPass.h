@@ -208,10 +208,9 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
 // `castSkinned` arg selects is also nullified when
 // `castSkinned == 0` to avoid a redundant uniform write.
 //
-// Stack-path for ≤ 16 joints (the common case — model files
-// today cap joint counts well below the Skeleton UBO's 128-
-// element range). Heap-path for larger counts preserves the pre-
-// F3 allocation pattern.
+// Stack-path for <= 16 draw-local joints. Larger palettes use a heap
+// scratch buffer up to the current renderer capability. The complete
+// skeleton may be larger and is addressed through DrawItem::boneRemap.
 //
 // Pure: no other state touched beyond `shader.setUniformBlock` /
 // `shader.setUniform`.

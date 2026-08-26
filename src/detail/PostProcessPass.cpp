@@ -606,13 +606,9 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
             frame.timeSeconds);
         s_loggedSubmit = true;
     }
-    // §P5 M2 (2026-08-24) — periodic re-log via the shared
-    // rate-limited helper so blit-state drift over many frames
-    // (sampler flip-flop, fallback→pong→fallback) leaves a trail.
-    // The verbose per-frame payload above is suppressed after the
-    // first frame; this fires on frame==0 then every 256 frames
-    // to confirm post-process is still alive.
-    rateLimitedEarlyReturn("PostProcessPass", "blit submitted");
+    // Successful submission is steady-state, not an early return.  Keep the
+    // detailed one-shot message above and leave periodic diagnostics for
+    // actual failure paths.
     return 1;
 }
 

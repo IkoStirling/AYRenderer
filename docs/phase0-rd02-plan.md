@@ -49,7 +49,7 @@ enum class VertexAttribute : uint8_t {
 
 // AYRenderAssetBridge::uploadMeshFromResource():
 //   - When IMesh::hasSkinWeights() == true:
-//       1. VertexLayoutDesc gets BoneIndices (Uint8x4 normalized) + BoneWeights (Floatx4) channels
+//       1. VertexLayoutDesc gets BoneIndices (Uint8x4 non-normalized) + BoneWeights (Floatx4) channels
 //       2. Vertex stride grows by 24 bytes
 //       3. repackMeshVertices copies IMesh::getSkinWeights() bytes into the new channels
 //       4. GpuAYResource/AYResource/assetsImpl/Mesh.hasSkinWeights = true
@@ -98,14 +98,14 @@ case VertexAttribute::BoneIndices: out = bgfx::Attrib::BoneIndices; return true;
 case VertexAttribute::BoneWeights: out = bgfx::Attrib::BoneWeights; return true;
 ```
 
-`BoneIndices` is `bgfx::AttribType::Uint8` normalized; `BoneWeights` is `bgfx::AttribType::Float`. Both already supported by `mapComponentType()`.
+`BoneIndices` is `bgfx::AttribType::Uint8` non-normalized; `BoneWeights` is `bgfx::AttribType::Float`. Both already supported by `mapComponentType()`.
 
 ### 3.4 `RenderAssetBridge.cpp`
 
 In `vertexLayoutFromMesh()`:
 
 - If `mesh.hasAttribute(MeshAttribute::SkinWeight)`, append two elements to `out`:
-  - `BoneIndices`, 4×Uint8, normalized=true
+  - `BoneIndices`, 4×Uint8, normalized=false
   - `BoneWeights`, 4×Float, normalized=false
 - Order: skin channels come last (after Color). This is deterministic and lets `repackMeshVertices` extend the existing loop.
 
@@ -159,7 +159,7 @@ In `uploadMeshFromResource()`:
 Cover the contract:
 
 1. **Layout stride** — `vertexLayoutFromMesh()` for a skinned mesh returns a layout whose `strideBytes()` equals position + normal + uv (32) + skin (24) = **56 bytes**.
-2. **Layout channels** — layout contains one `BoneIndices` element (4×Uint8 normalized) and one `BoneWeights` element (4×Float).
+2. **Layout channels** — layout contains one `BoneIndices` element (4×Uint8 non-normalized) and one `BoneWeights` element (4×Float).
 3. **Repack correctness** — repacked bytes for a known skinned mesh contain the expected skin weight values at the expected offset.
 4. **`GpuMesh::hasSkinWeights`** — calling `loadMesh()` on a skinned `.aymesh` results in `RenderResourceManager::meshes().at(h.id).hasSkinWeights == true`.
 

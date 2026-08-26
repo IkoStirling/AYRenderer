@@ -73,6 +73,11 @@ struct DrawItem {
     // otherwise passes submit this clamped slice.
     uint32_t                   firstIndex   = 0;
     uint32_t                   indexCount   = 0;
+    // Optional draw-local slot -> global pose index table. When null,
+    // jointCount addresses the first matrices directly (legacy/procedural).
+    const uint32_t*            boneRemap = nullptr;
+    // Bounds for validating boneRemap. Required whenever boneRemap is set.
+    uint32_t                   skeletonJointCount = 0;
 };
 
 class RenderScene {

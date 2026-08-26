@@ -399,8 +399,8 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         // top of the loop body.
         tryUploadBonePalette(material.shader,
                              material.boneBlockBinding,
-                             /*castSkinnedBinding=*/shader::InvalidBinding,
-                             /*castSkinnedValue=*/0u,
+                             material.shader.getUniformBinding("castSkinned"),
+                             /*castSkinnedValue=*/1u,
                              item);
 
         shader::DrawCallContext ctx;

@@ -179,6 +179,16 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
         }
     }
 
+    if (material.boneBlockBinding == shader::InvalidBinding) {
+        material.boneBlockBinding =
+            material.shader.getUniformBlockBinding("Skeleton");
+    }
+    tryUploadBonePalette(material.shader,
+                         material.boneBlockBinding,
+                         material.shader.getUniformBinding("castSkinned"),
+                         /*castSkinnedValue=*/1u,
+                         item);
+
     ayt::shader::DrawCallContext drawCtx;
     drawCtx.viewId = viewId;
     drawCtx.state  = 0;

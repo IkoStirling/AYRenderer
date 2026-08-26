@@ -175,6 +175,43 @@ TEST_CASE(f3_try_upload_bone_palette_noop_when_joint_count_zero) {
     CHECK(true);  // reached ⇒ no crash
 }
 
+TEST_CASE(f3_palette_over_backend_capacity_fails_before_matrix_read) {
+    ayt::render::detail::GpuMaterial material;
+    std::array<Float4x4, 1> completeSkeleton{makeJoint(0.0f)};
+
+    ayt::render::DrawItem item;
+    item.boneMatrices = completeSkeleton.data();
+    // Deliberately advertise more draw-local matrices than are present. The
+    // capacity gate must reject this before touching matrix slot 1.
+    item.jointCount = ayt::render::kUniformSkinPaletteCapacity + 1u;
+
+    tryUploadBonePalette(material.shader,
+                         shader::InvalidBinding,
+                         shader::InvalidBinding,
+                         1u,
+                         item);
+    CHECK(true);
+}
+
+TEST_CASE(f3_palette_remap_out_of_skeleton_range_fails_before_matrix_read) {
+    ayt::render::detail::GpuMaterial material;
+    std::array<Float4x4, 1> completeSkeleton{makeJoint(0.0f)};
+    const std::array<uint32_t, 1> invalidRemap{7u};
+
+    ayt::render::DrawItem item;
+    item.boneMatrices = completeSkeleton.data();
+    item.jointCount = 1u;
+    item.boneRemap = invalidRemap.data();
+    item.skeletonJointCount = 1u;
+
+    tryUploadBonePalette(material.shader,
+                         shader::InvalidBinding,
+                         shader::InvalidBinding,
+                         1u,
+                         item);
+    CHECK(true);
+}
+
 TEST_CASE(f3_try_upload_bone_palette_noop_when_skeleton_binding_invalid_and_no_bones_uniform) {
     // F3.3 — pre-F3 fallback logged 3x when neither Skeleton UBO
     // nor top-level bones[] existed on the program. The lifted

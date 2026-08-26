@@ -273,23 +273,51 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
 // loop now calls the same helper so both sites upload identical
 // bytes and the threshold / fallback behavior cannot drift.
 //
-// `castSkinnedValue` is the uniform toggle the depth caster reads
-// via Phoskia `property castSkinned`. Passing 0 from FO paths is
-// allowed (FO programs don't have that uniform — the helper early-
-// outs when `castSkinnedBinding == InvalidBinding`).
+// `castSkinnedValue` is the uniform toggle read by every skinned-capable
+// pass. Programs without that property keep an InvalidBinding and simply
+// skip the toggle write.
 //
-// Stack-path for ≤ 16 joints (covers all current AYEngine skinned
-// assets; Skeleton UBO can hold up to 128 but the per-frame upload
-// cost is dominated by memcpy, not allocation). Heap-path for
-// larger counts preserves the pre-F3 behavior: std::vector<float>
-// scratch space, header-only allocator.
+// Stack-path for <= 16 draw-local joints; larger valid palettes use a heap
+// scratch buffer. The 128 value is a backend per-draw capability, never a
+// limit on the complete skeleton stored in item.boneMatrices.
 void tryUploadBonePalette(shader::ShaderResource& shader,
                           shader::BindingId skeletonBinding,
                           shader::BindingId castSkinnedBinding,
                           uint8_t castSkinnedValue,
                           const DrawItem& item)
 {
-    const bool hasBones = item.boneMatrices != nullptr && item.jointCount > 0;
+    bool hasBones = item.boneMatrices != nullptr && item.jointCount > 0;
+    if (hasBones && item.jointCount > kUniformSkinPaletteCapacity) {
+        static uint32_t s_paletteCapacityLog = 0;
+        if (s_paletteCapacityLog < 3u) {
+            std::fprintf(stderr,
+                         "[RenderPass] skin palette %u exceeds backend capacity %u; "
+                         "draw uses bind pose\n",
+                         item.jointCount, kUniformSkinPaletteCapacity);
+            ++s_paletteCapacityLog;
+        }
+        hasBones = false;
+    }
+    if (hasBones && item.boneRemap != nullptr) {
+        if (item.skeletonJointCount == 0u) {
+            hasBones = false;
+        } else {
+            for (uint32_t k = 0; k < item.jointCount; ++k) {
+                if (item.boneRemap[k] >= item.skeletonJointCount) {
+                    static uint32_t s_invalidRemapLog = 0;
+                    if (s_invalidRemapLog < 3u) {
+                        std::fprintf(stderr,
+                                     "[RenderPass] skin palette slot %u maps to joint %u/%u; "
+                                     "draw uses bind pose\n",
+                                     k, item.boneRemap[k], item.skeletonJointCount);
+                        ++s_invalidRemapLog;
+                    }
+                    hasBones = false;
+                    break;
+                }
+            }
+        }
+    }
 
     // Always write the toggle when the program exposes it. Uniform values
     // persist across bgfx draws, so leaving the previous skinned draw's value
@@ -311,7 +339,8 @@ void tryUploadBonePalette(shader::ShaderResource& shader,
     if (byteCount <= 1024) {
         float stackBuf[1024 / sizeof(float)];
         for (uint32_t k = 0; k < item.jointCount; ++k) {
-            toBgfxColumnMajor(item.boneMatrices[k], &stackBuf[k * 16]);
+            const uint32_t joint = item.boneRemap != nullptr ? item.boneRemap[k] : k;
+            toBgfxColumnMajor(item.boneMatrices[joint], &stackBuf[k * 16]);
         }
         if (skeletonBinding != shader::InvalidBinding) {
             shader.setUniformBlock(skeletonBinding, stackBuf, byteCount);
@@ -333,7 +362,8 @@ void tryUploadBonePalette(shader::ShaderResource& shader,
     } else {
         std::vector<float> heapBuf(static_cast<size_t>(item.jointCount) * 16);
         for (uint32_t k = 0; k < item.jointCount; ++k) {
-            toBgfxColumnMajor(item.boneMatrices[k], &heapBuf[k * 16]);
+            const uint32_t joint = item.boneRemap != nullptr ? item.boneRemap[k] : k;
+            toBgfxColumnMajor(item.boneMatrices[joint], &heapBuf[k * 16]);
         }
         if (skeletonBinding != shader::InvalidBinding) {
             shader.setUniformBlock(skeletonBinding, heapBuf.data(), byteCount);
