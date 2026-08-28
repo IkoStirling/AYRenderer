@@ -70,6 +70,12 @@ public:
     void shutdown();
     bool isInitialized() const { return _initialized; }
 
+    // Retained display lists are replayed into this backend today. Pixel-
+    // retained UI layers are intentionally capability-gated until the bgfx
+    // framebuffer/texture lifetime implementation lands; AYUI callers see
+    // false and keep the immediate compositing fallback.
+    bool supportsRenderTargets() const override { return false; }
+
     void setFramebufferSize(uint16_t width, uint16_t height);
 
     // OverlapAware is the default. OrderedRuns remains available as a
