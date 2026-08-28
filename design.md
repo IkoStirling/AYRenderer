@@ -487,6 +487,10 @@ static constexpr std::string_view kFullPipelineOrder[] = {
 
 调度器只生成逻辑索引，不改写原始 item 数组；实际 vertex/index 数据仍按既有路径构建和提交。窗口大小为常数，因此相对 item 数量的渐进复杂度保持线性。非有限包围盒、过大输入或内部校验失败会自动使用原始输入顺序。
 
+Debug 构建还会对调度结果执行独立的不变量校验：结果必须是输入索引的完整排列，且每一对
+相交 item 的 painter order 必须保持不变。该检查为 O(N²)，仅用于测试与开发构建；失败时
+清空调度结果并回退到保守顺序，不进入 Release 热路径。
+
 `BatchMode::OrderedRuns` 完整保留旧实现：只合并相邻且兼容的 item。该模式作为运行时兜底、排障开关和性能 A/B 基线存在，不需要维护第二套渲染后端。
 
 ---

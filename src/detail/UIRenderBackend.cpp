@@ -120,6 +120,41 @@ bool drawBoundsOverlap(const UiItem& a, const UiItem& b)
         && a.minY < b.maxY && b.minY < a.maxY;
 }
 
+#if !defined(NDEBUG)
+bool validateOverlapAwareOrder(const std::vector<UiItem>& items,
+                               const std::vector<uint32_t>& order,
+                               std::vector<uint32_t>& positions)
+{
+    const size_t count = items.size();
+    if (order.size() != count) {
+        return false;
+    }
+
+    positions.assign(count, UINT32_MAX);
+    for (uint32_t position = 0; position < static_cast<uint32_t>(count); ++position) {
+        const uint32_t itemIndex = order[position];
+        if (itemIndex >= count || positions[itemIndex] != UINT32_MAX) {
+            return false;
+        }
+        positions[itemIndex] = position;
+    }
+
+    // The planner may reorder disjoint items, but every overlapping pair must
+    // retain painter order. This independent O(N^2) check is Debug-only so
+    // tests exercise the invariant without affecting the Release hot path.
+    for (uint32_t earlier = 0; earlier < static_cast<uint32_t>(count); ++earlier) {
+        for (uint32_t later = earlier + 1u;
+             later < static_cast<uint32_t>(count); ++later) {
+            if (drawBoundsOverlap(items[earlier], items[later])
+                && positions[earlier] >= positions[later]) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+#endif
+
 // Material-aware, painter-order-safe scheduler. A later item may move before
 // skipped items only when its draw bounds do not overlap any item it crosses.
 // Therefore every overlapping pair retains its original relative order while
@@ -199,6 +234,12 @@ bool buildOverlapAwareOrder(const std::vector<UiItem>& items,
         order.clear();
         return false;
     }
+#if !defined(NDEBUG)
+    if (!validateOverlapAwareOrder(items, order, next)) {
+        order.clear();
+        return false;
+    }
+#endif
     return true;
 }
 
