@@ -85,6 +85,8 @@ public:
 
     void beginFrame() override;
     void endFrame() override;
+    void setUiScale(float scale) override;
+    float getUiScale() const override;
     void beginCanvas(const ayt::math::FRectangle& viewport) override;
     void endCanvas() override;
 

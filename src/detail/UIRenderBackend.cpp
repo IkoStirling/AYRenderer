@@ -769,6 +769,7 @@ struct UIRenderBackend::FrameState {
     bool                               hasOrderingBarriers = false;
     ayt::ui::BlendMode                 currentBlend = ayt::ui::BlendMode::Normal;
     BatchMode                          batchMode = BatchMode::OverlapAware;
+    float                              uiScale = 1.0f;
     // Overlap-aware planner scratch. These vectors retain capacity across
     // frames; beginFrame clears only the logical command stream.
     std::vector<uint32_t>              batchOrder;
@@ -976,6 +977,17 @@ void UIRenderBackend::beginFrame()
     _gpu->beginView(kViewId, _width, _height);
 }
 
+void UIRenderBackend::setUiScale(float scale)
+{
+    if (_frame == nullptr) _frame = std::make_unique<FrameState>();
+    _frame->uiScale = std::isfinite(scale) && scale > 0.0f ? scale : 1.0f;
+}
+
+float UIRenderBackend::getUiScale() const
+{
+    return _frame != nullptr ? _frame->uiScale : 1.0f;
+}
+
 void UIRenderBackend::beginCanvas(const ayt::math::FRectangle& viewport)
 {
     AYUNREFERENCED_PARAM(viewport);
@@ -986,9 +998,10 @@ void UIRenderBackend::endCanvas() {}
 ayt::math::FRectangle UIRenderBackend::activeClipBounds() const
 {
     if (_frame == nullptr || _frame->clipStack.empty()) {
+        const float scale = getUiScale();
         return ayt::math::FRectangle(0.0f, 0.0f,
-                                     static_cast<float>(_width),
-                                     static_cast<float>(_height));
+                                     static_cast<float>(_width) / scale,
+                                     static_cast<float>(_height) / scale);
     }
     return _frame->clipStack.back().bounds;
 }
@@ -2017,6 +2030,7 @@ void UIRenderBackend::flushColoredRects()
     const uint16_t whiteIdx  = _gpu->whiteTextureIdx();
     const float    fbW       = static_cast<float>(_width);
     const float    fbH       = static_cast<float>(_height);
+    const float    uiScale   = getUiScale();
 
     // OrderedRuns is the original fallback. The optimized path builds a
     // logical order only; UiItems themselves stay in recording order so a
@@ -2052,7 +2066,7 @@ void UIRenderBackend::flushColoredRects()
         frame.scratchVertices.reserve(mesh.positions.size());
         for (const auto& point : mesh.positions) {
             frame.scratchVertices.push_back({
-                toNdcX(point.x, fbW), toNdcY(point.y, fbH), 0.0f,
+                toNdcX(point.x * uiScale, fbW), toNdcY(point.y * uiScale, fbH), 0.0f,
                 color, 0.0f, 0.0f,
                 0.0f, 0.0f, 0.0f, 0.0f,
                 0.0f, 0.0f, 0.0f, 0.0f
@@ -2138,16 +2152,16 @@ void UIRenderBackend::flushColoredRects()
             const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
             const float    z    = 0.0f;
 
-            frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.minY, fbH), z,
+            frame.scratchVertices.push_back({toNdcX(it.minX * uiScale, fbW), toNdcY(it.minY * uiScale, fbH), z,
                                              it.abgr[0], it.u0, it.v0,
                                              0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
-            frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.minY, fbH), z,
+            frame.scratchVertices.push_back({toNdcX(it.maxX * uiScale, fbW), toNdcY(it.minY * uiScale, fbH), z,
                                              it.abgr[1], it.u1, it.v0,
                                              0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
-            frame.scratchVertices.push_back({toNdcX(it.maxX, fbW), toNdcY(it.maxY, fbH), z,
+            frame.scratchVertices.push_back({toNdcX(it.maxX * uiScale, fbW), toNdcY(it.maxY * uiScale, fbH), z,
                                              it.abgr[2], it.u1, it.v1,
                                              0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
-            frame.scratchVertices.push_back({toNdcX(it.minX, fbW), toNdcY(it.maxY, fbH), z,
+            frame.scratchVertices.push_back({toNdcX(it.minX * uiScale, fbW), toNdcY(it.maxY * uiScale, fbH), z,
                                              it.abgr[3], it.u0, it.v1,
                                              0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
 
@@ -2189,7 +2203,7 @@ void UIRenderBackend::flushColoredRects()
             const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
             for (const auto& point : item.mesh->positions) {
                 frame.scratchVertices.push_back({
-                    toNdcX(point.x, fbW), toNdcY(point.y, fbH), 0.0f,
+                    toNdcX(point.x * uiScale, fbW), toNdcY(point.y * uiScale, fbH), 0.0f,
                     item.abgr[0], 0.0f, 0.0f,
                     0.0f, 0.0f, 0.0f, 0.0f,
                     0.0f, 0.0f, 0.0f, 0.0f
@@ -2278,18 +2292,18 @@ void UIRenderBackend::flushColoredRects()
                 const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
                 // Fill from abgr[0] (drawRoundedRect); borders leave it 0.
                 const uint32_t fill = s.abgr[0];
-                const float cx = (s.shapeMinX + s.shapeMaxX) * 0.5f;
-                const float cy = (s.shapeMinY + s.shapeMaxY) * 0.5f;
-                const float hw = (s.shapeMaxX - s.shapeMinX) * 0.5f;
-                const float hh = (s.shapeMaxY - s.shapeMinY) * 0.5f;
+                const float cx = (s.shapeMinX + s.shapeMaxX) * 0.5f * uiScale;
+                const float cy = (s.shapeMinY + s.shapeMaxY) * 0.5f * uiScale;
+                const float hw = (s.shapeMaxX - s.shapeMinX) * 0.5f * uiScale;
+                const float hh = (s.shapeMaxY - s.shapeMinY) * 0.5f * uiScale;
                 // Soft-clip rect as (center, half-extent); all-zero
                 // (chw == 0) = no clip, shader skips the seam fade.
                 float ccx = 0.0f, ccy = 0.0f, chw = 0.0f, chh = 0.0f;
                 if (s.clipMaxX > s.clipMinX && s.clipMaxY > s.clipMinY) {
-                    ccx = (s.clipMinX + s.clipMaxX) * 0.5f;
-                    ccy = (s.clipMinY + s.clipMaxY) * 0.5f;
-                    chw = (s.clipMaxX - s.clipMinX) * 0.5f;
-                    chh = (s.clipMaxY - s.clipMinY) * 0.5f;
+                    ccx = (s.clipMinX + s.clipMaxX) * 0.5f * uiScale;
+                    ccy = (s.clipMinY + s.clipMaxY) * 0.5f * uiScale;
+                    chw = (s.clipMaxX - s.clipMinX) * 0.5f * uiScale;
+                    chh = (s.clipMaxY - s.clipMinY) * 0.5f * uiScale;
                 }
                 // a_texcoord0 / v_pos MUST be draw-quad pixel corners
                 // (minX..maxY), not shapeMin/Max. Shape is often inset
@@ -2297,17 +2311,17 @@ void UIRenderBackend::flushColoredRects()
                 // packing shape corners warps SDF space so stroke rings
                 // collapse to corner arcs and soft shadows become solid
                 // blocks. Shape silhouette stays in TexCoord1 (cx,cy,hw,hh).
-                frame.scratchVertices.push_back({toNdcX(s.minX, fbW), toNdcY(s.minY, fbH), z,
-                                                 fill, s.minX, s.minY, cx, cy, hw, hh,
+                frame.scratchVertices.push_back({toNdcX(s.minX * uiScale, fbW), toNdcY(s.minY * uiScale, fbH), z,
+                                                 fill, s.minX * uiScale, s.minY * uiScale, cx, cy, hw, hh,
                                                  ccx, ccy, chw, chh});
-                frame.scratchVertices.push_back({toNdcX(s.maxX, fbW), toNdcY(s.minY, fbH), z,
-                                                 fill, s.maxX, s.minY, cx, cy, hw, hh,
+                frame.scratchVertices.push_back({toNdcX(s.maxX * uiScale, fbW), toNdcY(s.minY * uiScale, fbH), z,
+                                                 fill, s.maxX * uiScale, s.minY * uiScale, cx, cy, hw, hh,
                                                  ccx, ccy, chw, chh});
-                frame.scratchVertices.push_back({toNdcX(s.maxX, fbW), toNdcY(s.maxY, fbH), z,
-                                                 fill, s.maxX, s.maxY, cx, cy, hw, hh,
+                frame.scratchVertices.push_back({toNdcX(s.maxX * uiScale, fbW), toNdcY(s.maxY * uiScale, fbH), z,
+                                                 fill, s.maxX * uiScale, s.maxY * uiScale, cx, cy, hw, hh,
                                                  ccx, ccy, chw, chh});
-                frame.scratchVertices.push_back({toNdcX(s.minX, fbW), toNdcY(s.maxY, fbH), z,
-                                                 fill, s.minX, s.maxY, cx, cy, hw, hh,
+                frame.scratchVertices.push_back({toNdcX(s.minX * uiScale, fbW), toNdcY(s.maxY * uiScale, fbH), z,
+                                                 fill, s.minX * uiScale, s.maxY * uiScale, cx, cy, hw, hh,
                                                  ccx, ccy, chw, chh});
                 frame.scratchIndices.push_back(base + 0);
                 frame.scratchIndices.push_back(base + 1);
@@ -2318,12 +2332,22 @@ void UIRenderBackend::flushColoredRects()
             }
 
             setDrawStencil(it.stencilDepth);
+            detail::UiGpuContext::SdfParams scaledSdf = it.sdf;
+            scaledSdf.radius = ayt::math::FVector4(
+                it.sdf.radius.x * uiScale, it.sdf.radius.y * uiScale,
+                it.sdf.radius.z * uiScale, it.sdf.radius.w * uiScale);
+            scaledSdf.strokeWidth *= uiScale;
+            scaledSdf.strokeInset *= uiScale;
+            scaledSdf.shadowOffset = ayt::math::FVector2(
+                it.sdf.shadowOffset.x * uiScale,
+                it.sdf.shadowOffset.y * uiScale);
+            scaledSdf.shadowBlur *= uiScale;
             _gpu->submitSdfQuads(kViewId, *_adapter, it.state,
                                  frame.scratchVertices.data(),
                                  static_cast<uint32_t>(frame.scratchVertices.size()),
                                  sizeof(UiVertex), frame.scratchIndices.data(),
                                  static_cast<uint32_t>(frame.scratchIndices.size()),
-                                 it.sdf);
+                                 scaledSdf);
             ++_drawCalls;
             i = end;
             continue;
@@ -2359,17 +2383,17 @@ void UIRenderBackend::drawTexturedQuad(const ayt::math::FRectangle& bounds, uint
 
     const uint32_t abgr = toAbgr(tint);
     const UiVertex vertices[4] = {
-        {toNdcX(bounds.minX, static_cast<float>(_width)),
-         toNdcY(bounds.minY, static_cast<float>(_height)), 0.0f, abgr, 0.0f, 0.0f,
+        {toNdcX(bounds.minX * getUiScale(), static_cast<float>(_width)),
+         toNdcY(bounds.minY * getUiScale(), static_cast<float>(_height)), 0.0f, abgr, 0.0f, 0.0f,
          0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-        {toNdcX(bounds.maxX, static_cast<float>(_width)),
-         toNdcY(bounds.minY, static_cast<float>(_height)), 0.0f, abgr, 1.0f, 0.0f,
+        {toNdcX(bounds.maxX * getUiScale(), static_cast<float>(_width)),
+         toNdcY(bounds.minY * getUiScale(), static_cast<float>(_height)), 0.0f, abgr, 1.0f, 0.0f,
          0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-        {toNdcX(bounds.maxX, static_cast<float>(_width)),
-         toNdcY(bounds.maxY, static_cast<float>(_height)), 0.0f, abgr, 1.0f, 1.0f,
+        {toNdcX(bounds.maxX * getUiScale(), static_cast<float>(_width)),
+         toNdcY(bounds.maxY * getUiScale(), static_cast<float>(_height)), 0.0f, abgr, 1.0f, 1.0f,
          0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-        {toNdcX(bounds.minX, static_cast<float>(_width)),
-         toNdcY(bounds.maxY, static_cast<float>(_height)), 0.0f, abgr, 0.0f, 1.0f,
+        {toNdcX(bounds.minX * getUiScale(), static_cast<float>(_width)),
+         toNdcY(bounds.maxY * getUiScale(), static_cast<float>(_height)), 0.0f, abgr, 0.0f, 1.0f,
          0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
     };
     const uint32_t indices[6] = {0, 1, 2, 0, 2, 3};
@@ -2388,15 +2412,18 @@ ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(const std::wst
     }
 
     auto* atlas = const_cast<detail::BgfxFontAtlas*>(_fontAtlas.get());
-    ayt::font::IFont* font = atlas->acquireFont(fontSize);
+    const float scale = getUiScale();
+    const int rasterSize = std::max(1, static_cast<int>(std::lround(fontSize * scale)));
+    ayt::font::IFont* font = atlas->acquireFont(rasterSize);
     if (font == nullptr) {
         return out;
     }
 
     const ayt::font::FontMetrics& fm = font->getMetrics();
-    out.ascent  = fm.ascent;
-    out.descent = fm.descent > 0.0f ? fm.descent : -fm.descent;
-    out.height  = fm.lineHeight > 0.0f ? fm.lineHeight : static_cast<float>(fontSize);
+    out.ascent  = fm.ascent / scale;
+    out.descent = (fm.descent > 0.0f ? fm.descent : -fm.descent) / scale;
+    out.height  = (fm.lineHeight > 0.0f ? fm.lineHeight
+                                        : static_cast<float>(rasterSize)) / scale;
 
     if (text.empty()) {
         return out;
@@ -2412,14 +2439,14 @@ ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(const std::wst
     isSpace.reserve(n);
     if (!shaped.empty()) {
         for (const ayt::font::ShapedGlyph& sg : shaped) {
-            advances.push_back(static_cast<float>(sg.xAdvance) / 64.0f);
+            advances.push_back(static_cast<float>(sg.xAdvance) / (64.0f * scale));
             const size_t ci = std::min<size_t>(sg.charIndex, text.size() - 1);
             isSpace.push_back(text[ci] == L' ' || text[ci] == L'\t');
         }
     } else {
         for (wchar_t ch : text) {
             ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
-            advances.push_back((glyph != nullptr) ? static_cast<float>(glyph->metrics.advance)
+            advances.push_back((glyph != nullptr) ? static_cast<float>(glyph->metrics.advance) / scale
                                                   : out.height * 0.25f);
             isSpace.push_back(ch == L' ' || ch == L'\t');
         }
@@ -2500,16 +2527,18 @@ ayt::font::FontHandle UIRenderBackend::getFontHandle(const wchar_t* familyName, 
     // (BgfxFontAtlas seeds the family→file table from the default system
     // candidates); unknown or empty names fall back to the size-keyed
     // default face — the legacy behavior.
+    const int rasterSize = std::max(
+        1, static_cast<int>(std::lround(baseSize * getUiScale())));
     if (familyName != nullptr && familyName[0] != L'\0') {
-        ayt::font::IFont* familyFont = _fontAtlas->acquireFont(familyName, baseSize);
+        ayt::font::IFont* familyFont = _fontAtlas->acquireFont(familyName, rasterSize);
         if (familyFont != nullptr) {
             return familyFont->getHandle();
         }
     }
-    if (_fontAtlas->acquireFont(baseSize) == nullptr) {
+    if (_fontAtlas->acquireFont(rasterSize) == nullptr) {
         return ayt::font::FontHandle{-1};
     }
-    return _fontAtlas->handleForSize(baseSize);
+    return _fontAtlas->handleForSize(rasterSize);
 }
 
 void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::wstring& text,
@@ -2545,7 +2574,9 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     }
     FrameState& frame = *_frame;
 
-    ayt::font::IFont* font = _fontAtlas->acquireFont(fontSize);
+    const float scale = getUiScale();
+    const int rasterSize = std::max(1, static_cast<int>(std::lround(fontSize * scale)));
+    ayt::font::IFont* font = _fontAtlas->acquireFont(rasterSize);
     if (font == nullptr) {
         drawRect(bounds, style.color);
         return;
@@ -2554,9 +2585,9 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     std::vector<ayt::font::ShapedGlyph> shaped = _fontAtlas->shapeText(font, text);
     const bool useShaped = !shaped.empty();
     if (useShaped) {
-        _fontAtlas->prepareShapedGlyphs(font, fontSize, shaped);
+        _fontAtlas->prepareShapedGlyphs(font, rasterSize, shaped);
     } else {
-        _fontAtlas->prepareGlyphs(font, fontSize, text);
+        _fontAtlas->prepareGlyphs(font, rasterSize, text);
     }
 
     frame.textSyncFont = font;
@@ -2584,9 +2615,9 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         for (const ayt::font::ShapedGlyph& sg : shaped) {
             const size_t ci = std::min<size_t>(sg.charIndex, text.size() - 1);
             runs.push_back({font->getGlyphByIndex(sg.glyphIndex),
-                            static_cast<float>(sg.xOffset) / 64.0f,
-                            static_cast<float>(sg.yOffset) / 64.0f,
-                            static_cast<float>(sg.xAdvance) / 64.0f,
+                            static_cast<float>(sg.xOffset) / (64.0f * scale),
+                            static_cast<float>(sg.yOffset) / (64.0f * scale),
+                            static_cast<float>(sg.xAdvance) / (64.0f * scale),
                             text[ci] == L' ' || text[ci] == L'\t'});
         }
     } else {
@@ -2594,8 +2625,8 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         for (wchar_t ch : text) {
             ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
             runs.push_back({glyph, 0.0f, 0.0f,
-                            (glyph != nullptr) ? static_cast<float>(glyph->metrics.advance)
-                                               : metrics.lineHeight * 0.25f,
+                            (glyph != nullptr) ? static_cast<float>(glyph->metrics.advance) / scale
+                                               : (metrics.lineHeight / scale) * 0.25f,
                             ch == L' ' || ch == L'\t'});
         }
     }
@@ -2628,11 +2659,13 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     // Block layout: lines sit at lineHeight + lineSpacing stride; VAlign
     // positions the whole block (blockH > boundsH clamps top-aligned).
     const float lineHeight =
-        metrics.lineHeight > 0.0f ? metrics.lineHeight : static_cast<float>(fontSize);
+        metrics.lineHeight > 0.0f ? metrics.lineHeight / scale
+                                  : static_cast<float>(fontSize);
     const float stride = lineHeight + static_cast<float>(style.lineSpacing);
     const float blockH = lineHeight + stride * (static_cast<float>(lines.size()) - 1.0f);
     const float firstBaseline =
-        uiTextBaselineY(style.valign, bounds.minY, boundsH, blockH, metrics.ascent);
+        uiTextBaselineY(style.valign, bounds.minY, boundsH, blockH,
+                        metrics.ascent / scale);
 
     // Render passes back-to-front: shadow (offset copy) → outline (4-dir
     // offset copies) → fill. All passes emit the same atlas/state items,
@@ -2671,11 +2704,13 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
             return;
         }
 
-        const float x0 = penX + g.xOff + static_cast<float>(g.glyph->metrics.bearingX);
+        const float x0 = penX + g.xOff
+                       + static_cast<float>(g.glyph->metrics.bearingX) / scale;
         // HB y_offset is up-positive; screen Y grows downward.
-        const float y0 = penY - g.yOff - static_cast<float>(g.glyph->metrics.bearingY);
-        const float x1 = x0 + static_cast<float>(glyphW);
-        const float y1 = y0 + static_cast<float>(glyphH);
+        const float y0 = penY - g.yOff
+                       - static_cast<float>(g.glyph->metrics.bearingY) / scale;
+        const float x1 = x0 + static_cast<float>(glyphW) / scale;
+        const float y1 = y0 + static_cast<float>(glyphH) / scale;
 
         ayt::math::FRectangle glyphBounds(x0, y0, x1, y1);
         if (!clipRect(glyphBounds)) {
