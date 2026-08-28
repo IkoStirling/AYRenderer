@@ -82,18 +82,13 @@ class BloomExtractPass;
 // the latch says the complete chain submitted this frame.
 class BloomBlurPass;
 
-// §S4a (2026-07-23, short-term-plan §S4 sub-cut 1) — DepthHazePass
-// produces the half-resolution depth-aware haze FBO that the final
-// PostProcess composite samples as the additional haze contribution
-// (mixed over the *un-bloomed* raw scene color, NOT over the
-// bloomed composite — per short-term-plan §S4 决策 2026-07-23:
-// "haze 只改 raw, bloom 独立"). Forward decl mirrors BloomBlurPass
-// above; PostProcessPass::execute (after §S4c) will read
-// `ctx.depthHazePass->halfResFbo()` (RT0 of the haze result) via
-// the borrowed pointer. §S4a is the SKELETON cut — the type is
-// declared, PassExecContext carries the field, but DepthHazePass
-// itself currently early-returns 0 from execute() (the real
-// shader + FBO ensure land in §S4b).
+// SSAO publishes a current-frame latch. Lighting consumes AO only after that
+// latch is set, never from a persistent but stale FG handle.
+class SSAOPass;
+
+// DepthHaze publishes a current-frame latch for the FrameGraph-owned,
+// full-resolution HazeColor result. Transparent, Bloom and PostProcess use the
+// latch to reject persistent-but-stale handles.
 class DepthHazePass;
 
 // §F2 (2026-07-24, mid-term cutsheet `docs/frame-graph-mvp.md`
@@ -337,36 +332,13 @@ struct PassExecContext {
 
     const BloomBlurPass* bloomBlurPass = nullptr;
 
-    // §S4a (2026-07-23, short-term-plan §S4 sub-cut 1) — borrowed,
-    // non-owning pointer to the DepthHazePass that produces the
-    // half-resolution depth-aware haze FBO. PostProcessPass (after
-    // §S4c) reads `ctx.depthHazePass->halfResFbo()` (RT0 of the haze
-    // result) and binds it as an additional sampler on the fullscreen
-    // composite draw. Mirrors the bloomExtractPass / bloomBlurPass /
-    // skyboxPass / lightingPass / gbufferPass / shadowPass
-    // borrowed-pointer pattern; same lifetime contract: pointer must
-    // remain valid for the duration of pipeline::executeAll(ctx).
-    //
-    // Default-init = nullptr ⇒ S4c PostProcessPass haze-sampler code
-    // path binds `sceneColor` to the haze slot (byte-equivalent to
-    // hazeStrength=0 ⇒ no fog applied). Custom desc that omits
-    // DepthHaze from the pipeline yields a pipeline with
-    // ctx.depthHazePass null AND zero haze contribution — visually
-    // identical to a pipeline that never mounted haze (K3 invariant
-    // mirrored from S1c).
-    //
-    // §S4a is the SKELETON cut: only the field declaration + the
-    // empty DepthHazePass class land here. Real shader, real FBO
-    // ensure, and the PostProcessPass consumer-side wiring all
-    // arrive in §S4b / §S4c.
-    //
-    // All existing 20-/21-/22-field brace-init test sites keep
-    // compiling without edits via C++14 trailing-default behavior.
+    // Borrowed haze producer. Consumers promote HazeSource only when this
+    // producer submitted in the current frame; nullptr fails closed.
     const DepthHazePass* depthHazePass = nullptr;
 
     // §F2 (2026-07-24, mid-term FG MVP F2) — borrowed, non-owning
     // pointer to the FrameGraph that owns the post-process chain
-    // transient resources (BloomBright / BloomBlurA/B / HazeHalf).
+    // transient resources (BloomBright / BloomBlurA/B / HazeColor / SSAO).
     // BloomExtract (F2) / BloomBlur (F3) / DepthHaze (F4) /
     // PostProcess (F5) read this to resolve a logical FgResourceId
     // to a physical bgfx::FrameBufferHandle. The FrameGraph is
@@ -385,6 +357,9 @@ struct PassExecContext {
     // initializers retain their previous field mapping.
     float                bloomThreshold = 1.0f;
     float                bloomSoftKnee  = 0.5f;
+
+    // Appended to preserve every existing aggregate initializer's mapping.
+    const SSAOPass*      ssaoPass       = nullptr;
 
 };
 

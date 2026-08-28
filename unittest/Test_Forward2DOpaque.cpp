@@ -131,10 +131,10 @@ TEST_CASE(cm1_make_default_includes_forward2dopaque_between_fo_and_transparent) 
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::Forward2DOpaque);
-    CHECK(desc.passes[3] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[4] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[5] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[4] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[8] == RenderPassSlot::UI);
     CHECK(desc.contains(RenderPassSlot::Forward2DOpaque));

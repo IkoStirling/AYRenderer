@@ -89,21 +89,18 @@ struct FrameContext {
     ayt::math::FVector3 hazeColor      = ayt::math::FVector3(0.55f, 0.65f, 0.78f);
 
     // §A1 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) — SSAO
-    // knobs. Eight-tap worldPos-sphere occlusion pass (simplified;
-    // no normal reconstruction, no GTAO). Visible only on the
+    // knobs. Eight-tap TBN-oriented occlusion pass using GBuffer world
+    // position, normal, RT3 coverage, and view-space depth. Visible only on the
     // Deferred pipeline (render() central `ssaoPassEnabled` also
     // gates on `gbufferPass != nullptr` so Forward never sees it).
     //
-    // K-SSAO-1 invariant (must survive A2 wire + A3 composite):
-    //   ssaoEnabled=false OR ssaoStrength<=0 ⇒ render() central
+    // Fail-closed invariant:
+    //   disabled/zero/non-finite settings or an incomplete GBuffer -> SSAO ->
+    //   Lighting chain ⇒ render() central
     //   `ssaoPassEnabled = false` ⇒ FG compile culls SSAOTexture
     //   ⇒ FrameGraph::resolve returns invalid ⇒ SSAOPass::execute
-    //   early-returns 0 ⇒ zero draw, zero alloc. PostProcessPass
-    //   composite gate (A3) then binds sceneColor on the SSAO
-    //   sampler slot (semantic invalid → fallback path) and the
-    //   FS branchless `step(0.0001, ssaoStrength.x)` collapses
-    //   the contribution to 0 — byte-equivalent composite to
-    //   pre-A3 renders.
+    //   early-returns 0 ⇒ zero draw, zero alloc. Lighting uploads zero AO
+    //   strength, while DepthHaze/PostProcess never sample SSAO directly.
     //
     // Default = ALL OFF (enabled=false / strength=0) so
     // FrameContext brace-init keeps the pre-SSAO byte-identical

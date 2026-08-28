@@ -177,6 +177,13 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
         }
         material.shader.setUniform(binding, slot.data, slot.size);
     }
+
+    // PBR is shared with TransparentPass. Clear its optional haze uniforms on
+    // opaque submissions so a previous frame's transparent values cannot leak
+    // through the program-level uniform cache.
+    const float noDepthHaze[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    trySetUniformVec4(material.shader, "depthHaze", noDepthHaze);
+    trySetUniformVec4(material.shader, "depthHazeColor", noDepthHaze);
 }
 
 uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)

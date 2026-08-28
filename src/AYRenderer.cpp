@@ -8,6 +8,7 @@
 #include "detail/BloomBlurPass.h"
 #include "detail/BloomPipeline.h"
 #include "detail/DepthHazePass.h"  // S4b (2026-07-23) — borrowed-ptr source for PassExecContext::depthHazePass + destroyResources.
+#include "detail/DepthHazePipeline.h"
 #include "detail/DebugOverlay.h"
 #include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
 #include "detail/ForwardOpaquePass.h"
@@ -20,7 +21,9 @@
 #include "detail/EditorOverlayPass.h"
 #include "detail/Forward2DOpaquePass.h"  // CM-1 (2026-08-11) — 2D lane pass factory.
 #include "detail/RenderPipeline.h"
+#include "detail/RenderViewOrder.h"
 #include "detail/SSAOPass.h"        // §A1 SSAO MVP (2026-07-24) — SSAOPass factory + FrameGraph SSAOTexture resolve gate.
+#include "detail/SSAOPipeline.h"
 #include "detail/RenderResourceManager.h"
 #include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
@@ -75,10 +78,12 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         // DrawPayload2D items (pass returns 0 draws) ⇒ pre-CM-1
         // Forward hosts see 0 behavior change.
         RenderPassSlot::Forward2DOpaque,
+        // Forward has no GBuffer, so DepthHaze remains a zero-cost no-op. Its
+        // position matches the deferred dependency order for custom pipelines.
+        RenderPassSlot::DepthHaze,
         RenderPassSlot::Transparent,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
-        RenderPassSlot::DepthHaze,      // S4b (2026-07-23) — half-res exponential depth-aware haze; hazeEnabled=false default ⇒ zero FBO + zero write (K3 invariant #2).
         RenderPassSlot::PostProcess,
         RenderPassSlot::UI,
     }};
@@ -146,12 +151,12 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::Shadow,
         RenderPassSlot::Skybox,         // §Skybox0 (2026-07-23)
         RenderPassSlot::GBuffer,
+        RenderPassSlot::SSAO,
         RenderPassSlot::Lighting,
+        RenderPassSlot::DepthHaze,
         RenderPassSlot::Transparent,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
-        RenderPassSlot::DepthHaze,      // S4b (2026-07-23) — half-res exponential depth-aware haze; hazeEnabled=false default ⇒ zero FBO + zero write.
-        RenderPassSlot::SSAO,           // §A2 SSAO MVP (2026-07-24) — full-res 8-tap worldPos SSAO. Deferred-only (cutsheet §S2 hard line: makeDefault() does NOT include this slot). ssaoEnabled=false / ssaoStrength<=0 / gbufferPass==nullptr ⇒ 0 alloc.
         RenderPassSlot::PostProcess,
         RenderPassSlot::UI,
         // Fullscreen attachment overlay on view 250. It is mounted only in
@@ -289,11 +294,10 @@ struct Renderer::Impl {
     detail::RenderPipeline        pipeline;
     RenderPipelineDesc            pipelineDesc = RenderPipelineDesc::makeDefault();
 
-    // §F2 (2026-07-24, mid-term FG MVP) — FrameGraph owns the
-    // post-process chain transient resources (BloomBright /
-    // BloomBlurA/B / HazeHalf). Lives here (Impl member) so its
-    // lifetime matches the Renderer; borrowed via
-    // PassExecContext::frameGraph for each render() call.
+    // FrameGraph owns the post-process chain transient resources:
+    // half-resolution BloomBright/BloomBlurA/B, full-resolution HazeColor,
+    // and full-resolution SSAOTexture. It lives on Impl so its lifetime
+    // matches Renderer and is borrowed through PassExecContext each frame.
     // Constructed with the adapter reference (it queries the
     // adapter's isInitialized/isNoopBackend per-frame).
     detail::FrameGraph            frameGraph{adapter};
@@ -592,19 +596,18 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
-    // S4b (2026-07-23, short-term-plan §S4 sub-cut 2) —
-    // DepthHazePass destroyResources mirror (mirror BloomExtractPass /
-    // BloomBlurPass destroy blocks above). DepthHazePass owns a
-    // half-resolution RGBA16F FBO (no depth, lazy-ensured only when
-    // hazeEnabled=true + hazeStrength>0) + fullscreen-triangle
-    // VB/IB + Phoskia haze program; all three must be released
-    // BEFORE pipeline.clear() for the same handle-rotation reason.
-    // When the host has not opted in (hazeEnabled=false ⇒ ensureFbo
-    // never ran ⇒ _fbo is invalid), destroyResources is a no-op
-    // (K3 invariant #2 holds: zero allocation ⇒ zero release work).
+    // DepthHaze owns only fullscreen geometry and its Phoskia program; the
+    // full-resolution HazeColor target is FrameGraph-owned. Release the
+    // pass-local GPU objects before pipeline.clear().
     if (detail::RenderPass* depthHazePass = pipeline.findPass("DepthHaze")) {
         if (adapter.isInitialized()) {
             static_cast<detail::DepthHazePass*>(depthHazePass)->destroyResources(adapter);
+        }
+    }
+
+    if (detail::RenderPass* ssaoPass = pipeline.findPass("SSAO")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::SSAOPass*>(ssaoPass)->destroyResources(adapter);
         }
     }
 
@@ -767,6 +770,16 @@ void Renderer::shutdown()
         }
     }
 
+    // SSAO keeps raw fullscreen geometry handles in the pass instance. Reset
+    // them before adapter shutdown so initialize() on the same Renderer never
+    // mistakes stale numeric handles for live resources.
+    if (detail::RenderPass* ssaoPass = _impl->pipeline.findPass("SSAO")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::SSAOPass*>(ssaoPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+
     // P2 (PR-D) — release the scene FBO before tearing down the
     // adapter. Mirrors the PostProcessPass FBO destroy pattern:
     // bgfx::destroy on a stale handle after bgfx::shutdown() is the
@@ -880,14 +893,18 @@ void Renderer::render(const RenderScene& scene)
     frame.tonemapMode      = _impl->postProcessTonemapMode;
     // §S4d — DepthHaze knobs (Editor / host). Defaults keep haze off.
     frame.hazeEnabled      = _impl->depthHazeEnabled;
-    frame.hazeStrength     = _impl->depthHazeStrength;
-    frame.hazeDensity      = _impl->depthHazeDensity;
-    frame.hazeColor        = _impl->depthHazeColor;
+    frame.hazeStrength     = detail::sanitizeDepthHazeStrength(
+        _impl->depthHazeStrength);
+    frame.hazeDensity      = detail::sanitizeDepthHazeDensity(
+        _impl->depthHazeDensity);
+    frame.hazeColor        = detail::sanitizeDepthHazeColor(
+        _impl->depthHazeColor);
     // §S2 v1 — SSAO knobs (Editor / host). Defaults keep SSAO off.
     frame.ssaoEnabled      = _impl->ssaoEnabled;
-    frame.ssaoStrength     = _impl->ssaoStrength;
-    frame.ssaoRadius       = _impl->ssaoRadius;
-    frame.ssaoBias         = _impl->ssaoBias;
+    frame.ssaoStrength     = detail::sanitizeSsaoStrength(_impl->ssaoStrength);
+    frame.ssaoRadius       = detail::sanitizeSsaoRadius(_impl->ssaoRadius);
+    frame.ssaoBias         = std::min(
+        detail::sanitizeSsaoBias(_impl->ssaoBias), frame.ssaoRadius);
     // GBuffer attachment overlay knobs. Disabled is a zero-allocation path;
     // enabled rendering happens in GBufferDebugPass on view 250.
     frame.gbufferDebugEnabled = _impl->gbufferDebugEnabled;
@@ -999,9 +1016,10 @@ void Renderer::render(const RenderScene& scene)
     // shell's execute() Noop-gates — so consumers receive a
     // present-but-empty signal (same shape as ShadowPass on
     // Noop). Absent GBuffer ⇒ nullptr.
-    const detail::GBufferPass* gbufferPassPtr = nullptr;
+    detail::GBufferPass* gbufferPassPtr = nullptr;
     if (detail::RenderPass* gbufferSlot = _impl->pipeline.findPass("GBuffer")) {
-        gbufferPassPtr = static_cast<const detail::GBufferPass*>(gbufferSlot);
+        gbufferPassPtr = static_cast<detail::GBufferPass*>(gbufferSlot);
+        gbufferPassPtr->resetFrameState();
     }
 
     // §P5 B3 (2026-07-22) — when Lighting is in the configured
@@ -1014,9 +1032,10 @@ void Renderer::render(const RenderScene& scene)
     // and the shell's execute() Noop-gates — so consumers receive
     // a present-but-empty signal (same shape as GBufferPass /
     // ShadowPass on Noop). Absent Lighting ⇒ nullptr.
-    const detail::LightingPass* lightingPassPtr = nullptr;
+    detail::LightingPass* lightingPassPtr = nullptr;
     if (detail::RenderPass* lightingSlot = _impl->pipeline.findPass("Lighting")) {
-        lightingPassPtr = static_cast<const detail::LightingPass*>(lightingSlot);
+        lightingPassPtr = static_cast<detail::LightingPass*>(lightingSlot);
+        lightingPassPtr->resetFrameState();
     }
 
     // §Skybox0 (2026-07-23) — borrowed pointer to the SkyboxPass in
@@ -1042,19 +1061,18 @@ void Renderer::render(const RenderScene& scene)
         bloomBlurPassPtr->resetFrameState();
     }
 
-    // §S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — borrowed
-    // pointer to the DepthHazePass in the pipeline. nullptr when the
-    // host built a custom desc that omitted the DepthHaze slot
-    // (cutsheet §S4 "omit slot = opt out"). PostProcessPass (after
-    // §S4c) reads `ctx.depthHazePass->halfResFbo()` (RT0 of the haze
-    // result) and binds it as the `hazeTexture` sampler on the
-    // fullscreen composite draw. nullptr ⇒ PostProcessPass falls
-    // back to binding sceneColor on slot 2 (FS branchless composite
-    // collapses to `raw * (1 - 0) = raw` — byte-equivalent to
-    // hazeEnabled=false). Mirrors bloomBlurPassPtr above.
-    const detail::DepthHazePass* depthHazePassPtr = nullptr;
+    // Borrow the haze producer so downstream passes can require a successful
+    // submit from this frame before promoting FgSemantic::HazeSource.
+    detail::DepthHazePass* depthHazePassPtr = nullptr;
     if (detail::RenderPass* depthHazeSlot = _impl->pipeline.findPass("DepthHaze")) {
-        depthHazePassPtr = static_cast<const detail::DepthHazePass*>(depthHazeSlot);
+        depthHazePassPtr = static_cast<detail::DepthHazePass*>(depthHazeSlot);
+        depthHazePassPtr->resetFrameState();
+    }
+
+    detail::SSAOPass* ssaoPassPtr = nullptr;
+    if (detail::RenderPass* ssaoSlot = _impl->pipeline.findPass("SSAO")) {
+        ssaoPassPtr = static_cast<detail::SSAOPass*>(ssaoSlot);
+        ssaoPassPtr->resetFrameState();
     }
 
     // §P5.5 C (2026-07-23) — wire the per-frame SceneLights ref
@@ -1094,6 +1112,67 @@ void Renderer::render(const RenderScene& scene)
     }
     fg.importExternal(detail::FgResourceId::SceneColor, sceneColorHandle);
 
+    const bool backendReady = _impl->adapter.isInitialized()
+        && !_impl->adapter.isNoopBackend();
+    const bool gbufferStagePresent = gbufferPassPtr != nullptr
+        && gbufferPassPtr->isEnabled();
+    const bool lightingStagePresent = lightingPassPtr != nullptr
+        && lightingPassPtr->isEnabled();
+
+    // Lighting is the sole SSAO consumer. The graph allocates the target only
+    // when the complete GBuffer -> SSAO -> Lighting chain is available.
+    const bool ssaoPassEnabled = detail::selectSsaoStage(
+        frame.ssaoEnabled,
+        frame.ssaoStrength,
+        frame.ssaoRadius,
+        ssaoPassPtr != nullptr,
+        ssaoPassPtr != nullptr && ssaoPassPtr->isEnabled(),
+        gbufferPassPtr != nullptr,
+        gbufferStagePresent,
+        lightingPassPtr != nullptr,
+        lightingStagePresent,
+        fgW,
+        fgH) && backendReady;
+    if (ssaoPassEnabled) {
+        fg.addResource(detail::FgResourceId::SSAOTexture,
+                       {bgfx::TextureFormat::RGBA8,
+                        detail::FgTextureScale::Full,
+                        /*transient=*/true,
+                        /*withDepth=*/false});
+        fg.addPass({"SSAO",
+                    {},
+                    {detail::FgResourceId::SSAOTexture},
+                    /*enabled=*/true});
+        fg.setResolvedSemantic(detail::FgSemantic::SSAOSource,
+                               detail::FgResourceId::SSAOTexture);
+    }
+
+    const bool hazePassEnabled = detail::selectDepthHazeStage(
+        frame.hazeEnabled,
+        frame.hazeStrength,
+        depthHazePassPtr != nullptr,
+        depthHazePassPtr != nullptr && depthHazePassPtr->isEnabled(),
+        gbufferPassPtr != nullptr && gbufferPassPtr->isEnabled(),
+        lightingPassPtr != nullptr && lightingPassPtr->isEnabled(),
+        fgW,
+        fgH) && backendReady;
+    if (hazePassEnabled) {
+        fg.addResource(detail::FgResourceId::HazeColor,
+                       {detail::kHdrSceneColorFormat,
+                        detail::FgTextureScale::Full,
+                        /*transient=*/true,
+                        /*withDepth=*/false});
+        fg.addPass({"DepthHaze",
+                    {detail::FgResourceId::SceneColor},
+                    {detail::FgResourceId::HazeColor},
+                    /*enabled=*/true});
+        fg.setResolvedSemantic(detail::FgSemantic::HazeSource,
+                               detail::FgResourceId::HazeColor);
+    }
+
+    const detail::FgResourceId hdrSceneSource = hazePassEnabled
+        ? detail::FgResourceId::HazeColor
+        : detail::FgResourceId::SceneColor;
     const detail::BloomStageState bloomStages = detail::selectBloomStages(
         frame.bloomStrength,
         bloomExtractPassPtr != nullptr,
@@ -1107,12 +1186,9 @@ void Renderer::render(const RenderScene& scene)
                         /*transient=*/true,
                         /*withDepth=*/false});
         fg.addPass({"BloomExtract",
-                    {detail::FgResourceId::SceneColor},
+                    {hdrSceneSource},
                     {detail::FgResourceId::BloomBright},
                     /*enabled=*/true});
-
-        // A and B are distinct logical targets whose read/write intervals
-        // overlap, so FrameGraph must not alias them.
     }
     if (bloomStages.blur) {
         fg.addResource(detail::FgResourceId::BloomBlurA,
@@ -1125,144 +1201,22 @@ void Renderer::render(const RenderScene& scene)
                         detail::FgTextureScale::Half,
                         /*transient=*/true,
                         /*withDepth=*/false});
-        // H pass (view 11): BloomBright → BloomBlurA.
         fg.addPass({"BloomBlurH",
                     {detail::FgResourceId::BloomBright},
                     {detail::FgResourceId::BloomBlurA},
                     /*enabled=*/true});
-        // V pass (view 12): BloomBlurA → BloomBlurB.
         fg.addPass({"BloomBlurV",
                     {detail::FgResourceId::BloomBlurA},
                     {detail::FgResourceId::BloomBlurB},
                     /*enabled=*/true});
-    }
-
-    // §F4 (2026-07-24, mid-term FG MVP sub-cut 4) — DepthHazePass
-    // HazeHalf target. Centralized `hazePassEnabled` gate:
-    //   - frame.hazeEnabled (host knob)
-    //   - frame.hazeStrength > 0 (otherwise fogFactor
-    //     collapses to 0; no point allocating the RT)
-    //   - gbufferPass != nullptr (Deferred-only MVP; the haze
-    //     distance proxy reads GBuffer RT2 worldPos ── Forward
-    //     has no GBuffer so safe-no-haze at the host side)
-    //
-    // When `hazePassEnabled` is false, the DepthHaze pass is not
-    // added to the FG, HazeHalf is not declared, and the
-    // FrameGraph compile culls it entirely. K3 invariant #2
-    // ("hazeEnabled == false ⇒ no FBO allocation") is enforced
-    // at compile time, not per-pass. The DepthHazePass::execute
-    // path checks `ctx.frameGraph->resolve(HazeHalf)` and early-
-    // returns 0 when the resource is not live — byte-equivalent
-    // to the pre-F4 `if (!frame.hazeEnabled) return 0` short-
-    // circuit.
-    const bool hazePassEnabled =
-        frame.hazeEnabled
-        && frame.hazeStrength > 0.0f
-        && (gbufferPassPtr != nullptr)
-        && (_impl->viewportW > 0)
-        && (_impl->viewportH > 0);
-    if (hazePassEnabled) {
-        fg.addResource(detail::FgResourceId::HazeHalf,
-                       {detail::kHdrSceneColorFormat,
-                        detail::FgTextureScale::Half,
-                        /*transient=*/true,
-                        /*withDepth=*/false});
-        fg.addPass({"DepthHaze",
-                    {detail::FgResourceId::SceneColor},
-                    {detail::FgResourceId::HazeHalf},
-                    /*enabled=*/true});
-    }
-    // Compile locks the live set and physical target plan; resolve() returns
-    // invalid for resources culled by the current frame's gates.
-    //
-    // §F5 (2026-07-24, mid-term FG MVP sub-cut 5) — semantic
-    // resolution for the 3 final-PP source slots. Each semantic
-    // points to a logical resource; if that resource isn't live
-    // (compile culled it because the host disabled the effect)
-    // the semantic resolves to invalid ⇒ PostProcessPass binds
-    // `sceneColor` on the sampler slot and the FS branchless
-    // strength gate collapses the contribution to zero.
-    //
-    //   FinalColorSource → SceneColor (always; the Base color
-    //                       handed to PostProcessPass — Deferred
-    //                       ⇒ LightingOutput; Forward ⇒ sceneFbo,
-    //                       both routed through the same external
-    //                       SceneColor borrow imported above).
-    //   BloomSource      → BloomBlurB when the complete chain is declared.
-    //                       PostProcess additionally requires Blur's current-
-    //                       frame production latch; otherwise strength is zero.
-    //   HazeSource       → HazeHalf (when hazePassEnabled); else
-    //                       invalid ⇒ fallback to sceneColor +
-    //                       branchless strength gate.
-    fg.setResolvedSemantic(detail::FgSemantic::FinalColorSource,
-                           detail::FgResourceId::SceneColor);
-    if (bloomStages.blur) {
         fg.setResolvedSemantic(detail::FgSemantic::BloomSource,
                                detail::FgResourceId::BloomBlurB);
     }
-    if (hazePassEnabled) {
-        fg.setResolvedSemantic(detail::FgSemantic::HazeSource,
-                               detail::FgResourceId::HazeHalf);
-    }
 
-    // §A2 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) —
-    // SSAOTexture target. Centralized `ssaoPassEnabled` gate.
-    // Mirrors `hazePassEnabled` semantics so K-SSAO-1 ("ssaoEnabled
-    // == false ⇒ no FBO allocation") is enforced at the FG compile
-    // step rather than inside SSAOPass::execute. The two extra
-    // conditions beyond the haze gate (mirror cutsheet §S2):
-    //
-    //   - frame.ssaoEnabled (host knob; default false)
-    //   - frame.ssaoStrength > 0 (otherwise the FS gate `step
-    //     (0.0001, ssaoStrength.x)` collapses to 0; no point
-    //     allocating the RT and the noise texture)
-    //   - gbufferPassPtr != nullptr (Deferred-only MVP; SSAOPass
-    //     reads GBuffer RT2 worldPos via ctx.gbufferPass. Forward
-    //     ⇒ no GBuffer ⇒ safe no-SSAO at the host side; cutsheet
-    //     §S2 "Deferred-only" hard line)
-    //   - _impl->viewportW > 0 && _impl->viewportH > 0
-    //   - adapter.isInitialized() && !adapter.isNoopBackend()
-    //
-    // The last two conditions are pinned by A2 — they make the
-    // Noop-backend test path not leak stats (mirror F6 K3 #3
-    // "Noop / uninit ⇒ 0 alloc" guard). When `ssaoPassEnabled`
-    // is false, SSAOPass is not added to the FG, SSAOTexture is
-    // not declared, and FG compile culls it entirely ⇒ resolve
-    // returns invalid ⇒ SSAOPass::execute early-returns 0.
-    const bool ssaoPassEnabled =
-        frame.ssaoEnabled
-        && frame.ssaoStrength > 0.0f
-        && (gbufferPassPtr != nullptr)
-        && (_impl->viewportW > 0)
-        && (_impl->viewportH > 0)
-        && _impl->adapter.isInitialized()
-        && !_impl->adapter.isNoopBackend();
-    if (ssaoPassEnabled) {
-        // §A2 SSAO MVP (2026-07-24) — SSAOTexture resource lives
-        // on the FrameGraph now. SSAOPass::execute reads it via
-        // `ctx.frameGraph->resolve(FgResourceId::SSAOTexture)`,
-        // PostProcessPass (A3) reads it via
-        // `ctx.frameGraph->resolveSemantic(
-        //   FgSemantic::SSAOSource)`.
-        //
-        // NOTE: composite is not wired in A2 — PostProcessPass
-        // (F5-shipped) currently does NOT bind the SSAOSource
-        // sampler (the A3 cut adds `texture2d ssaoTexture` to FS).
-        // A2 only verifies the FG resource side; A3 then wires
-        // the consumer pipeline so the composite reaches the
-        // backbuffer.
-        fg.addResource(detail::FgResourceId::SSAOTexture,
-                       {bgfx::TextureFormat::RGBA8,
-                        detail::FgTextureScale::Full,
-                        /*transient=*/true,
-                        /*withDepth=*/false});
-        fg.addPass({"SSAO",
-                    {detail::FgResourceId::SceneColor},
-                    {detail::FgResourceId::SSAOTexture},
-                    /*enabled=*/true});
-        fg.setResolvedSemantic(detail::FgSemantic::SSAOSource,
-                               detail::FgResourceId::SSAOTexture);
-    }
+    // FinalColorSource always names the stable underlying scene. Runtime source
+    // selection promotes HazeSource only after its current-frame latch is set.
+    fg.setResolvedSemantic(detail::FgSemantic::FinalColorSource,
+                           detail::FgResourceId::SceneColor);
 
     // GBufferDebug now overlays the selected attachment directly into the
     // game viewport on view 250. No hidden host-owned FBO is allocated; UI
@@ -1319,30 +1273,14 @@ void Renderer::render(const RenderScene& scene)
         // Bloom producer latches; physical textures resolve through FG.
         bloomExtractPassPtr,
         bloomBlurPassPtr,
-        // §S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — borrowed
-        // pointer to the DepthHazePass in the pipeline. PostProcessPass
-        // (after §S4c) reads the producer's halfResFbo() through this
-        // ptr; nullptr ⇒ PostProcessPass binds sceneColor on slot 2
-        // (FS branchless composite collapses to `raw * (1 - 0) = raw`
-        // = zero haze, no GLSL sampler-not-set warning). Mirrors
-        // bloomBlurPassPtr above (lifetime contract: pointer must
-        // remain valid for the duration of pipeline::executeAll(ctx)).
+        // Haze producer latch. HazeColor resolves through FrameGraph; nullptr
+        // or a false current-frame latch fails closed to the underlying scene.
         depthHazePassPtr,
-        // §F2 (2026-07-24, mid-term FG MVP) — borrowed pointer to
-        // the FrameGraph that owns the post-process chain transient
-        // resources (BloomBright / BloomBlurA/B / HazeHalf). F2
-        // wires this for BloomExtract only; F3-F5 migrate BloomBlur /
-        // DepthHaze / PostProcess. nullptr ⇒ those passes early-
-        // return 0 (byte-equivalent to today's host-default path
-        // where bloomStrength=0 ⇒ no bloom contribution).
-        //
-        // The FrameGraph is owned by `_impl->frameGraph`; its
-        // lifetime is Renderer lifetime. The pass uses it to resolve
-        // a logical FgResourceId (e.g. BloomBright) to a physical
-        // bgfx::FrameBufferHandle.
+        // Renderer-owned FrameGraph for Bloom, HazeColor and SSAO transients.
         &_impl->frameGraph,
         detail::sanitizeBloomThreshold(_impl->postProcessBloomThreshold),
         detail::sanitizeBloomSoftKnee(_impl->postProcessBloomSoftKnee),
+        ssaoPassPtr,
     };
 
     static uint32_t s_compositeLog = 0;
@@ -1384,6 +1322,7 @@ void Renderer::render(const RenderScene& scene)
     // Editor / demo / unittest have no consumer). The shadow FBO is
     // a depth-only offscreen target; ShadowPass::execute Noop-gates
     // cleanly when the adapter is uninitialized or Noop.
+    detail::configureRenderViewOrder(_impl->adapter);
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
 
     // §5.5 cleanup (2026-07-22) — the F1-diagnostic lastFrameShadowFbo
@@ -1452,7 +1391,7 @@ void Renderer::resize(uint32_t width, uint32_t height)
     //
     // §F6 — centralized FrameGraph resize. All post-process chain
     // transient RTs (BloomBright / BloomBlurA / BloomBlurB /
-    // HazeHalf) live on the FrameGraph now; resize() destroys
+    // HazeColor / SSAOTexture) live on the FrameGraph now; resize() destroys
     // owned FG RTs, leaves externals alone (mirror sceneFbo
     // block above). Passes (BloomExtract / BloomBlur / DepthHaze
     // / PostProcess) get a single fg.resize() call instead of
@@ -2186,7 +2125,7 @@ void Renderer::setDepthHazeStrength(float strength)
     if (!_impl) {
         return;
     }
-    _impl->depthHazeStrength = strength;
+    _impl->depthHazeStrength = detail::sanitizeDepthHazeStrength(strength);
 }
 
 float Renderer::depthHazeStrength() const noexcept
@@ -2199,7 +2138,7 @@ void Renderer::setDepthHazeDensity(float density)
     if (!_impl) {
         return;
     }
-    _impl->depthHazeDensity = density;
+    _impl->depthHazeDensity = detail::sanitizeDepthHazeDensity(density);
 }
 
 float Renderer::depthHazeDensity() const noexcept
@@ -2212,7 +2151,7 @@ void Renderer::setDepthHazeColor(const ayt::math::FVector3& color)
     if (!_impl) {
         return;
     }
-    _impl->depthHazeColor = color;
+    _impl->depthHazeColor = detail::sanitizeDepthHazeColor(color);
 }
 
 ayt::math::FVector3 Renderer::depthHazeColor() const noexcept
@@ -2245,7 +2184,7 @@ void Renderer::setSsaoStrength(float strength)
     if (!_impl) {
         return;
     }
-    _impl->ssaoStrength = strength;
+    _impl->ssaoStrength = detail::sanitizeSsaoStrength(strength);
 }
 
 float Renderer::ssaoStrength() const noexcept
@@ -2258,7 +2197,7 @@ void Renderer::setSsaoRadius(float radius)
     if (!_impl) {
         return;
     }
-    _impl->ssaoRadius = radius;
+    _impl->ssaoRadius = detail::sanitizeSsaoRadius(radius);
 }
 
 float Renderer::ssaoRadius() const noexcept
@@ -2271,7 +2210,7 @@ void Renderer::setSsaoBias(float bias)
     if (!_impl) {
         return;
     }
-    _impl->ssaoBias = bias;
+    _impl->ssaoBias = detail::sanitizeSsaoBias(bias);
 }
 
 float Renderer::ssaoBias() const noexcept

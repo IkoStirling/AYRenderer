@@ -88,10 +88,10 @@ void checkCanonicalDefaultDesc(const RenderPipelineDesc& desc)
     // appended between BloomBlur and PostProcess).
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::Forward2DOpaque);  // CM-1 (2026-08-11)
-    CHECK(desc.passes[3] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[4] == RenderPassSlot::BloomExtract);   // S1a (2026-07-23)
-    CHECK(desc.passes[5] == RenderPassSlot::BloomBlur);      // S1b (2026-07-23)
-    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);      // S4b (2026-07-23)
+    CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[4] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[8] == RenderPassSlot::UI);
 }

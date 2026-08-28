@@ -98,6 +98,7 @@ public:
         return _lightingFbo.idx != UINT16_MAX && _programReady;
     }
     bool producedThisFrame() const noexcept { return _producedThisFrame; }
+    void resetFrameState() noexcept { _producedThisFrame = false; }
 
     // Stub accessors — return invalid handle / 0 until B5 wires
     // real GPU state. The output FBO is the consumer-side binding
@@ -199,6 +200,8 @@ private:
     ayt::shader::BindingId _tEnvCube         = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uCubeActive      = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uAmbientStrength = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _tSsaoTexture     = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uSsaoParams      = ayt::shader::InvalidBinding;
 
     // §P5.5 C (2026-07-23) — per-light shadow atlas bindings. The
     // atlas is a single texture2d (mirrors the pre-C `shadowMap`

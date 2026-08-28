@@ -5,6 +5,8 @@
 #include "detail/LightingPass.h"
 #include "detail/GBufferPass.h"
 #include "detail/SkyboxPass.h"
+#include "detail/DepthHazePass.h"
+#include "detail/PostProcessPass.h"
 
 #include "AYRenderer/RenderTypes.h"
 #include "AYShader/ShaderResource.h"
@@ -265,6 +267,23 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
     (void)uploadShadowAtlas(material.shader, shadows);
     bindTransparentEnvironment(material.shader, ctx);
 
+    // Built-in PBR transparents evaluate fog from their own fragment world
+    // position after opaque haze has completed. Optional bindings keep custom
+    // shaders source-compatible; an absent uniform simply skips this feature.
+    const bool hazeActive = ctx.depthHazePass != nullptr
+        && ctx.depthHazePass->producedThisFrame();
+    const float depthHaze[4] = {
+        frame.hazeDensity,
+        hazeActive ? frame.hazeStrength : 0.0f,
+        material.blendMode == BlendMode::Additive ? 1.0f : 0.0f,
+        0.0f
+    };
+    const float depthHazeColor[4] = {
+        frame.hazeColor.x, frame.hazeColor.y, frame.hazeColor.z, 0.0f
+    };
+    trySetUniformVec4(material.shader, "depthHaze", depthHaze);
+    trySetUniformVec4(material.shader, "depthHazeColor", depthHazeColor);
+
     if (material.boneBlockBinding == shader::InvalidBinding) {
         material.boneBlockBinding =
             material.shader.getUniformBlockBinding("Skeleton");
@@ -383,7 +402,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     bool borrowedDepth = false;
     if (deferredLitComposite) {
         const bgfx::FrameBufferHandle lightingFbo =
-            ctx.lightingPass->lightingOutputFbo();
+            PostProcessPass::selectSourceFbo(ctx);
         const bgfx::TextureHandle color =
             adapter.getFboAttachment(lightingFbo, 0);
         const bgfx::TextureHandle depth = ctx.gbufferPass->gbufferDepthRt();

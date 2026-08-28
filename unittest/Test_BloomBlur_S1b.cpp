@@ -198,10 +198,10 @@ TEST_CASE(s1b_make_default_includes_bloomblur_after_bloomextract) {
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::Forward2DOpaque);  // CM-1 (2026-08-11)
-    CHECK(desc.passes[3] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[4] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[5] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
+    CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[4] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[8] == RenderPassSlot::UI);
     CHECK(desc.contains(RenderPassSlot::BloomBlur));
@@ -219,12 +219,12 @@ TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
-    CHECK(desc.passes[3] == RenderPassSlot::Lighting);
-    CHECK(desc.passes[4] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[7] == RenderPassSlot::DepthHaze);   // S4b (2026-07-23)
-    CHECK(desc.passes[8] == RenderPassSlot::SSAO);        // §A2 SSAO MVP (2026-07-24) — between DepthHaze and PP
+    CHECK(desc.passes[3] == RenderPassSlot::SSAO);
+    CHECK(desc.passes[4] == RenderPassSlot::Lighting);
+    CHECK(desc.passes[5] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[6] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[7] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[8] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[9] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[10] == RenderPassSlot::UI);
 }
@@ -242,11 +242,8 @@ TEST_CASE(s1b_bloomblur_view_ids_after_extract_before_pp) {
           == BloomBlurPass::kBloomBlurHorizontalViewId + 1);
     CHECK(DepthHazePass::kDepthHazeViewId
           == BloomBlurPass::kBloomBlurVerticalViewId + 1);
-    // §A2 SSAO MVP (2026-07-24) — single-point view-id bump. The
-    // chain now goes SSAO between DepthHaze and PostProcess:
-    // DepthHaze=13 → SSAO=14 → PostProcess=15. BloomBlur chain
-    // remains DepthHaze=13; the SSAO slot is consumed between
-    // DepthHaze and PostProcess now.
+    // Stable numeric IDs remain adjacent for ABI, while explicit view order
+    // executes SSAO(14) before Lighting(8) and DepthHaze(13).
     CHECK(SSAOPass::kSsaoViewId
           == DepthHazePass::kDepthHazeViewId + 1);
     CHECK(PostProcessPass::kBlitViewId

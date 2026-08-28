@@ -1,15 +1,8 @@
 // §A3 SSAO integration test (2026-07-24, mid-term FG MVP SSAO
 // Gate commit).
 //
-// Validates the End-to-end FG + SSAOPass + PostProcessPass wire:
-//   1) SSAOSource invalid ⇒ resolveSemantic returns invalid ⇒
-//      PostProcessPass binds sceneColor on slot 3 ⇒ FS gate
-//      `step(0.0001, strength)` collapses AO contribution (no
-//      behavior change vs pre-A3 composite).
-//   2) SSAOSource valid ⇒ resolveSemantic returns the SSAOTexture
-//      RT ⇒ PostProcessPass binds it on slot 3. (Compositing
-//      itself is purely a GPU-side operation; the test verifies
-//      the wire without exercising the shader pipeline.)
+// Validates the FrameGraph + SSAOPass ownership wire. Lighting is the only
+// consumer; DepthHaze/PostProcess never composite AO over final color.
 //   3) Noop-backend ⇒ no FG alloc; SSAOPass::execute and
 //      PostProcessPass::execute both short-circuit to 0.
 
@@ -24,6 +17,7 @@
 #include "detail/FgResource.h"
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
+#include "detail/LightingPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
@@ -86,7 +80,7 @@ TEST_CASE(a3int_fg_ssaosource_valid_when_tex_live) {
                        /*transient=*/true,
                        /*withDepth=*/false});
     fg.addPass({"SSAO",
-                {FgResourceId::SceneColor},
+                {},
                 {FgResourceId::SSAOTexture},
                 /*enabled=*/true});
     fg.setResolvedSemantic(FgSemantic::SSAOSource,
@@ -99,9 +93,8 @@ TEST_CASE(a3int_fg_ssaosource_valid_when_tex_live) {
     // physical remains invalid. We pin the `hasLogical` arm of
     // resolveSemantic — when the logical isn't live OR the
     // adapter is uninitialized, resolveSemantic returns invalid.
-    // K-SSAO-1 hold: SSAOSource invalid ⇒ fallback to sceneColor
-    // ⇒ FS gate collapses (test verifies the wire is plumbed;
-    // composition is GPU-pipeline).
+    // Physical allocation requires an initialized adapter; logical liveness is
+    // still visible through graph statistics on the headless path.
     const bgfx::FrameBufferHandle h =
         fg.resolveSemantic(FgSemantic::SSAOSource);
     // The headless test path returns invalid — pin it.
@@ -141,34 +134,16 @@ TEST_CASE(a3int_ssao_pass_executes_0_no_gbuffer) {
     CHECK(pass.execute(ctx) == 0u);
 }
 
-// ─── C. K-SSAO-3 invariant — composite gate ─────────────────────────
+// ─── C. AO ownership invariant ──────────────────────────────────────
 
-TEST_CASE(a3int_k_ssao_3_composite_math_when_strength_zero) {
-    // The composite math in PostProcessPass FS:
-    //   let aoMul = clamp(1.0 - aoFactor * ssaoStrength.x * step(...), 0, 1)
-    // With ssaoStrength.x == 0, aoMul evaluates to 1.0 (the only
-    // safe value) regardless of aoFactor.
-    const float ssaoStrengthZero = 0.0f;
-    const float aoFactor         = 0.7f;
-    const float gate = (ssaoStrengthZero > 0.0001f) ? 1.0f : 0.0f;
-    const float aoMul = (1.0f - aoFactor * ssaoStrengthZero * gate < 0.0f)
-                            ? 0.0f
-                            : ((1.0f - aoFactor * ssaoStrengthZero * gate > 1.0f)
-                                ? 1.0f
-                                : 1.0f - aoFactor * ssaoStrengthZero * gate);
-    CHECK_FLOAT_EQ(aoMul, 1.0f, 1e-6f);
-}
-
-TEST_CASE(a3int_k_ssao_3_composite_math_when_strength_positive) {
-    // Sanity — when ssaoStrength is positive, the composite
-    // multiplies rawHaze by `1 - aoFactor * strength`. With
-    // strength=0.5 and aoFactor=1 (fully occluded), the
-    // darkening is `0.5` ⇒ rawHaze becomes 50% brightness.
-    const float strength = 0.5f;
-    const float aoFactor = 1.0f;
-    const float gate   = (strength > 0.0001f) ? 1.0f : 0.0f;
-    const float aoMul  = 1.0f - aoFactor * strength * gate;
-    CHECK_FLOAT_EQ(aoMul, 0.5f, 1e-6f);
+TEST_CASE(a3int_lighting_is_the_only_final_color_ssao_consumer) {
+    const std::string lighting(
+        ayt::render::detail::kLightingPhoskiaSourceCStr);
+    const std::string post(
+        ayt::render::detail::postProcessPhoskiaSourceForTests());
+    CHECK(lighting.find("texture2d ssaoTexture") != std::string::npos);
+    CHECK(lighting.find("materialAo * ssaoAmbient") != std::string::npos);
+    CHECK(post.find("ssaoTexture") == std::string::npos);
 }
 
 TEST_SUITE_END

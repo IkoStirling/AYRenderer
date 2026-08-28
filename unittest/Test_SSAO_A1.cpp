@@ -35,6 +35,7 @@
 #include "AYRenderer.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
+#include "AYRenderer/SSAOShaderSources.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "AYShader/ShaderResource.h"
 
@@ -151,17 +152,12 @@ TEST_CASE(a1_fg_semantic_ssao_source_is_3) {
 // ─── C. View id reservation lock ────────────────────────────────────
 
 TEST_CASE(a1_ssao_view_id_lock_is_14) {
-    // §A1 (2026-07-24) — cutsheet §S2 view-map lock:
-    //   BloomExtract=10 → BlurH=11 → BlurV=12 → DepthHaze=13 →
-    //   SSAO=14 → PostProcess=15 → UI=255.
+    // Numeric IDs remain ABI-stable; execution order is configured separately.
     CHECK(SSAOPass::kSsaoViewId == 14u);
 }
 
 TEST_CASE(a1_post_process_view_id_lock_is_15_post_a2_bump) {
-    // §A2 (2026-07-24) — single-point view-id bump 14→15 so
-    // PostProcess reads SSAOTexture on the next view (cutsheet §S2
-    // view-map lock: SSAO=14 → PP=15 → UI=255). Pinned here so a
-    // future cutsheet that re-renumbers would break loudly.
+    // Stable final-composite view id, before UI view 255.
     CHECK(static_cast<uint16_t>(PostProcessPass::kBlitViewId) == 15u);
 }
 
@@ -312,23 +308,12 @@ TEST_CASE(a1_ssao_pass_execute_frame_graph_invalid_resolve_returns_zero) {
 
 // ─── H. K-SSAO invariant documentation pin ──────────────────────────
 
-TEST_CASE(a1_k_ssao_invariants_documented) {
-    // Documentation-only pin for grep-ability. The contract:
-    //   K-SSAO-1: ssaoEnabled=false || ssaoStrength<=0 ||
-    //     gbufferPass==nullptr ⇒ SSAOTexture not live ⇒ resolve
-    //     invalid ⇒ execute() returns 0 ⇒ zero draw, zero alloc.
-    //     PostProcessPass composite (A3) fallback binds sceneColor
-    //     on the SSAO slot and FS gate step(0.0001, ssaoStrength)
-    //     collapses the composite (byte-equivalent to pre-A3).
-    //   K-SSAO-2: SSAO sample rejecting sky (worldPos.w == 0)
-    //     uses step(0.0001, w), NOT if. Phoskia has no if-expr.
-    //   K-SSAO-3: PostProcessPass composite uses clamp(1-x, 0, 1),
-    //     NOT saturate builtin.
-    // A1 ships: K-SSAO-1 holds trivially (execute early-returns
-    // even when resolve succeeds; SSAOTexture is in the graph).
-    // K-SSAO-2/3 land with A3 (real shader). Trivially held now
-    // because there is no shader body yet.
-    CHECK(true);
+TEST_CASE(a1_ssao_production_contract_is_not_a_placeholder) {
+    const std::string source(ayt::render::kSsaoPhoskiaSource);
+    CHECK(source.find("texture2d geometryCoverage") != std::string::npos);
+    CHECK(source.find("return vec4(aoOcclusion * centerCoverage")
+          != std::string::npos);
+    CHECK(source.find("worldPos.w") == std::string::npos);
 }
 
 // ─── I. SSAOTexture FG declare-vs-not-declare contrast ──────────────
@@ -389,19 +374,11 @@ TEST_CASE(a1_fg_ssao_texture_declared_resolve_live_count_one) {
     CHECK(pass.execute(ctx) == 0u);
 }
 
-// ─── J. PassExecContext default-init — no SSAOPass borrowed ptr ─────
+// ─── J. PassExecContext trailing defaults ───────────────────────────
 
-TEST_CASE(a1_pass_exec_context_no_ssao_borrowed_ptr_field) {
-    // §A1 design decision — SSAOPass is wired via the
-    // FrameGraph resource read path, not via a borrowed pointer
-    // on PassExecContext (mirror DepthHazePass line 422-422 was
-    // borrowed-ptr, but SSAOPass is fully FG-driven so it does
-    // NOT need a borrowed pointer — cutsheet §S2 "Resources:
-    // SSAOTexture via FG.resolveSemantic(SSAOSource)"). No new
-    // field on PassExecContext. Verify C++14 trailing-default
-    // behavior: 22-field brace-init sites still compile (this
-    // test itself is one such site; if test compiles & runs,
-    // K-SSAO ABI holds).
+TEST_CASE(a1_pass_exec_context_ssao_borrow_defaults_null) {
+    // Lighting uses the borrowed producer only as a current-frame latch; old
+    // aggregate initializers remain safe because the field is trailing-default.
     SSAOA1Stubs stubs;
     BGFXAdapter adapter;
     ayt::shader::ShaderResourcePool pool;
@@ -412,11 +389,9 @@ TEST_CASE(a1_pass_exec_context_no_ssao_borrowed_ptr_field) {
         stubs.frame,
         /*viewId=*/14u,
     };
-    // depthHazePass (the previous appended borrowed-ptr) must
-    // still be the default nullptr.
     CHECK(ctx.depthHazePass == nullptr);
-    // frameGraph must still be the default nullptr (pre-A2).
     CHECK(ctx.frameGraph == nullptr);
+    CHECK(ctx.ssaoPass == nullptr);
 }
 
 TEST_SUITE_END

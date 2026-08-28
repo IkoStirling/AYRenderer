@@ -1,145 +1,192 @@
-// §A3 SSAO MVP composite test (2026-07-24, mid-term FG MVP SSAO
-// Gate commit).
-//
-// Pins the A3 SHIP contract:
-//   1) SSAOPass 8-tap sphere Phoskia FS string literal contains
-//      the expected composite ingredients:
-//        - clamp(1 - x, 0, 1)           — K-SSAO-3 (no `saturate`)
-//        - step(0.0001, worldPos.w)     — K-SSAO-2 sky reject
-//        - 8 unrolled let dxN / pN / wN pairs (template-string
-//          pin, not AST)
-//        - viewProjectionMatrix builtin used (no `inverse()`)
-//        - pow(1 - occFraction, 4.0) visibility → occlusion
-//        - center-depth + hemi flip (v3 quality; not kernel-depth)
-//   2) SSAO cache-key bumped v2 → v3 (kSSAOCacheKeyCStr)
-//   3) PostProcessPass FS composite clamp(1 - aoFactor * strength
-//      * step(0.0001, strength), 0, 1) — byte-equivalent to v5
-//      when strength = 0
-//   4) PostProcessPass FS contains `texture2d ssaoTexture` (slot 3)
-//   5) kPostProcessCacheKeyCStr bumped v5 → v6 (Bug-fix-#3 mirror),
-//      then v7 5-tap blur, then §P5 L1 v7 → v8_audit_p5
-//   6) SSAOPass::isReady() reflects program + noise upload
-//   7) FrameContext ssaoEnabled/ssaoStrength already exercised by
-//      A1 tests; A3 verifies the composite is wired into PP
-
 #include "AYTest.h"
-#include "AYRenderer.h"
-#include "AYRenderer/RenderScene.h"
-#include "AYRenderer/RenderTypes.h"
-#include "AYShader/ShaderResourcePool.h"
-#include "AYShader/ShaderResource.h"
 
-#include "detail/BGFXAdapter.h"
-#include "detail/FrameContext.h"
-#include "detail/PassExecContext.h"
+#include "AYRenderer/SSAOShaderSources.h"
+#include "AYShader/BGFXConverter.h"
+#include "AYShader/Phoskia.h"
+#include "detail/DepthHazePass.h"
+#include "detail/LightingPass.h"
 #include "detail/PostProcessPass.h"
-#include "detail/RenderPass.h"
 #include "detail/SSAOPass.h"
+#include "detail/SSAOPipeline.h"
 
+#include <iostream>
+#include <fstream>
+#include <limits>
+#include <sstream>
 #include <string>
 
-using ayt::render::detail::PostProcessPass;
-using ayt::render::detail::SSAOPass;
+namespace
+{
 
-namespace {
+bool compileFullscreenMaterial(const char* source, const char* label)
+{
+    ayt::shader::phoskia::Compiler compiler;
+    ayt::shader::phoskia::CompileOptions frontend;
+    ayt::shader::BGFXCompileOptions backend;
+#ifdef AY_SHADER_SHADERC_HINT
+    backend.shadercPath = AY_SHADER_SHADERC_HINT;
+#endif
+    backend.platform = "linux";
+    backend.profile = "430";
+#ifdef AY_SHADER_BGFX_COMMON_HINT
+    backend.includeDirs.emplace_back(AY_SHADER_BGFX_COMMON_HINT);
+#endif
+#ifdef AY_SHADER_BGFX_SRC_HINT
+    backend.includeDirs.emplace_back(AY_SHADER_BGFX_SRC_HINT);
+#endif
+
+    ayt::shader::CompiledShaderProgram program;
+    compiler.compileToProgram(source, frontend, backend, program);
+    if (!program.success) {
+        std::cerr << '[' << label << "] compile failed:\n";
+        for (const std::string& error : program.errors) {
+            std::cerr << "  " << error << '\n';
+        }
+    }
+    return program.success;
+}
+
+std::string readRendererSource(const char* relativePath)
+{
+    const std::string path =
+        std::string(AY_RENDERER_SOURCE_DIR) + "/" + relativePath;
+    std::ifstream file(path, std::ios::binary);
+    std::stringstream stream;
+    stream << file.rdbuf();
+    return stream.str();
+}
 
 } // namespace
 
 TEST_SUITE(AYRenderer_SSAO_A3)
 
-// ─── A. SSAO cache-key + isReady bump pin ───────────────────────────
+TEST_CASE(a3_parameters_are_sanitized)
+{
+    using namespace ayt::render::detail;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
 
-TEST_CASE(a3_ssao_cache_key_bumped_v4) {
-    // §A3 — v3 hemi → v4 off-plane + fixed kernel.
-    const std::string key(ayt::render::detail::kSSAOCacheKeyCStr);
-    CHECK(key.find("ssao") != std::string::npos);
-    CHECK(key.find("_v4_") != std::string::npos);
+    CHECK(sanitizeSsaoStrength(-1.0f) == 0.0f);
+    CHECK(sanitizeSsaoStrength(2.0f) == 1.0f);
+    CHECK(sanitizeSsaoStrength(nan) == 0.0f);
+    CHECK(sanitizeSsaoRadius(-1.0f) == 0.0f);
+    CHECK(sanitizeSsaoRadius(inf) == 0.0f);
+    CHECK(sanitizeSsaoBias(-1.0f) == 0.0f);
+    CHECK(sanitizeSsaoBias(nan) == 0.0f);
 }
 
-TEST_CASE(a3_post_process_cache_key_bumped_v9_bloom_failclose) {
-    // §A3 — v6 SSAO sample → v7 5-tap SSAO blur in composite.
-    // §P5 L1 (2026-08-24) — bumped v7 → v8_audit_p5 after the
-    // rate-limited logging refactor. The "ssao" substring is
-    // still in the key (the bump is documented as audit-p5, not
-    // ssao-related); the substring check pins that the bump
-    // didn't accidentally drop the SSAO marker.
-    const std::string key(ayt::render::detail::kPostProcessCacheKeyCStr);
-    CHECK(key.find("v9_bloom_failclose_exposure") != std::string::npos);
-    CHECK(key.find("ssao") != std::string::npos);
+TEST_CASE(a3_complete_chain_gate_fails_closed)
+{
+    using ayt::render::detail::selectSsaoStage;
+    CHECK(selectSsaoStage(true, 0.6f, 0.5f,
+                          true, true, true, true, true, true, 1280, 720));
+    CHECK_FALSE(selectSsaoStage(false, 0.6f, 0.5f,
+                                true, true, true, true, true, true, 1280, 720));
+    CHECK_FALSE(selectSsaoStage(true, 0.0f, 0.5f,
+                                true, true, true, true, true, true, 1280, 720));
+    CHECK_FALSE(selectSsaoStage(true, 0.6f, 0.0f,
+                                true, true, true, true, true, true, 1280, 720));
+    CHECK_FALSE(selectSsaoStage(true, 0.6f, 0.5f,
+                                false, true, true, true, true, true, 1280, 720));
+    CHECK_FALSE(selectSsaoStage(true, 0.6f, 0.5f,
+                                true, false, true, true, true, true, 1280, 720));
+    CHECK_FALSE(selectSsaoStage(true, 0.6f, 0.5f,
+                                true, true, false, true, true, true, 1280, 720));
+    CHECK_FALSE(selectSsaoStage(true, 0.6f, 0.5f,
+                                true, true, true, false, true, true, 1280, 720));
+    CHECK_FALSE(selectSsaoStage(true, 0.6f, 0.5f,
+                                true, true, true, true, false, true, 1280, 720));
+    CHECK_FALSE(selectSsaoStage(true, 0.6f, 0.5f,
+                                true, true, true, true, true, false, 1280, 720));
+    CHECK_FALSE(selectSsaoStage(true, 0.6f, 0.5f,
+                                true, true, true, true, true, true, 0, 720));
 }
 
-TEST_CASE(a3_ssao_pass_is_ready_lifts_after_program_acquire) {
-    // §A3 (2026-07-24) — Skeleton isReady() returned false (A1).
-    // The real impl lifts it to `_program.isValid() && _noiseUploaded`.
-    // We can't easily exercise this without a real adapter+pool,
-    // so we just pin the contract via documentation here. Tests
-    // requiring the full GPU path live in the Editor Play smoke.
-    SSAOPass pass{};
-    CHECK_FALSE(pass.isReady());   // initial state still false
-    // Smoke: cache-key readback.
-    CHECK(ayt::render::detail::kSSAOCacheKeyCStr != nullptr);
+TEST_CASE(a3_production_shader_uses_rt3_coverage_tbn_and_view_depth)
+{
+    const std::string source(ayt::render::kSsaoPhoskiaSource);
+    CHECK(source.find("texture2d geometryCoverage") != std::string::npos);
+    CHECK(source.find("sample(geometryCoverage, uv).a") != std::string::npos);
+    CHECK(source.find("centerWorld.w") == std::string::npos);
+    CHECK(source.find("cross(helper, Nn)") != std::string::npos);
+    CHECK(source.find("viewportRect.zw") != std::string::npos);
+    CHECK(source.find("viewMatrix * vec4(sampleWorld0, 1.0)")
+          != std::string::npos);
+    CHECK(source.find("abs(actualView0.z) + bias, abs(sampleView0.z)")
+          != std::string::npos);
+    CHECK(source.find("dot(to0, Nn)") != std::string::npos);
+    CHECK(source.find("0.01") == std::string::npos);
+    CHECK(source.find("uniform vec4 ssaoStrength") == std::string::npos);
 }
 
-// ─── B. Composite contract documented ───────────────────────────────
-
-TEST_CASE(a3_k_ssao_invariants_documented) {
-    // The K-SSAO invariants are now reproduced in real code
-    // (cutsheet §S2 hard line). Test pins so a future reader can
-    // grep for `k_ssao_` to find the contract.
-    //
-    // K-SSAO-1: ssaoEnabled=false ⇒ SSAOTexture not live ⇒
-    //          0 alloc / 0 draw. ENFORCED BY FG compile via the
-    //          render() central 7-condition gate.
-    // K-SSAO-2: worldPos.w == 0 sky reject via
-    //          `step(0.0001, w)`. ENFORCED IN Phoskia FS
-    //          `let skyGate = step(0.0001, centerWorld.w)`
-    //          inside the SSAO material.
-    // K-SSAO-3: composite uses `clamp(1 - x, 0, 1)` (no
-    //          `saturate`). ENFORCED IN PostProcessPass FS
-    //          `let aoMul = clamp(1.0 - aoFactor *
-    //          ssaoStrength.x * aoGate, 0.0, 1.0)`.
-    CHECK(true);
+TEST_CASE(a3_production_shader_compiles)
+{
+    CHECK(compileFullscreenMaterial(ayt::render::kSsaoPhoskiaSource,
+                                    "ssao"));
 }
 
-TEST_CASE(a3_frame_context_ssao_knobs_round_trip) {
-    // §A3 (2026-07-24) — FrameContext SSAO tail reachable from
-    // a host setter. Verifies the four-knob readback so a host
-    // can opt in by setting ssaoEnabled=true + ssaoStrength>0.
-    ayt::render::detail::FrameContext ctx;
-    ctx.ssaoEnabled  = true;
-    ctx.ssaoStrength = 0.42f;
-    ctx.ssaoRadius   = 1.0f;
-    ctx.ssaoBias     = 0.05f;
-    CHECK(ctx.ssaoEnabled);
-    CHECK_FLOAT_EQ(ctx.ssaoStrength, 0.42f, 1e-6f);
-    CHECK_FLOAT_EQ(ctx.ssaoRadius,   1.0f,  1e-6f);
-    CHECK_FLOAT_EQ(ctx.ssaoBias,     0.05f, 1e-6f);
+TEST_CASE(a3_lighting_applies_ssao_to_ambient_only)
+{
+    const std::string source(
+        ayt::render::detail::kLightingPhoskiaSourceCStr);
+    CHECK(source.find("texture2d ssaoTexture") != std::string::npos);
+    CHECK(source.find("let ssaoAmbient") != std::string::npos);
+    CHECK(source.find("materialAo * ssaoAmbient") != std::string::npos);
+    CHECK(source.find("let pbrLit = ambientLit + directLit + surface.rgb")
+          != std::string::npos);
+    CHECK(source.find("let unlit = albedo.rgb + surface.rgb")
+          != std::string::npos);
+    CHECK(source.find("mix(pbrLit, unlit, isUnlit)")
+          != std::string::npos);
+
+    const std::string haze(
+        ayt::render::detail::depthHazePhoskiaSourceForTests());
+    const std::string post(
+        ayt::render::detail::postProcessPhoskiaSourceForTests());
+    const std::string postFallback(
+        ayt::render::detail::postProcessFallbackPhoskiaSourceForTests());
+    CHECK(haze.find("ssaoTexture") == std::string::npos);
+    CHECK(post.find("ssaoTexture") == std::string::npos);
+    CHECK(postFallback.find("ssaoTexture") == std::string::npos);
 }
 
-TEST_CASE(a3_ppostProcessViewId_pin) {
-    // §A2 (2026-07-24) — single-point view-id bump 14 → 15.
-    // Re-pinned here as part of the A3 composite wire-up so a
-    // reader searching for `a3_*` sees the contract.
-    CHECK(static_cast<uint16_t>(PostProcessPass::kBlitViewId) == 15);
+TEST_CASE(a3_cache_keys_and_latch_are_current)
+{
+    CHECK(std::string(ayt::render::detail::kSSAOCacheKeyCStr)
+          == "ssao_v5_8tap_viewdepth_tbn_coverage_fs");
+    CHECK(std::string(ayt::render::detail::kLightingCacheKeyCStr)
+          == "lighting_v31_ssao_ambient_only");
+    ayt::render::detail::SSAOPass pass;
+    CHECK_FALSE(pass.isReady());
+    CHECK_FALSE(pass.producedThisFrame());
+    pass.resetFrameState();
+    CHECK_FALSE(pass.producedThisFrame());
 }
 
-// ─── C. post-process FS pin (lint-level) ────────────────────────────
+TEST_CASE(a3_ssao_resources_are_destroyed_before_pipeline_or_adapter_teardown)
+{
+    const std::string source = readRendererSource("src/AYRenderer.cpp");
+    CHECK_FALSE(source.empty());
 
-TEST_CASE(a3_post_process_ssao_strength_uniform_default_zero) {
-    // §A3 (2026-07-24) — pre-A3 PPM composite gate collapses
-    // (`step(0.0001, 0) = 0`). With ssaoStrength == 0, the
-    // aoMul expression evaluates to 1.0 ⇒ no darkening ⇒
-    // byte-equivalent to v5 composite.
-    const float strengthPad[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    const float gate = (strengthPad[0] > 0.0001f) ? 1.0f : 0.0f;
-    CHECK_FLOAT_EQ(gate, 0.0f, 1e-6f);
-    const float aoMul = 1.0f - 0.0f * strengthPad[0] * gate;
-    CHECK_FLOAT_EQ(aoMul, 1.0f, 1e-6f);
-}
+    const size_t reconfigure =
+        source.find("void Renderer::Impl::applyPipelineDesc");
+    const size_t reconfigureSsao =
+        source.find("pipeline.findPass(\"SSAO\")", reconfigure);
+    const size_t pipelineClear = source.find("pipeline.clear();", reconfigure);
+    CHECK(reconfigure != std::string::npos);
+    CHECK(reconfigureSsao != std::string::npos);
+    CHECK(pipelineClear != std::string::npos);
+    CHECK(reconfigureSsao < pipelineClear);
 
-TEST_CASE(a3_ssao_view_id_lock) {
-    // §A1 §A3 (2026-07-24) — SSAO view id 14 lock holds.
-    CHECK(SSAOPass::kSsaoViewId == 14);
+    const size_t shutdown = source.find("void Renderer::shutdown()");
+    const size_t shutdownSsao =
+        source.find("_impl->pipeline.findPass(\"SSAO\")", shutdown);
+    const size_t adapterShutdown =
+        source.find("_impl->adapter.shutdown()", shutdown);
+    CHECK(shutdown != std::string::npos);
+    CHECK(shutdownSsao != std::string::npos);
+    CHECK(adapterShutdown != std::string::npos);
+    CHECK(shutdownSsao < adapterShutdown);
 }
 
 TEST_SUITE_END

@@ -109,7 +109,7 @@ namespace {
 // mirror here ALSO moves v20 �?v22; live drift detection
 // compares against `kLightingCacheKeyCStr` (Bug fix #3 mirror �?// pre-D self-compare was false-green).
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v30_audit_shadow_brdf_hdr";
+    "lighting_v31_ssao_ambient_only";
 
 // §Skybox0 (2026-07-23) �?SkyboxPass cache-key literal. Pin
 // here so a master-cache-key change without a Test_Skybox0
@@ -367,7 +367,7 @@ TEST_CASE(lighting_pass_cache_key_bump_v22_p5p5d) {
     CHECK(std::string(kExpectedLightingCacheKey).size() >= 10u);
     // Live drift detection (Bug fix #3 mirror) �?the mirror
     // literal MUST match the live kLightingCacheKeyCStr extern.
-    CHECK(std::string(kLightingCacheKeyCStr).find("v30_audit_shadow_brdf_hdr")
+    CHECK(std::string(kLightingCacheKeyCStr).find("v31_ssao_ambient_only")
           != std::string::npos);
 }
 

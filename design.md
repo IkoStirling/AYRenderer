@@ -1,7 +1,7 @@
 # AYRenderer Design
 
-> **文档状态**：2026-08-28 已对齐当前代码；R0–R5 主管线已落地。
-> **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、UI 和 GBufferDebug 已接入 Pass 调度。GBuffer 已冻结 `material-contract-v3-model-coverage-split`；Lighting、Transparent 与 Bloom 第二轮按序修复已完成，等待真实 GPU capture 验收。
+> **文档状态**：2026-08-29 已对齐当前代码；R0–R5 主管线已落地。
+> **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、UI 和 GBufferDebug 已接入 Pass 调度。GBuffer 已冻结 `material-contract-v3-model-coverage-split`；Lighting、Transparent、Bloom、DepthHaze 与 SSAO 第二轮按序修复已完成，等待真实 GPU capture 验收。
 > **活动执行计划**：[`docs/execution-plan.md`](execution-plan.md)（P0–P6 队列、§5 segfault 约束、§5.4 隔离实验、附录 B/C/D 索引）。本文件是目标架构，与代码不一致时以代码与 execution-plan 为准。
 > **关联文档**：[`docs/gbuffer-current.md`](docs/gbuffer-current.md)（当前 MRT/数据契约）、[`AYShader/design.md` §8.5](../AYShader/design.md)（opaque handle contract）、[`AYShader/README.md`](../AYShader/README.md)。
 
@@ -460,22 +460,23 @@ public:
 | LightingPass | 已落地全屏 Deferred 光照；shadow atlas、完整多光 BRDF、采样变体与 HDR 链路已完成第二轮收敛 |
 | TransparentPass | 已接入双路径；Deferred 借用 LightingOutput 颜色与 GBuffer 深度组成缓存 FBO，共享多光/阴影契约，按 sortKey 与相机距离稳定排序并在输入失效时 fail-close |
 | BloomExtract / BloomBlur | 已完成第二轮收敛：完整链门控、当前帧产出契约、RGBA16F、Karis 降采样、5-fetch/axis blur、曝光一致合成 |
-| DepthHaze / SSAO | 已接入，由 frame option 零成本门控；等待逐 Pass 审核 |
+| DepthHaze | 已完成第二轮收敛：全分辨率 HDR HazeColor、Coverage 背景语义、逐帧 fail-close、透明 PBR 雾化与显式 view 顺序；SSAO 已在 Lighting 环境光阶段完成，不在 Haze 内重复合成 |
+| SSAO | 已完成审核与按序修复：RT3 coverage、TBN 旋转核、view-Z 比较、完整链门控、生命周期闭合，且只影响 Lighting 环境光 |
 | PostProcess / UI | 已接入 |
 | GBufferDebug | Deferred-only，view 250，默认关闭 |
 
 当前 Forward 默认顺序：
 
 ```text
-Shadow → ForwardOpaque → Forward2DOpaque → Transparent
-       → BloomExtract → BloomBlur → DepthHaze → PostProcess → UI
+Shadow → ForwardOpaque → Forward2DOpaque → DepthHaze(no-op)
+       → Transparent → BloomExtract → BloomBlur → PostProcess → UI
 ```
 
 当前 Deferred opt-in 顺序：
 
 ```text
-Shadow → Skybox → GBuffer → Lighting → Transparent
-       → BloomExtract → BloomBlur → DepthHaze → SSAO
+Shadow → Skybox → GBuffer → SSAO → Lighting → DepthHaze
+       → Transparent → BloomExtract → BloomBlur
        → PostProcess → UI → GBufferDebug
 ```
 
@@ -735,6 +736,9 @@ include/AYRenderer/
 - [x] BloomExtract/BloomBlur 第一轮静态审核：链路门控、数据流、HDR/曝光、失败路径、shader 质量与测试有效性
 - [x] BloomExtract/BloomBlur 第二轮收敛：完整链零分配门控、逐帧产出 latch、参数清洗、HDR Karis 降采样、5-fetch/axis blur、Final fail-close
 - [ ] Bloom 真实 D3D11/12 GPU capture：阈值/knee、曝光一致性、resize、格式 fallback、边缘采样与高亮稳定性
+- [x] DepthHaze 第一轮静态审核：资源所有权、深度/背景语义、SSAO/透明/Bloom 顺序、失败路径与测试真实性
+- [x] DepthHaze 第二轮收敛：全分辨率 HazeColor、Coverage 背景策略、AO-before-fog、逐帧 latch、透明 PBR 雾化与参数清洗
+- [ ] DepthHaze 真实 D3D11/12 GPU capture：天空/地平线、遮挡边缘、透明叠层、additive、resize 与 HDR 格式 fallback
 - [ ] 场景渲染 `DrawListBuilder` 合批（UI 合批已独立完成）
 - [ ] Command Queue
 - [ ] `material_shader_mapping` 数据库
@@ -770,6 +774,12 @@ include/AYRenderer/
 - `Test_UIPass_AI1`(composite + UI view 2 锁)
 
 跑法:同一 commit **连续 3 次**全量 `AYRenderer_Test`,记录 PASS/FAIL;**3 次不全绿**则按 `docs/execution-plan.md` §5 处理,不许合并带赌的 ABI 变更。
+
+### 14.4 MSVC 增量对象与内部 ABI
+
+- 修改 Pass 类布局、显式/隐式构造函数或 `PassExecContext` 尾字段后，如果出现随机 bool、内存断言、重复构造符号或测试进程挂住，先怀疑旧 `.obj` 与新头文件布局混用。
+- 本轮 DepthHaze 曾由旧测试对象携带旧的隐式构造函数，导致 `_producedThisFrame` 初值随机；加入显式构造后，链接器进一步报告同一构造函数重复定义，最终通过清理并完整重建 `AYRenderer_Test` 目标消除。
+- 此类问题不得靠放宽断言或增加运行时容错掩盖。先终止精确的残留测试进程，再对目标做干净重建；调试测试保持串行，避免多个断言窗口与 exe 文件锁互相干扰。
 
 ---
 
@@ -809,7 +819,7 @@ include/AYRenderer/
 
 ### 2026-08-28 — LightingPass 第一轮审核
 
-- 当前结构是一个 view 8 的全屏光照 Pass：消费四个 GBuffer 颜色附件、Skybox/环境立方体、`SceneLights` 与 `ShadowPass`，输出独立 `RGBA8` LightingOutput；Transparent、Bloom/Haze/SSAO 和 PostProcess 继续消费该结果。
+- 审核时结构是一个 view 8 的全屏光照 Pass：消费四个 GBuffer 颜色附件、Skybox/环境立方体、`SceneLights` 与 `ShadowPass`，当时输出独立 `RGBA8` LightingOutput；后续第二轮已升级为 `RGBA16F`，2026-08-29 又将 SSAO 调整为 Lighting 的前置 ambient 输入。
 - 正向项：`GBufferPass::producedThisFrame()` 输入门禁、Lighting 自身逐帧产出门禁、冷启动/缩放前置 FBO 准备和资源销毁路径已经闭合。
 - 阻断项：每光源 shadow atlas 复用同一 bgfx View 修改 view transform/scissor，且上传给 Lighting 的数组保存的是 View 而非 ViewProjection；Spot caster 还读取了 `Light::direction` 而不是 `spotDirection`。
 - 高优先级项：多光源 PBR 只有槽 0 计算镜面项；阴影 shader 每像素静态执行 81 次采样；atlas 投影范围与 PCF tile 边界不严；未使用槽位会计算等边界 `smoothstep`；LightingOutput 为 LDR，曝光/tonemap 前已截断高光。
@@ -822,7 +832,7 @@ include/AYRenderer/
 - Lighting 上传精确 `activeLightCount`，未使用灯槽写入有限中性值，输入 light 参数做非有限值和范围清洗；8 个灯槽均执行完整 Cook-Torrance GGX，而非仅槽 0 有镜面项。
 - Shader 按 shadow caster 数量与 PCF 开关生成变体：无阴影 0 次 shadow sample，硬阴影每槽 1 次，PCF 每槽 9 次；删除重复 legacy 关键光采样。
 - Atlas 投影增加 clip.w、局部 UV 与参考深度门禁，PCF 中心限制在 tile 内侧 1.5 texel，避免跨 tile 污染；采样 texel 使用实际 4096 atlas 尺寸。
-- LightingOutput、BloomBright、BloomBlurA/B 与 HazeHalf 统一为共享 `RGBA16F` HDR 中间格式，最终 tone map/gamma 仍由 PostProcess 执行。
+- LightingOutput、BloomBright、BloomBlurA/B 与 HazeColor 统一为共享 `RGBA16F` HDR 中间格式，最终 tone map/gamma 仍由 PostProcess 执行。
 - 新增 `AYRenderer_LightingAuditRound2` 回归组，覆盖 HDR 格式、view 保留区、采样次数、无阴影公共计算裁剪和四类实际 Phoskia 变体 IR；定向 Lighting/Skybox 旧缓存键断言已同步。
 - MSVC Debug 构建通过；`AYRenderer_Test` 全量 2936/2936 通过。该结果仍不替代真实 D3D11/12 shader 编译与 RenderDoc capture。
 - 尚未关闭的生产门禁：真实 D3D11/12 shader 编译与 RenderDoc capture；Point 光全向阴影仍不支持，Spot caster 暂用 scene-fit 正交投影而非透视锥体。
@@ -835,7 +845,7 @@ include/AYRenderer/
 - 修正混合状态：straight 与 premultiplied alpha 均使用独立 alpha 通道 `ONE / INV_SRC_ALPHA`，additive 通过 `ZERO / ONE` 保留目标 alpha；所有透明模式统一 `LEQUAL` 且禁用深度写入。
 - Transparent 借用 FBO 按颜色/深度句柄缓存，并在管线重配、resize、MSAA 修改与 shutdown 前主动销毁，避免持有已失效的生产者附件。
 - 内建 PBR 已通过 Phoskia IR、Linux GLSL 430 与 Windows s_5_0 编译检查；新增/更新 Transparent、PBR 与共享灯光测试，相关回归均通过，手动使用当前 Ninja/MSVC 参数链接的 `AYRenderer_Test` 全量为 2987/2987。
-- 尚未关闭的生产门禁：真实 D3D11/12 RenderDoc capture；传统 alpha 仍依赖排序，不提供 OIT；透明物体不写 GBuffer，因此 SSAO、DepthHaze、轮廓和其它只消费 opaque GBuffer 的效果仍按 opaque 深度语义工作；Point 全向阴影和 Spot 透视锥体阴影沿用 LightingPass 的后续能力项。
+- 尚未关闭的生产门禁：真实 D3D11/12 RenderDoc capture；传统 alpha 仍依赖排序，不提供 OIT；透明物体不写 GBuffer，因此 SSAO、轮廓和其它只消费 opaque GBuffer 的效果仍按 opaque 深度语义工作；DepthHaze 对内建透明 PBR 单独按 fragment world position 处理，自定义透明 shader 需要声明可选 haze uniforms；Point 全向阴影和 Spot 透视锥体阴影沿用 LightingPass 的后续能力项。
 
 ### 2026-08-28 — BloomExtract/BloomBlur 两轮审核与按序修复
 
@@ -848,6 +858,31 @@ include/AYRenderer/
 - 测试直接检查生产 shader 字符串，不再维护易漂移的测试镜像；覆盖完整链 truth table、逐帧 fail-close、参数边界、HDR 格式、采样数/offset、binding 与曝光合成。精确生产源已手动通过 Phoskia IR、Linux GLSL 430 和 Windows s_5_0 检查；稳定全量 `AYRenderer_Test` 为 3022/3022。
 - 可选后续优化按收益排序：先做真实 D3D11/12 capture 和阈值/曝光标定；需要更宽光晕时升级为多级 downsample/upsample 金字塔；再考虑 quarter-res 质量档、lens dirt、anamorphic streak 或 temporal stabilization。现阶段不引入多级链，避免在没有 GPU 基线前增加 RT、带宽与调参维度。
 - 仍未关闭的生产门禁：真实 GPU capture、边缘采样/resize 观测、RGBA16F fallback 后的视觉降级验证；当前为单层半分辨率 Bloom，不具备多尺度光晕。
+
+### 2026-08-28 — DepthHaze 两轮审核与按序修复
+
+- 架构收敛为 FrameGraph 所有的全分辨率 `RGBA16F HazeColor`；DepthHazePass 自身只持有全屏几何、shader/binding 和 `producedThisFrame` latch。原 `HazeHalf` 数值 ID 4 保留为源码兼容别名，新代码统一使用 `HazeColor`。
+- Deferred 数据流固定为 `GBuffer → optional SSAOTexture → LightingOutput + RT2 WorldPosition + RT3 GeometryCoverage → HazeColor → Transparent → Bloom → PostProcess`。显式 bgfx view order 保持稳定 ID 的同时强制 `SSAO(14) → Lighting(8) → Haze(13) → Transparent(9) → Bloom(10–12) → PostProcess(15)`。
+- RT3.a 明确表示 geometry coverage：有几何像素按相机到 world position 的指数距离雾计算；无几何背景按无穷远策略接收完整请求强度，不再把清屏 world position 误判为近距离表面。
+- SSAO 只在本帧实际产出且 semantic/attachment 有效时由 Lighting 消费，并仅衰减 StandardLit 的环境/IBL 项；DepthHaze 与 PostProcess 均不再读取 SSAO，因此 direct、emissive、unlit 与雾散射不会被整屏乘暗。
+- PostProcess 删除独立 `hazeTexture` 与二次 haze composite，直接把本帧有效的 HazeColor 提升为主 scene source；Bloom 从同一 HDR source 提取。DepthHaze shader、PostProcess 主/回退 shader 均直接通过 Phoskia 与 Linux GLSL 430 编译验证。
+- Transparent 在 opaque haze 后写回同一 HazeColor 并借用 GBuffer depth；内建 PBR 用 fragment world position 计算透明雾。Alpha 路径注入雾色，Additive 路径只按透射率衰减，避免凭空增加能量；ForwardOpaque 每次清零可选 haze uniforms，防止共享 program 状态串帧。
+- strength/density/color 统一清洗 NaN、Inf 与负值；Pass/producer/backend/viewport 任一缺失时不声明资源或不提交。GBuffer、Lighting、SSAO、Haze 与 Bloom 的逐帧 latch 在图构建前统一复位，消费者不再把“句柄仍有效”误当成“本帧数据有效”。
+- MSVC Debug 干净构建通过；四组 DepthHaze 定向契约 131/131，通过真实 shader 编译与 view-order 检查后，`AYRenderer_Test` 在同一代码上连续三次 3052/3052 全绿，未再出现断言窗或挂起。
+- 可选优化顺序：先以 D3D11/12 capture 标定天空、地平线、轮廓边缘和透明叠层；确认带宽成为瓶颈后再评估 half/quarter-res + 双边上采样；待 GBuffer 深度重建方案成熟后可移除 RT2 WorldPosition；只有确有体积光需求时再升级 froxel/temporal volumetric fog。
+- 剩余限制：自定义透明 shader 若不声明可选 haze uniforms 将保持未雾化；当前是解析式距离雾，不支持局部体积、光束或时间积累；全分辨率 HazeColor 增加一轮 HDR 读写，仍需真实 GPU capture 定量验收。
+
+### 2026-08-29 — SSAOPass 审核与按序修复
+
+- 架构固定为 Deferred-only 的 `GBuffer → SSAO → Lighting`：SSAO view 14 读取 RT2 world position、RT1 encoded normal 与 RT3.a geometry coverage，写入 FrameGraph 所有的全分辨率 `RGBA8 SSAOTexture`；R 保存遮蔽率，A 保存中心 coverage。Lighting view 8 是唯一消费者。
+- 修正 coverage 来源：不再把 RT2.a 的 material AO/model 打包值当作几何有效位；中心与每个 kernel tap 均读取 RT3.a，天空/越界采样 fail-close。
+- 8-tap kernel 以 GBuffer normal 构造 TBN，并按像素哈希旋转；样本从近到远分布于法线半球。遮挡比较使用符号无关的 `abs(view-space Z)`，bias 为固定视空间单位，不再比较相机径向距离或按距离放大 bias。
+- 参数入口和逐帧广播统一清洗：strength 限制到 `[0,1]`，radius/bias 拒绝负值与 NaN/Inf，逐帧 bias 再限制到 radius。完整 gate 要求 SSAO/GBuffer/Lighting 三个 Pass 均存在且启用、后端与 viewport 有效、strength/radius 非零；否则不声明 SSAOTexture。
+- 合成所有权收敛到 Lighting：coverage-aware 五点过滤后，AO 只乘 StandardLit ambient/IBL；direct、emissive 与 Unlit 保持不变。DepthHaze/PostProcess 删除 SSAO sampler、uniform 与重复滤波，避免整屏乘暗和有雾/无雾路径不一致。
+- `producedThisFrame` 在每帧和每次 execute 起始清零，仅真实 submit 后置位。管线重配 `pipeline.clear()` 前和 Renderer shutdown/adapter teardown 前都显式销毁 SSAO 全屏 VB/IB 与 program/binding，关闭重启后的 stale handle/ABI 断言窗口。
+- 测试改为直接消费生产 shader：覆盖参数非有限值、完整链 truth table、RT3 coverage、TBN、view-Z、ambient-only 所有权、Haze/PP 无重复 SSAO、cache key、latch 与 teardown 顺序，并实际执行 Phoskia + Linux GLSL 430 编译；不再用 `CHECK(true)` 或测试内复制 gate 形成假绿。
+- 修改 `PostProcessPass` 私有布局后的增量产物曾在 `FinalPPPass_S1c` 触发 `Stack around the variable 'pass' was corrupted`；同一配置完整 clean rebuild 后该套件 46/46 正常退出，确认是新旧 `.obj` 混用导致的 ABI 污染，不是 SSAO shader 越界。随后 SSAO 161/161、Lighting 32/32、DepthHaze 64/64 定向回归通过，最终 MSVC Debug 全量 `AYRenderer_Test` 为 3095/3095，未再出现断言窗或异常退出。
+- 暂不实施的可选优化：half-resolution + depth/normal-aware bilateral upsample、`R8` 单通道目标、由 depth 重建 view position、蓝噪声/temporal accumulation 与 GTAO。先用 D3D11/12 capture 测量 SSAO 带宽、边缘 halo、噪声和参数尺度，再按收益选择，避免在无 GPU 基线时同时改变格式、分辨率和算法。
 
 ### 2026-07 — 引擎闭环（R4 + Engine）
 
@@ -877,4 +912,4 @@ include/AYRenderer/
 
 ### 下一步
 
-按 Pass 顺序进入 DepthHaze 审核；并行保留 GBuffer、Lighting、Transparent 与 Bloom 的真实 GPU capture 门禁。之后再审核 SSAO/PostProcess，并继续推进 Point/Spot 高级阴影、Command Queue 与 DrawListBuilder。
+按 Pass 顺序进入 PostProcess 审核；并行保留 GBuffer、Lighting、Transparent、Bloom、DepthHaze 与 SSAO 的真实 GPU capture 门禁。之后继续推进 Point/Spot 高级阴影、Command Queue 与 DrawListBuilder。

@@ -30,6 +30,10 @@ material PBR {
     uniform vec4 activeLightCount
     uniform vec4 cubeActive
     uniform vec4 ambientStrength
+    // Optional transparent-pass depth haze. x=density, y=strength,
+    // z=additive blend policy (1 attenuates without fog-color injection).
+    uniform vec4 depthHaze
+    uniform vec4 depthHazeColor
 
     property baseColor  = vec4(1.0, 1.0, 1.0, 1.0)
     property metallic   = vec4(0.0, 0.0, 0.0, 0.0)
@@ -871,7 +875,15 @@ material PBR {
         let color = flatAmbient + cubeAmbient + direct + materialEmissive
         let alpha = sampledBase.a * sampledOpacity
                   * max(0.0, min(1.0, opacity.x))
-        let outputColor = mix(color, color * alpha,
+        let hazeDistance = length(worldPos - cameraPos.xyz)
+        let transparentFog = clamp(
+            (1.0 - exp(-depthHaze.x * hazeDistance)) * depthHaze.y,
+            0.0, 1.0)
+        let alphaHazed = mix(color, depthHazeColor.xyz, transparentFog)
+        let additiveHazed = color * (1.0 - transparentFog)
+        let hazedColor = mix(alphaHazed, additiveHazed,
+                             max(0.0, min(1.0, depthHaze.z)))
+        let outputColor = mix(hazedColor, hazedColor * alpha,
                               max(0.0, min(1.0, premultipliedAlpha.x)))
         return vec4(outputColor, alpha)
     }

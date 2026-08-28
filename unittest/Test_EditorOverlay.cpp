@@ -32,8 +32,8 @@ TEST_CASE(make_editor_forward_inserts_overlay_after_postprocess) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeEditorForward();
     CHECK(desc.contains(RenderPassSlot::EditorOverlay));
     CHECK(desc.passes.size() == 10u);  // 9-slot default (CM-1 2026-08-11) + EditorOverlay
-    CHECK(desc.passes[3] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[4] == RenderPassSlot::Transparent);
     CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[8] == RenderPassSlot::EditorOverlay);
     CHECK(desc.passes[9] == RenderPassSlot::UI);

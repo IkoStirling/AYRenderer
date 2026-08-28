@@ -54,6 +54,7 @@ public:
     // Renderer::render() calls setGbufferSize() every frame (including 0x0),
     // which resets this bit before pipeline dispatch.
     bool producedThisFrame() const noexcept { return _producedThisFrame; }
+    void resetFrameState() noexcept { _producedThisFrame = false; }
     bool hasValidAttachments() const noexcept {
         return bgfx::isValid(_gbufferAlbedoRt)
             && bgfx::isValid(_gbufferNormalRt)

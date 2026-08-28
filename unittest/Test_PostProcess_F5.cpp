@@ -335,10 +335,9 @@ TEST_CASE(f5_view_id_constant_lock) {
     // F5 view id 锁:PostProcess = kBlitViewId = 14,F5 不动。
     //
     // §A2 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) — single-
-    // point view-id bump 14→15 so PostProcess runs AFTER the SSAO
-    // pass (view 14) and BEFORE UI (view 255). The lock is bumped
-    // here to match the new kBlitViewId. No F5 test contract
-    // changes.
+    // point view-id bump 14→15 preserved the numeric ABI. Current explicit
+    // order executes SSAO(14) before Lighting/Haze and PostProcess(15) after
+    // the complete scene chain, before UI(255).
     CHECK(static_cast<uint16_t>(PostProcessPass::kBlitViewId) == 15);
 }
 

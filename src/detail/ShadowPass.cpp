@@ -4,6 +4,7 @@
 #include "detail/ShadowDebug.h"
 #include "detail/ShadowDiagnostics.h"
 #include "detail/ShadowMatrixBuilder.h"
+#include "detail/RenderViewOrder.h"
 
 #include <algorithm>
 #include <cmath>
@@ -55,13 +56,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     // range. View 1 clears the full atlas, then tile views render with their
     // own viewport before view 2 resolves it. Reorder them ahead of consumers
     // every frame because bgfx resets view order at frame boundaries.
-    static constexpr bgfx::ViewId kViewOrder[] = {
-        1, 18, 19, 20, 21, 22, 23, 24, 25,
-        2, 0,
-        3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17
-    };
-    static_assert(sizeof(kViewOrder) / sizeof(kViewOrder[0]) == 26);
-    adapter.setViewOrder(0, 26, kViewOrder);
+    configureRenderViewOrder(adapter);
 
     ++_frameCounter;
 

@@ -121,6 +121,15 @@ FrameGraph     — addPass / importExternal / compile / execute
 the FG 套路 works for a brand-new Pass without requiring any
 changes to `FrameGraph` core.
 
+> **2026-08-29 implementation update**：下方 A1–A3 内容保留为历史
+> cutsheet，不再描述当前算法。现行链路是
+> `GBuffer → SSAO(view 14) → Lighting(view 8) → DepthHaze(view 13) →
+> Transparent/Bloom → PostProcess(view 15)`，通过显式 view order 保持
+> 数值 ABI。SSAO 读取 RT2 world position、RT1 normal 与 RT3.a coverage，
+> 使用 TBN 旋转 8-tap 和 view-space Z；Lighting 是唯一消费者并只衰减
+> ambient/IBL。DepthHaze/PostProcess 不再声明 SSAO sampler。完整现状与
+> 可选优化见 [`design.md` 2026-08-29 记录](../design.md)。
+
 ### Append-only ABI (no F1–F6 baseline churn)
 
 - `FgResourceId::SSAOTexture = 5` — append before `Count` (now 6)

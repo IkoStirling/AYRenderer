@@ -11,8 +11,9 @@
 // `producedThisFrame()` is reset before every dispatch and becomes true only
 // after a successful submit, so downstream passes cannot consume stale data.
 //
-// View order is fixed: Transparent=9, Extract=10, BlurH=11, BlurV=12,
-// DepthHaze=13, SSAO=14, PostProcess=15, UI=255.
+// Explicit view order follows dependencies: SSAO=14, Lighting=8,
+// DepthHaze=13, Transparent=9, Extract=10, BlurH=11, BlurV=12,
+// PostProcess=15, UI=255.
 
 #include "AYShader/ShaderResource.h"
 

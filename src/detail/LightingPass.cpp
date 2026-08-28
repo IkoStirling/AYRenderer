@@ -8,6 +8,7 @@
 #include "detail/RenderPass.h"
 #include "detail/SceneLighting.h"
 #include "detail/ShadowPass.h"
+#include "detail/SSAOPass.h"
 
 #include "AYRenderer/RenderScene.h"
 
@@ -86,7 +87,7 @@ const char* const kLightingBuildStampCStr = kLightingBuildStamp;
 //   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
 //   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v30_audit_shadow_brdf_hdr";
+    "lighting_v31_ssao_ambient_only";
 
 // �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -183,6 +184,7 @@ material Lighting {
     texture2d gbufferMaterial
     texture2d shadowMap
     texture2d gbufferSky
+    texture2d ssaoTexture
     texturecube envCube
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
@@ -194,6 +196,7 @@ material Lighting {
     uniform vec4 skyMix
     uniform vec4 cubeActive
     uniform vec4 ambientStrength
+    uniform vec4 ssaoParams
     // �P5.5 C (2026-07-23) ??per-light shadow atlas bindings.
     // shadowAtlasRects[i] = (u0,v0,u1,v1) in atlas UV [0,1].
     // lightViewProjs[i]   = light-space VP for slot i.
@@ -217,6 +220,21 @@ material Lighting {
         let normalSample = sample(gbufferNormal, baseUv)
         let worldSample = sample(gbufferWorldPosition, baseUv)
         let surface = sample(gbufferMaterial, baseUv)
+        let ssaoCenter = sample(ssaoTexture, baseUv)
+        let ssaoLeft = sample(ssaoTexture, baseUv + vec2(-ssaoParams.y, 0.0))
+        let ssaoRight = sample(ssaoTexture, baseUv + vec2(ssaoParams.y, 0.0))
+        let ssaoDown = sample(ssaoTexture, baseUv + vec2(0.0, -ssaoParams.z))
+        let ssaoUp = sample(ssaoTexture, baseUv + vec2(0.0, ssaoParams.z))
+        let ssaoWeight = ssaoCenter.a + ssaoLeft.a + ssaoRight.a + ssaoDown.a + ssaoUp.a
+        let ssaoOcclusion = clamp(
+            (ssaoCenter.r * ssaoCenter.a
+             + ssaoLeft.r * ssaoLeft.a
+             + ssaoRight.r * ssaoRight.a
+             + ssaoDown.r * ssaoDown.a
+             + ssaoUp.r * ssaoUp.a) / max(ssaoWeight, 1.0),
+            0.0,
+            1.0)
+        let ssaoAmbient = clamp(1.0 - ssaoOcclusion * ssaoParams.x, 0.0, 1.0)
         let decodedN = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
         let N = decodedN * (1.0 / max(length(decodedN), 0.0001))
         // �P5.5 D (2026-07-23) ??IBL MVP ambient term. Default
@@ -865,7 +883,8 @@ material Lighting {
         let directLit = direct0 + direct1 + direct2 + direct3 + direct4 + direct5 + direct6 + direct7
         let ambientF = fresnelSchlickRoughness(NdotV, F0, materialRoughness)
         let ambientDiffuseWeight = (vec3(1.0, 1.0, 1.0) - ambientF) * (1.0 - materialMetallic)
-        let ambientLit = albedo.rgb * ambientDiffuseWeight * ambient * materialAo
+        let ambientLit = albedo.rgb * ambientDiffuseWeight * ambient
+                       * materialAo * ssaoAmbient
         let pbrLit = ambientLit + directLit + surface.rgb
         let unlit = albedo.rgb + surface.rgb
         let isUnlit = step(0.5, materialModel) * (1.0 - step(1.5, materialModel))
@@ -1024,6 +1043,8 @@ void LightingPass::destroyResources(BGFXAdapter& adapter)
     _tEnvCube         = ayt::shader::InvalidBinding;
     _uCubeActive      = ayt::shader::InvalidBinding;
     _uAmbientStrength = ayt::shader::InvalidBinding;
+    _tSsaoTexture     = ayt::shader::InvalidBinding;
+    _uSsaoParams      = ayt::shader::InvalidBinding;
     _uShadowAtlasRects    = ayt::shader::InvalidBinding;
     _uLightViewProjs      = ayt::shader::InvalidBinding;
     _uShadowBiases        = ayt::shader::InvalidBinding;
@@ -1120,6 +1141,8 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool,
         _tEnvCube         = ayt::shader::InvalidBinding;
         _uCubeActive      = ayt::shader::InvalidBinding;
         _uAmbientStrength = ayt::shader::InvalidBinding;
+        _tSsaoTexture     = ayt::shader::InvalidBinding;
+        _uSsaoParams      = ayt::shader::InvalidBinding;
         _uShadowAtlasRects    = ayt::shader::InvalidBinding;
         _uLightViewProjs      = ayt::shader::InvalidBinding;
         _uShadowBiases        = ayt::shader::InvalidBinding;
@@ -1163,6 +1186,8 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool,
     _tEnvCube         = _program.getTextureBinding("envCube");
     _uCubeActive      = _program.getUniformBinding("cubeActive");
     _uAmbientStrength = _program.getUniformBinding("ambientStrength");
+    _tSsaoTexture     = _program.getTextureBinding("ssaoTexture");
+    _uSsaoParams      = _program.getUniformBinding("ssaoParams");
 
     // �P5.5 C (2026-07-23) ??per-light shadow atlas binding
     // resolves. Default InvalidBinding on acquire failure; the
@@ -1250,7 +1275,9 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     const bool shadowVariantPcf = shadowVariantCount > 0
         && ctx.shadowPass->pcfEnabled();
     ensureProgram(ctx.pool, shadowVariantCount, shadowVariantPcf);
-    if (!_program.isValid()) {
+    if (!_program.isValid()
+        || _tSsaoTexture == ayt::shader::InvalidBinding
+        || _uSsaoParams == ayt::shader::InvalidBinding) {
         return 0;
     }
 
@@ -1365,6 +1392,37 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             }
         }
     }
+
+    // SSAO is generated before Lighting and is accepted only when both the
+    // producer latch and FrameGraph semantic refer to this frame. A valid
+    // persistent attachment alone is never considered sufficient.
+    bgfx::TextureHandle ssaoTexture =
+        ctx.gbufferPass->gbufferMaterialRt(); // always-valid fallback sampler
+    bool ssaoReady = false;
+    if (ctx.ssaoPass != nullptr
+        && ctx.ssaoPass->producedThisFrame()
+        && ctx.frameGraph != nullptr) {
+        const bgfx::FrameBufferHandle ssaoFbo =
+            ctx.frameGraph->resolveSemantic(FgSemantic::SSAOSource);
+        if (BGFXAdapter::isValid(ssaoFbo)) {
+            const bgfx::TextureHandle candidate =
+                ctx.adapter.getFboAttachment(ssaoFbo, 0);
+            if (BGFXAdapter::isValid(candidate)) {
+                ssaoTexture = candidate;
+                ssaoReady = true;
+            }
+        }
+    }
+    _program.setTexture(_program.getTextureStage(_tSsaoTexture),
+                        _tSsaoTexture,
+                        toShaderTexture(ssaoTexture));
+    const float ssaoParams[4] = {
+        ssaoReady ? frame.ssaoStrength : 0.0f,
+        1.0f / static_cast<float>(_lightingW),
+        1.0f / static_cast<float>(_lightingH),
+        0.0f,
+    };
+    _program.setUniform(_uSsaoParams, ssaoParams, sizeof(ssaoParams));
 
     // �Skybox0 (2026-07-23) ??upload `skyMix` uniform. Default =
     // ayt::render::kDefaultSkyMix (full intensity; hoisted to

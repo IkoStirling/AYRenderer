@@ -47,21 +47,11 @@ namespace ayt::render::detail
 // PostProcessPass on a Deferred pipeline would blit an empty
 // sceneFbo — visible blackness on Editor Play.
 //
-// §S4c (2026-07-23, short-term-plan §S4 sub-cut 3) — third sampler
-// `hazeTexture` added on the fullscreen-triangle composite draw,
-// bound to `ctx.depthHazePass->halfResFbo()` RT0 when present.
-// Applies the per-pixel exponential depth-haze composite
-// `mix(raw, fogColor, fogFactor * strength)` over the *un-bloomed*
-// raw scene color (per short-term-plan §S4 决策 2026-07-23:
-// "haze 只改 raw, bloom 独立") — bloom stays additive on top of
-// the post-haze raw so the composite order is haze(raw) + bloom
-// (NOT haze(raw + bloom)). When the haze slot is unbound (custom
-// desc omits DepthHaze OR first-frame race when halfResFbo() is
-// invalid), execute() binds sceneColor on the haze slot and the
-// FS branchless strength gate collapses the mix to
-// `raw * (1 - 0) + fogColor * 0 = raw` — byte-equivalent to a
-// zero-haze pipeline (K3 invariant #3). Mirrors the §S1c
-// bloomTexture branchless-collapse pattern.
+// DepthHaze now produces the full-resolution scene-linear HazeColor result.
+// PostProcess selects that target as its primary scene source only after the
+// producer's current-frame latch is set; it no longer samples or recomposites
+// a separate half-resolution haze texture. SSAO is already part of deferred
+// Lighting's ambient term and is never applied to final scene color here.
 //
 // Source-FBO priority order (B6 lock):
 //   1. `ctx.gbufferPass != nullptr && ctx.lightingPass != nullptr
@@ -101,15 +91,9 @@ namespace ayt::render::detail
 // (destroy on shutdown / resize / adapter-reinit).
 class PostProcessPass : public RenderPass {
 public:
-    // §A2 SSAO MVP (2026-07-24) — single-point view-id bump
-    // 14→15 so PostProcess reads SSAOTexture on the next view.
-    // Lock: SSAO=14 → PostProcess=15 → UI=255. SSAO sits between
-    // DepthHaze (=13) and Final PP so same-frame sampling of the
-    // occlusion RT works (PostProcess's `ssaoTexture` sampler,
-    // wired in §A3, sees SSAOPass's just-written RT0).
-    //
-    // Before §A2: After DepthHaze=13; shared by Forward + Deferred.
-    // UI chrome is fixed at view 255 (must stay > Final PP).
+    // Stable final-composite view. Deferred ordering is SSAO(14) →
+    // Lighting(8) → DepthHaze(13) → transparent/bloom → PostProcess(15),
+    // with UI chrome fixed at view 255.
     static constexpr uint8_t kBlitViewId = 15;
 
     PostProcessPass() = default;
@@ -184,23 +168,6 @@ private:
     ayt::shader::BindingId      _uTonemapMode   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uTime          = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uGammaParams   = ayt::shader::InvalidBinding;
-    // §S4c (2026-07-23) — three new vec4 uniforms for the haze
-    // composite (hazeDensity / hazeStrength / hazeColor). Mirror
-    // _uBloomStrength shape (vec4 + .x for scalars; .xyz for
-    // fogColor). Uploads gated on the same per-frame source —
-    // FrameContext::haze* — that DepthHazePass S4b reads, so the
-    // strength gate stays consistent across the half-res FS write
-    // (DepthHazePass) and the full-res FS composite (PostProcessPass).
-    ayt::shader::BindingId      _uHazeDensity   = ayt::shader::InvalidBinding;
-    ayt::shader::BindingId      _uHazeStrength  = ayt::shader::InvalidBinding;
-    ayt::shader::BindingId      _uHazeColor     = ayt::shader::InvalidBinding;
-    // §A3 SSAO MVP (2026-07-24) — new vec4 uniform on the SSAO
-    // composite slot. Shape: vec4 + .x for the strength knob
-    // (cutsheet §S2 lock; mirror the haze-strength uniform).
-    // Used by the FS gate `step(0.0001, ssaoStrength.x)` to
-    // branchlessly fold the occlusion contribution to zero when
-    // the host has not opted in (K-SSAO-1 + K-SSAO-3 hold).
-    ayt::shader::BindingId      _uSSAOStrength  = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tSceneColor    = ayt::shader::InvalidBinding;
     // §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — second
     // sampler on the fullscreen-triangle composite draw, bound to
@@ -209,26 +176,6 @@ private:
     // `raw + sample(bloomTexture, uv) * bloomStrength`. Invalid
     // when the program hasn't been acquired yet (mirror _tSceneColor).
     ayt::shader::BindingId      _tBloomTexture  = ayt::shader::InvalidBinding;
-    // §S4c (2026-07-23, short-term-plan §S4 sub-cut 3) — third
-    // sampler on the fullscreen-triangle composite draw, bound to
-    // `ctx.depthHazePass->halfResFbo()` RT0 when present. When
-    // unbound (custom desc omits DepthHaze OR first-frame race),
-    // execute() falls back to binding sceneColor and the FS
-    // branchless strength gate collapses the haze mix to zero
-    // (K3 invariant #3). Mirrors _tSceneColor / _tBloomTexture.
-    ayt::shader::BindingId      _tHazeTexture   = ayt::shader::InvalidBinding;
-    // §A3 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) —
-    // fourth sampler on the fullscreen-triangle composite draw,
-    // bound to `ctx.frameGraph->resolveSemantic(
-    // FgSemantic::SSAOSource)` RT0 when SSAOPass is mounted and
-    // enabled. When the semantic physical is invalid (K-SSAO-1
-    // case: ssaoEnabled=false ⇒ FG compile culls SSAOTexture
-    // ⇒ resolve returns invalid), execute() falls back to
-    // binding sceneColor and the FS gate `step(0.0001,
-    // ssaoStrength.x)` collapses the AO contribution to zero
-    // — byte-equivalent to pre-A3 composite (K-SSAO-3 hold).
-    // Mirrors _tSceneColor / _tBloomTexture / _tHazeTexture.
-    ayt::shader::BindingId      _tSSAOTexture   = ayt::shader::InvalidBinding;
     // Latch so a failed acquire does not re-run shaderc every frame
     // (was the main stutter source when Phoskia→HLSL rejected).
     bool                        _programAcquireFailed = false;

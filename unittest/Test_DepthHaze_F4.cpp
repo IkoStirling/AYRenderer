@@ -307,7 +307,7 @@ TEST_CASE(f4_render_pipeline_slot_abi_lock) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
     CHECK(desc.passes.size() == 9);
-    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
     CHECK(desc.contains(RenderPassSlot::DepthHaze));
     // DepthHaze enum 值仍 = 10(append-only 锁)。
     CHECK(static_cast<uint8_t>(RenderPassSlot::DepthHaze) == 10);

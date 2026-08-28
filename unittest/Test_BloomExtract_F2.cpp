@@ -257,7 +257,7 @@ TEST_CASE(f2_render_pipeline_slot_abi_lock) {
     // Shadow, FO, 2DOpaque, Trans, BloomExtract, BloomBlur,
     // DepthHaze, PostProcess, UI。
     CHECK(desc.passes.size() == 9);
-    CHECK(desc.passes[4] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.contains(RenderPassSlot::BloomExtract));
     // BloomExtract enum 值仍 = 8(append-only 锁)。
     CHECK(static_cast<uint8_t>(RenderPassSlot::BloomExtract) == 8);

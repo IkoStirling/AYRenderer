@@ -1,8 +1,7 @@
 // §S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — DepthHazePass
-// real-implementation test. Pins the S4b SHIP — exponential fog
-// shader (主人拍板 B) + half-res RGBA8 FBO + view 13 + K3
-// invariants — without touching the PostProcessPass haze sampler
-// wire (that lands in §S4c).
+// legacy compatibility/no-op test. Current production uses a FrameGraph-owned
+// full-resolution HazeColor target; the old halfRes accessors remain invalid
+// source-compatible shims. This suite pins view/slot ABI and fail-closed gates.
 //
 // Tests pin:
 //   1) FrameContext default haze fields (hazeEnabled=false,
@@ -79,8 +78,7 @@ TEST_SUITE(AYRenderer_DepthHazePass_S4b)
 // === A. Identity & view-id pins =====================================
 
 TEST_CASE(s4b_depth_haze_view_id_lock_is_14) {
-    // Append-only view-id allocation; cutsheet §S4 lock:
-    //   BloomBlurV=13 → DepthHaze=14 → UI=255.
+    // Stable numeric id; explicit view order runs SSAO=14 before Haze=13.
     CHECK(DepthHazePass::kDepthHazeViewId == 13u);
 }
 
@@ -100,7 +98,7 @@ TEST_CASE(s4b_depth_haze_cache_key_extern_addressable) {
     // DepthHazePass.h must bind to the file-scope literal in
     // DepthHazePass.cpp. Drift between the two is now a compile-time
     // link error instead of a runtime self-compare.
-    const char* const mirror = "depthhaze_v2_worldpos_campos";
+    const char* const mirror = "depthhaze_v4_fullres_coverage_fs";
     CHECK(std::string(ayt::render::detail::kDepthHazeCacheKeyCStr)
           == std::string(mirror));
 }

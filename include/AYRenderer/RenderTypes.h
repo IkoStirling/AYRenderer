@@ -283,21 +283,21 @@ enum class RenderPassSlot : uint8_t {
     DepthHaze = 10,
 
     // §A1 SSAO MVP (2026-07-24, mid-term FG MVP SSAO Gate) —
-    // append-only ABI value 11. Full-resolution worldPos-sphere
-    // SSAO pass inserted AFTER DepthHaze + BEFORE PostProcess on
+    // append-only ABI value 11. Full-resolution GBuffer SSAO pass inserted
+    // AFTER GBuffer + BEFORE Lighting on
     // the **Deferred-only** pipeline (cutsheet §S2 hard line:
     // makeDefault() does NOT mount this slot — host must call
     // makeDeferred() or a custom desc that includes it). Forward
-    // pipeline never sees this slot. View 14 claim (cutsheet §S2
-    // view-map lock: Haze=13 → SSAO=14 → PP=15).
+    // pipeline never sees this slot. Stable view id 14 is ordered explicitly
+    // before Lighting view 8; Haze remains view 13 and PostProcess view 15.
     //
-    // K-SSAO invariants (must survive A2 pipeline wire + A3 composite):
+    // K-SSAO invariants:
     //   1. When frame.ssaoEnabled=false (host default) OR
     //      ssaoStrength<=0 OR gbufferPass==nullptr, the render()
     //      central `ssaoPassEnabled` is false ⇒ FG compile culls
-    //      SSAOTexture ⇒ SSAOPass::execute early-returns 0 ⇒
-    //      PostProcessPass composite gate folds `step(0.0001,
-    //      ssaoStrength.x)` to 0 — byte-equivalent composite.
+    //      SSAOTexture ⇒ SSAOPass::execute early-returns 0. Lighting is the
+    //      only consumer and applies AO to ambient/IBL, never direct,
+    //      emissive, unlit, haze, or final post-process color.
     //   2. ABI: append-only. NEVER reorder or repurpose existing
     //      slot values. Test pin: static_cast<uint8_t>(
     //      RenderPassSlot::SSAO) == 11.

@@ -10,8 +10,8 @@ namespace ayt::render::detail
 namespace {
 
 // F1 — 由 scale + 完整 viewport 算出实际物理尺寸。
-// 与 BloomExtractPass / BloomBlurPass / DepthHazePass 的 half-res
-// 约定一致: `(viewport + 1) / 2`。quarter 留作未来用。
+// Half scale uses Bloom's `(viewport + 1) / 2` convention. DepthHaze and
+// SSAO request Full explicitly; quarter remains reserved for future effects.
 uint16_t scaledDim(uint16_t viewport, FgTextureScale scale)
 {
     switch (scale) {

@@ -54,13 +54,17 @@ enum class FgResourceId : uint8_t {
     BloomBright  = 1,
     BloomBlurA   = 2,
     BloomBlurB   = 3,
-    HazeHalf     = 4,
+    // Full-resolution scene-linear color after opaque depth haze. HazeHalf is
+    // retained as a source-compatible alias for the stable numeric resource
+    // id; new code must use HazeColor because the target is no longer half-res.
+    HazeColor    = 4,
+    HazeHalf     = HazeColor,
     // §A1 SSAO MVP (2026-07-24, mid-term plan `frame-graph-mvp.md`
     // §S2 / cutsheet SSAO MVP Gate) — append-only ABI value 5.
     // SSAOPass writes the full-resolution RGBA8 occlusion RT
-    // (R = aoOcclusion ∈ [0,1]; G/B/A pad). Resolve stays invalid
-    // when the host has `ssaoEnabled=false || ssaoStrength<=0 ||
-    // gbufferPass==nullptr` ⇒ 0 alloc. Never reorder or repurpose
+    // (R = aoOcclusion; A = geometry coverage). Resolve stays invalid
+    // unless the complete enabled GBuffer -> SSAO -> Lighting chain and a
+    // non-zero sanitized strength/radius are present. Never reorder or repurpose
     // existing values. Test pin:
     //   static_cast<uint8_t>(FgResourceId::SSAOTexture) == 5
     SSAOTexture  = 5,
@@ -110,12 +114,10 @@ enum class FgSemantic : uint8_t {
     BloomSource      = 1,
     HazeSource       = 2,
     // §A1 SSAO MVP (2026-07-24) — append-only ABI value 3.
-    // PostProcessPass reads `resolveSemantic(FgSemantic::SSAOSource)`
-    // for the `ssaoTexture` sampler slot 3. When the SSAOPass is
-    // not in the graph, FG resolveSemantic returns invalid ⇒
-    // PostProcessPass fallback binds sceneColor on the SSAO slot
-    // and FS gate `step(0.0001, ssaoStrength.x)` collapses the
-    // composite to rawHaze (byte-equivalent to pre-A3 composite).
+    // LightingPass reads `resolveSemantic(FgSemantic::SSAOSource)` and folds
+    // AO into the ambient term only after SSAOPass reports current-frame
+    // production. When the pass is absent or fails, Lighting binds a safe
+    // GBuffer fallback and uploads zero strength.
     // Never reorder or repurpose existing values.
     SSAOSource       = 3,
     Count            = 4,

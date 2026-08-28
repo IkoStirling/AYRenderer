@@ -268,10 +268,10 @@ TEST_CASE(s1a_make_default_includes_bloomextract_after_transparent) {
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::Forward2DOpaque);  // CM-1 (2026-08-11)
-    CHECK(desc.passes[3] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[4] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[5] == RenderPassSlot::BloomBlur);      // S1b (2026-07-23)
-    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);      // S4b (2026-07-23)
+    CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[4] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[8] == RenderPassSlot::UI);
     // contains() helper round-trip
@@ -295,12 +295,12 @@ TEST_CASE(s1a_make_deferred_includes_bloomextract_after_transparent) {
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
-    CHECK(desc.passes[3] == RenderPassSlot::Lighting);
-    CHECK(desc.passes[4] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);      // S1b (2026-07-23)
-    CHECK(desc.passes[7] == RenderPassSlot::DepthHaze);      // S4b (2026-07-23)
-    CHECK(desc.passes[8] == RenderPassSlot::SSAO);           // §A2 SSAO MVP (2026-07-24)
+    CHECK(desc.passes[3] == RenderPassSlot::SSAO);
+    CHECK(desc.passes[4] == RenderPassSlot::Lighting);
+    CHECK(desc.passes[5] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[6] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[7] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[8] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[9] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[10] == RenderPassSlot::UI);
 }

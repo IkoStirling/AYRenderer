@@ -5,14 +5,13 @@
 // Disabled mode remains zero-allocation and zero-draw.
 //
 // Pipeline position:
-//   ... → GBuffer → Lighting → ... → SSAO → PostProcess → UI →
+//   ... → GBuffer → SSAO → Lighting → DepthHaze/Bloom → PostProcess →
 //     GBufferDebug(view 250) → Editor UI(view 255).
 //
-// View id allocation:
-//   0=FO, 1=ShadowC, 2=ShadowR, 3=Trans, 4=PP-Fwd, 5=BloomExtract,
-//   6=Skybox, 7=GBuffer, 8=Lighting, 9=Trans-Def, 10=PP-Def,
-//   11=UI, 12=BloomBlurH, 13=BloomBlurV, 14=DepthHaze, 15=SSAO,
-//   250=GBufferDebug, 255=UI-Editor.
+// Stable ids relevant to deferred diagnostics are GBuffer=7, Lighting=8,
+// SSAO=14, DepthHaze=13, Transparent=9, Bloom=10..12, PostProcess=15,
+// GBufferDebug=250 and Editor UI=255. Execution order is explicit and does
+// not follow numeric order for the post-lighting chain.
 //
 // Contracts:
 //   1. Disabled, uninitialized, Noop, or missing/currently-unproduced
