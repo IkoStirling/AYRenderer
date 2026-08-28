@@ -1,6 +1,7 @@
 #include "detail/BloomExtractPass.h"
 
 #include "detail/BGFXAdapter.h"
+#include "detail/BloomPipeline.h"
 #include "detail/FgResource.h"          // §F2 (2026-07-24) — FrameGraph FgResourceId::BloomBright
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
@@ -8,6 +9,7 @@
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
 
+#include "AYRenderer/BloomShaderSources.h"
 #include "AYShader/ShaderResource.h"
 
 #include <cstdio>
@@ -35,62 +37,15 @@ constexpr FullscreenVertex kFullscreenTriangle[3] = {
 
 constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 
-// Bright-extract Phoskia source. Samples LIT scene color from the
-// upstream FBO (LightingOutput on Deferred path, sceneFbo on Forward
-// path — both via PostProcessPass::selectSourceFbo), subtracts a
-// threshold (Karis-style soft knee = max(0, lum - threshold) /
-// max(lum, 0.0001) to avoid hard cutoff), multiplies by
-// bloomStrength (0 ⇒ pass-through zero contribution —
-// zero-behavior-change to existing renders), and writes to the
-// half-resolution FBO (BGRA8 — sampler is bilinear by default).
-//
-// Uniform gates (cutsheet lessons §3.1): all scalars as vec4 + .x
-// to satisfy bgfx Vec4 upload ABI. UV.y flipped for D3D RT vs
-// backbuffer convention (mirror PostProcessPass FS).
-//
-// Branchless: converter drops if/for. Threshold/knee formula uses
-// `step` + `mix` (mirror Skybox0 / LightingPass pattern).
-constexpr const char* kBloomExtractPhoskiaSource = R"(
-material BloomExtract {
-    texture2d sceneColor
-    uniform vec4 bloomThreshold
-    vertex {
-        in  pos : position
-        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
-        return vec4(pos.x, pos.y, 0.0, 1.0)
-    }
-    fragment {
-        in  vUv : texcoord
-        let uv = vec2(vUv.x, 1.0 - vUv.y)
-        let sampled = sample(sceneColor, uv)
-        // Rec.709 luminance. LightingOutput is RGBA8 LDR — keep the
-        // threshold modest so Editor lit surfaces actually contribute.
-        let lum = dot(sampled.xyz, vec3(0.2126, 0.7152, 0.0722))
-        let knee  = bloomThreshold.x * 0.5
-        let soft  = smoothstep(bloomThreshold.x - knee, bloomThreshold.x + knee, lum)
-        // Strength is applied ONLY in Final PP (live slider). Extract
-        // always writes the bright plate so bloomStrength=0 ⇒ PP adds 0.
-        let outRgb = sampled.xyz * soft
-        return vec4(outRgb, sampled.w)
-    }
-}
-)";
-
-// Cache-key bump: remove extract-side strength + lower default threshold.
-constexpr const char* kBloomExtractCacheKey = "bloomextract_v1_threshold_ldr_no_strength_fs";
-
 } // namespace
 
 uint32_t BloomExtractPass::execute(PassExecContext& ctx)
 {
+    _producedThisFrame = false;
     BGFXAdapter& adapter = ctx.adapter;
     shader::ShaderResourcePool& pool = ctx.pool;
 
-    // Mirror PostProcessPass / ShadowPass / LightingPass / SkyboxPass
-    // — Noop + uninit short-circuits must come FIRST so headless
-    // tests run clean. The FBO create path inside ensureFbo would
-    // otherwise race against bgfx::createFrameBuffer with no init
-    // context.
+    // Backend gates precede every FrameGraph resolve and GPU allocation.
     if (!adapter.isInitialized()) {
         return 0;
     }
@@ -123,18 +78,8 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // §F2 (2026-07-24) — BloomBright target RT now owned by
-    // FrameGraph instead of this Pass. resolve() returns a
-    // borrowed physical handle when the resource is live AND
-    // the FrameGraph has created it; otherwise returns invalid.
-    //
-    // F2 ship-path: host bloomStrength == 0 ⇒ FG compile marks
-    // BloomExtract pass disabled ⇒ BloomBright not live ⇒
-    // resolve() returns invalid ⇒ this pass returns 0 draws.
-    // Byte-equivalent to today's "extract writes zeros into the
-    // half-res FBO + Final PP folds bloomStrength=0 into no-op"
-    // path. F6 will make FrameGraph actually create the physical
-    // RT so host bloomStrength > 0 lights the bloom chain back up.
+    // BloomBright is a borrowed FrameGraph target. The graph does not declare
+    // it when the full Extract+Blur capability is disabled or incomplete.
     if (ctx.frameGraph == nullptr) {
         // Pre-F2 callers (legacy test sites) never wire frameGraph
         // ⇒ early-return 0. Byte-equivalent to today's path only
@@ -149,13 +94,7 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // Half-resolution size — (W+1)/2 rounds UP so we never sample
-    // outside [0,W) on the source texture. Mirror conventional
-    // half-res chain math (S1 cutsheet §S1 "ensure(w/2, h/2)").
-    // F2 NOTE: F6 will read the actual physical size from FG; for
-    // now we still compute half-res locally because FrameGraph
-    // physical creation is deferred — and the resulting target
-    // is currently invalid, so this draw is skipped anyway.
+    // Half-resolution size uses the same round-up convention as FrameGraph.
     const uint16_t halfW = static_cast<uint16_t>((viewportWidth  + 1u) / 2u);
     const uint16_t halfH = static_cast<uint16_t>((viewportHeight + 1u) / 2u);
 
@@ -168,12 +107,11 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
     ensureProgram(pool);
     const bool programReady = _program.isValid()
         && _uBloomThreshold != ayt::shader::InvalidBinding
+        && _uSourceTexelSize != ayt::shader::InvalidBinding
         && _tSceneColor     != ayt::shader::InvalidBinding;
     if (!programReady) {
-        // Acquire failed (shaderc missing on CI). Skip the draw so
-        // the half-res FBO stays clear (any consumer — S1b blur —
-        // would then sample zero and produce no bloom; visually
-        // identical to default bloomStrength=0 host with no BloomExtract).
+        // Keep the production latch false; Blur requires a successful current
+        // frame Extract submit and therefore cannot sample stale data.
         return 0;
     }
 
@@ -194,40 +132,50 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
     const ayt::shader::TextureHandle texHandle =
         ayt::render::detail::toShaderTexture(fboColor);
 
-    // LDR LightingOutput (RGBA8): 0.85 was too high for Editor lit
-    // surfaces — extract stayed black and the strength slider looked
-    // dead. Soft-knee around ~0.35 catches highlights without blooming
-    // the whole frame. Final PP applies frame.bloomStrength.
-    const float thresholdPad[4] = {0.35f, 0.0f, 0.0f, 0.0f};
+    const float thresholdPad[4] = {
+        sanitizeBloomThreshold(ctx.bloomThreshold),
+        sanitizeBloomSoftKnee(ctx.bloomSoftKnee),
+        0.0f, 0.0f
+    };
+    const float sourceTexelPad[4] = {
+        1.0f / static_cast<float>(viewportWidth),
+        1.0f / static_cast<float>(viewportHeight),
+        0.0f, 0.0f
+    };
 
     adapter.setTransformIdentity();
     adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
     adapter.setIndexBuffer(_fullscreenIB, 0, 3);
     _program.setTexture(0, _tSceneColor, texHandle);
     _program.setUniform(_uBloomThreshold, thresholdPad, sizeof(thresholdPad));
+    _program.setUniform(_uSourceTexelSize,
+                        sourceTexelPad, sizeof(sourceTexelPad));
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
     sub.state  = 0;  // depth-ignore state owned by adapter preset
     adapter.setStateDepthTestAlways();  // mirror PostProcessPass
     _program.submit(sub);
+    _producedThisFrame = true;
 
     // Do NOT setViewFrameBuffer(viewId, INVALID) after submit — in bgfx
     // the last bind wins for the whole view this frame, which would
     // redirect the half-res draw to the default backbuffer at (0,0)
     // (tiny duplicate under Editor chrome). Leave the view bound to
-    // `_fbo` for the frame (same pattern as FO → sceneFbo).
+    // the FrameGraph target for the frame (same pattern as FO → sceneFbo).
 
     static bool s_loggedFirst = false;
     if (!s_loggedFirst) {
         std::fprintf(stderr,
             "[BloomExtractPass] first blit view=%u srcFbo=%u "
-            "half=%ux%u threshold=%.2f (strength applied in Final PP=%.2f)\n",
+            "half=%ux%u threshold=%.2f knee=%.2f "
+            "(strength applied in Final PP=%.2f)\n",
             static_cast<unsigned>(viewId),
             static_cast<unsigned>(sourceFbo.idx),
             static_cast<unsigned>(halfW),
             static_cast<unsigned>(halfH),
             thresholdPad[0],
+            thresholdPad[1],
             ctx.frame.bloomStrength);
         s_loggedFirst = true;
     }
@@ -256,20 +204,21 @@ void BloomExtractPass::ensureFullscreenQuad(BGFXAdapter& adapter)
 
 void BloomExtractPass::ensureProgram(shader::ShaderResourcePool& pool)
 {
-    // Cache-key bump forces re-acquire (pointer-equal compare).
-    // S1a ships one cache-key; S1b/S1c cuts will bump it.
+    // A source-contract change bumps the static cache-key pointer and forces
+    // a fresh acquire.
     static const char* s_acquiredCacheKey = nullptr;
-    if (s_acquiredCacheKey != kBloomExtractCacheKey) {
+    if (s_acquiredCacheKey != ayt::render::kBloomExtractCacheKey) {
         _program.reset();
         _programAcquireFailed = false;
-        s_acquiredCacheKey = kBloomExtractCacheKey;
+        s_acquiredCacheKey = ayt::render::kBloomExtractCacheKey;
     }
 
     if (_program.isValid() || _programAcquireFailed) {
         return;
     }
     ayt::shader::ShaderResource acquired =
-        pool.acquire(kBloomExtractPhoskiaSource, kBloomExtractCacheKey);
+        pool.acquire(ayt::render::kBloomExtractPhoskiaSource,
+                     ayt::render::kBloomExtractCacheKey);
     if (!acquired.isValid()) {
         _programAcquireFailed = true;
         std::fprintf(stderr,
@@ -282,8 +231,8 @@ void BloomExtractPass::ensureProgram(shader::ShaderResourcePool& pool)
     }
     _program        = acquired;
     _uBloomThreshold = _program.getUniformBinding("bloomThreshold");
+    _uSourceTexelSize = _program.getUniformBinding("sourceTexelSize");
     _tSceneColor     = _program.getTextureBinding("sceneColor");
-    _uBloomStrength  = ayt::shader::InvalidBinding; // strength lives in Final PP only
 }
 
 void BloomExtractPass::destroyResources(BGFXAdapter& adapter)
@@ -310,9 +259,10 @@ void BloomExtractPass::destroyResources(BGFXAdapter& adapter)
         _program.reset();
     }
     _uBloomThreshold = ayt::shader::InvalidBinding;
-    _uBloomStrength  = ayt::shader::InvalidBinding;
+    _uSourceTexelSize = ayt::shader::InvalidBinding;
     _tSceneColor     = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
+    _producedThisFrame = false;
 }
 
 } // namespace ayt::render::detail

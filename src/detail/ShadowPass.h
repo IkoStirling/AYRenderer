@@ -33,8 +33,13 @@ public:
     // Composite view map: 1 = caster FBO, 2 = resolve blit (must differ).
     static constexpr uint8_t  kShadowViewId        = 1;
     static constexpr uint8_t  kShadowResolveViewId = 2;
+    // Each atlas slot needs its own bgfx view: view state (transform,
+    // scissor, framebuffer) is shared by every submit in a view.
+    static constexpr uint8_t  kShadowAtlasFirstViewId = 18;
+    static constexpr uint8_t  kShadowAtlasViewCount =
+        static_cast<uint8_t>(kShadowAtlasMaxSlots);
     // §P5.5 C (2026-07-23) — atlas size when per-light shadow is
-    // active (4096×4096 default ⇒ 8 sub-rects of 2048×2048 each in
+    // active (4096×4096 default ⇒ 8 sub-rects of 1024×2048 each in
     // a 4×2 grid). Falls back to kDefaultShadowMapSize (single 2048)
     // when no SceneLights instance is wired (pre-C byte-equivalent).
     static constexpr uint16_t kDefaultAtlasSize = kShadowAtlasDefaultSize;
@@ -55,13 +60,23 @@ public:
     {
         // A disabled pass may still own a valid map from the previous frame.
         // Do not let receivers sample that stale map: disabled means fully lit.
-        return isEnabled() && _mapResources.hasSampleableShadow();
+        return isEnabled() && _producedThisFrame
+            && _mapResources.hasSampleableShadow();
     }
 
     bool lastBlitOk() const noexcept { return _mapResources.lastBlitOk(); }
 
-    void setShadowMapSize(uint16_t size) noexcept { _requestedSize = size; }
+    void setShadowMapSize(uint16_t size) noexcept
+    {
+        _requestedSize = size;
+        _sampleMapSize = 0;
+        _producedThisFrame = false;
+    }
     uint16_t shadowMapSize() const noexcept { return _requestedSize; }
+    uint16_t shadowSampleMapSize() const noexcept
+    {
+        return _sampleMapSize > 0 ? _sampleMapSize : _requestedSize;
+    }
 
     void setPcfEnabled(bool enabled) noexcept { _pcfEnabled = enabled; }
     bool pcfEnabled() const noexcept { return _pcfEnabled; }
@@ -84,8 +99,8 @@ public:
     // cuts) into the producer before each execute(). When the
     // pointer is non-null, the pass picks castShadow=true slots and
     // produces one atlas sub-rect per caster. When null (default),
-    // execute() behaves exactly as pre-C: single directional caster
-    // into one atlas-sized sub-rect, count==0 reported.
+    // execute() publishes the legacy directional caster as slot 0 with a
+    // full-texture sample rect, so consumers use one unified array path.
     void setSceneLightsRef(const ayt::render::SceneLights* lights) noexcept
     {
         _sceneLightsRef = lights;
@@ -95,8 +110,8 @@ public:
         return _sceneLightsRef;
     }
     // §P5.5 C — number of lights with castShadow=true (max 8).
-    // 0 ⇒ pre-C byte-equivalent single caster path. Consumed by
-    // LightingPass to upload `perLightShadowCount.x = N`.
+    // Legacy fallback reports 1 after a successful execute; 0 means no
+    // sampleable shadow was produced in the current frame.
     uint32_t perLightShadowCount() const noexcept
     {
         return _perLightShadowCount;
@@ -106,6 +121,10 @@ public:
     const float* atlasSubRects() const noexcept
     {
         return &_atlasLayout.subRects[0][0];
+    }
+    const float* shadowSampleRects() const noexcept
+    {
+        return &_shadowSampleRects[0][0];
     }
     // §P5.5 C — per-slot light-space VP matrices (col-major
     // float[16] each, 8 slots). Consumed by LightingPass to upload
@@ -145,7 +164,9 @@ private:
     ShadowMapResources         _mapResources;
     ShadowCaster               _shadowCaster;
     uint16_t                   _requestedSize = kDefaultShadowMapSize;
+    uint16_t                   _sampleMapSize = 0;
     bool                       _pcfEnabled    = true;
+    bool                       _producedThisFrame = false;
 
     ayt::math::Float4x4        _lightView        = ayt::math::Float4x4::identity();
     ayt::math::Float4x4        _lightProj        = ayt::math::Float4x4::identity();
@@ -169,8 +190,30 @@ private:
         computeShadowAtlasLayout(_atlasConfig);
     const ayt::render::SceneLights* _sceneLightsRef = nullptr;
     uint32_t                   _perLightShadowCount = 0;
-    // Per-slot LVP matrices (col-major float[16]). Slot i is
-    // populated when lights[i].castShadow=true; identity otherwise.
+    float                      _shadowSampleRects[kShadowAtlasMaxSlots][4] = {
+        {0,0,1,1}, {0,0,0,0}, {0,0,0,0}, {0,0,0,0},
+        {0,0,0,0}, {0,0,0,0}, {0,0,0,0}, {0,0,0,0}
+    };
+    // Per-slot matrices. bgfx consumes View + Projection separately while
+    // LightingPass consumes the composed ViewProjection.
+    ayt::math::Float4x4        _atlasLightViews[kShadowAtlasMaxSlots]
+        {ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity()};
+    ayt::math::Float4x4        _atlasLightProjs[kShadowAtlasMaxSlots]
+        {ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity(),
+         ayt::math::Float4x4::identity()};
     ayt::math::Float4x4        _atlasLightViewProjs[kShadowAtlasMaxSlots]
         {ayt::math::Float4x4::identity(),
          ayt::math::Float4x4::identity(),
@@ -180,6 +223,8 @@ private:
          ayt::math::Float4x4::identity(),
          ayt::math::Float4x4::identity(),
          ayt::math::Float4x4::identity()};
+    float                      _atlasLightViewsCol[kShadowAtlasMaxSlots][16] = {};
+    float                      _atlasLightProjsCol[kShadowAtlasMaxSlots][16] = {};
     // §P4 M9 (2026-08-24) — identity-col-major default for the
     // col-major per-slot LVP array. The pattern "(c % 5 == 0) ? 1 : 0"
     // (= 1 at indices 0,5,10,15; 0 elsewhere) is the row-major

@@ -14,7 +14,7 @@
 // priority") read through `PassExecContext::lightingPass`.
 //
 // B5 ships:
-//   - LightingOutput FBO (lightingFbo, RGBA8, viewport size — 1×
+//   - LightingOutput FBO (lightingFbo, RGBA16F, viewport size — 1×
 //     color RT, NO depth attachment since this is a fullscreen
 //     post-process pass that does not read depth).
 //   - Fullscreen triangle VB/IB (mirror PostProcessPass shape, but
@@ -63,6 +63,7 @@
 #include <bgfx/bgfx.h>
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace ayt::render::detail
@@ -131,7 +132,9 @@ public:
     // and PostProcessPass::ensureProgram shape (PostProcessPass.cpp:311+).
     // Stamp-checked `static const char* s_acquiredCacheKey != kLightingCacheKey`
     // invalidates the cached program when the literal bumps.
-    void ensureProgram(ayt::shader::ShaderResourcePool& pool);
+    void ensureProgram(ayt::shader::ShaderResourcePool& pool,
+                       uint32_t shadowCount = ayt::render::kMaxSceneLights,
+                       bool pcfEnabled = true);
     bool isProgramReady() const noexcept { return _programReady; }
 
     // §P5 B5 (2026-07-22) — build stamp pointer (mirror
@@ -143,7 +146,7 @@ private:
     // §P5 B5 (2026-07-22) — internal ensure path (mirror
     // GBufferPass::ensure at GBufferPass.cpp:268-314). Called from
     // execute() AFTER setOutputSize has stored the request. Creates
-    // the 1× RGBA8 FBO via `adapter.createFrameBuffer(w, h, RGBA8,
+    // the 1× RGBA16F FBO via `adapter.createFrameBuffer(w, h, RGBA16F,
     // withDepth=false)`, caches the result, and bumps buildStamp.
     void ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height);
 
@@ -184,6 +187,7 @@ private:
     bool _programReady      = false;  // mirror GBufferPass _acquireFailed semantics: _program.isValid() OR _programReady=true (set on success); failure path leaves _programReady=false
     bool _programAcquireFailed = false;  // mirror GBufferPass _acquireFailed
     bool _producedThisFrame = false;
+    std::string _programVariantKey;
 
     // §P5.5 D (2026-07-23) — lazy-resolved binding IDs for the
     // cube-driven ambient lookup (mirror _gbufferSkyRt + skyMix
@@ -216,6 +220,7 @@ private:
     ayt::shader::BindingId _uLightViewProjs      = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uShadowBiases        = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uPerLightShadowCount = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uActiveLightCount    = ayt::shader::InvalidBinding;
 
     // §P5.5 D — IBL ambient cube strength (.x of ambientStrength vec4).
     // Host: Renderer::setAmbientStrength → per-frame broadcast in render().
@@ -237,6 +242,12 @@ private:
 // per the AY naming rules). The actual string literal lives in
 // LightingPass.cpp as the canonical definition.
 extern const char* const kLightingCacheKeyCStr;
+extern const char* const kLightingBuildStampCStr;
 extern const char* const kLightingPhoskiaSourceCStr;
+
+// Test-visible variant builder. Production uses the same function, so tests
+// pin the actual compile-time shadow specialization rather than a source copy.
+std::string buildLightingVariantSource(uint32_t shadowCount,
+                                       bool pcfEnabled);
 
 } // namespace ayt::render::detail

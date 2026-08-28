@@ -292,6 +292,10 @@ public:
     // Shader uniforms are vec4 slots (.x used); see
     // docs/pass-lessons-from-shadow.md §3.1.
     void setPostProcessBloomStrength(float strength);
+    // Scene-linear extraction threshold and fractional soft-knee [0,1].
+    // Defaults are 1.0 and 0.5 respectively.
+    void setPostProcessBloomThreshold(float threshold);
+    void setPostProcessBloomSoftKnee(float softKnee);
     void setPostProcessExposure(float exposure);
     // Display gamma for final blit encode (pow(c, 1/gamma)). Default 2.2.
     void setPostProcessGamma(float gamma);

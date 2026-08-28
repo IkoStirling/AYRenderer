@@ -21,10 +21,9 @@
 //         sceneFbo (B3 boundary: LightingPass is itself the dispatch
 //         endpoint, so missing lightingPass = "no Deferred path lit
 //         pass for this frame").
-//      c) gbufferPass mounted AND lightingPass mounted but its
-//         `lightingOutputFbo()` is invalid (B5 ensure path hasn't
-//         run yet — default-constructed LightingPass) → falls to
-//         sceneFbo. Graceful degrade: no Editor blackout.
+//      c) gbufferPass mounted AND lightingPass mounted but either
+//         producer did not complete this frame → invalid. A mounted
+//         Deferred path must not expose the unused/stale Forward sceneFbo.
 //      d) SceneFbo invalid, both borrowed pointers null → invalid.
 //         Caller execute() early-returns 0 (no-op). Matches P2
 //         "without a scene RT there is nothing to sample" semantics.
@@ -36,8 +35,7 @@
 //      actually consumes selectSourceFbo as its source-FBO. Verify
 //      that an E2E B6 pipeline (Forward + GBuffer-only no-Light)
 //      still hits ctx.sceneFbo (P2 invariant preserved). And a
-//      path with default-constructed LightingPass (FBO invalid)
-//      also falls to sceneFbo.
+//      mounted Deferred producers that did not run return invalid.
 //
 //   4) No mirror of selectSourceFbo on the public surface; the
 //      helper is `static bgfx::FrameBufferHandle
@@ -186,11 +184,11 @@ TEST_CASE(b6_forward_path_with_gbuffer_but_no_lighting_falls_to_scene_fbo) {
     CHECK(got.idx == kForgedSceneIdx);  // not flipped → sceneFbo
 }
 
-TEST_CASE(b6_deferred_path_default_lighting_fbo_invalid_falls_to_scene_fbo) {
+TEST_CASE(b6_deferred_path_unproduced_lighting_returns_invalid) {
     // B6.2.c — both borrowed pointers mounted but default-
     // constructed LightingPass (lightingFbo invalid until B5
-    // ensure ran). selectSourceFbo must gracefully fall back
-    // to sceneFbo (no Editor blackout).
+    // ensure ran). The frame-valid producer contract must reject
+    // the unused Forward sceneFbo rather than exposing stale color.
     BGFXAdapter adapter;
     ayt::shader::ShaderResourcePool pool;
     RenderScene scene;
@@ -210,8 +208,7 @@ TEST_CASE(b6_deferred_path_default_lighting_fbo_invalid_falls_to_scene_fbo) {
     ctx.lightingPass = &lt;
 
     const bgfx::FrameBufferHandle got = PostProcessPass::selectSourceFbo(ctx);
-    // Lighting FBO invalid → falls to sceneFbo.
-    CHECK(got.idx == kForgedSceneIdx);
+    CHECK_FALSE(bgfx::isValid(got));
 }
 
 TEST_CASE(b6_neither_lighting_nor_scene_valid_returns_invalid) {

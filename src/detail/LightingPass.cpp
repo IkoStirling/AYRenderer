@@ -2,13 +2,17 @@
 
 #include "detail/BgfxMatrix.h"
 #include "detail/FrameContext.h"
+#include "detail/FgResource.h"
 #include "detail/GBufferPass.h"
 #include "detail/GpuResources.h"
 #include "detail/RenderPass.h"
+#include "detail/SceneLighting.h"
 #include "detail/ShadowPass.h"
 
 #include "AYRenderer/RenderScene.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace ayt::render::detail
@@ -18,7 +22,8 @@ namespace ayt::render::detail
 // GBufferPass.cpp:15 `kGBufferBuildStamp`). Pointer-equal compare;
 // bumping this triggers a FBO rebuild on next execute(). B5 is
 // the first lock ??bumping is safe across B5.x cuts.
-static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
+static constexpr const char* kLightingBuildStamp = "lighting-hdr-v1-2026-08-28";
+const char* const kLightingBuildStampCStr = kLightingBuildStamp;
 
 // �P5 B5 (2026-07-22) ??cache key literal (mirror GBufferPass.cpp:68
 // `kGBufferCacheKey`). Pointer-equal compare so cache invalidates
@@ -81,7 +86,7 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
 //   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
 //   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v29_material_model_decode";
+    "lighting_v30_audit_shadow_brdf_hdr";
 
 // �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -198,6 +203,7 @@ material Lighting {
     uniform mat4 lightViewProjs[8]
     uniform vec4 shadowBiases[8]
     uniform vec4 perLightShadowCount
+    uniform vec4 activeLightCount
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     vertex {
         in  pos : position
@@ -211,7 +217,8 @@ material Lighting {
         let normalSample = sample(gbufferNormal, baseUv)
         let worldSample = sample(gbufferWorldPosition, baseUv)
         let surface = sample(gbufferMaterial, baseUv)
-        let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
+        let decodedN = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
+        let N = decodedN * (1.0 / max(length(decodedN), 0.0001))
         // �P5.5 D (2026-07-23) ??IBL MVP ambient term. Default
         // cubeActive=0 ??ambient = ambientFlat (pre-D byte-
         // equivalent). When host calls Renderer::setSkySourceCube
@@ -257,18 +264,23 @@ material Lighting {
         let _uy0 = _ndcY0 * 0.5 + 0.5
         let _altUv0 = vec2(_ndcX0 * 0.5 + 0.5, 1.0 - _uy0)
         let _rectUv0 = mix(shadowAtlasRects[0].xy, shadowAtlasRects[0].zw, _altUv0)
-        let _inMap0 = step(0.0, _rectUv0.x) * step(_rectUv0.x, 1.0)
-                    * step(0.0, _rectUv0.y) * step(_rectUv0.y, 1.0)
+        let _safeUv0 = vec2(
+            max(shadowAtlasRects[0].x + _tx * 1.5, min(shadowAtlasRects[0].z - _tx * 1.5, _rectUv0.x)),
+            max(shadowAtlasRects[0].y + _ty * 1.5, min(shadowAtlasRects[0].w - _ty * 1.5, _rectUv0.y)))
+        let _inMap0 = step(0.0001, _clip0.w)
+                    * step(0.0, _altUv0.x) * step(_altUv0.x, 1.0)
+                    * step(0.0, _altUv0.y) * step(_altUv0.y, 1.0)
+                    * step(0.0, _ref0) * step(_ref0, 1.0)
         let _bias0 = shadowBiases[0].x * step(0.0001, shadowBiases[0].x) + _globalBias * (1.0 - step(0.0001, shadowBiases[0].x))
-        let _s0a = sample(shadowMap, _rectUv0 + vec2(-_tx, -_ty)).x
-        let _s0b = sample(shadowMap, _rectUv0 + vec2(0.0, -_ty)).x
-        let _s0c = sample(shadowMap, _rectUv0 + vec2(_tx, -_ty)).x
-        let _s0d = sample(shadowMap, _rectUv0 + vec2(-_tx, 0.0)).x
-        let _s0e = sample(shadowMap, _rectUv0 + vec2(0.0, 0.0)).x
-        let _s0f = sample(shadowMap, _rectUv0 + vec2(_tx, 0.0)).x
-        let _s0g = sample(shadowMap, _rectUv0 + vec2(-_tx, _ty)).x
-        let _s0h = sample(shadowMap, _rectUv0 + vec2(0.0, _ty)).x
-        let _s0i = sample(shadowMap, _rectUv0 + vec2(_tx, _ty)).x
+        let _s0a = sample(shadowMap, _safeUv0 + vec2(-_tx, -_ty)).x
+        let _s0b = sample(shadowMap, _safeUv0 + vec2(0.0, -_ty)).x
+        let _s0c = sample(shadowMap, _safeUv0 + vec2(_tx, -_ty)).x
+        let _s0d = sample(shadowMap, _safeUv0 + vec2(-_tx, 0.0)).x
+        let _s0e = sample(shadowMap, _safeUv0 + vec2(0.0, 0.0)).x
+        let _s0f = sample(shadowMap, _safeUv0 + vec2(_tx, 0.0)).x
+        let _s0g = sample(shadowMap, _safeUv0 + vec2(-_tx, _ty)).x
+        let _s0h = sample(shadowMap, _safeUv0 + vec2(0.0, _ty)).x
+        let _s0i = sample(shadowMap, _safeUv0 + vec2(_tx, _ty)).x
         let _t0a = max(1.0 - step(_s0a + _bias0, _ref0), step(0.999, _s0a))
         let _t0b = max(1.0 - step(_s0b + _bias0, _ref0), step(0.999, _s0b))
         let _t0c = max(1.0 - step(_s0c + _bias0, _ref0), step(0.999, _s0c))
@@ -292,18 +304,23 @@ material Lighting {
         let _uy1 = _ndcY1 * 0.5 + 0.5
         let _altUv1 = vec2(_ndcX1 * 0.5 + 0.5, 1.0 - _uy1)
         let _rectUv1 = mix(shadowAtlasRects[1].xy, shadowAtlasRects[1].zw, _altUv1)
-        let _inMap1 = step(0.0, _rectUv1.x) * step(_rectUv1.x, 1.0)
-                    * step(0.0, _rectUv1.y) * step(_rectUv1.y, 1.0)
+        let _safeUv1 = vec2(
+            max(shadowAtlasRects[1].x + _tx * 1.5, min(shadowAtlasRects[1].z - _tx * 1.5, _rectUv1.x)),
+            max(shadowAtlasRects[1].y + _ty * 1.5, min(shadowAtlasRects[1].w - _ty * 1.5, _rectUv1.y)))
+        let _inMap1 = step(0.0001, _clip1.w)
+                    * step(0.0, _altUv1.x) * step(_altUv1.x, 1.0)
+                    * step(0.0, _altUv1.y) * step(_altUv1.y, 1.0)
+                    * step(0.0, _ref1) * step(_ref1, 1.0)
         let _bias1 = shadowBiases[1].x * step(0.0001, shadowBiases[1].x) + _globalBias * (1.0 - step(0.0001, shadowBiases[1].x))
-        let _s1a = sample(shadowMap, _rectUv1 + vec2(-_tx, -_ty)).x
-        let _s1b = sample(shadowMap, _rectUv1 + vec2(0.0, -_ty)).x
-        let _s1c = sample(shadowMap, _rectUv1 + vec2(_tx, -_ty)).x
-        let _s1d = sample(shadowMap, _rectUv1 + vec2(-_tx, 0.0)).x
-        let _s1e = sample(shadowMap, _rectUv1 + vec2(0.0, 0.0)).x
-        let _s1f = sample(shadowMap, _rectUv1 + vec2(_tx, 0.0)).x
-        let _s1g = sample(shadowMap, _rectUv1 + vec2(-_tx, _ty)).x
-        let _s1h = sample(shadowMap, _rectUv1 + vec2(0.0, _ty)).x
-        let _s1i = sample(shadowMap, _rectUv1 + vec2(_tx, _ty)).x
+        let _s1a = sample(shadowMap, _safeUv1 + vec2(-_tx, -_ty)).x
+        let _s1b = sample(shadowMap, _safeUv1 + vec2(0.0, -_ty)).x
+        let _s1c = sample(shadowMap, _safeUv1 + vec2(_tx, -_ty)).x
+        let _s1d = sample(shadowMap, _safeUv1 + vec2(-_tx, 0.0)).x
+        let _s1e = sample(shadowMap, _safeUv1 + vec2(0.0, 0.0)).x
+        let _s1f = sample(shadowMap, _safeUv1 + vec2(_tx, 0.0)).x
+        let _s1g = sample(shadowMap, _safeUv1 + vec2(-_tx, _ty)).x
+        let _s1h = sample(shadowMap, _safeUv1 + vec2(0.0, _ty)).x
+        let _s1i = sample(shadowMap, _safeUv1 + vec2(_tx, _ty)).x
         let _t1a = max(1.0 - step(_s1a + _bias1, _ref1), step(0.999, _s1a))
         let _t1b = max(1.0 - step(_s1b + _bias1, _ref1), step(0.999, _s1b))
         let _t1c = max(1.0 - step(_s1c + _bias1, _ref1), step(0.999, _s1c))
@@ -327,18 +344,23 @@ material Lighting {
         let _uy2 = _ndcY2 * 0.5 + 0.5
         let _altUv2 = vec2(_ndcX2 * 0.5 + 0.5, 1.0 - _uy2)
         let _rectUv2 = mix(shadowAtlasRects[2].xy, shadowAtlasRects[2].zw, _altUv2)
-        let _inMap2 = step(0.0, _rectUv2.x) * step(_rectUv2.x, 1.0)
-                    * step(0.0, _rectUv2.y) * step(_rectUv2.y, 1.0)
+        let _safeUv2 = vec2(
+            max(shadowAtlasRects[2].x + _tx * 1.5, min(shadowAtlasRects[2].z - _tx * 1.5, _rectUv2.x)),
+            max(shadowAtlasRects[2].y + _ty * 1.5, min(shadowAtlasRects[2].w - _ty * 1.5, _rectUv2.y)))
+        let _inMap2 = step(0.0001, _clip2.w)
+                    * step(0.0, _altUv2.x) * step(_altUv2.x, 1.0)
+                    * step(0.0, _altUv2.y) * step(_altUv2.y, 1.0)
+                    * step(0.0, _ref2) * step(_ref2, 1.0)
         let _bias2 = shadowBiases[2].x * step(0.0001, shadowBiases[2].x) + _globalBias * (1.0 - step(0.0001, shadowBiases[2].x))
-        let _s2a = sample(shadowMap, _rectUv2 + vec2(-_tx, -_ty)).x
-        let _s2b = sample(shadowMap, _rectUv2 + vec2(0.0, -_ty)).x
-        let _s2c = sample(shadowMap, _rectUv2 + vec2(_tx, -_ty)).x
-        let _s2d = sample(shadowMap, _rectUv2 + vec2(-_tx, 0.0)).x
-        let _s2e = sample(shadowMap, _rectUv2 + vec2(0.0, 0.0)).x
-        let _s2f = sample(shadowMap, _rectUv2 + vec2(_tx, 0.0)).x
-        let _s2g = sample(shadowMap, _rectUv2 + vec2(-_tx, _ty)).x
-        let _s2h = sample(shadowMap, _rectUv2 + vec2(0.0, _ty)).x
-        let _s2i = sample(shadowMap, _rectUv2 + vec2(_tx, _ty)).x
+        let _s2a = sample(shadowMap, _safeUv2 + vec2(-_tx, -_ty)).x
+        let _s2b = sample(shadowMap, _safeUv2 + vec2(0.0, -_ty)).x
+        let _s2c = sample(shadowMap, _safeUv2 + vec2(_tx, -_ty)).x
+        let _s2d = sample(shadowMap, _safeUv2 + vec2(-_tx, 0.0)).x
+        let _s2e = sample(shadowMap, _safeUv2 + vec2(0.0, 0.0)).x
+        let _s2f = sample(shadowMap, _safeUv2 + vec2(_tx, 0.0)).x
+        let _s2g = sample(shadowMap, _safeUv2 + vec2(-_tx, _ty)).x
+        let _s2h = sample(shadowMap, _safeUv2 + vec2(0.0, _ty)).x
+        let _s2i = sample(shadowMap, _safeUv2 + vec2(_tx, _ty)).x
         let _t2a = max(1.0 - step(_s2a + _bias2, _ref2), step(0.999, _s2a))
         let _t2b = max(1.0 - step(_s2b + _bias2, _ref2), step(0.999, _s2b))
         let _t2c = max(1.0 - step(_s2c + _bias2, _ref2), step(0.999, _s2c))
@@ -362,18 +384,23 @@ material Lighting {
         let _uy3 = _ndcY3 * 0.5 + 0.5
         let _altUv3 = vec2(_ndcX3 * 0.5 + 0.5, 1.0 - _uy3)
         let _rectUv3 = mix(shadowAtlasRects[3].xy, shadowAtlasRects[3].zw, _altUv3)
-        let _inMap3 = step(0.0, _rectUv3.x) * step(_rectUv3.x, 1.0)
-                    * step(0.0, _rectUv3.y) * step(_rectUv3.y, 1.0)
+        let _safeUv3 = vec2(
+            max(shadowAtlasRects[3].x + _tx * 1.5, min(shadowAtlasRects[3].z - _tx * 1.5, _rectUv3.x)),
+            max(shadowAtlasRects[3].y + _ty * 1.5, min(shadowAtlasRects[3].w - _ty * 1.5, _rectUv3.y)))
+        let _inMap3 = step(0.0001, _clip3.w)
+                    * step(0.0, _altUv3.x) * step(_altUv3.x, 1.0)
+                    * step(0.0, _altUv3.y) * step(_altUv3.y, 1.0)
+                    * step(0.0, _ref3) * step(_ref3, 1.0)
         let _bias3 = shadowBiases[3].x * step(0.0001, shadowBiases[3].x) + _globalBias * (1.0 - step(0.0001, shadowBiases[3].x))
-        let _s3a = sample(shadowMap, _rectUv3 + vec2(-_tx, -_ty)).x
-        let _s3b = sample(shadowMap, _rectUv3 + vec2(0.0, -_ty)).x
-        let _s3c = sample(shadowMap, _rectUv3 + vec2(_tx, -_ty)).x
-        let _s3d = sample(shadowMap, _rectUv3 + vec2(-_tx, 0.0)).x
-        let _s3e = sample(shadowMap, _rectUv3 + vec2(0.0, 0.0)).x
-        let _s3f = sample(shadowMap, _rectUv3 + vec2(_tx, 0.0)).x
-        let _s3g = sample(shadowMap, _rectUv3 + vec2(-_tx, _ty)).x
-        let _s3h = sample(shadowMap, _rectUv3 + vec2(0.0, _ty)).x
-        let _s3i = sample(shadowMap, _rectUv3 + vec2(_tx, _ty)).x
+        let _s3a = sample(shadowMap, _safeUv3 + vec2(-_tx, -_ty)).x
+        let _s3b = sample(shadowMap, _safeUv3 + vec2(0.0, -_ty)).x
+        let _s3c = sample(shadowMap, _safeUv3 + vec2(_tx, -_ty)).x
+        let _s3d = sample(shadowMap, _safeUv3 + vec2(-_tx, 0.0)).x
+        let _s3e = sample(shadowMap, _safeUv3 + vec2(0.0, 0.0)).x
+        let _s3f = sample(shadowMap, _safeUv3 + vec2(_tx, 0.0)).x
+        let _s3g = sample(shadowMap, _safeUv3 + vec2(-_tx, _ty)).x
+        let _s3h = sample(shadowMap, _safeUv3 + vec2(0.0, _ty)).x
+        let _s3i = sample(shadowMap, _safeUv3 + vec2(_tx, _ty)).x
         let _t3a = max(1.0 - step(_s3a + _bias3, _ref3), step(0.999, _s3a))
         let _t3b = max(1.0 - step(_s3b + _bias3, _ref3), step(0.999, _s3b))
         let _t3c = max(1.0 - step(_s3c + _bias3, _ref3), step(0.999, _s3c))
@@ -397,18 +424,23 @@ material Lighting {
         let _uy4 = _ndcY4 * 0.5 + 0.5
         let _altUv4 = vec2(_ndcX4 * 0.5 + 0.5, 1.0 - _uy4)
         let _rectUv4 = mix(shadowAtlasRects[4].xy, shadowAtlasRects[4].zw, _altUv4)
-        let _inMap4 = step(0.0, _rectUv4.x) * step(_rectUv4.x, 1.0)
-                    * step(0.0, _rectUv4.y) * step(_rectUv4.y, 1.0)
+        let _safeUv4 = vec2(
+            max(shadowAtlasRects[4].x + _tx * 1.5, min(shadowAtlasRects[4].z - _tx * 1.5, _rectUv4.x)),
+            max(shadowAtlasRects[4].y + _ty * 1.5, min(shadowAtlasRects[4].w - _ty * 1.5, _rectUv4.y)))
+        let _inMap4 = step(0.0001, _clip4.w)
+                    * step(0.0, _altUv4.x) * step(_altUv4.x, 1.0)
+                    * step(0.0, _altUv4.y) * step(_altUv4.y, 1.0)
+                    * step(0.0, _ref4) * step(_ref4, 1.0)
         let _bias4 = shadowBiases[4].x * step(0.0001, shadowBiases[4].x) + _globalBias * (1.0 - step(0.0001, shadowBiases[4].x))
-        let _s4a = sample(shadowMap, _rectUv4 + vec2(-_tx, -_ty)).x
-        let _s4b = sample(shadowMap, _rectUv4 + vec2(0.0, -_ty)).x
-        let _s4c = sample(shadowMap, _rectUv4 + vec2(_tx, -_ty)).x
-        let _s4d = sample(shadowMap, _rectUv4 + vec2(-_tx, 0.0)).x
-        let _s4e = sample(shadowMap, _rectUv4 + vec2(0.0, 0.0)).x
-        let _s4f = sample(shadowMap, _rectUv4 + vec2(_tx, 0.0)).x
-        let _s4g = sample(shadowMap, _rectUv4 + vec2(-_tx, _ty)).x
-        let _s4h = sample(shadowMap, _rectUv4 + vec2(0.0, _ty)).x
-        let _s4i = sample(shadowMap, _rectUv4 + vec2(_tx, _ty)).x
+        let _s4a = sample(shadowMap, _safeUv4 + vec2(-_tx, -_ty)).x
+        let _s4b = sample(shadowMap, _safeUv4 + vec2(0.0, -_ty)).x
+        let _s4c = sample(shadowMap, _safeUv4 + vec2(_tx, -_ty)).x
+        let _s4d = sample(shadowMap, _safeUv4 + vec2(-_tx, 0.0)).x
+        let _s4e = sample(shadowMap, _safeUv4 + vec2(0.0, 0.0)).x
+        let _s4f = sample(shadowMap, _safeUv4 + vec2(_tx, 0.0)).x
+        let _s4g = sample(shadowMap, _safeUv4 + vec2(-_tx, _ty)).x
+        let _s4h = sample(shadowMap, _safeUv4 + vec2(0.0, _ty)).x
+        let _s4i = sample(shadowMap, _safeUv4 + vec2(_tx, _ty)).x
         let _t4a = max(1.0 - step(_s4a + _bias4, _ref4), step(0.999, _s4a))
         let _t4b = max(1.0 - step(_s4b + _bias4, _ref4), step(0.999, _s4b))
         let _t4c = max(1.0 - step(_s4c + _bias4, _ref4), step(0.999, _s4c))
@@ -432,18 +464,23 @@ material Lighting {
         let _uy5 = _ndcY5 * 0.5 + 0.5
         let _altUv5 = vec2(_ndcX5 * 0.5 + 0.5, 1.0 - _uy5)
         let _rectUv5 = mix(shadowAtlasRects[5].xy, shadowAtlasRects[5].zw, _altUv5)
-        let _inMap5 = step(0.0, _rectUv5.x) * step(_rectUv5.x, 1.0)
-                    * step(0.0, _rectUv5.y) * step(_rectUv5.y, 1.0)
+        let _safeUv5 = vec2(
+            max(shadowAtlasRects[5].x + _tx * 1.5, min(shadowAtlasRects[5].z - _tx * 1.5, _rectUv5.x)),
+            max(shadowAtlasRects[5].y + _ty * 1.5, min(shadowAtlasRects[5].w - _ty * 1.5, _rectUv5.y)))
+        let _inMap5 = step(0.0001, _clip5.w)
+                    * step(0.0, _altUv5.x) * step(_altUv5.x, 1.0)
+                    * step(0.0, _altUv5.y) * step(_altUv5.y, 1.0)
+                    * step(0.0, _ref5) * step(_ref5, 1.0)
         let _bias5 = shadowBiases[5].x * step(0.0001, shadowBiases[5].x) + _globalBias * (1.0 - step(0.0001, shadowBiases[5].x))
-        let _s5a = sample(shadowMap, _rectUv5 + vec2(-_tx, -_ty)).x
-        let _s5b = sample(shadowMap, _rectUv5 + vec2(0.0, -_ty)).x
-        let _s5c = sample(shadowMap, _rectUv5 + vec2(_tx, -_ty)).x
-        let _s5d = sample(shadowMap, _rectUv5 + vec2(-_tx, 0.0)).x
-        let _s5e = sample(shadowMap, _rectUv5 + vec2(0.0, 0.0)).x
-        let _s5f = sample(shadowMap, _rectUv5 + vec2(_tx, 0.0)).x
-        let _s5g = sample(shadowMap, _rectUv5 + vec2(-_tx, _ty)).x
-        let _s5h = sample(shadowMap, _rectUv5 + vec2(0.0, _ty)).x
-        let _s5i = sample(shadowMap, _rectUv5 + vec2(_tx, _ty)).x
+        let _s5a = sample(shadowMap, _safeUv5 + vec2(-_tx, -_ty)).x
+        let _s5b = sample(shadowMap, _safeUv5 + vec2(0.0, -_ty)).x
+        let _s5c = sample(shadowMap, _safeUv5 + vec2(_tx, -_ty)).x
+        let _s5d = sample(shadowMap, _safeUv5 + vec2(-_tx, 0.0)).x
+        let _s5e = sample(shadowMap, _safeUv5 + vec2(0.0, 0.0)).x
+        let _s5f = sample(shadowMap, _safeUv5 + vec2(_tx, 0.0)).x
+        let _s5g = sample(shadowMap, _safeUv5 + vec2(-_tx, _ty)).x
+        let _s5h = sample(shadowMap, _safeUv5 + vec2(0.0, _ty)).x
+        let _s5i = sample(shadowMap, _safeUv5 + vec2(_tx, _ty)).x
         let _t5a = max(1.0 - step(_s5a + _bias5, _ref5), step(0.999, _s5a))
         let _t5b = max(1.0 - step(_s5b + _bias5, _ref5), step(0.999, _s5b))
         let _t5c = max(1.0 - step(_s5c + _bias5, _ref5), step(0.999, _s5c))
@@ -467,18 +504,23 @@ material Lighting {
         let _uy6 = _ndcY6 * 0.5 + 0.5
         let _altUv6 = vec2(_ndcX6 * 0.5 + 0.5, 1.0 - _uy6)
         let _rectUv6 = mix(shadowAtlasRects[6].xy, shadowAtlasRects[6].zw, _altUv6)
-        let _inMap6 = step(0.0, _rectUv6.x) * step(_rectUv6.x, 1.0)
-                    * step(0.0, _rectUv6.y) * step(_rectUv6.y, 1.0)
+        let _safeUv6 = vec2(
+            max(shadowAtlasRects[6].x + _tx * 1.5, min(shadowAtlasRects[6].z - _tx * 1.5, _rectUv6.x)),
+            max(shadowAtlasRects[6].y + _ty * 1.5, min(shadowAtlasRects[6].w - _ty * 1.5, _rectUv6.y)))
+        let _inMap6 = step(0.0001, _clip6.w)
+                    * step(0.0, _altUv6.x) * step(_altUv6.x, 1.0)
+                    * step(0.0, _altUv6.y) * step(_altUv6.y, 1.0)
+                    * step(0.0, _ref6) * step(_ref6, 1.0)
         let _bias6 = shadowBiases[6].x * step(0.0001, shadowBiases[6].x) + _globalBias * (1.0 - step(0.0001, shadowBiases[6].x))
-        let _s6a = sample(shadowMap, _rectUv6 + vec2(-_tx, -_ty)).x
-        let _s6b = sample(shadowMap, _rectUv6 + vec2(0.0, -_ty)).x
-        let _s6c = sample(shadowMap, _rectUv6 + vec2(_tx, -_ty)).x
-        let _s6d = sample(shadowMap, _rectUv6 + vec2(-_tx, 0.0)).x
-        let _s6e = sample(shadowMap, _rectUv6 + vec2(0.0, 0.0)).x
-        let _s6f = sample(shadowMap, _rectUv6 + vec2(_tx, 0.0)).x
-        let _s6g = sample(shadowMap, _rectUv6 + vec2(-_tx, _ty)).x
-        let _s6h = sample(shadowMap, _rectUv6 + vec2(0.0, _ty)).x
-        let _s6i = sample(shadowMap, _rectUv6 + vec2(_tx, _ty)).x
+        let _s6a = sample(shadowMap, _safeUv6 + vec2(-_tx, -_ty)).x
+        let _s6b = sample(shadowMap, _safeUv6 + vec2(0.0, -_ty)).x
+        let _s6c = sample(shadowMap, _safeUv6 + vec2(_tx, -_ty)).x
+        let _s6d = sample(shadowMap, _safeUv6 + vec2(-_tx, 0.0)).x
+        let _s6e = sample(shadowMap, _safeUv6 + vec2(0.0, 0.0)).x
+        let _s6f = sample(shadowMap, _safeUv6 + vec2(_tx, 0.0)).x
+        let _s6g = sample(shadowMap, _safeUv6 + vec2(-_tx, _ty)).x
+        let _s6h = sample(shadowMap, _safeUv6 + vec2(0.0, _ty)).x
+        let _s6i = sample(shadowMap, _safeUv6 + vec2(_tx, _ty)).x
         let _t6a = max(1.0 - step(_s6a + _bias6, _ref6), step(0.999, _s6a))
         let _t6b = max(1.0 - step(_s6b + _bias6, _ref6), step(0.999, _s6b))
         let _t6c = max(1.0 - step(_s6c + _bias6, _ref6), step(0.999, _s6c))
@@ -502,18 +544,23 @@ material Lighting {
         let _uy7 = _ndcY7 * 0.5 + 0.5
         let _altUv7 = vec2(_ndcX7 * 0.5 + 0.5, 1.0 - _uy7)
         let _rectUv7 = mix(shadowAtlasRects[7].xy, shadowAtlasRects[7].zw, _altUv7)
-        let _inMap7 = step(0.0, _rectUv7.x) * step(_rectUv7.x, 1.0)
-                    * step(0.0, _rectUv7.y) * step(_rectUv7.y, 1.0)
+        let _safeUv7 = vec2(
+            max(shadowAtlasRects[7].x + _tx * 1.5, min(shadowAtlasRects[7].z - _tx * 1.5, _rectUv7.x)),
+            max(shadowAtlasRects[7].y + _ty * 1.5, min(shadowAtlasRects[7].w - _ty * 1.5, _rectUv7.y)))
+        let _inMap7 = step(0.0001, _clip7.w)
+                    * step(0.0, _altUv7.x) * step(_altUv7.x, 1.0)
+                    * step(0.0, _altUv7.y) * step(_altUv7.y, 1.0)
+                    * step(0.0, _ref7) * step(_ref7, 1.0)
         let _bias7 = shadowBiases[7].x * step(0.0001, shadowBiases[7].x) + _globalBias * (1.0 - step(0.0001, shadowBiases[7].x))
-        let _s7a = sample(shadowMap, _rectUv7 + vec2(-_tx, -_ty)).x
-        let _s7b = sample(shadowMap, _rectUv7 + vec2(0.0, -_ty)).x
-        let _s7c = sample(shadowMap, _rectUv7 + vec2(_tx, -_ty)).x
-        let _s7d = sample(shadowMap, _rectUv7 + vec2(-_tx, 0.0)).x
-        let _s7e = sample(shadowMap, _rectUv7 + vec2(0.0, 0.0)).x
-        let _s7f = sample(shadowMap, _rectUv7 + vec2(_tx, 0.0)).x
-        let _s7g = sample(shadowMap, _rectUv7 + vec2(-_tx, _ty)).x
-        let _s7h = sample(shadowMap, _rectUv7 + vec2(0.0, _ty)).x
-        let _s7i = sample(shadowMap, _rectUv7 + vec2(_tx, _ty)).x
+        let _s7a = sample(shadowMap, _safeUv7 + vec2(-_tx, -_ty)).x
+        let _s7b = sample(shadowMap, _safeUv7 + vec2(0.0, -_ty)).x
+        let _s7c = sample(shadowMap, _safeUv7 + vec2(_tx, -_ty)).x
+        let _s7d = sample(shadowMap, _safeUv7 + vec2(-_tx, 0.0)).x
+        let _s7e = sample(shadowMap, _safeUv7 + vec2(0.0, 0.0)).x
+        let _s7f = sample(shadowMap, _safeUv7 + vec2(_tx, 0.0)).x
+        let _s7g = sample(shadowMap, _safeUv7 + vec2(-_tx, _ty)).x
+        let _s7h = sample(shadowMap, _safeUv7 + vec2(0.0, _ty)).x
+        let _s7i = sample(shadowMap, _safeUv7 + vec2(_tx, _ty)).x
         let _t7a = max(1.0 - step(_s7a + _bias7, _ref7), step(0.999, _s7a))
         let _t7b = max(1.0 - step(_s7b + _bias7, _ref7), step(0.999, _s7b))
         let _t7c = max(1.0 - step(_s7c + _bias7, _ref7), step(0.999, _s7c))
@@ -553,49 +600,18 @@ material Lighting {
         let attenSpot0  = Lights.params[0].y * falloff0 * cone0 / max(d0 * d0, 0.01)
         let NdotDir0  = max(dot(N, Ld0), 0.0)
         let NdotPos0  = max(dot(N, Lp0), 0.0)
-        // �P5.5 C ??per-slot shadow for the key light. When
-        // perLightShadowCount.x > 0 we use the per-slot PCF result;
-        // when 0 we use the legacy global `shadowKey` (pre-C path)
-        // so pre-C behavior is preserved exactly.
-        let _globalKeyClip = u_lightViewProj * vec4(worldPos, 1.0)
-        let _gInvW = 1.0 / max(_globalKeyClip.w, 0.0001)
-        let _gNdcX = _globalKeyClip.x * _gInvW
-        let _gNdcY = _globalKeyClip.y * _gInvW
-        let _gRef = _globalKeyClip.z * _gInvW * 0.5 + 0.5
-        let _gUy = _gNdcY * 0.5 + 0.5
-        let _gUv = vec2(_gNdcX * 0.5 + 0.5, 1.0 - _gUy)
-        let _gIn = step(0.0, _gUv.x) * step(_gUv.x, 1.0) * step(0.0, _gUv.y) * step(_gUv.y, 1.0)
-        let _g00 = sample(shadowMap, _gUv + vec2(-_tx, -_ty)).x
-        let _g10 = sample(shadowMap, _gUv + vec2(0.0, -_ty)).x
-        let _g20 = sample(shadowMap, _gUv + vec2(_tx, -_ty)).x
-        let _g01 = sample(shadowMap, _gUv + vec2(-_tx, 0.0)).x
-        let _g11 = sample(shadowMap, _gUv + vec2(0.0, 0.0)).x
-        let _g21 = sample(shadowMap, _gUv + vec2(_tx, 0.0)).x
-        let _g02 = sample(shadowMap, _gUv + vec2(-_tx, _ty)).x
-        let _g12 = sample(shadowMap, _gUv + vec2(0.0, _ty)).x
-        let _g22 = sample(shadowMap, _gUv + vec2(_tx, _ty)).x
-        let _h00 = max(1.0 - step(_g00 + _globalBias, _gRef), step(0.999, _g00))
-        let _h10 = max(1.0 - step(_g10 + _globalBias, _gRef), step(0.999, _g10))
-        let _h20 = max(1.0 - step(_g20 + _globalBias, _gRef), step(0.999, _g20))
-        let _h01 = max(1.0 - step(_g01 + _globalBias, _gRef), step(0.999, _g01))
-        let _h11 = max(1.0 - step(_g11 + _globalBias, _gRef), step(0.999, _g11))
-        let _h21 = max(1.0 - step(_g21 + _globalBias, _gRef), step(0.999, _g21))
-        let _h02 = max(1.0 - step(_g02 + _globalBias, _gRef), step(0.999, _g02))
-        let _h12 = max(1.0 - step(_g12 + _globalBias, _gRef), step(0.999, _g12))
-        let _h22 = max(1.0 - step(_g22 + _globalBias, _gRef), step(0.999, _g22))
-        let _gSoft = (_h00 + _h10 + _h20 + _h01 + _h11 + _h21 + _h02 + _h12 + _h22) * (1.0 / 9.0)
-        let _shadowKey = mix(1.0, mix(_h11, _gSoft, shadowPcf.x), _gIn)
-        // When atlas is active (perLightShadowCount.x > 0.5), use
-        // the per-slot shadow; otherwise the legacy global shadowKey.
-        let _keyShadow = mix(_shadowKey, perLightShadow0.x, step(0.5, perLightShadowCount.x))
+        // Legacy and atlas producers both publish slot 0 through the same
+        // array contract, so there is only one shadow sampling path.
+        let _keyShadow = perLightShadow0.x
         let dirPart0  = NdotDir0 * _keyShadow * Lights.colors[0].xyz
-        let _atlasShadow0 = mix(1.0, perLightShadow0.x, step(0.5, perLightShadowCount.x))
+        let _atlasShadow0 = perLightShadow0.x
         let pointPart0 = NdotPos0 * attenPoint0 * _atlasShadow0 * Lights.colors[0].xyz
         let spotPart0  = NdotPos0 * attenSpot0  * _atlasShadow0 * Lights.colors[0].xyz
         let isDir0  = 1.0 - step(0.5, Lights.dirs[0].w)
         let isPoint0 = step(0.5, Lights.dirs[0].w) - step(1.5, Lights.dirs[0].w)
         let isSpot0 = step(1.5, Lights.dirs[0].w)
-        let keyContrib = dirPart0 * isDir0 + pointPart0 * isPoint0 + spotPart0 * isSpot0
+        let active0 = step(0.5, activeLightCount.x)
+        let keyContrib = (dirPart0 * isDir0 + pointPart0 * isPoint0 + spotPart0 * isSpot0) * active0
         // --- lights 1..7 (fill/rim ??per-slot shadow via perLightShadow{i}) ---
         let Ld1 = Lights.dirs[1].xyz * (1.0 / max(length(Lights.dirs[1].xyz), 0.0001))
         let toL1 = Lights.dirs[1].xyz - worldPos
@@ -615,7 +631,8 @@ material Lighting {
         let isDir1 = 1.0 - step(0.5, Lights.dirs[1].w)
         let isPoint1 = step(0.5, Lights.dirs[1].w) - step(1.5, Lights.dirs[1].w)
         let isSpot1 = step(1.5, Lights.dirs[1].w)
-        let f1 = dirPart1 * isDir1 + pointPart1 * isPoint1 + spotPart1 * isSpot1
+        let active1 = step(1.5, activeLightCount.x)
+        let f1 = (dirPart1 * isDir1 + pointPart1 * isPoint1 + spotPart1 * isSpot1) * active1
         let Ld2 = Lights.dirs[2].xyz * (1.0 / max(length(Lights.dirs[2].xyz), 0.0001))
         let toL2 = Lights.dirs[2].xyz - worldPos
         let d2 = length(toL2)
@@ -634,7 +651,8 @@ material Lighting {
         let isDir2 = 1.0 - step(0.5, Lights.dirs[2].w)
         let isPoint2 = step(0.5, Lights.dirs[2].w) - step(1.5, Lights.dirs[2].w)
         let isSpot2 = step(1.5, Lights.dirs[2].w)
-        let f2 = dirPart2 * isDir2 + pointPart2 * isPoint2 + spotPart2 * isSpot2
+        let active2 = step(2.5, activeLightCount.x)
+        let f2 = (dirPart2 * isDir2 + pointPart2 * isPoint2 + spotPart2 * isSpot2) * active2
         let Ld3 = Lights.dirs[3].xyz * (1.0 / max(length(Lights.dirs[3].xyz), 0.0001))
         let toL3 = Lights.dirs[3].xyz - worldPos
         let d3 = length(toL3)
@@ -653,7 +671,8 @@ material Lighting {
         let isDir3 = 1.0 - step(0.5, Lights.dirs[3].w)
         let isPoint3 = step(0.5, Lights.dirs[3].w) - step(1.5, Lights.dirs[3].w)
         let isSpot3 = step(1.5, Lights.dirs[3].w)
-        let f3 = dirPart3 * isDir3 + pointPart3 * isPoint3 + spotPart3 * isSpot3
+        let active3 = step(3.5, activeLightCount.x)
+        let f3 = (dirPart3 * isDir3 + pointPart3 * isPoint3 + spotPart3 * isSpot3) * active3
         let Ld4 = Lights.dirs[4].xyz * (1.0 / max(length(Lights.dirs[4].xyz), 0.0001))
         let toL4 = Lights.dirs[4].xyz - worldPos
         let d4 = length(toL4)
@@ -672,7 +691,8 @@ material Lighting {
         let isDir4 = 1.0 - step(0.5, Lights.dirs[4].w)
         let isPoint4 = step(0.5, Lights.dirs[4].w) - step(1.5, Lights.dirs[4].w)
         let isSpot4 = step(1.5, Lights.dirs[4].w)
-        let f4 = dirPart4 * isDir4 + pointPart4 * isPoint4 + spotPart4 * isSpot4
+        let active4 = step(4.5, activeLightCount.x)
+        let f4 = (dirPart4 * isDir4 + pointPart4 * isPoint4 + spotPart4 * isSpot4) * active4
         let Ld5 = Lights.dirs[5].xyz * (1.0 / max(length(Lights.dirs[5].xyz), 0.0001))
         let toL5 = Lights.dirs[5].xyz - worldPos
         let d5 = length(toL5)
@@ -691,7 +711,8 @@ material Lighting {
         let isDir5 = 1.0 - step(0.5, Lights.dirs[5].w)
         let isPoint5 = step(0.5, Lights.dirs[5].w) - step(1.5, Lights.dirs[5].w)
         let isSpot5 = step(1.5, Lights.dirs[5].w)
-        let f5 = dirPart5 * isDir5 + pointPart5 * isPoint5 + spotPart5 * isSpot5
+        let active5 = step(5.5, activeLightCount.x)
+        let f5 = (dirPart5 * isDir5 + pointPart5 * isPoint5 + spotPart5 * isSpot5) * active5
         let Ld6 = Lights.dirs[6].xyz * (1.0 / max(length(Lights.dirs[6].xyz), 0.0001))
         let toL6 = Lights.dirs[6].xyz - worldPos
         let d6 = length(toL6)
@@ -710,7 +731,8 @@ material Lighting {
         let isDir6 = 1.0 - step(0.5, Lights.dirs[6].w)
         let isPoint6 = step(0.5, Lights.dirs[6].w) - step(1.5, Lights.dirs[6].w)
         let isSpot6 = step(1.5, Lights.dirs[6].w)
-        let f6 = dirPart6 * isDir6 + pointPart6 * isPoint6 + spotPart6 * isSpot6
+        let active6 = step(6.5, activeLightCount.x)
+        let f6 = (dirPart6 * isDir6 + pointPart6 * isPoint6 + spotPart6 * isSpot6) * active6
         let Ld7 = Lights.dirs[7].xyz * (1.0 / max(length(Lights.dirs[7].xyz), 0.0001))
         let toL7 = Lights.dirs[7].xyz - worldPos
         let d7 = length(toL7)
@@ -729,28 +751,122 @@ material Lighting {
         let isDir7 = 1.0 - step(0.5, Lights.dirs[7].w)
         let isPoint7 = step(0.5, Lights.dirs[7].w) - step(1.5, Lights.dirs[7].w)
         let isSpot7 = step(1.5, Lights.dirs[7].w)
-        let f7 = dirPart7 * isDir7 + pointPart7 * isPoint7 + spotPart7 * isSpot7
-        let directionalSum = keyContrib + f1 + f2 + f3 + f4 + f5 + f6 + f7
+        let active7 = step(7.5, activeLightCount.x)
+        let f7 = (dirPart7 * isDir7 + pointPart7 * isPoint7 + spotPart7 * isSpot7) * active7
         let materialMetallic = max(0.0, min(1.0, albedo.a))
         let materialRoughness = max(0.045, min(1.0, normalSample.a))
         let materialModel = floor(worldSample.a * 0.5 + 0.0001)
         let materialAo = max(0.0, min(1.0, worldSample.a - materialModel * 2.0))
-        let V = normalize(u_cameraPos.xyz - worldPos)
-        let keyL = normalize(Ld0 * isDir0 + Lp0 * (isPoint0 + isSpot0))
-        let H = normalize(V + keyL)
+        let toCamera = u_cameraPos.xyz - worldPos
+        let V = toCamera * (1.0 / max(length(toCamera), 0.0001))
         let NdotV = max(dot(N, V), 0.001)
-        let NdotLKey = max(dot(N, keyL), 0.001)
-        let NdotH = max(dot(N, H), 0.0)
-        let VdotH = max(dot(V, H), 0.0)
         let F0 = mix(vec3(0.04, 0.04, 0.04), albedo.rgb, materialMetallic)
-        let F = fresnelSchlick(VdotH, F0)
-        let D = distributionGGX(NdotH, materialRoughness)
-        let G = geometrySmith(NdotV, NdotLKey, materialRoughness)
-        let diffuseWeight = (vec3(1.0, 1.0, 1.0) - F) * (1.0 - materialMetallic)
-        let diffuseLit = albedo.rgb * diffuseWeight * directionalSum
-        let specularLit = F * (D * G / max(4.0 * NdotV * NdotLKey, 0.001)) * keyContrib
-        let ambientLit = albedo.rgb * diffuseWeight * ambient * materialAo
-        let pbrLit = ambientLit + diffuseLit + specularLit + surface.rgb
+        let oneOverPi = 0.31830988618
+
+        // Full Cook-Torrance BRDF per light. keyContrib/f1..f7 already carry
+        // radiance * attenuation * NdotL * shadow, so each BRDF is multiplied
+        // by its own light instead of reusing slot 0's Fresnel/specular lobe.
+        let brdfRawL0 = Ld0 * isDir0 + Lp0 * (isPoint0 + isSpot0)
+        let brdfL0 = brdfRawL0 * (1.0 / max(length(brdfRawL0), 0.0001))
+        let brdfRawH0 = V + brdfL0
+        let brdfH0 = brdfRawH0 * (1.0 / max(length(brdfRawH0), 0.0001))
+        let brdfNdotL0 = max(dot(N, brdfL0), 0.0)
+        let brdfF0 = fresnelSchlick(max(dot(V, brdfH0), 0.0), F0)
+        let brdfD0 = distributionGGX(max(dot(N, brdfH0), 0.0), materialRoughness)
+        let brdfG0 = geometrySmith(NdotV, brdfNdotL0, materialRoughness)
+        let brdfDiffuse0 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF0) * (1.0 - materialMetallic) * oneOverPi
+        let brdfSpecular0 = brdfF0 * (brdfD0 * brdfG0 / max(4.0 * NdotV * brdfNdotL0, 0.001))
+        let direct0 = (brdfDiffuse0 + brdfSpecular0) * keyContrib
+
+        let brdfRawL1 = Ld1 * isDir1 + Lp1 * (isPoint1 + isSpot1)
+        let brdfL1 = brdfRawL1 * (1.0 / max(length(brdfRawL1), 0.0001))
+        let brdfRawH1 = V + brdfL1
+        let brdfH1 = brdfRawH1 * (1.0 / max(length(brdfRawH1), 0.0001))
+        let brdfNdotL1 = max(dot(N, brdfL1), 0.0)
+        let brdfF1 = fresnelSchlick(max(dot(V, brdfH1), 0.0), F0)
+        let brdfD1 = distributionGGX(max(dot(N, brdfH1), 0.0), materialRoughness)
+        let brdfG1 = geometrySmith(NdotV, brdfNdotL1, materialRoughness)
+        let brdfDiffuse1 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF1) * (1.0 - materialMetallic) * oneOverPi
+        let brdfSpecular1 = brdfF1 * (brdfD1 * brdfG1 / max(4.0 * NdotV * brdfNdotL1, 0.001))
+        let direct1 = (brdfDiffuse1 + brdfSpecular1) * f1
+
+        let brdfRawL2 = Ld2 * isDir2 + Lp2 * (isPoint2 + isSpot2)
+        let brdfL2 = brdfRawL2 * (1.0 / max(length(brdfRawL2), 0.0001))
+        let brdfRawH2 = V + brdfL2
+        let brdfH2 = brdfRawH2 * (1.0 / max(length(brdfRawH2), 0.0001))
+        let brdfNdotL2 = max(dot(N, brdfL2), 0.0)
+        let brdfF2 = fresnelSchlick(max(dot(V, brdfH2), 0.0), F0)
+        let brdfD2 = distributionGGX(max(dot(N, brdfH2), 0.0), materialRoughness)
+        let brdfG2 = geometrySmith(NdotV, brdfNdotL2, materialRoughness)
+        let brdfDiffuse2 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF2) * (1.0 - materialMetallic) * oneOverPi
+        let brdfSpecular2 = brdfF2 * (brdfD2 * brdfG2 / max(4.0 * NdotV * brdfNdotL2, 0.001))
+        let direct2 = (brdfDiffuse2 + brdfSpecular2) * f2
+
+        let brdfRawL3 = Ld3 * isDir3 + Lp3 * (isPoint3 + isSpot3)
+        let brdfL3 = brdfRawL3 * (1.0 / max(length(brdfRawL3), 0.0001))
+        let brdfRawH3 = V + brdfL3
+        let brdfH3 = brdfRawH3 * (1.0 / max(length(brdfRawH3), 0.0001))
+        let brdfNdotL3 = max(dot(N, brdfL3), 0.0)
+        let brdfF3 = fresnelSchlick(max(dot(V, brdfH3), 0.0), F0)
+        let brdfD3 = distributionGGX(max(dot(N, brdfH3), 0.0), materialRoughness)
+        let brdfG3 = geometrySmith(NdotV, brdfNdotL3, materialRoughness)
+        let brdfDiffuse3 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF3) * (1.0 - materialMetallic) * oneOverPi
+        let brdfSpecular3 = brdfF3 * (brdfD3 * brdfG3 / max(4.0 * NdotV * brdfNdotL3, 0.001))
+        let direct3 = (brdfDiffuse3 + brdfSpecular3) * f3
+
+        let brdfRawL4 = Ld4 * isDir4 + Lp4 * (isPoint4 + isSpot4)
+        let brdfL4 = brdfRawL4 * (1.0 / max(length(brdfRawL4), 0.0001))
+        let brdfRawH4 = V + brdfL4
+        let brdfH4 = brdfRawH4 * (1.0 / max(length(brdfRawH4), 0.0001))
+        let brdfNdotL4 = max(dot(N, brdfL4), 0.0)
+        let brdfF4 = fresnelSchlick(max(dot(V, brdfH4), 0.0), F0)
+        let brdfD4 = distributionGGX(max(dot(N, brdfH4), 0.0), materialRoughness)
+        let brdfG4 = geometrySmith(NdotV, brdfNdotL4, materialRoughness)
+        let brdfDiffuse4 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF4) * (1.0 - materialMetallic) * oneOverPi
+        let brdfSpecular4 = brdfF4 * (brdfD4 * brdfG4 / max(4.0 * NdotV * brdfNdotL4, 0.001))
+        let direct4 = (brdfDiffuse4 + brdfSpecular4) * f4
+
+        let brdfRawL5 = Ld5 * isDir5 + Lp5 * (isPoint5 + isSpot5)
+        let brdfL5 = brdfRawL5 * (1.0 / max(length(brdfRawL5), 0.0001))
+        let brdfRawH5 = V + brdfL5
+        let brdfH5 = brdfRawH5 * (1.0 / max(length(brdfRawH5), 0.0001))
+        let brdfNdotL5 = max(dot(N, brdfL5), 0.0)
+        let brdfF5 = fresnelSchlick(max(dot(V, brdfH5), 0.0), F0)
+        let brdfD5 = distributionGGX(max(dot(N, brdfH5), 0.0), materialRoughness)
+        let brdfG5 = geometrySmith(NdotV, brdfNdotL5, materialRoughness)
+        let brdfDiffuse5 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF5) * (1.0 - materialMetallic) * oneOverPi
+        let brdfSpecular5 = brdfF5 * (brdfD5 * brdfG5 / max(4.0 * NdotV * brdfNdotL5, 0.001))
+        let direct5 = (brdfDiffuse5 + brdfSpecular5) * f5
+
+        let brdfRawL6 = Ld6 * isDir6 + Lp6 * (isPoint6 + isSpot6)
+        let brdfL6 = brdfRawL6 * (1.0 / max(length(brdfRawL6), 0.0001))
+        let brdfRawH6 = V + brdfL6
+        let brdfH6 = brdfRawH6 * (1.0 / max(length(brdfRawH6), 0.0001))
+        let brdfNdotL6 = max(dot(N, brdfL6), 0.0)
+        let brdfF6 = fresnelSchlick(max(dot(V, brdfH6), 0.0), F0)
+        let brdfD6 = distributionGGX(max(dot(N, brdfH6), 0.0), materialRoughness)
+        let brdfG6 = geometrySmith(NdotV, brdfNdotL6, materialRoughness)
+        let brdfDiffuse6 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF6) * (1.0 - materialMetallic) * oneOverPi
+        let brdfSpecular6 = brdfF6 * (brdfD6 * brdfG6 / max(4.0 * NdotV * brdfNdotL6, 0.001))
+        let direct6 = (brdfDiffuse6 + brdfSpecular6) * f6
+
+        let brdfRawL7 = Ld7 * isDir7 + Lp7 * (isPoint7 + isSpot7)
+        let brdfL7 = brdfRawL7 * (1.0 / max(length(brdfRawL7), 0.0001))
+        let brdfRawH7 = V + brdfL7
+        let brdfH7 = brdfRawH7 * (1.0 / max(length(brdfRawH7), 0.0001))
+        let brdfNdotL7 = max(dot(N, brdfL7), 0.0)
+        let brdfF7 = fresnelSchlick(max(dot(V, brdfH7), 0.0), F0)
+        let brdfD7 = distributionGGX(max(dot(N, brdfH7), 0.0), materialRoughness)
+        let brdfG7 = geometrySmith(NdotV, brdfNdotL7, materialRoughness)
+        let brdfDiffuse7 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF7) * (1.0 - materialMetallic) * oneOverPi
+        let brdfSpecular7 = brdfF7 * (brdfD7 * brdfG7 / max(4.0 * NdotV * brdfNdotL7, 0.001))
+        let direct7 = (brdfDiffuse7 + brdfSpecular7) * f7
+
+        let directLit = direct0 + direct1 + direct2 + direct3 + direct4 + direct5 + direct6 + direct7
+        let ambientF = fresnelSchlickRoughness(NdotV, F0, materialRoughness)
+        let ambientDiffuseWeight = (vec3(1.0, 1.0, 1.0) - ambientF) * (1.0 - materialMetallic)
+        let ambientLit = albedo.rgb * ambientDiffuseWeight * ambient * materialAo
+        let pbrLit = ambientLit + directLit + surface.rgb
         let unlit = albedo.rgb + surface.rgb
         let isUnlit = step(0.5, materialModel) * (1.0 - step(1.5, materialModel))
         let lit = mix(pbrLit, unlit, isUnlit)
@@ -770,6 +886,88 @@ material Lighting {
 )";
 
 const char* const kLightingPhoskiaSourceCStr = kLightingPhoskiaSource;
+
+static std::string hardShadowBlock(std::string_view block, uint32_t slot)
+{
+    const std::string n = std::to_string(slot);
+    const std::string samplePrefix = "let _s" + n;
+    const std::string centerSample = "let _s" + n + "e ";
+    const std::string testPrefix = "let _t" + n;
+    const std::string centerTest = "let _t" + n + "e ";
+    const std::string softPrefix = "let _soft" + n;
+    const std::string shadowPrefix = "let _shadow" + n;
+
+    std::string out;
+    size_t begin = 0;
+    while (begin < block.size()) {
+        const size_t newline = block.find('\n', begin);
+        const size_t end = newline == std::string_view::npos
+            ? block.size()
+            : newline + 1;
+        const std::string_view line = block.substr(begin, end - begin);
+        const bool nonCenterSample = line.find(samplePrefix) != std::string_view::npos
+            && line.find(centerSample) == std::string_view::npos;
+        const bool nonCenterTest = line.find(testPrefix) != std::string_view::npos
+            && line.find(centerTest) == std::string_view::npos;
+        if (nonCenterSample || nonCenterTest
+            || line.find(softPrefix) != std::string_view::npos) {
+            begin = end;
+            continue;
+        }
+        if (line.find(shadowPrefix) != std::string_view::npos) {
+            out += "        let _shadow" + n
+                + " = mix(1.0, _t" + n + "e, _inMap" + n + ")\n";
+        } else {
+            out.append(line.data(), line.size());
+        }
+        begin = end;
+    }
+    return out;
+}
+
+std::string buildLightingVariantSource(uint32_t shadowCount, bool pcfEnabled)
+{
+    shadowCount = std::min(shadowCount, ayt::render::kMaxSceneLights);
+    std::string source(kLightingPhoskiaSource);
+    if (shadowCount == 0) {
+        const std::string commonBegin = "        let _world = vec4(worldPos, 1.0)\n";
+        const std::string slotZero = "        // slot 0\n";
+        const size_t begin = source.find(commonBegin);
+        const size_t end = source.find(slotZero, begin);
+        if (begin != std::string::npos && end != std::string::npos) {
+            source.replace(begin, end - begin,
+                           "        // shadow path compile-time inactive\n\n");
+        }
+    }
+    for (int slot = 0;
+         slot < static_cast<int>(ayt::render::kMaxSceneLights);
+         ++slot) {
+        const std::string marker = "        // slot " + std::to_string(slot) + "\n";
+        const std::string nextMarker = slot + 1
+            < static_cast<int>(ayt::render::kMaxSceneLights)
+            ? "        // slot " + std::to_string(slot + 1) + "\n"
+            : "        // --- light 0 (key) ---";
+        const size_t begin = source.find(marker);
+        const size_t end = source.find(nextMarker, begin + marker.size());
+        if (begin == std::string::npos || end == std::string::npos) {
+            continue;
+        }
+
+        if (static_cast<uint32_t>(slot) >= shadowCount) {
+            const std::string inactive =
+                "        // slot " + std::to_string(slot)
+                + " (compile-time inactive)\n"
+                + "        let perLightShadow" + std::to_string(slot)
+                + " = vec4(1.0)\n\n";
+            source.replace(begin, end - begin, inactive);
+        } else if (!pcfEnabled) {
+            const std::string block = source.substr(begin, end - begin);
+            source.replace(begin, end - begin,
+                           hardShadowBlock(block, static_cast<uint32_t>(slot)));
+        }
+    }
+    return source;
+}
 
 LightingPass::~LightingPass() = default;
 
@@ -818,6 +1016,7 @@ void LightingPass::destroyResources(BGFXAdapter& adapter)
     _program.reset();
     _programReady = false;
     _programAcquireFailed = false;
+    _programVariantKey.clear();
     _producedThisFrame = false;
     // �P5.5 D (2026-07-23) ??cube binding IDs reset on destroy so
     // the next ensureProgram() re-resolves them after the v22
@@ -825,6 +1024,11 @@ void LightingPass::destroyResources(BGFXAdapter& adapter)
     _tEnvCube         = ayt::shader::InvalidBinding;
     _uCubeActive      = ayt::shader::InvalidBinding;
     _uAmbientStrength = ayt::shader::InvalidBinding;
+    _uShadowAtlasRects    = ayt::shader::InvalidBinding;
+    _uLightViewProjs      = ayt::shader::InvalidBinding;
+    _uShadowBiases        = ayt::shader::InvalidBinding;
+    _uPerLightShadowCount = ayt::shader::InvalidBinding;
+    _uActiveLightCount = ayt::shader::InvalidBinding;
 }
 
 void LightingPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
@@ -855,14 +1059,15 @@ void LightingPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
         _allocatedW = _allocatedH = 0;
     }
 
-    // �P5 B5 (2026-07-22) ??1� RGBA8 LightingOutput FBO. NO depth
+    // HDR lighting target. Keep values above 1.0 alive through bloom/haze;
+    // PostProcessPass owns the final tone-map/gamma conversion.
     // attachment ??this is a fullscreen post-process pass that
     // does not read depth. `withDepth=false` matches cutsheet
     // `pass-lessons-from-deferred.md:151,161,169` "LightingPass
-    // ??LightingOutput FBO" semantics (independent RGBA8 RT, not
+    // ??LightingOutput FBO" semantics (independent RGBA16F RT, not
     // a color+depth like sceneFbo).
     _lightingFbo = adapter.createFrameBuffer(width, height,
-                                              bgfx::TextureFormat::RGBA8,
+                                              kHdrSceneColorFormat,
                                               /*withDepth=*/false);
     if (bgfx::isValid(_lightingFbo)) {
         _allocatedW = width;
@@ -891,7 +1096,9 @@ void LightingPass::ensureFullscreenQuad(BGFXAdapter& adapter)
                                               BGFX_BUFFER_NONE);
 }
 
-void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
+void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool,
+                                 uint32_t shadowCount,
+                                 bool pcfEnabled)
 {
     // �P5 B5 (2026-07-22) ??mirror GBufferPass::ensureProgram at
     // GBufferPass.cpp:72-107. Stamp-checked `s_acquiredCacheKey`
@@ -899,8 +1106,11 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     // ShadowCaster.cpp:60-65). On compile failure: log + set
     // _programAcquireFailed, leave _programReady false. On success:
     // _program = acquired, _programReady = true.
-    static const char* s_acquiredCacheKey = nullptr;
-    if (s_acquiredCacheKey != kLightingCacheKey) {
+    shadowCount = std::min(shadowCount, ayt::render::kMaxSceneLights);
+    const std::string requestedKey = std::string(kLightingCacheKey)
+        + "_shadow" + std::to_string(shadowCount)
+        + (pcfEnabled ? "_pcf9" : "_hard1");
+    if (_programVariantKey != requestedKey) {
         _program.reset();
         _programReady = false;
         _programAcquireFailed = false;
@@ -910,15 +1120,22 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
         _tEnvCube         = ayt::shader::InvalidBinding;
         _uCubeActive      = ayt::shader::InvalidBinding;
         _uAmbientStrength = ayt::shader::InvalidBinding;
-        s_acquiredCacheKey = kLightingCacheKey;
+        _uShadowAtlasRects    = ayt::shader::InvalidBinding;
+        _uLightViewProjs      = ayt::shader::InvalidBinding;
+        _uShadowBiases        = ayt::shader::InvalidBinding;
+        _uPerLightShadowCount = ayt::shader::InvalidBinding;
+        _uActiveLightCount = ayt::shader::InvalidBinding;
+        _programVariantKey = requestedKey;
     }
 
     if (_program.isValid() || _programAcquireFailed) {
         return;
     }
 
+    const std::string variantSource =
+        buildLightingVariantSource(shadowCount, pcfEnabled);
     ayt::shader::ShaderResource acquired =
-        pool.acquire(kLightingPhoskiaSource, kLightingCacheKey);
+        pool.acquire(variantSource, _programVariantKey);
     if (!acquired.isValid()) {
         _programAcquireFailed = true;
         std::fprintf(stderr,
@@ -932,7 +1149,7 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
 
     std::fprintf(stderr,
                  "[LightingPass] program ready via Phoskia (cacheKey=%s)\n",
-                 kLightingCacheKey);
+                  _programVariantKey.c_str());
 
     _program = acquired;
     _programReady = true;
@@ -957,6 +1174,7 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     _uLightViewProjs      = _program.getUniformBinding("lightViewProjs");
     _uShadowBiases        = _program.getUniformBinding("shadowBiases");
     _uPerLightShadowCount = _program.getUniformBinding("perLightShadowCount");
+    _uActiveLightCount    = _program.getUniformBinding("activeLightCount");
 }
 
 uint32_t LightingPass::execute(PassExecContext& ctx)
@@ -1024,7 +1242,14 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    ensureProgram(ctx.pool);
+    const uint32_t shadowVariantCount =
+        ctx.shadowPass != nullptr && ctx.shadowPass->hasSampleableShadow()
+        ? std::min(ctx.shadowPass->perLightShadowCount(),
+                   ayt::render::kMaxSceneLights)
+        : 0u;
+    const bool shadowVariantPcf = shadowVariantCount > 0
+        && ctx.shadowPass->pcfEnabled();
+    ensureProgram(ctx.pool, shadowVariantCount, shadowVariantPcf);
     if (!_program.isValid()) {
         return 0;
     }
@@ -1315,260 +1540,32 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // zero ??Directional branch never reads them. This avoids the
     // "FS unrolls 8 lights but UBO has all zero ??black picture"
     // failure mode when the host hasn't called setSceneLights yet.
-    static_assert(ayt::render::kMaxSceneLights == 8,
-                  "LightingPass B7 UBO assumes kMaxSceneLights == 8");
-
-    alignas(16) float lightsBlock[ayt::render::kMaxSceneLights * 16] = {};
-    // 8 vec4 dirs + 8 vec4 colors + 8 vec4 params + 8 vec4 spotDir
-    // = 32 floats � 4 bytes = 512 bytes total
-    const ayt::render::SceneLights* sceneLights = ctx.sceneLights;
-    const bool useMulti = (sceneLights != nullptr) && (sceneLights->count > 0u);
-
-    if (useMulti) {
-        // Use the exact same stable packing as ShadowPass: active
-        // Directional/Spot casters first, then the unshadowed suffix. Lighting
-        // is additive, so this preserves the image while making packed atlas
-        // slot i refer to Lights[i] even when scene slot 0 does not cast.
-        const ShadowLightOrder lightOrder = computeShadowLightOrder(*sceneLights);
-        for (uint32_t i = 0; i < lightOrder.lightCount; ++i) {
-            const ayt::render::Light& L =
-                sceneLights->lights[lightOrder.indices[i]];
-            // dirs[i] (16-byte vec4) ??per LightType CPU-side split.
-            // xyz + .w = float(LightType). Point/Spot branches land
-            // at zero CPU cost (the switch is a jump table).
-            float lightVecX = 0.0f, lightVecY = 0.0f, lightVecZ = 0.0f;
-            float paramRange = 0.0f, paramIntensity = 1.0f;
-            float paramConeInner = 0.0f, paramConeOuter = 0.0f;
-            float spotDirX = 0.0f, spotDirY = -1.0f, spotDirZ = 0.0f;
-            switch (L.type) {
-            case ayt::render::LightType::Directional:
-                // Negate FrameContext convention.
-                lightVecX = -L.direction.x;
-                lightVecY = -L.direction.y;
-                lightVecZ = -L.direction.z;
-                // params[] + spotDir[] stay at default ??Directional
-                // branch never reads them.
-                break;
-            case ayt::render::LightType::Point:
-                lightVecX = L.position.x;
-                lightVecY = L.position.y;
-                lightVecZ = L.position.z;
-                paramRange    = L.range;
-                paramIntensity = L.intensity;
-                // spotDir[] stays at default ??Point branch never reads it.
-                break;
-            case ayt::render::LightType::Spot:
-                lightVecX = L.position.x;
-                lightVecY = L.position.y;
-                lightVecZ = L.position.z;
-                paramRange     = L.range;
-                paramIntensity = L.intensity;
-                paramConeInner = L.coneCosInner;
-                paramConeOuter = L.coneCosOuter;
-                spotDirX = L.spotDirection.x;
-                spotDirY = L.spotDirection.y;
-                spotDirZ = L.spotDirection.z;
-                break;
-            }
-            // dirs[i] (16-byte vec4) ??xyz + float(LightType).
-            lightsBlock[i * 4 + 0] = lightVecX;
-            lightsBlock[i * 4 + 1] = lightVecY;
-            lightsBlock[i * 4 + 2] = lightVecZ;
-            lightsBlock[i * 4 + 3] =
-                static_cast<float>(L.type);
-            // colors[i] (16-byte vec4) ??same for all light types.
-            lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 0] = L.color.x;
-            lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 1] = L.color.y;
-            lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 2] = L.color.z;
-            lightsBlock[(ayt::render::kMaxSceneLights + i) * 4 + 3] = 0.0f;
-            // params[i] (16-byte vec4) ??B: per-light (range, intensity,
-            // coneCosInner, coneCosOuter). Directional leaves them at
-            // (0, 1, 0, 0) ??the FS Directional branch never reads this
-            // array, but the upload is unconditional so any stray FS
-            // code that does (e.g. debug viz) sees the right values.
-            lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 0] = paramRange;
-            lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 1] = paramIntensity;
-            lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 2] = paramConeInner;
-            lightsBlock[(ayt::render::kMaxSceneLights * 2 + i) * 4 + 3] = paramConeOuter;
-            // spotDir[i] (16-byte vec4) ??B: Spot direction (xyz) + 0
-            // padding. Directional/Point leave (0, -1, 0, 0) default
-            // (their FS branches never read this array).
-            lightsBlock[(ayt::render::kMaxSceneLights * 3 + i) * 4 + 0] = spotDirX;
-            lightsBlock[(ayt::render::kMaxSceneLights * 3 + i) * 4 + 1] = spotDirY;
-            lightsBlock[(ayt::render::kMaxSceneLights * 3 + i) * 4 + 2] = spotDirZ;
-            lightsBlock[(ayt::render::kMaxSceneLights * 3 + i) * 4 + 3] = 0.0f;
-        }
-    } else {
-        // B5 single-light fallback mirrors the FrameContext values
-        // into dirs[0] + colors[0]. The remaining 7 slots stay zero.
-        // B widens the layout to 4 arrays but the fallback only writes
-        // the first 2 (params + spotDir stay zero ??Directional branch
-        // never reads them, and the legacy single-light contract is
-        // preserved byte-for-byte at the first 32 bytes of lightsBlock).
-        lightsBlock[0] = -frame.lightDirection.x;
-        lightsBlock[1] = -frame.lightDirection.y;
-        lightsBlock[2] = -frame.lightDirection.z;
-        lightsBlock[3] = 0.0f;  // w = float(LightType::Directional) = 0
-        lightsBlock[ayt::render::kMaxSceneLights * 4 + 0] = frame.lightColor.x;
-        lightsBlock[ayt::render::kMaxSceneLights * 4 + 1] = frame.lightColor.y;
-        lightsBlock[ayt::render::kMaxSceneLights * 4 + 2] = frame.lightColor.z;
-        lightsBlock[ayt::render::kMaxSceneLights * 4 + 3] = 0.0f;
-    }
-
-    // �P5.5 B (2026-07-23) ??force single field-split upload path,
-    // REMOVE the setUniformBlock fallback. Reasoning (cutsheet �P5.5 B
-    // dual-path decision):
-    //   - A's dual-path was a workaround when the UBO field rename
-    //     `dirs?record` broke HLSL/bgfx uniform wiring. Field-split
-    //     (`setUniform` per vec4 array) is the path that's actually
-    //     stable today.
-    //   - B adds 2 more vec4 arrays (`params[8]` + `spotDir[8]`); a
-    //     dual-path on 4 arrays would explode to 2^4 = 16 combinations.
-    //   - When to migrate to setUniformBlock: post-B ship, on D3D
-    //     3-run validate, then a future cut can collapse.
-    //
+    const PackedSceneLighting packedLights =
+        packSceneLighting(ctx.sceneLights, frame);
     // 4 setUniform calls (one per array), all 128 bytes each.
     // Logged-once message confirms we're on the B field-split path.
     // �P5.5 A ??field name stays `dirs` (xyz = light vector, w = type).
     // Do NOT rename to `record` ??that broke HLSL/bgfx uniform wiring.
-    const shader::BindingId dirsBinding   = _program.getUniformBinding("dirs");
-    const shader::BindingId colorsBinding = _program.getUniformBinding("colors");
-    const shader::BindingId paramsBinding = _program.getUniformBinding("params");
-    const shader::BindingId spotDirBinding = _program.getUniformBinding("spotDir");
-    if (dirsBinding   != shader::InvalidBinding
-        && colorsBinding != shader::InvalidBinding
-        && paramsBinding != shader::InvalidBinding
-        && spotDirBinding != shader::InvalidBinding) {
-        // �P5.5 B (2026-07-23) ??field-split path: 4 separate
-        // `setUniform` calls, each writing one vec4 array.
-        _program.setUniform(dirsBinding,   lightsBlock,
-                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
-        _program.setUniform(colorsBinding,
-                            lightsBlock + ayt::render::kMaxSceneLights * 4u,
-                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
-        _program.setUniform(paramsBinding,
-                            lightsBlock + ayt::render::kMaxSceneLights * 8u,
-                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
-        _program.setUniform(spotDirBinding,
-                            lightsBlock + ayt::render::kMaxSceneLights * 12u,
-                            ayt::render::kMaxSceneLights * 4u * sizeof(float));
-        static bool s_loggedSplit = false;
-        if (!s_loggedSplit) {
-            s_loggedSplit = true;
+    if (!uploadSceneLighting(_program, packedLights)) {
+        static uint32_t s_fatalFrame = 0;
+        if ((s_fatalFrame++ % 64u) == 0u) {
             std::fprintf(stderr,
-                         "[LightingPass] lights via field uniforms "
-                         "dirs+colors+params+spotDir (HLSL/bgfx, "
-                         "�P5.5 B field-split path)\n");
-        }
-    } else {
-        // ABORT: the program should have all 4 arrays ??Phoskia
-        // �P5.5 B source declares them as top-level uniformblock
-        // fields. If any binding is missing, the cache key was bumped
-        // without updating the Phoskia source (or vice versa). Loud
-        // fail so we don't silently ship a black image.
-            // §P3 M7 (2026-08-24) - was one-shot (`s_loggedMissing`
-            // latch). Replaced with a rate-limited pattern (1 line per
-            // 64 frames), matching the Part 2 M8 shadow-bind diagnostic
-            // style. Keeps the first frame loud but stops the console
-            // from drowning in repeats.
-            static uint32_t s_fatalFrame = 0;
-            static uint32_t s_fatalCount = 0;
-            const uint32_t kFatalRateLimit = 64u;
-            if (s_fatalFrame == 0 || (s_fatalFrame % kFatalRateLimit) == 0) {
-                std::fprintf(stderr,
-                         "[LightingPass] FATAL frame=%u missing one of "
-                         "dirs/colors/params/spotDir uniforms (suppressed=%u, "
-                                                  "check Phoskia source vs cache-key bump\n",
-                 s_fatalFrame, s_fatalCount);
-                s_fatalCount = 0;
-            } else {
-                ++s_fatalCount;
-            }
-            ++s_fatalFrame;
-    }
-
-    // �P5.5 C (2026-07-23) ??per-light shadow atlas array uniforms.
-    // Three vec4[8] + one mat4[8] arrays + one vec4 count uniform.
-    // Source: ctx.shadowPass (atlas sub-rects + per-slot LVP + per-slot
-    // bias) + ctx.perLightShadows (count, via ctx.shadowPass's derived
-    // perLightShadowCount()). The atlas-rect pack is 32 vec4s = 128B;
-    // the LVP pack is 8 * 16 floats = 512B; the bias pack is 8
-    // floats = 32B padded to 8 vec4 = 128B (bgfx expects vec4 pad).
-    //
-    // When ctx.shadowPass is null (e.g. host on Forward path with no
-    // shadow producer), perLightShadowCount uploads 0 and the FS
-    // collapses all perLightShadow{i} = vec4(1.0) ??pre-C byte-
-    // equivalent. The atlas-rect / LVP / bias packs still ship
-    // (all-zero / identity) so the binding contract is satisfied on
-    // every host.
-    // §P3 M3 (2026-08-24) - the four upload slots below
-    // (_uShadowAtlasRects / _uLightViewProjs / _uShadowBiases /
-    // _uPerLightShadowCount) MUST stay in sync with the Phoskia
-    // source (see LightingPass.cpp top-of-file uniform block +
-    // LightingPass.h §P5.5 C field matrix). Array sizes,
-    // packing convention (vec4 pad for biases / col-major mat4
-    // for LVPs), and the count uniform are load-bearing for the
-    // FS unroll — if any one drifts, the FS indexes into
-    // wrong ranges and lights fall off. The slot count (8) is
-    // shared with ShadowPass::kMaxShadowCasters; bump both at
-    // once when the cap changes.
-    {
-        float atlasRects[8 * 4] = {};   // 8 × vec4 = 32 floats
-        float atlasBiases[8 * 4] = {};  // 8 × vec4 = 32 floats (.x used)
-        float atlasLvp[8 * 16] = {};    // 8 × mat4 col-major
-
-        uint32_t perLightCount = 0;
-        if (ctx.shadowPass != nullptr) {
-            perLightCount = ctx.shadowPass->perLightShadowCount();
-            // §P3 M8 (2026-08-24) - guard the three
-            // memcopy loops behind `count > 0` so the all-zero
-            // baseline from the array `{}` initializers stays
-            // cheap when no per-light shadows are active. The
-            // source-pointer reads stay unconditional so the
-            // bind contract is satisfied on every host.
-            if (perLightCount > 0) {
-                const float* srcRects = ctx.shadowPass->atlasSubRects();
-                for (uint32_t i = 0; i < 8u * 4u; ++i) {
-                    atlasRects[i] = srcRects[i];
-                }
-                const float* srcBiases = ctx.shadowPass->atlasShadowBiases();
-                for (uint32_t i = 0; i < 8u; ++i) {
-                    atlasBiases[i * 4 + 0] = srcBiases[i];
-                    atlasBiases[i * 4 + 1] = 0.0f;
-                    atlasBiases[i * 4 + 2] = 0.0f;
-                    atlasBiases[i * 4 + 3] = 0.0f;
-                }
-                const float* srcLvp = ctx.shadowPass->atlasLightViewProjsColumnMajor();
-                for (uint32_t i = 0; i < 8u * 16u; ++i) {
-                    atlasLvp[i] = srcLvp[i];
-                }
-            }
-        }
-        // else: all-zero / identity baseline; perLightCount stays 0
-        // ??the FS collapses every perLightShadow{i} to vec4(1.0).
-
-        if (_uShadowAtlasRects != ayt::shader::InvalidBinding) {
-            _program.setUniform(_uShadowAtlasRects, atlasRects,
-                                sizeof(atlasRects));
-        }
-        if (_uLightViewProjs != ayt::shader::InvalidBinding) {
-            _program.setUniform(_uLightViewProjs, atlasLvp,
-                                sizeof(atlasLvp));
-        }
-        if (_uShadowBiases != ayt::shader::InvalidBinding) {
-            _program.setUniform(_uShadowBiases, atlasBiases,
-                                sizeof(atlasBiases));
-        }
-        if (_uPerLightShadowCount != ayt::shader::InvalidBinding) {
-            const float countPad[4] = {
-                static_cast<float>(perLightCount),
-                0.0f, 0.0f, 0.0f
-            };
-            _program.setUniform(_uPerLightShadowCount, countPad,
-                                sizeof(countPad));
+                         "[LightingPass] FATAL missing scene-light array contract\n");
         }
     }
 
+    // Lighting and TransparentPass consume the same stable caster-first
+    // atlas layout, so light slot i always matches shadow slot i.
+    const PackedShadowAtlas packedShadows =
+        packShadowAtlas(ctx.shadowPass, true);
+    if (!uploadShadowAtlas(_program, packedShadows)) {
+        static bool s_loggedMissingShadowContract = false;
+        if (!s_loggedMissingShadowContract) {
+            s_loggedMissingShadowContract = true;
+            std::fprintf(stderr,
+                         "[LightingPass] FATAL missing shadow atlas array contract\n");
+        }
+    }
     // �P5 B5.5 (2026-07-22) ??consume ctx.shadowPass->shadowMap
     // via the shared `tryBindShadowSampler` helper (mirror the
     // FO / Trans call sites at ForwardOpaquePass.cpp:105-106 +

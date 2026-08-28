@@ -75,6 +75,12 @@ enum class FgTextureScale : uint8_t {
     Quarter = 2,
 };
 
+// Scene-referred color stays HDR until the final post-process pass performs
+// tone mapping and gamma conversion. Lighting, bloom, and haze must share this
+// format so intermediate writes cannot clamp values above 1.0.
+inline constexpr bgfx::TextureFormat::Enum kHdrSceneColorFormat =
+    bgfx::TextureFormat::RGBA16F;
+
 // 资源声明 ── 描述一个 logical 资源(format / 实际尺寸 / 是否 FG own
 // / 是否带 depth attachment)。`transient == false` 表示该资源由外部
 // import 而非 FG 创建(MVP 不会用 ── 留口子给未来 RT pool 共享)。

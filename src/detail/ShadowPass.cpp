@@ -20,6 +20,10 @@ ShadowPass::~ShadowPass() = default;
 
 uint32_t ShadowPass::execute(PassExecContext& ctx)
 {
+    _producedThisFrame = false;
+    _perLightShadowCount = 0;
+    _sampleMapSize = 0;
+
     BGFXAdapter& adapter = ctx.adapter;
     ayt::shader::ShaderResourcePool& pool = ctx.pool;
     const uint8_t viewId = kShadowViewId;
@@ -46,6 +50,18 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
         adapter.capsRendererType(),
         adapter.capsTextureBlit(),
         adapter.capsTextureReadBack());
+
+    // Stable IDs 18..25 avoid collisions with the main pipeline's 0..17
+    // range. View 1 clears the full atlas, then tile views render with their
+    // own viewport before view 2 resolves it. Reorder them ahead of consumers
+    // every frame because bgfx resets view order at frame boundaries.
+    static constexpr bgfx::ViewId kViewOrder[] = {
+        1, 18, 19, 20, 21, 22, 23, 24, 25,
+        2, 0,
+        3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17
+    };
+    static_assert(sizeof(kViewOrder) / sizeof(kViewOrder[0]) == 26);
+    adapter.setViewOrder(0, 26, kViewOrder);
 
     ++_frameCounter;
 
@@ -76,8 +92,14 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     // (Kept as comments so future readers understand why we
     // don't memset the whole array each frame.)
     const auto resetAtlasSlot = [this](uint32_t slot) noexcept {
+        _atlasLightViews[slot] = ayt::math::Float4x4::identity();
+        _atlasLightProjs[slot] = ayt::math::Float4x4::identity();
         _atlasLightViewProjs[slot] = ayt::math::Float4x4::identity();
         for (uint32_t c = 0; c < 16; ++c) {
+            _atlasLightViewsCol[slot][c] =
+                (c % 5 == 0) ? 1.0f : 0.0f;
+            _atlasLightProjsCol[slot][c] =
+                (c % 5 == 0) ? 1.0f : 0.0f;
             _atlasLightViewProjsCol[slot][c] =
                 (c % 5 == 0) ? 1.0f : 0.0f;
         }
@@ -91,15 +113,36 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     if (_requestedSize == 0) {
         _requestedSize = kDefaultShadowMapSize;
     }
-    const bool useAtlas =
-        lightsPtr != nullptr
-        && lightsPtr->count > 0
-        && [lightsPtr]() -> bool {
-            for (uint32_t i = 0; i < lightsPtr->count; ++i) {
-                if (lightsPtr->lights[i].castShadow) return true;
+    const bool hasSceneLights = lightsPtr != nullptr && lightsPtr->count > 0;
+    const ShadowLightOrder lightOrder = hasSceneLights
+        ? computeShadowLightOrder(*lightsPtr)
+        : ShadowLightOrder{};
+    const bool useAtlas = hasSceneLights && lightOrder.shadowCasterCount > 0;
+
+    // A populated modern light list with no supported caster must not fall
+    // back to the legacy key-light shadow or expose last frame's atlas.
+    if (hasSceneLights && !useAtlas) {
+        for (uint32_t i = 0; i < lightOrder.lightCount; ++i) {
+            const uint32_t sourceIndex = lightOrder.indices[i];
+            const ayt::render::Light& light = lightsPtr->lights[sourceIndex];
+            if (light.castShadow
+                && light.type == ayt::render::LightType::Point
+                && ayt::render::ShadowDiagnostics::enabled(
+                    ayt::render::ShadowLogLevel::L1_Caps)) {
+                static uint32_t s_omniOnlySkipLog = 0;
+                if (s_omniOnlySkipLog
+                    < ayt::render::ShadowDiagnostics::kVerboseLogLimit) {
+                    std::fprintf(stderr,
+                                 "[ShadowPass] Point light slot %u "
+                                 "castShadow=true skipped (omni-shadow "
+                                 "out of scope for §P5.5 C)\n",
+                                 sourceIndex);
+                    ++s_omniOnlySkipLog;
+                }
             }
-            return false;
-        }();
+        }
+        return 0;
+    }
 
     const uint16_t effectiveSize = useAtlas ? kDefaultAtlasSize
                                             : _requestedSize;
@@ -107,6 +150,9 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     if (useAtlas && _atlasLayout.slotCount == 0) {
         // Recompute layout if config changed since ctor (e.g. tests).
         _atlasLayout = computeShadowAtlasLayout(_atlasConfig);
+        if (_atlasLayout.slotCount == 0) {
+            return 0;
+        }
     }
 
     _mapResources.ensure(adapter, effectiveSize, ayt::render::kShadowPipelineBuildStamp);
@@ -138,7 +184,6 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     // Point castShadow=true ⇒ log + skip (omni-shadow out of scope).
     uint32_t casterDrawCount = 0;
     if (useAtlas) {
-        const ShadowLightOrder lightOrder = computeShadowLightOrder(*lightsPtr);
         activeCount = std::min(lightOrder.shadowCasterCount,
                                _atlasLayout.slotCount);
 
@@ -186,16 +231,21 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             // before overwriting (the L9 helper replaces the
             // old "reset all slots up front" pattern).
             resetAtlasSlot(slot);
+            for (uint32_t c = 0; c < 4; ++c) {
+                _shadowSampleRects[slot][c] = _atlasLayout.subRects[slot][c];
+            }
             buildDirectionalShadowMatricesForScene(
                 scene,
                 meshes,
-                L.direction,
+                L.type == ayt::render::LightType::Spot
+                    ? L.spotDirection
+                    : L.direction,
+                _atlasLightViews[slot],
+                _atlasLightProjs[slot],
                 _atlasLightViewProjs[slot],
-                _lightProj,        // tmp scratch — same matrix used per slot
-                _lightViewProj,    // tmp scratch
-                _atlasLightViewProjsCol[slot],
-                _lightProjCol,
-                _lightViewProjCol);
+                _atlasLightViewsCol[slot],
+                _atlasLightProjsCol[slot],
+                _atlasLightViewProjsCol[slot]);
             _atlasShadowBiases[slot] = L.shadowBias;
         }
     } else {
@@ -209,6 +259,10 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
         // would correctly skip them, but direct test access
         // (T6) would see stale data.
         resetAtlasSlot(0);
+        _shadowSampleRects[0][0] = 0.0f;
+        _shadowSampleRects[0][1] = 0.0f;
+        _shadowSampleRects[0][2] = 1.0f;
+        _shadowSampleRects[0][3] = 1.0f;
         buildDirectionalShadowMatricesForScene(
             scene,
             meshes,
@@ -219,12 +273,17 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             _lightViewCol,
             _lightProjCol,
             _lightViewProjCol);
-        _atlasLightViewProjs[0] = _lightView;
+        _atlasLightViews[0] = _lightView;
+        _atlasLightProjs[0] = _lightProj;
+        _atlasLightViewProjs[0] = _lightViewProj;
         for (uint32_t c = 0; c < 16; ++c) {
+            _atlasLightViewsCol[0][c] = _lightViewCol[c];
+            _atlasLightProjsCol[0][c] = _lightProjCol[c];
             _atlasLightViewProjsCol[0][c] = _lightViewProjCol[c];
         }
         // Pre-C bias is the global uniform; per-slot bias is 0
         // (FS uses global fallback when 0).
+        activeCount = 1;
     }
     _perLightShadowCount = activeCount;
 
@@ -232,7 +291,6 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
         logShadowPassCpuDiag(ctx.frame.lightDirection, homogeneousDepth, _lightViewProjCol);
     }
 
-    _mapResources.bindShadowView(adapter, viewId, effectiveSize);
     // §P5.5 C — scissor the view to each sub-rect and re-draw
     // casters per atlas slot. Pre-C path has one caster pass into
     // the full atlas-sized sub-rect[0] (no scissor — covers the
@@ -240,29 +298,34 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     // effectiveSize==2048). stats.atlasSlots reports slot count,
     // NOT draw-call count (see §S2-3).
     if (useAtlas) {
-        // Disable scissor for slot 0 (covers the entire first
-        // sub-rect because atlas size = slot0 size when N=8
-        // and atlas=4096; setViewScissor(0,0,slotW,slotH)
-        // matches the sub-rect pixel extent anyway, so we use
-        // it for symmetry / clarity).
+        // Clear the shared atlas once using the full-size legacy view. Each
+        // slot then uses a distinct tile-sized viewport. Scissor alone is not
+        // sufficient: with a full-atlas viewport, NDC would map across 4096²
+        // and clipping to a tile would retain only part of the projection.
+        _mapResources.bindShadowView(adapter, viewId, effectiveSize,
+                                     /*clearAttachments=*/true);
+        adapter.touch(viewId);
         for (uint32_t slot = 0; slot < activeCount; ++slot) {
+            const uint8_t slotViewId = static_cast<uint8_t>(
+                kShadowAtlasFirstViewId + slot);
             const ShadowAtlasPixelRect r = slotPixelRect(slot);
-            adapter.setViewScissor(viewId, r.x, r.y, r.w, r.h);
+            _mapResources.bindShadowView(adapter, slotViewId, effectiveSize,
+                                         /*clearAttachments=*/false);
+            adapter.setViewRect(slotViewId, r.x, r.y, r.w, r.h);
+            adapter.setViewScissor(slotViewId, r.x, r.y, r.w, r.h);
             adapter.setViewTransformColumnMajor(
-                viewId,
-                _atlasLightViewProjsCol[slot],   // view (col-major)
-                _lightProjCol);                  // proj (col-major) — shared
-            adapter.touch(viewId);
+                slotViewId,
+                _atlasLightViewsCol[slot],
+                _atlasLightProjsCol[slot]);
+            adapter.touch(slotViewId);
             const uint64_t casterState = ShadowMapResources::casterDrawState();
             adapter.setStateDepthOnlyWrite();
             casterDrawCount += _shadowCaster.drawCasters(
-                adapter, viewId, casterState, scene, meshes, textures, materials);
+                adapter, slotViewId, casterState,
+                scene, meshes, textures, materials);
         }
-        // Reset scissor for subsequent consumers (next pass).
-        adapter.setViewScissor(viewId, 0, 0,
-                               static_cast<uint16_t>(effectiveSize),
-                               static_cast<uint16_t>(effectiveSize));
     } else {
+        _mapResources.bindShadowView(adapter, viewId, effectiveSize);
         adapter.setViewTransformColumnMajor(viewId, _lightViewCol, _lightProjCol);
         // P6.5 (2026-07-22) — bgfx::touch(viewId) replaced with
         // BGFXAdapter::touch() wrapper. Behavior identical (bgfx::touch
@@ -297,11 +360,19 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             adapter, viewId, casterState, scene, meshes, textures, materials);
     }
 
+    // A touched shadow view clears the map even when there are no drawable
+    // casters; white depth encoding then correctly means fully lit.
+    _producedThisFrame = true;
+    _sampleMapSize = effectiveSize;
+
     _mapResources.resolveForSampling(adapter, kShadowResolveViewId);
 
     const bgfx::TextureHandle shadowColor = _mapResources.colorAttachment(adapter);
+    const float* const probeLvp = useAtlas
+        ? _atlasLightViewProjsCol[0]
+        : _lightViewProjCol;
     const ShadowProjectSample probe =
-        projectWorldThroughLvpColMajor(_lightViewProjCol,
+        projectWorldThroughLvpColMajor(probeLvp,
                                        ayt::math::FVector3(0.0f, 0.0f, 0.0f));
 
     const float maxCoord = static_cast<float>(effectiveSize > 1 ? effectiveSize - 1 : 0);
@@ -331,6 +402,9 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
 
 void ShadowPass::destroyResources(BGFXAdapter& adapter)
 {
+    _producedThisFrame = false;
+    _perLightShadowCount = 0;
+    _sampleMapSize = 0;
     _mapResources.destroy(adapter);
     _shadowCaster.destroy(adapter);
 }

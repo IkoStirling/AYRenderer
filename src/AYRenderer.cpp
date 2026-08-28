@@ -6,6 +6,7 @@
 #include "detail/CameraMath.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
+#include "detail/BloomPipeline.h"
 #include "detail/DepthHazePass.h"  // S4b (2026-07-23) — borrowed-ptr source for PassExecContext::depthHazePass + destroyResources.
 #include "detail/DebugOverlay.h"
 #include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
@@ -373,6 +374,8 @@ struct Renderer::Impl {
     // R5+ (Phase PostProcess) — per-host post-process knobs.
     // Defaults = no effect (bloom=0, exposure=1, ripple=0, tonemap=None).
     float                          postProcessBloomStrength  = 0.0f;
+    float                          postProcessBloomThreshold = 1.0f;
+    float                          postProcessBloomSoftKnee  = 0.5f;
     float                          postProcessExposure       = 1.0f;
     float                          postProcessGamma          = 2.2f;
     // §P5.5 D — IBL ambient cube strength (.x uploaded as vec4).
@@ -511,6 +514,15 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         retainedUi = static_cast<detail::UIPass*>(uiPass)->backend();
     }
 
+    // Transparent's deferred composite FBO borrows Lighting color + GBuffer
+    // depth. Release the FBO shell before either producer rotates handles.
+    if (detail::RenderPass* transparentPass = pipeline.findPass("Transparent")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::TransparentPass*>(transparentPass)
+                ->destroyResources(adapter);
+        }
+    }
+
     if (detail::RenderPass* shadowPass = pipeline.findPass("Shadow")) {
         if (adapter.isInitialized()) {
             static_cast<detail::ShadowPass*>(shadowPass)
@@ -532,7 +544,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
 
     // §P5 B5 (2026-07-22) — LightingPass destroyResources mirror
     // (mirror GBuffer destroy block above). LightingPass owns a
-    // 1× RGBA8 LightingOutput FBO + fullscreen triangle VB/IB +
+    // 1× RGBA16F LightingOutput FBO + fullscreen triangle VB/IB +
     // Phoskia Lighting program; all three must be released BEFORE
     // pipeline.clear() for the same handle-rotation reason as
     // Shadow/GBuffer. cutsheet `pass-lessons-from-deferred.md:151,
@@ -557,7 +569,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
 
     // S1a (2026-07-23, short-term-plan §S1) — BloomExtractPass
     // destroyResources mirror (mirror SkyboxPass destroy block
-    // above). BloomExtractPass owns a half-resolution RGBA8 FBO
+    // above). BloomExtractPass owns a half-resolution RGBA16F FBO
     // (no depth) + fullscreen-triangle VB/IB + Phoskia extract
     // program; all three must be released BEFORE pipeline.clear()
     // for the same handle-rotation reason.
@@ -570,7 +582,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // S1b (2026-07-23, short-term-plan §S1 sub-cut 2) —
     // BloomBlurPass destroyResources mirror (mirror
     // BloomExtractPass destroy block above). BloomBlurPass owns
-    // two half-resolution RGBA8 ping-pong FBOs (no depth) +
+    // two half-resolution RGBA16F ping-pong FBOs (no depth) +
     // fullscreen-triangle VB/IB + Phoskia blur program; all four
     // must be released BEFORE pipeline.clear() for the same
     // handle-rotation reason.
@@ -583,7 +595,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // S4b (2026-07-23, short-term-plan §S4 sub-cut 2) —
     // DepthHazePass destroyResources mirror (mirror BloomExtractPass /
     // BloomBlurPass destroy blocks above). DepthHazePass owns a
-    // half-resolution RGBA8 FBO (no depth, lazy-ensured only when
+    // half-resolution RGBA16F FBO (no depth, lazy-ensured only when
     // hazeEnabled=true + hazeStrength>0) + fullscreen-triangle
     // VB/IB + Phoskia haze program; all three must be released
     // BEFORE pipeline.clear() for the same handle-rotation reason.
@@ -747,6 +759,14 @@ void Renderer::shutdown()
         _impl->aliveToken->store(false, std::memory_order_release);
     }
 
+    if (detail::RenderPass* transparentPass =
+            _impl->pipeline.findPass("Transparent")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::TransparentPass*>(transparentPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+
     // P2 (PR-D) — release the scene FBO before tearing down the
     // adapter. Mirrors the PostProcessPass FBO destroy pattern:
     // bgfx::destroy on a stale handle after bgfx::shutdown() is the
@@ -853,7 +873,8 @@ void Renderer::render(const RenderScene& scene)
     // R5+ — host-configured post-process knobs. Rendered every frame
     // even when the value hasn't changed because the FrameContext is
     // stack-local; cost is negligible (3 floats + 1 byte enum).
-    frame.bloomStrength    = _impl->postProcessBloomStrength;
+    frame.bloomStrength    = detail::sanitizeBloomStrength(
+        _impl->postProcessBloomStrength);
     frame.exposure         = _impl->postProcessExposure;
     frame.gamma            = _impl->postProcessGamma;
     frame.tonemapMode      = _impl->postProcessTonemapMode;
@@ -922,7 +943,7 @@ void Renderer::render(const RenderScene& scene)
     }
 
     // §P5 B5 (2026-07-22) — broadcast viewport size to LightingPass
-    // before dispatch so its execute() can ensure() the 1× RGBA8
+    // before dispatch so its execute() can ensure() the 1× RGBA16F
     // LightingOutput FBO at the correct W×H. Mirror the GBuffer
     // setGbufferSize block above (same viewport rect). Skipped
     // when Lighting isn't in the configured pipeline (Forward path)
@@ -1006,37 +1027,19 @@ void Renderer::render(const RenderScene& scene)
         skyboxPassPtr = static_cast<const detail::SkyboxPass*>(skyboxSlot);
     }
 
-    // §S1b BloomBlur (2026-07-23) — borrowed pointer to the
-    // BloomExtractPass in the pipeline. nullptr when the host
-    // built a custom desc that omitted the BloomExtract slot
-    // (cutsheet §S1 "omit slot = opt out"). BloomBlurPass reads
-    // the producer's half-res FBO through this pointer; absent
-    // ⇒ BloomBlurPass early-returns 0 (visually identical to
-    // bloomStrength=0 default). Mirrors the skyboxPassPtr /
-    // lightingPassPtr / gbufferPassPtr / shadowPassPtr shape
-    // (lifetime contract: pointer must remain valid for the
-    // duration of pipeline::executeAll(ctx)).
-    const detail::BloomExtractPass* bloomExtractPassPtr = nullptr;
+    // Borrow both bloom passes and clear their production latches before graph
+    // compilation. Downstream consumers require a successful submit from this
+    // frame, never merely a still-valid attachment handle.
+    detail::BloomExtractPass* bloomExtractPassPtr = nullptr;
     if (detail::RenderPass* bloomExtractSlot = _impl->pipeline.findPass("BloomExtract")) {
-        bloomExtractPassPtr = static_cast<const detail::BloomExtractPass*>(bloomExtractSlot);
+        bloomExtractPassPtr = static_cast<detail::BloomExtractPass*>(bloomExtractSlot);
+        bloomExtractPassPtr->resetFrameState();
     }
 
-    // §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — borrowed
-    // pointer to the BloomBlurPass in the pipeline. nullptr when
-    // the host built a custom desc that omitted the BloomBlur slot.
-    // PostProcessPass reads `ctx.bloomBlurPass->pongFbo()` (RT0 of
-    // the vertically-blurred result) and binds it as the second
-    // sampler on the fullscreen-triangle composite draw, replacing
-    // the pre-S1 fake `raw + raw*bloomStrength` shader hack with
-    // the real `raw + sample(bloomTexture, uv) * bloomStrength`
-    // composite. nullptr ⇒ PostProcessPass falls back to binding
-    // sceneColor on slot 1 (no GLSL sampler-not-set warning;
-    // FS branchless composite collapses to `raw * (1 + 0) = raw`
-    // — byte-equivalent to a zero-bloom pipeline). Mirrors
-    // bloomExtractPassPtr above.
-    const detail::BloomBlurPass* bloomBlurPassPtr = nullptr;
+    detail::BloomBlurPass* bloomBlurPassPtr = nullptr;
     if (detail::RenderPass* bloomBlurSlot = _impl->pipeline.findPass("BloomBlur")) {
-        bloomBlurPassPtr = static_cast<const detail::BloomBlurPass*>(bloomBlurSlot);
+        bloomBlurPassPtr = static_cast<detail::BloomBlurPass*>(bloomBlurSlot);
+        bloomBlurPassPtr->resetFrameState();
     }
 
     // §S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — borrowed
@@ -1073,17 +1076,9 @@ void Renderer::render(const RenderScene& scene)
             _impl->sceneLights);
     }
 
-    // §F2 (2026-07-24, mid-term FG MVP) — FrameGraph is the
-    // post-process chain resource pool. build-graph site lives
-    // HERE (not in Pass::execute) so the compile pass sees the
-    // full pass list before any Resolve() fires. F2 wires
-    // BloomExtract only; F3-F5 migrate BloomBlur / DepthHaze /
-    // PostProcess incrementally.
-    //
-    // bloomEnabled is the unified gate for the whole bloom
-    // chain (extract + blur) — host's bloomStrength > 0 enables
-    // it; otherwise the chain is fully culled at compile time
-    // and no transient RTs are created (cutsheet §7 row 3).
+    // Build the post-process graph before any pass resolves a target. Bloom is
+    // one capability: finite positive strength plus both mounted/enabled
+    // stages. Otherwise all three transient targets are omitted.
     detail::FrameGraph& fg = _impl->frameGraph;
     const uint16_t fgW = _impl->viewportW;
     const uint16_t fgH = _impl->viewportH;
@@ -1099,14 +1094,15 @@ void Renderer::render(const RenderScene& scene)
     }
     fg.importExternal(detail::FgResourceId::SceneColor, sceneColorHandle);
 
-    const bool bloomEnabled = (frame.bloomStrength > 0.0f);
-    if (bloomEnabled) {
-        // F2 ships with the physical RT path still gated on FG
-        // resolve() returning invalid (FG physical creation
-        // deferred to F6). The compile-time declaration still
-        // happens so enabled-vs-disabled visibility is correct.
+    const detail::BloomStageState bloomStages = detail::selectBloomStages(
+        frame.bloomStrength,
+        bloomExtractPassPtr != nullptr,
+        bloomExtractPassPtr != nullptr && bloomExtractPassPtr->isEnabled(),
+        bloomBlurPassPtr != nullptr,
+        bloomBlurPassPtr != nullptr && bloomBlurPassPtr->isEnabled());
+    if (bloomStages.extract) {
         fg.addResource(detail::FgResourceId::BloomBright,
-                       {bgfx::TextureFormat::RGBA8,
+                       {detail::kHdrSceneColorFormat,
                         detail::FgTextureScale::Half,
                         /*transient=*/true,
                         /*withDepth=*/false});
@@ -1115,22 +1111,17 @@ void Renderer::render(const RenderScene& scene)
                     {detail::FgResourceId::BloomBright},
                     /*enabled=*/true});
 
-        // §F3 (2026-07-24) — BloomBlur ping-pong targets. Two
-        // distinct logical resources (BloomBlurA / BloomBlurB);
-        // aliasing is forbidden by design — cutsheet §4 "BloomBlur
-        // A/B 显式禁止 alias". The FG compile step keeps them in
-        // separate physical RTs even when their FgTextureDesc
-        // matches (the resolvePingPong() path through FgResourceId
-        // does the bookkeeping). Both declared inside the
-        // `bloomEnabled` gate so bloomStrength=0 ⇒ no transient
-        // RTs allocated (K2 #1 invariant).
+        // A and B are distinct logical targets whose read/write intervals
+        // overlap, so FrameGraph must not alias them.
+    }
+    if (bloomStages.blur) {
         fg.addResource(detail::FgResourceId::BloomBlurA,
-                       {bgfx::TextureFormat::RGBA8,
+                       {detail::kHdrSceneColorFormat,
                         detail::FgTextureScale::Half,
                         /*transient=*/true,
                         /*withDepth=*/false});
         fg.addResource(detail::FgResourceId::BloomBlurB,
-                       {bgfx::TextureFormat::RGBA8,
+                       {detail::kHdrSceneColorFormat,
                         detail::FgTextureScale::Half,
                         /*transient=*/true,
                         /*withDepth=*/false});
@@ -1172,7 +1163,7 @@ void Renderer::render(const RenderScene& scene)
         && (_impl->viewportH > 0);
     if (hazePassEnabled) {
         fg.addResource(detail::FgResourceId::HazeHalf,
-                       {bgfx::TextureFormat::RGBA8,
+                       {detail::kHdrSceneColorFormat,
                         detail::FgTextureScale::Half,
                         /*transient=*/true,
                         /*withDepth=*/false});
@@ -1181,9 +1172,8 @@ void Renderer::render(const RenderScene& scene)
                     {detail::FgResourceId::HazeHalf},
                     /*enabled=*/true});
     }
-    // Compile locks the live set; F6 will add alias decisions on
-    // top of this same compile step. F2 only needs the live set
-    // so resolve() can return invalid for not-live resources.
+    // Compile locks the live set and physical target plan; resolve() returns
+    // invalid for resources culled by the current frame's gates.
     //
     // §F5 (2026-07-24, mid-term FG MVP sub-cut 5) — semantic
     // resolution for the 3 final-PP source slots. Each semantic
@@ -1198,16 +1188,15 @@ void Renderer::render(const RenderScene& scene)
     //                       ⇒ LightingOutput; Forward ⇒ sceneFbo,
     //                       both routed through the same external
     //                       SceneColor borrow imported above).
-    //   BloomSource      → BloomBlurB (when bloomEnabled); else
-    //                       invalid ⇒ fallback to sceneColor +
-    //                       branchless strength gate (FS sees 0
-    //                       bloom contribution).
+    //   BloomSource      → BloomBlurB when the complete chain is declared.
+    //                       PostProcess additionally requires Blur's current-
+    //                       frame production latch; otherwise strength is zero.
     //   HazeSource       → HazeHalf (when hazePassEnabled); else
     //                       invalid ⇒ fallback to sceneColor +
     //                       branchless strength gate.
     fg.setResolvedSemantic(detail::FgSemantic::FinalColorSource,
                            detail::FgResourceId::SceneColor);
-    if (bloomEnabled) {
+    if (bloomStages.blur) {
         fg.setResolvedSemantic(detail::FgSemantic::BloomSource,
                                detail::FgResourceId::BloomBlurB);
     }
@@ -1327,20 +1316,8 @@ void Renderer::render(const RenderScene& scene)
         // perLightShadowCount=0 upload ⇒ byte-equivalent pre-C
         // key-only shadow multiply on lights[0].
         _impl->sceneLights,
-        // §S1b BloomBlur (2026-07-23) — borrowed pointer to the
-        // BloomExtractPass in the pipeline. BloomBlurPass reads
-        // the producer's half-res FBO through this ptr; nullptr
-        // ⇒ BloomBlurPass early-returns 0 (no source to blur =
-        // visually identical to bloomStrength=0 default).
+        // Bloom producer latches; physical textures resolve through FG.
         bloomExtractPassPtr,
-        // §S1c (2026-07-23) — borrowed pointer to the BloomBlurPass
-        // in the pipeline. PostProcessPass reads the producer's
-        // pongFbo() through this ptr; nullptr ⇒ PostProcessPass
-        // binds sceneColor on slot 1 (FS branchless composite
-        // collapses to `raw * (1 + 0) = raw` = zero bloom, no
-        // GLSL sampler-not-set warning). Mirrors bloomExtractPassPtr
-        // above (lifetime contract: pointer must remain valid for
-        // the duration of pipeline::executeAll(ctx)).
         bloomBlurPassPtr,
         // §S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — borrowed
         // pointer to the DepthHazePass in the pipeline. PostProcessPass
@@ -1364,6 +1341,8 @@ void Renderer::render(const RenderScene& scene)
         // a logical FgResourceId (e.g. BloomBright) to a physical
         // bgfx::FrameBufferHandle.
         &_impl->frameGraph,
+        detail::sanitizeBloomThreshold(_impl->postProcessBloomThreshold),
+        detail::sanitizeBloomSoftKnee(_impl->postProcessBloomSoftKnee),
     };
 
     static uint32_t s_compositeLog = 0;
@@ -1388,9 +1367,9 @@ void Renderer::render(const RenderScene& scene)
     // Dispatched via RenderPipeline::executeAll in registration order
     // [ForwardOpaque, Transparent, PostProcess, UI]. ForwardOpaquePass
     // writes the depth buffer first; TransparentPass reuses that depth
-    // for STATE_DEPTH_TEST_LESS but does not WRITE_Z so transparent
-    // fragments composite over the opaque result without occluding
-    // each other (back-to-front sort is via DrawItem::sortKey descending).
+    // with DEPTH_TEST_LEQUAL but does not WRITE_Z. Transparent submission is
+    // stable back-to-front: explicit DrawItem::sortKey first, camera distance
+    // second, with Sequential view mode preserving that CPU order.
     // PostProcessPass samples its own FBO today (scene-RT closure is
     // docs/execution-plan.md P2). UIPass ignores the viewId arg and
     // delegates to its injected UIRenderBackend (see UIPass.h for the
@@ -1440,6 +1419,11 @@ void Renderer::resize(uint32_t width, uint32_t height)
     }
     _impl->sceneFboW = 0;
     _impl->sceneFboH = 0;
+    if (detail::RenderPass* transparentPass =
+            _impl->pipeline.findPass("Transparent")) {
+        static_cast<detail::TransparentPass*>(transparentPass)
+            ->destroyResources(_impl->adapter);
+    }
     // Full destroyResources also drops Phoskia programs — fine on
     // rare window resize; MSAA change already does the same.
     if (detail::RenderPass* gbufferPass = _impl->pipeline.findPass("GBuffer")) {
@@ -1501,8 +1485,10 @@ bgfx::FrameBufferHandle Renderer::Impl::ensureSceneFbo()
         adapter.destroy(sceneFbo);
         sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
-    sceneFbo = adapter.createColorDepthFrameBuffer(static_cast<uint16_t>(w),
-                                                   static_cast<uint16_t>(h));
+    sceneFbo = adapter.createColorDepthFrameBuffer(
+        static_cast<uint16_t>(w), static_cast<uint16_t>(h),
+        detail::kHdrSceneColorFormat,
+        /*pointSampled=*/false);
     if (detail::BGFXAdapter::isValid(sceneFbo)) {
         sceneFboW = static_cast<uint16_t>(w);
         sceneFboH = static_cast<uint16_t>(h);
@@ -1951,6 +1937,13 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
         }
         _impl->sceneFboW = 0;
         _impl->sceneFboH = 0;
+        if (detail::RenderPass* transparentPass =
+                _impl->pipeline.findPass("Transparent")) {
+            if (_impl->adapter.isInitialized()) {
+                static_cast<detail::TransparentPass*>(transparentPass)
+                    ->destroyResources(_impl->adapter);
+            }
+        }
         if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
             if (_impl->adapter.isInitialized()) {
                 static_cast<detail::ShadowPass*>(shadowPass)
@@ -2085,11 +2078,26 @@ void Renderer::setPostProcessBloomStrength(float strength)
     if (!_impl) {
         return;
     }
-    // R5+ — clamps negative values; values >1 are accepted (the shader
-    // is responsible for clamping the final mix). NaN/Inf pass through
-    // and the shader sees them — matches the existing setMaterialFloat
-    // leniency (no validation, host responsibility).
-    _impl->postProcessBloomStrength = strength;
+    // Values above one remain valid artistic intensities. Invalid and
+    // negative values collapse to zero so the graph and final composite use
+    // one finite enable contract.
+    _impl->postProcessBloomStrength = detail::sanitizeBloomStrength(strength);
+}
+
+void Renderer::setPostProcessBloomThreshold(float threshold)
+{
+    if (_impl) {
+        _impl->postProcessBloomThreshold =
+            detail::sanitizeBloomThreshold(threshold);
+    }
+}
+
+void Renderer::setPostProcessBloomSoftKnee(float softKnee)
+{
+    if (_impl) {
+        _impl->postProcessBloomSoftKnee =
+            detail::sanitizeBloomSoftKnee(softKnee);
+    }
 }
 
 void Renderer::setPostProcessExposure(float exposure)

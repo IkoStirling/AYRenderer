@@ -257,6 +257,12 @@ private:
 // PostProcessPass.cpp as the canonical definition.
 extern const char* const kPostProcessCacheKeyCStr;
 
+// Exact runtime shader sources used by PostProcessPass. Exposed from the
+// private detail header so regression tests compile the production strings
+// instead of stale test-local mirrors.
+const char* postProcessPhoskiaSourceForTests() noexcept;
+const char* postProcessFallbackPhoskiaSourceForTests() noexcept;
+
 // §P5 L3 (2026-08-24) — color-format constant extern. Pre-L3 the
 // color format was an inline `bgfx::TextureFormat::RGBA8` literal
 // inside ensureFbo(); a future sRGB post-process pass flipping the

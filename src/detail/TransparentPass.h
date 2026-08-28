@@ -2,6 +2,7 @@
 
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
+#include "detail/SceneLighting.h"
 #include "AYRenderer/RenderTypes.h"  // ayt::render::BlendMode
 
 #include <cstdint>
@@ -11,31 +12,43 @@
 namespace ayt::render::detail
 {
 
-// U1 — third concrete RenderPass subclass. Filters scene.items()
-// for transparent material blend modes and submits them with
-// BGFX_STATE_BLEND_ALPHA so the alpha-blended geometry composites
-// over the opaque result.
-//
-// View id: same viewId as ForwardOpaquePass. We share the 3D view
-// between opaque and transparent; bgfx draws submit in the order we
-// call them, so the ForwardOpaque dispatch must run first (to
-// populate the depth buffer), then the Transparent dispatch reuses
-// that depth for STATE_DEPTH_TEST_LESS but never writes its own Z.
-//
-// Sort: NOT implemented in U1 (design.md:460 says "blend state +
-// 排序" — back-to-front sort is deferred to U1+ when a sort-key
-// field lands on DrawItem). Today insertion order is honored; users
-// who need correct alpha ordering without scene-level sort should
-// add `scene.add(...)` calls back-to-front manually.
-//
-// Color override support mirrors ForwardOpaquePass::flushMaterial
-// lines 69-79 (without the skinning branch — U1 transparent draws
-// are non-skinned; skinned transparent will revisit).
+struct TransparentSortEntry {
+    const DrawItem* item = nullptr;
+    float distanceSquared = 0.0f;
+};
+
+float transparentDistanceSquared(const DrawItem& item,
+                                 const ayt::math::FVector3& cameraPosition) noexcept;
+bool transparentSortBefore(const TransparentSortEntry& a,
+                           const TransparentSortEntry& b) noexcept;
+
+enum class TransparentRoute : uint8_t {
+    Skip,
+    Forward,
+    Deferred,
+};
+
+TransparentRoute selectTransparentRoute(bool hasGBufferPass,
+                                        bool hasLightingPass,
+                                        bool gbufferProduced,
+                                        bool lightingProduced,
+                                        bool lightingFboValid) noexcept;
+
+uint64_t transparentDrawState(BlendMode blendMode,
+                              bool premultipliedAlpha,
+                              bool doubleSided,
+                              bool reverseWinding) noexcept;
+
+// Forward path composites into sceneFbo after ForwardOpaque. Deferred path
+// uses a dedicated view and a cached FBO that borrows LightingOutput color and
+// GBuffer depth. The pass never writes depth. SceneLights and shadow-atlas
+// arrays share the same CPU packing contract as LightingPass.
 class TransparentPass : public RenderPass {
 public:
     std::string_view name() const override { return "Transparent"; }
 
     uint32_t execute(PassExecContext& ctx) override;
+    void destroyResources(BGFXAdapter& adapter) noexcept;
 
 private:
     struct SubmitResult {
@@ -48,7 +61,21 @@ private:
                                    PassExecContext& ctx,
                                    const FrameContext& frame,
                                    const DrawItem& item,
-                                   uint8_t viewId);
+                                   uint8_t viewId,
+                                   const PackedSceneLighting& lights,
+                                   const PackedShadowAtlas& shadows);
+
+    bgfx::FrameBufferHandle ensureDeferredCompositeFbo(
+        BGFXAdapter& adapter,
+        bgfx::TextureHandle color,
+        bgfx::TextureHandle depth);
+
+    bgfx::FrameBufferHandle _deferredCompositeFbo =
+        bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle _deferredColor =
+        bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle _deferredDepth =
+        bgfx::TextureHandle{BGFX_INVALID_HANDLE};
 };
 
 } // namespace ayt::render::detail

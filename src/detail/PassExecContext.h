@@ -61,12 +61,9 @@ class ShadowPass;
 // FrameContext.
 class GBufferPass;
 
-// §P5 B3 (2026-07-22) — LightingPass is the B5 producer of the
-// shaded scene color (1 RGBA8 FBO, fullscreen-triangle FS that
-// samples the GBuffer MRT + shadow). Forward decl mirrors the
-// GBufferPass pattern so PassExecContext can carry the borrowed
-// pointer without dragging the full LightingPass definition into
-// every TU that already includes PassExecContext.h.
+// LightingPass produces scene-linear RGBA16F color from the GBuffer,
+// scene lights, shadows, sky, and IBL. Consumers borrow it through this
+// context without pulling the complete pass definition into every TU.
 class LightingPass;
 
 // §Skybox0 (2026-07-23) — SkyboxPass writes the equirect-panorama
@@ -76,23 +73,13 @@ class LightingPass;
 // includes PassExecContext.h.
 class SkyboxPass;
 
-// §S1a BloomExtract (2026-07-23) — BloomExtractPass writes the
-// half-resolution bright-extract FBO. Forward decl mirrors the
-// SkyboxPass pattern so PassExecContext can carry the borrowed
-// pointer without dragging the full BloomExtractPass definition
-// into every TU that already includes PassExecContext.h. S1a
-// itself does NOT use this pointer (it reads upstream scene
-// color via PostProcessPass::selectSourceFbo per cutsheet §P5
-// B6 lock); S1b BloomBlurPass is the first consumer.
+// BloomExtract writes BloomBright and publishes a current-frame production
+// latch. BloomBlur consumes both the FrameGraph resource and that latch.
 class BloomExtractPass;
 
-// §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — BloomBlurPass
-// produces the half-resolution vertically-blurred FBO that the
-// final PostProcess composite samples as the actual bloom
-// contribution. Forward decl mirrors BloomExtractPass above;
-// PostProcessPass::execute reads `ctx.bloomBlurPass->pongFbo()`
-// (RT0 of the blur result) via the borrowed pointer. S1c is the
-// first consumer.
+// BloomBlur writes BloomBlurB and publishes its own production latch.
+// PostProcess resolves the texture through FgSemantic::BloomSource only when
+// the latch says the complete chain submitted this frame.
 class BloomBlurPass;
 
 // §S4a (2026-07-23, short-term-plan §S4 sub-cut 1) — DepthHazePass
@@ -343,52 +330,11 @@ struct PassExecContext {
     // via C++14 trailing-default behavior.
     const ayt::render::SceneLights* perLightShadows = nullptr;
 
-    // §S1b BloomBlur (2026-07-23, short-term-plan §S1 sub-cut 2) —
-    // borrowed, non-owning pointer to the BloomExtractPass that
-    // produced the half-resolution bright FBO this frame. BloomBlurPass
-    // reads `ctx.bloomExtractPass->halfResFbo()` (RT0 of the bright
-    // extract) as its blur source and ping-pongs into two of its own
-    // halfW × halfH FBOs (horizontal pass → vertical pass). Mirrors
-    // the skyboxPass / lightingPass / gbufferPass / shadowPass
-    // borrowed-pointer pattern; lifetime contract: pointer must
-    // remain valid for the duration of pipeline::executeAll(ctx).
-    //
-    // Default-init = nullptr ⇒ BloomBlurPass early-returns 0 (no
-    // source FBO to read; visually identical to bloomStrength=0
-    // default — the BloomExtract slot in makeDefault() is optional
-    // from the host's perspective; custom desc that omits both
-    // BloomExtract and BloomBlur yields a zero-bloom pipeline).
-    // All existing 20-field brace-init test sites
-    // (Test_BloomExtract_S1a, Test_E4_DefaultShadow, Test_E5_DefaultShadow,
-    // Test_Skybox0, ...) keep compiling without edits via C++14
-    // trailing-default behavior.
+    // Borrowed producer pointers. They are valid for executeAll(ctx) and are
+    // used only for current-frame production latches; texture handles resolve
+    // through FrameGraph. nullptr always fails closed.
     const BloomExtractPass* bloomExtractPass = nullptr;
 
-    // §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — borrowed,
-    // non-owning pointer to the BloomBlurPass that produced the
-    // half-resolution vertically-blurred FBO this frame. PostProcessPass
-    // reads `ctx.bloomBlurPass->pongFbo()` (RT0 of the blur result)
-    // and binds it as an additional sampler on the fullscreen-triangle
-    // composite draw, replacing the pre-S1 fake
-    // `raw + raw*bloomStrength` shader hack with the real
-    // `raw + sample(bloomTexture, uv) * bloomStrength` composite.
-    //
-    // Mirrors the bloomExtractPass / skyboxPass / lightingPass /
-    // gbufferPass / shadowPass borrowed-pointer pattern; same
-    // lifetime contract: pointer must remain valid for the duration
-    // of pipeline::executeAll(ctx).
-    //
-    // Default-init = nullptr ⇒ PostProcessPass falls back to the
-    // pre-S1 fake composite (`raw + raw*bloomStrength`) which is
-    // visually a no-op when bloomStrength=0 (host default). Custom
-    // desc that omits both BloomExtract and BloomBlur yields a
-    // pipeline where ctx.bloomBlurPass is null AND the composite
-    // contribution is `raw * (1 + 0) = raw` (zero bloom) — same
-    // visual result as a pipeline without any bloom passes mounted.
-    // All existing 20-/21-field brace-init test sites
-    // (Test_BloomExtract_S1a, Test_BloomBlur_S1b, Test_PostProcess_R51,
-    // Test_E4_DefaultShadow, Test_E5_DefaultShadow, Test_Skybox0, ...)
-    // keep compiling without edits via C++14 trailing-default behavior.
     const BloomBlurPass* bloomBlurPass = nullptr;
 
     // §S4a (2026-07-23, short-term-plan §S4 sub-cut 1) — borrowed,
@@ -434,6 +380,11 @@ struct PassExecContext {
     // in the consuming Pass paths (the same byte-equivalent
     // behavior as the F2 "host bloomStrength=0" path).
     FrameGraph*          frameGraph     = nullptr;
+
+    // Scene-linear bloom extraction controls. Appended so legacy aggregate
+    // initializers retain their previous field mapping.
+    float                bloomThreshold = 1.0f;
+    float                bloomSoftKnee  = 0.5f;
 
 };
 

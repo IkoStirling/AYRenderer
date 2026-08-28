@@ -34,7 +34,10 @@ public:
 
     bgfx::TextureHandle colorAttachment(BGFXAdapter& adapter) const;
 
-    void bindShadowView(BGFXAdapter& adapter, uint8_t viewId, uint16_t mapSize);
+    void bindShadowView(BGFXAdapter& adapter,
+                        uint8_t viewId,
+                        uint16_t mapSize,
+                        bool clearAttachments = true);
 
     // Optional: copy attachment 0 → resolve on a dedicated resolveViewId.
     // Must NOT reuse the caster view (last setViewFrameBuffer wins per view).

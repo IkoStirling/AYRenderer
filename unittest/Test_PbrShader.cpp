@@ -77,6 +77,13 @@ TEST_CASE(runtime_pbr_declares_imported_material_contract)
     CHECK(source.find("texture2d aoTexture") != std::string::npos);
     CHECK(source.find("texture2d emissiveTexture") != std::string::npos);
     CHECK(source.find("texture2d shadowMap") != std::string::npos);
+    CHECK(source.find("texturecube envCube") != std::string::npos);
+    CHECK(source.find("uniformblock Lights") != std::string::npos);
+    CHECK(source.find("vec4 dirs[8]") != std::string::npos);
+    CHECK(source.find("uniform vec4 activeLightCount") != std::string::npos);
+    CHECK(source.find("uniform vec4 shadowAtlasRects[8]") != std::string::npos);
+    CHECK(source.find("uniform mat4 lightViewProjs[8]") != std::string::npos);
+    CHECK(source.find("uniform vec4 perLightShadowCount") != std::string::npos);
     CHECK(source.find("property metallic") != std::string::npos);
     CHECK(source.find("property roughness") != std::string::npos);
     CHECK(source.find("property emissive") != std::string::npos);
@@ -91,7 +98,11 @@ TEST_CASE(runtime_pbr_declares_imported_material_contract)
     CHECK(source.find("in tan : tangent") != std::string::npos);
     CHECK(source.find("normalYSign") != std::string::npos);
     CHECK(source.find("premultipliedAlpha") != std::string::npos);
-    CHECK(source.find("clipPos.z / max(clipPos.w") != std::string::npos);
+    CHECK(source.find("let direct7 = (diffuse7 + specular7)")
+          != std::string::npos);
+    CHECK(source.find("let shadow7 = mix(") != std::string::npos);
+    CHECK(source.find("let cubeAmbient = sample(envCube, N)")
+          != std::string::npos);
 }
 
 TEST_CASE(runtime_pbr_frontend_and_shaderc_compile)

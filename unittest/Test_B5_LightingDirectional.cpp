@@ -79,6 +79,7 @@ using ayt::render::detail::GBufferPass;
 using ayt::render::detail::GpuMaterial;
 using ayt::render::detail::GpuMesh;
 using ayt::render::detail::GpuTexture;
+using ayt::render::detail::kLightingBuildStampCStr;
 using ayt::render::detail::kLightingCacheKeyCStr;
 using ayt::render::detail::LightingPass;
 using ayt::render::detail::PassExecContext;
@@ -102,9 +103,9 @@ namespace {
 // key via `kLightingCacheKeyCStr` in LightingPass.h, so this test
 // compares the mirror against the live key �?drift now fails.
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v29_material_model_decode";
+    "lighting_v30_audit_shadow_brdf_hdr";
 inline constexpr const char* kExpectedLightingBuildStamp =
-    "b5-2026-07-22";
+    "lighting-hdr-v1-2026-08-28";
 
 inline const char* kExpectedSourceSubstrings[] = {
     "texture2d gbufferAlbedo",    // sampler declaration (Phoskia keyword)
@@ -310,7 +311,7 @@ TEST_CASE(b5_lighting_cache_key_and_build_stamp_pinned) {
     CHECK(std::string(kExpectedLightingCacheKey)
           == std::string(kLightingCacheKeyCStr));
     CHECK(std::string(kExpectedLightingBuildStamp)
-          == std::string("b5-2026-07-22"));
+          == std::string(kLightingBuildStampCStr));
 
     // The cache-key bump protection is enforced by the static
     // `s_acquiredCacheKey` pointer-equal guard inside

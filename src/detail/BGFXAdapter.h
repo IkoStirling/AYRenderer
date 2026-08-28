@@ -51,6 +51,12 @@ public:
     // go through adapter only). Routes the call so the Noop short-circuit
     // and adapter lifecycle gates apply.
     void setViewMode(uint8_t viewId, bgfx::ViewMode::Enum mode);
+    // Reorder logical bgfx views without changing their stable IDs. Shadow
+    // atlas slots use a high, collision-free ID range but must execute before
+    // the resolve and lighting consumers.
+    void setViewOrder(bgfx::ViewId firstViewId,
+                      uint16_t count,
+                      const bgfx::ViewId* order);
     // §P5.5 C (2026-07-23) — per-light shadow atlas sub-rect clip.
     // bgfx::setViewScissor wraps the fragment-cull rect (orthogonal
     // to setViewRect which is the viewport). ShadowPass calls this
@@ -136,7 +142,11 @@ public:
     // severe self-shadow acne → nearly-black lit meshes). Attachment 0
     // is the sampleable color RT.
     // Also used for the Editor/scene color+depth RT (PostProcess sample).
-    bgfx::FrameBufferHandle createColorDepthFrameBuffer(uint16_t width, uint16_t height);
+    bgfx::FrameBufferHandle createColorDepthFrameBuffer(
+        uint16_t width, uint16_t height,
+        bgfx::TextureFormat::Enum preferredColorFormat =
+            bgfx::TextureFormat::RGBA8,
+        bool pointSampled = true);
 
     // Deferred material GBuffer helper. 5 attachments:
     // RT0 albedo+metallic RGBA8 / RT1 normal+roughness RGBA8 /

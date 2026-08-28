@@ -9,16 +9,15 @@
 // uses shadowAtlasRects[i] to compute UV within the atlas when
 // sampling shadowMap for light slot i.
 //
-// Default layout (kDefaultGridCols=4 x kDefaultGridRows=2 = 8 slots,
-// each 2048x2048 if atlasSize=4096). The grid is auto-derived from
-// requestedSlots: rows = ceil(sqrt(N)), cols = ceil(N / rows).
+// Default layout is 4 columns x 2 rows = 8 slots, each 1024x2048 when
+// atlasSize=4096. The grid is auto-derived from requestedSlots:
+// rows = floor(sqrt(N)), cols = ceil(N / rows).
 //
 // Scope:
 //   - Directional + Spot each occupy one sub-rect (single-VP caster).
 //   - Point omni-shadow is OUT OF SCOPE for §P5.5 C.
-//   - ShadowPass uses BGFXAdapter scissor state to clip each caster
-//     pass to its sub-rect (single view id 1 reused, see cutsheet
-//     §设计决定 #6 — scissor not multi-view).
+//   - ShadowPass uses one bgfx view per slot (18..25) and scissor state to
+//     clip each caster pass to its sub-rect.
 
 #include <cstdint>
 
@@ -72,8 +71,8 @@ ShadowLightOrder computeShadowLightOrder(
 
 // §P5.5 C — compute a ShadowAtlasLayout for the given config.
 // Algorithm:
-//   1. clamp slotCount to [1, kShadowAtlasMaxSlots]
-//   2. gridRows = ceil(sqrt(N)), gridCols = ceil(N / gridRows)
+//   1. clamp slotCount to [0, kShadowAtlasMaxSlots]
+//   2. gridRows = floor(sqrt(N)), gridCols = ceil(N / gridRows)
 //   3. each sub-rect = (col * (1/cols), row * (1/rows),
 //                        (col+1) * (1/cols), (row+1) * (1/rows))
 // Atlas is square — atlasSize is recorded verbatim so ShadowPass

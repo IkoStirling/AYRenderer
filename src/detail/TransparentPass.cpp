@@ -4,43 +4,121 @@
 #include "detail/ShadowPass.h"
 #include "detail/LightingPass.h"
 #include "detail/GBufferPass.h"
+#include "detail/SkyboxPass.h"
 
 #include "AYRenderer/RenderTypes.h"
 #include "AYShader/ShaderResource.h"
 
 #include <algorithm>
-#include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
 namespace ayt::render::detail
 {
 
+float transparentDistanceSquared(
+    const DrawItem& item,
+    const ayt::math::FVector3& cameraPosition) noexcept
+{
+    const float dx = item.world(0, 3) - cameraPosition.x;
+    const float dy = item.world(1, 3) - cameraPosition.y;
+    const float dz = item.world(2, 3) - cameraPosition.z;
+    const float distance = dx * dx + dy * dy + dz * dz;
+    return std::isfinite(distance) ? distance : 0.0f;
+}
+
+bool transparentSortBefore(const TransparentSortEntry& a,
+                           const TransparentSortEntry& b) noexcept
+{
+    if (a.item == nullptr || b.item == nullptr) {
+        return a.item != nullptr;
+    }
+    // Explicit sortKey remains the primary, host-controlled layer. Equal
+    // layers (including the default zero layer) sort by camera distance.
+    if (a.item->sortKey != b.item->sortKey) {
+        return a.item->sortKey > b.item->sortKey;
+    }
+    return a.distanceSquared > b.distanceSquared;
+}
+
+TransparentRoute selectTransparentRoute(bool hasGBufferPass,
+                                        bool hasLightingPass,
+                                        bool gbufferProduced,
+                                        bool lightingProduced,
+                                        bool lightingFboValid) noexcept
+{
+    const bool hasDeferredProducer = hasGBufferPass || hasLightingPass;
+    if (!hasDeferredProducer) {
+        return TransparentRoute::Forward;
+    }
+    if (!hasGBufferPass || !hasLightingPass || !gbufferProduced
+        || !lightingProduced || !lightingFboValid) {
+        return TransparentRoute::Skip;
+    }
+    return TransparentRoute::Deferred;
+}
+
+uint64_t transparentDrawState(BlendMode blendMode,
+                              bool premultipliedAlpha,
+                              bool doubleSided,
+                              bool reverseWinding) noexcept
+{
+    uint64_t state = BGFX_STATE_WRITE_RGB
+                   | BGFX_STATE_WRITE_A
+                   | BGFX_STATE_DEPTH_TEST_LEQUAL;
+    if (blendMode == BlendMode::Additive) {
+        // Add RGB while preserving destination coverage alpha.
+        state |= BGFX_STATE_BLEND_FUNC_SEPARATE(
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_ONE,
+            BGFX_STATE_BLEND_ZERO, BGFX_STATE_BLEND_ONE);
+    } else if (premultipliedAlpha) {
+        state |= BGFX_STATE_BLEND_FUNC_SEPARATE(
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA,
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+    } else {
+        // Standard over: RGB uses source alpha; alpha itself uses
+        // srcA + dstA*(1-srcA), not srcA*srcA.
+        state |= BGFX_STATE_BLEND_FUNC_SEPARATE(
+            BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+    }
+    if (!doubleSided) {
+        state |= reverseWinding ? kCullFrontFaces : kCullBackFaces;
+    }
+    return state;
+}
+
 namespace {
 
-struct SortKeyDescending {
-    bool operator()(const DrawItem* a, const DrawItem* b) const {
-        return a->sortKey > b->sortKey;
-    }
-};
-
-// §P2 M3 (2026-08-24) — RAII guard for borrowedDepthFbo. Replaces the
-// two explicit `if (ownsBorrowedDepthFbo) adapter.destroy(...)` sites
-// at the early-return and the tail of execute(). If a downstream call
-// (stable_sort, setViewFrameBuffer, submitItem) throws bad_alloc or a
-// bgfx driver-error surface, the FBO is still destroyed on stack
-// unwind — eliminates the leak window flagged in M3.
-struct BorrowedFboGuard {
-    BGFXAdapter*          adapter = nullptr;
-    bgfx::FrameBufferHandle fbo   = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
-    bool                  owned  = false;
-
-    ~BorrowedFboGuard() noexcept {
-        if (owned && adapter != nullptr) {
-            adapter->destroy(fbo);
+void bindTransparentEnvironment(shader::ShaderResource& shader,
+                                const PassExecContext& ctx)
+{
+    bool cubeActive = false;
+    if (ctx.skyboxPass != nullptr && ctx.skyboxPass->hasCubeTexture()) {
+        const auto cubeIt = ctx.textures.find(ctx.skyboxPass->cubeTexture().id);
+        const shader::BindingId cubeBinding = shader.getTextureBinding("envCube");
+        if (cubeBinding != shader::InvalidBinding
+            && cubeIt != ctx.textures.end()
+            && BGFXAdapter::isValid(cubeIt->second.handle)) {
+            shader.setTexture(shader.getTextureStage(cubeBinding), cubeBinding,
+                              toShaderTexture(cubeIt->second.handle));
+            cubeActive = true;
         }
     }
-};
+
+    const float cubeActiveValue[4] = {
+        cubeActive ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f
+    };
+    const float ambientValue[4] = {
+        ctx.lightingPass != nullptr
+            ? ctx.lightingPass->ambientStrength()
+            : ayt::render::kDefaultAmbientStrength,
+        0.0f, 0.0f, 0.0f
+    };
+    trySetUniformVec4(shader, "cubeActive", cubeActiveValue);
+    trySetUniformVec4(shader, "ambientStrength", ambientValue);
+}
 
 } // namespace
 
@@ -49,7 +127,9 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
     PassExecContext& ctx,
     const FrameContext& frame,
     const DrawItem& item,
-    uint8_t viewId)
+    uint8_t viewId,
+    const PackedSceneLighting& lights,
+    const PackedShadowAtlas& shadows)
 {
     SubmitResult result;
     const auto& meshes   = ctx.meshes;
@@ -178,6 +258,13 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
         }
     }
 
+    // Frame-owned lighting state is uploaded after material slots so an asset
+    // cannot accidentally leave stale SceneLights/atlas data on a shared
+    // program. Shaders without the new arrays keep the legacy uniforms above.
+    (void)uploadSceneLighting(material.shader, lights);
+    (void)uploadShadowAtlas(material.shader, shadows);
+    bindTransparentEnvironment(material.shader, ctx);
+
     if (material.boneBlockBinding == shader::InvalidBinding) {
         material.boneBlockBinding =
             material.shader.getUniformBlockBinding("Skeleton");
@@ -198,19 +285,45 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
     return result;
 }
 
+bgfx::FrameBufferHandle TransparentPass::ensureDeferredCompositeFbo(
+    BGFXAdapter& adapter,
+    bgfx::TextureHandle color,
+    bgfx::TextureHandle depth)
+{
+    if (!BGFXAdapter::isValid(color) || !BGFXAdapter::isValid(depth)) {
+        destroyResources(adapter);
+        return BGFX_INVALID_HANDLE;
+    }
+    if (BGFXAdapter::isValid(_deferredCompositeFbo)
+        && _deferredColor.idx == color.idx
+        && _deferredDepth.idx == depth.idx) {
+        return _deferredCompositeFbo;
+    }
+
+    destroyResources(adapter);
+    _deferredCompositeFbo =
+        adapter.createBorrowedColorDepthFrameBuffer(color, depth);
+    if (BGFXAdapter::isValid(_deferredCompositeFbo)) {
+        _deferredColor = color;
+        _deferredDepth = depth;
+    }
+    return _deferredCompositeFbo;
+}
+
+void TransparentPass::destroyResources(BGFXAdapter& adapter) noexcept
+{
+    if (BGFXAdapter::isValid(_deferredCompositeFbo)) {
+        adapter.destroy(_deferredCompositeFbo);
+    }
+    _deferredCompositeFbo = BGFX_INVALID_HANDLE;
+    _deferredColor = BGFX_INVALID_HANDLE;
+    _deferredDepth = BGFX_INVALID_HANDLE;
+}
+
 uint32_t TransparentPass::execute(PassExecContext& ctx)
 {
     BGFXAdapter& adapter = ctx.adapter;
     const FrameContext& frame = ctx.frame;
-    // §P2 M10 (2026-08-24) — view id hoisted to RenderTypes.h.
-    const bool deferredLitComposite = (ctx.lightingPass != nullptr)
-        && (ctx.gbufferPass != nullptr)
-        && ctx.lightingPass->producedThisFrame()
-        && ctx.gbufferPass->producedThisFrame()
-        && bgfx::isValid(ctx.lightingPass->lightingOutputFbo());
-    const uint8_t viewId = deferredLitComposite
-                               ? ayt::render::kTransparentDeferredViewId
-                               : ctx.viewId;
     const uint16_t viewportX      = ctx.viewportX;
     const uint16_t viewportY      = ctx.viewportY;
     const uint16_t viewportWidth  = ctx.viewportWidth;
@@ -221,52 +334,29 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    adapter.setViewTransform(viewId, frame.view, frame.projection);
-    // Alpha compositing is order-dependent. bgfx's default view mode may
-    // reorder submits by state/program, which silently defeats the CPU-side
-    // back-to-front stable_sort below. Sequential makes DrawItem::sortKey the
-    // actual GPU submission order for this dedicated transparent view.
-    //
-    // §P2 M2 (2026-08-24) — routed through BGFXAdapter (cutsheet red line).
-    adapter.setViewMode(viewId, bgfx::ViewMode::Sequential);
-
-    // Deferred LightingOutput is color-only. Borrow GBuffer depth so
-    // glass can DEPTH_TEST_LESS against opaque geometry.
-    //
-    // §P2 M3 (2026-08-24) — RAII guard replaces explicit destroy().
-    BorrowedFboGuard depthGuard;
-    depthGuard.adapter = &adapter;
-    bgfx::FrameBufferHandle compositeFbo = ctx.sceneFbo;
-    if (deferredLitComposite) {
-        compositeFbo = ctx.lightingPass->lightingOutputFbo();
-        if (ctx.gbufferPass != nullptr) {
-            const bgfx::TextureHandle color =
-                adapter.getFboAttachment(compositeFbo, 0);
-            const bgfx::TextureHandle depth = ctx.gbufferPass->gbufferDepthRt();
-            if (BGFXAdapter::isValid(color) && BGFXAdapter::isValid(depth)) {
-                depthGuard.fbo =
-                    adapter.createBorrowedColorDepthFrameBuffer(color, depth);
-                depthGuard.owned = BGFXAdapter::isValid(depthGuard.fbo);
-            }
-        }
-        if (depthGuard.owned) {
-            compositeFbo = depthGuard.fbo;
-        } else {
-            // §P2 L3 (2026-08-24) — atomic once-only flag.
-            static std::atomic<bool> s_logged{false};
-            if (!s_logged.exchange(true)) {
-                std::fprintf(stderr,
-                    "[TransparentPass] deferred depth FBO unavailable; "
-                    "glass will not occlude against opaque\n");
-            }
-        }
+    const TransparentRoute route = selectTransparentRoute(
+        ctx.gbufferPass != nullptr,
+        ctx.lightingPass != nullptr,
+        ctx.gbufferPass != nullptr && ctx.gbufferPass->producedThisFrame(),
+        ctx.lightingPass != nullptr && ctx.lightingPass->producedThisFrame(),
+        ctx.lightingPass != nullptr
+            && BGFXAdapter::isValid(ctx.lightingPass->lightingOutputFbo()));
+    if (route == TransparentRoute::Skip) {
+        rateLimitedEarlyReturn(
+            "TransparentPass",
+            "deferred producer missing/stale — transparent composite skipped");
+        return 0;
     }
+    const bool deferredLitComposite = route == TransparentRoute::Deferred;
+    const uint8_t viewId = deferredLitComposite
+        ? ayt::render::kTransparentDeferredViewId
+        : ctx.viewId;
 
     const auto& items = scene.items();
     // §P2 M4 (2026-08-24) — filter to Alpha-only BEFORE sorting. The
     // prior code sorted every non-outlineHull item, then submitItem
     // filtered by blendMode — opaque items paid sort cost for nothing.
-    std::vector<const DrawItem*> sortedItems;
+    std::vector<TransparentSortEntry> sortedItems;
     sortedItems.reserve(items.size());
     for (const DrawItem& item : items) {
         if (item.outlineHull) {
@@ -279,12 +369,37 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         if (!ayt::render::isTransparentBlendMode(matIt->second.blendMode)) {
             continue;
         }
-        sortedItems.push_back(&item);
+        sortedItems.push_back({
+            &item, transparentDistanceSquared(item, frame.cameraPosition)
+        });
     }
     if (sortedItems.empty()) {
         return 0;
     }
-    std::stable_sort(sortedItems.begin(), sortedItems.end(), SortKeyDescending{});
+    std::stable_sort(sortedItems.begin(), sortedItems.end(),
+                     transparentSortBefore);
+
+    bgfx::FrameBufferHandle compositeFbo = ctx.sceneFbo;
+    bool borrowedDepth = false;
+    if (deferredLitComposite) {
+        const bgfx::FrameBufferHandle lightingFbo =
+            ctx.lightingPass->lightingOutputFbo();
+        const bgfx::TextureHandle color =
+            adapter.getFboAttachment(lightingFbo, 0);
+        const bgfx::TextureHandle depth = ctx.gbufferPass->gbufferDepthRt();
+        compositeFbo = ensureDeferredCompositeFbo(adapter, color, depth);
+        borrowedDepth = BGFXAdapter::isValid(compositeFbo);
+        if (!borrowedDepth) {
+            rateLimitedEarlyReturn(
+                "TransparentPass",
+                "deferred color+depth FBO unavailable — fail closed");
+            return 0;
+        }
+    }
+
+    adapter.setViewTransform(viewId, frame.view, frame.projection);
+    // CPU back-to-front order must survive bgfx's program/state sorting.
+    adapter.setViewMode(viewId, bgfx::ViewMode::Sequential);
 
     uint32_t drawCount = 0;
 
@@ -294,59 +409,51 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     } else {
         adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
     }
-
-    const bool depthAlways = deferredLitComposite && !depthGuard.owned;
-
     static uint32_t s_orderLogFrames = 0;
     if (s_orderLogFrames < 3) {
         uint32_t rank = 0;
-        for (const DrawItem* item : sortedItems) {
+        for (const TransparentSortEntry& entry : sortedItems) {
+            const DrawItem* item = entry.item;
             std::fprintf(stderr,
                          "[TransparentOrder] frame=%u rank=%u material=%llu "
-                         "sortKey=%d first=%u count=%u\n",
+                         "sortKey=%d distance2=%.3f first=%u count=%u\n",
                          s_orderLogFrames, rank++,
                          static_cast<unsigned long long>(item->material.id),
-                         item->sortKey, item->firstIndex, item->indexCount);
+                         item->sortKey, entry.distanceSquared,
+                         item->firstIndex, item->indexCount);
         }
         ++s_orderLogFrames;
     }
 
-    for (const DrawItem* pItem : sortedItems) {
+    const PackedSceneLighting packedLights =
+        packSceneLighting(ctx.sceneLights, frame);
+    const PackedShadowAtlas receiverShadows =
+        packShadowAtlas(ctx.shadowPass, true);
+    const PackedShadowAtlas litFallbackShadows =
+        packShadowAtlas(nullptr, false);
+
+    for (const TransparentSortEntry& entry : sortedItems) {
+        const DrawItem* pItem = entry.item;
         const auto matIt = ctx.materials.find(pItem->material.id);
         if (matIt == ctx.materials.end()) {
             continue;
         }
         const GpuMaterial& material = matIt->second;
 
-        // §P2 supplemental — TransparentPass inlined raw state bits here,
-        // but BGFXAdapter already exposes `setStateAlphaBlend`. Use the
-        // preset as the base and OR in the per-material toggles.
-        // NOTE: setStateAlphaBlend currently sets BLEND_ALPHA + WRITE_RGB
-        // + WRITE_A + WRITE_Z (transparent draws do NOT write depth — they
-        // re-use the opaque z-buffer for occlusion). Our transparent path
-        // needs NO WRITE_Z, so the adapter preset is NOT a drop-in here;
-        // the inline construction is load-bearing. Kept as-is — the
-        // magic-number comment from the audit agent (M5/M8) was about the
-        // LIGHT UNIFORM code duplication, not state bits.
-        uint64_t state = BGFX_STATE_WRITE_RGB
-                           | BGFX_STATE_WRITE_A
-                           | (depthAlways ? BGFX_STATE_DEPTH_TEST_ALWAYS
-                                          : BGFX_STATE_DEPTH_TEST_LEQUAL);
-        if (material.blendMode == ayt::render::BlendMode::Additive) {
-            state |= BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE,
-                                           BGFX_STATE_BLEND_ONE);
-        } else {
-            state |= material.premultipliedAlpha
-                ? BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE,
-                                        BGFX_STATE_BLEND_INV_SRC_ALPHA)
-                : BGFX_STATE_BLEND_ALPHA;
-        }
-        if (!material.doubleSided) {
-            state |= cullBackFacesForTransform(pItem->world);
-        }
-        adapter.setState(state);
+        adapter.setState(transparentDrawState(
+            material.blendMode,
+            material.premultipliedAlpha,
+            material.doubleSided,
+            reversesWinding(pItem->world)));
 
-        const SubmitResult res = submitItem(adapter, ctx, frame, *pItem, viewId);
+        const PackedShadowAtlas& packedShadows =
+            receivesShadow(pItem->shadowFlags)
+                ? receiverShadows
+                : litFallbackShadows;
+
+        const SubmitResult res = submitItem(
+            adapter, ctx, frame, *pItem, viewId,
+            packedLights, packedShadows);
         if (res.accepted) {
             ++drawCount;
         }
@@ -359,13 +466,9 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
                      "draws=%u deferred=%d borrowedDepth=%d\n",
                      s_routeLogFrame, items.size(), sortedItems.size(), drawCount,
                      deferredLitComposite ? 1 : 0,
-                     depthGuard.owned ? 1 : 0);
+                     borrowedDepth ? 1 : 0);
         ++s_routeLogFrame;
     }
-
-    // BorrowedFboGuard remains armed. Its destructor releases only the
-    // temporary framebuffer; destroyTextures=false keeps Lighting color and
-    // GBuffer depth owned by their producer passes.
 
     return drawCount;
 }

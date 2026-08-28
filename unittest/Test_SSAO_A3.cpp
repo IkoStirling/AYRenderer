@@ -56,7 +56,7 @@ TEST_CASE(a3_ssao_cache_key_bumped_v4) {
     CHECK(key.find("_v4_") != std::string::npos);
 }
 
-TEST_CASE(a3_post_process_cache_key_bumped_v8_audit_p5) {
+TEST_CASE(a3_post_process_cache_key_bumped_v9_bloom_failclose) {
     // §A3 — v6 SSAO sample → v7 5-tap SSAO blur in composite.
     // §P5 L1 (2026-08-24) — bumped v7 → v8_audit_p5 after the
     // rate-limited logging refactor. The "ssao" substring is
@@ -64,7 +64,7 @@ TEST_CASE(a3_post_process_cache_key_bumped_v8_audit_p5) {
     // ssao-related); the substring check pins that the bump
     // didn't accidentally drop the SSAO marker.
     const std::string key(ayt::render::detail::kPostProcessCacheKeyCStr);
-    CHECK(key.find("v8_audit_p5") != std::string::npos);
+    CHECK(key.find("v9_bloom_failclose_exposure") != std::string::npos);
     CHECK(key.find("ssao") != std::string::npos);
 }
 

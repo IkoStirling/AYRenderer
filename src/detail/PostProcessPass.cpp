@@ -1,6 +1,7 @@
 #include "detail/PostProcessPass.h"
 
-#include "detail/BloomBlurPass.h"  // §S1c (2026-07-23) — PongFbo access
+#include "detail/BloomBlurPass.h"  // Current-frame production latch.
+#include "detail/BloomPipeline.h"
 #include "detail/DepthHazePass.h"  // §S4c (2026-07-23) — halfResFbo() access
 #include "detail/FgResource.h"    // §F5 (2026-07-24) — BloomSource / HazeSource semantic
 #include "detail/GpuResources.h"
@@ -38,19 +39,12 @@ constexpr FullscreenVertex kFullscreenTriangle[3] = {
 
 constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 
-// Post-process: sample sceneColor → exposure → optional bloom tint →
-// branchless tonemap (None / Reinhard / ACES) → display gamma.
-//
-// §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — added a second
-// sampler `bloomTexture` that, when bound by execute() to
-// `ctx.bloomBlurPass->pongFbo()` RT0, replaces the pre-S1 fake
-// `raw + raw*bloomStrength` shader hack with the real composite
-// `raw + sample(bloomTexture, uv) * bloomStrength`. When the
-// bloomTexture sampler is NOT bound (custom desc omits BloomExtract
-// + BloomBlur, or first-frame race), the FS branchless mix collapses
-// to `raw * (1 + 0) = raw` — visually identical to a zero-bloom
-// pipeline (cutsheet §S1 §K3 invariant #1). Branchless (converter
-// drops if/for). Knobs are vec4 (.x) for bgfx Vec4 upload ABI — see
+// Post-process: sample sceneColor and the FrameGraph BloomSource, apply
+// exposure to both scene-linear inputs, then tonemap (None / Reinhard /
+// ACES) and display gamma. Bloom is accepted only when BloomBlur reports
+// production in the current frame and the resolved attachment is valid;
+// otherwise execute() binds a safe texture and uploads zero strength.
+// Knobs are vec4 (.x) for bgfx Vec4 upload ABI — see
 // docs/pass-lessons-from-shadow.md §3.1. tonemapMode.x: 0=None,
 // 1=Reinhard, 2=ACES (Narkowicz fitted). Select via
 // mix(mix(none, reinhard, step(0.5,m)), aces, step(1.5,m)).
@@ -122,7 +116,8 @@ material PostProcess {
         let aoGate = step(0.0001, ssaoStrength.x)
         let aoMul = clamp(1.0 - aoFactor * ssaoStrength.x * aoGate, 0.0, 1.0)
         let rawOccluded = rawHaze * aoMul
-        let withBloom = rawOccluded + bloomSample.xyz * bloomStrength.x
+        let withBloom = rawOccluded
+                      + bloomSample.xyz * bloomStrength.x * exposure.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -146,15 +141,10 @@ material PostProcess {
 }
 )";
 
-// §P5 L1 (2026-08-24) — bumped v7 → v8_audit_p5 to invalidate
-// the shader cache after the rate-limited logging refactor (M1+M2
-// + M3 + M4). Consumers can't tell when the cache needs bumping
-// from the bare v7 suffix; the audit-p5 marker documents the
-// source event that triggered the bump. Kept the trailing
-// "ssao_blur5_fs" tag so Test_SSAO_A3's substring check still
-// pins the SSAO composite marker.
+// v9 pins current-frame bloom fail-close and applies exposure equally to
+// scene-linear scene color and bloom before tone mapping.
 constexpr const char* kPostProcessCacheKey =
-    "postprocess_tonemap_aces_v8_audit_p5_ssao_blur5_fs";
+    "postprocess_tonemap_aces_v9_bloom_failclose_exposure_ssao_blur5_fs";
 
 // (kPostProcessColorFormat is defined below alongside
 // kPostProcessCacheKeyCStr — see §P5 L3 in this file.)
@@ -226,7 +216,8 @@ material PostProcessBlit {
         let aoGate = step(0.0001, ssaoStrength.x)
         let aoMul = clamp(1.0 - aoFactor * ssaoStrength.x * aoGate, 0.0, 1.0)
         let rawOccluded = rawHaze * aoMul
-        let withBloom = rawOccluded + bloomSample.xyz * bloomStrength.x
+        let withBloom = rawOccluded
+                      + bloomSample.xyz * bloomStrength.x * exposure.x
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -249,7 +240,8 @@ material PostProcessBlit {
     }
 }
 )";
-constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough_tonemap_aces_v7_ssao_blur5_fs";
+constexpr const char* kPostProcessPassthroughCacheKey =
+    "postprocess_passthrough_tonemap_aces_v8_bloom_exposure_fs";
 
 } // namespace
 
@@ -268,6 +260,16 @@ constexpr const char* kPostProcessPassthroughCacheKey = "postprocess_passthrough
 // MUST live at file scope inside the `ayt::render::detail`
 // namespace so the extern declaration in PostProcessPass.h finds it.
 const char* const kPostProcessCacheKeyCStr = kPostProcessCacheKey;
+const char* postProcessPhoskiaSourceForTests() noexcept
+{
+    return kPostProcessPhoskiaSource;
+}
+
+const char* postProcessFallbackPhoskiaSourceForTests() noexcept
+{
+    return kPostProcessPassthroughSource;
+}
+
 // §P5 L3 (2026-08-24) — extern definition for kPostProcessColorFormat
 // (header declares `extern const bgfx::TextureFormat::Enum
 // kPostProcessColorFormat`; the `constexpr` above gives the value
@@ -439,32 +441,33 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
 
     const ayt::shader::TextureHandle texHandle =
         ayt::render::detail::toShaderTexture(fboColor);
-    // §F5 (2026-07-24, mid-term FG MVP sub-cut 5) — second sampler
-    // (bloomTexture). Read via `ctx.frameGraph->resolveSemantic(
-    // FgSemantic::BloomSource)`, replacing the pre-F5
-    // `ctx.bloomBlurPass->pongFbo()` producer-pointer pattern. The
-    // FG's semantic layer is the single source of truth for which
-    // physical RT feeds the bloom sampler; render() central wiring
-    // resolves BloomSource → BloomBlurB (when bloomEnabled) →
-    // invalid fallback to sceneColor. Falls back to sceneColor
-    // (sentinel) when the semantic physical is invalid — same
-    // shape as the pre-F5 `pongFbo() invalid ⇒ fallback` pattern.
+    // BloomSource is owned by the FrameGraph. A blur result is consumed
+    // only when its current-frame production latch is set and RT0 resolves
+    // to a valid texture. The bound scene texture is merely a safe fallback;
+    // effectiveBloomStrength() forces the composite contribution to zero.
     ayt::shader::TextureHandle bloomTexHandle = texHandle;  // fallback
     bgfx::FrameBufferHandle bloomSourceFbo = BGFX_INVALID_HANDLE;
-    if (ctx.frameGraph != nullptr) {
+    const bool blurProduced = ctx.bloomBlurPass != nullptr
+        && ctx.bloomBlurPass->producedThisFrame();
+    if (blurProduced && ctx.frameGraph != nullptr) {
         bloomSourceFbo = ctx.frameGraph->resolveSemantic(
             ayt::render::detail::FgSemantic::BloomSource);
     }
+    bool bloomSourceReady = false;
     if (BGFXAdapter::isValid(bloomSourceFbo)) {
         const bgfx::TextureHandle bloomColor =
             adapter.getFboAttachment(bloomSourceFbo, 0);
         if (BGFXAdapter::isValid(bloomColor)) {
             bloomTexHandle =
                 ayt::render::detail::toShaderTexture(bloomColor);
+            bloomSourceReady = true;
         }
     }
     // bgfx Vec4 slots — pad scalars into .x (lessons §3.1).
-    const float bloomPad[4] = {frame.bloomStrength, 0.0f, 0.0f, 0.0f};
+    const float bloomPad[4] = {
+        effectiveBloomStrength(frame.bloomStrength, bloomSourceReady),
+        0.0f, 0.0f, 0.0f
+    };
     const float exposurePad[4] = {frame.exposure, 0.0f, 0.0f, 0.0f};
     const float tonemapPad[4] = {
         static_cast<float>(static_cast<int32_t>(frame.tonemapMode)), 0.0f, 0.0f, 0.0f};
@@ -596,7 +599,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
             gammaPad[0],
             frame.exposure,
             tonemapPad[0],
-            frame.bloomStrength,
+            bloomPad[0],
             bloomFromPong ? "pong" : "fallback(scene)",
             frame.hazeStrength,
             frame.hazeDensity,

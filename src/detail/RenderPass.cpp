@@ -135,7 +135,20 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
         return !useMap;
     }();
 
-    const bool wantSample = !forceLit && Contract::shouldSampleShadowMap(flags);
+    const bool atlasProducer = shadowPass != nullptr
+        && shadowPass->sceneLightsRef() != nullptr
+        && shadowPass->sceneLightsRef()->count > 0u
+        && shadowPass->perLightShadowCount() > 0u;
+    const bool hasAtlasArrays =
+        shader.getUniformBinding("shadowAtlasRects") != shader::InvalidBinding
+        && shader.getUniformBinding("lightViewProjs") != shader::InvalidBinding;
+    const shader::BindingId singleAtlasRectBinding =
+        shader.getUniformBinding("shadowAtlasRect");
+    const bool atlasCompatible = !atlasProducer || hasAtlasArrays
+        || singleAtlasRectBinding != shader::InvalidBinding;
+    const bool wantSample = !forceLit
+        && Contract::shouldSampleShadowMap(flags)
+        && atlasCompatible;
     bgfx::TextureHandle shadowTex = BGFX_INVALID_HANDLE;
     bool usedFallback = false;
     bool lvpUploaded = false;
@@ -152,10 +165,17 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
                 ? shader.getUniformBinding(Contract::kLightViewProjAlt.data())
                 : lvpBinding;
         if (lvpAlt != shader::InvalidBinding) {
-            shader.setUniform(lvpAlt,
-                              shadowPass->lightViewProjColumnMajor(),
-                              sizeof(float) * 16);
+            const float* lvp = atlasProducer
+                ? shadowPass->atlasLightViewProjsColumnMajor()
+                : shadowPass->lightViewProjColumnMajor();
+            shader.setUniform(lvpAlt, lvp, sizeof(float) * 16);
             lvpUploaded = true;
+        }
+
+        if (singleAtlasRectBinding != shader::InvalidBinding) {
+            const float* rects = shadowPass->shadowSampleRects();
+            shader.setUniform(singleAtlasRectBinding, rects,
+                              sizeof(float) * 4);
         }
 
         const shader::BindingId biasBinding =
@@ -175,7 +195,9 @@ void tryBindShadowSampler(shader::ShaderResource& shader,
             shader.getUniformBinding(Contract::kShadowMapTexelName.data());
         if (texelBinding != shader::InvalidBinding) {
             const float mapSize = static_cast<float>(
-                shadowPass->shadowMapSize() > 0 ? shadowPass->shadowMapSize() : 1u);
+                shadowPass->shadowSampleMapSize() > 0
+                    ? shadowPass->shadowSampleMapSize()
+                    : 1u);
             const float texel = 1.0f / mapSize;
             const float texelPad[4] = {texel, texel, mapSize, 0.0f};
             shader.setUniform(texelBinding, texelPad, sizeof(texelPad));

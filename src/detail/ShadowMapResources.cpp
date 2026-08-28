@@ -36,16 +36,26 @@ bgfx::TextureHandle ShadowMapResources::colorAttachment(BGFXAdapter& adapter) co
 
 void ShadowMapResources::bindShadowView(BGFXAdapter& adapter,
                                         uint8_t viewId,
-                                        uint16_t mapSize)
+                                        uint16_t mapSize,
+                                        bool clearAttachments)
 {
     adapter.setViewFrameBuffer(viewId, _fbo);
     adapter.setViewRect(viewId, 0, 0, mapSize, mapSize);
-    // RGBA8 clear → 1.0 far in .r; depth clear 1.0 (D3D far plane).
-    adapter.setViewClearRaw(viewId,
-                            BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                            /*rgba=*/0xffffffff,
-                            /*depth=*/1.0f,
-                            /*stencil=*/0);
+    if (clearAttachments) {
+        // Clear the shared atlas once, on its first slot view. Clearing every
+        // slot view would erase the tiles submitted by earlier views.
+        adapter.setViewClearRaw(viewId,
+                                BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                                /*rgba=*/0xffffffff,
+                                /*depth=*/1.0f,
+                                /*stencil=*/0);
+    } else {
+        adapter.setViewClearRaw(viewId,
+                                BGFX_CLEAR_NONE,
+                                /*rgba=*/0,
+                                /*depth=*/1.0f,
+                                /*stencil=*/0);
+    }
 }
 
 bool ShadowMapResources::resolveForSampling(BGFXAdapter& adapter, uint8_t resolveViewId)

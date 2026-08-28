@@ -1,67 +1,33 @@
-// S1a BloomExtractPass (2026-07-23, short-term-plan §S1) — first
-// half-resolution effect pass. This test pins the S1a ship:
-//
-//   1) Noop backend short-circuit (cutsheet §S1 "Noop 不崩" 验收)
-//      — execute() returns 0 when adapter is uninit or bound to
-//      bgfx::RendererType::Noop. K1 invariant #2.
-//   2) Half-resolution size math: ensureFbo uses (W+1)/2 × (H+1)/2
-//      when the viewport changes (cutsheet §S1 "ensure(w/2, h/2)").
-//   3) Source-FBO priority: BloomExtractPass reuses
-//      PostProcessPass::selectSourceFbo, so it gets the deferred
-//      LightingOutput win + forward sceneFbo fallback. On Noop
-//      (both invalid) ⇒ 0 draws.
-//   4) Phoskia source substring pin: embedded kBloomExtractPhoskiaSource
-//      declares material BloomExtract + texture2d sceneColor +
-//      uniform vec4 bloomThreshold + uniform vec4 bloomStrength +
-//      soft-knee bright extract.
-//   5) Cache-key bump: BloomExtractPass compiles under
-//      "bloomextract_v0_threshold_knee_soft_fs". A future S1b/S1c
-//      bump forces a re-acquire.
-//   6) RenderPassSlot::BloomExtract enum value = 8 (Lighting=7)
-//      and the slot is included in BOTH makeDefault() and
-//      makeDeferred() slot lists at the correct dispatch position
-//      (after Transparent, before PostProcess).
-//   7) RenderPipeline dispatch order: BloomExtractPass fires AFTER
-//      TransparentPass and BEFORE PostProcessPass in a custom
-//      pipeline.
-//   8) destroyResources idempotent on an uninitialized adapter
-//      (BGFXAdapter::destroy on invalid handle is a no-op).
-//
-// All tests use Backend::Noop so the headless test path stays
-// clean (no shaderc, no FBO create, no GPU). The pass's
-// `isNoopBackend()` guard short-circuits before any FBO / texture
-// work, so these tests don't fight the Noop-backend fragility.
+// BloomExtract regression coverage: stage fail-close rules, finite parameter
+// sanitization, HDR/Karis/soft-knee production shader contract, exposure-aware
+// final composite, slot order, Noop safety, and resource teardown. Shader
+// assertions inspect the exact runtime source rather than a test-local mirror.
 
 #include "AYTest.h"
 #include "AYRenderer.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
+#include "AYRenderer/BloomShaderSources.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "AYShader/ShaderResource.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/BloomExtractPass.h"
-#include "detail/ForwardOpaquePass.h"
+#include "detail/BloomPipeline.h"
+#include "detail/FgResource.h"
 #include "detail/FrameContext.h"
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
 #include "detail/RenderPipeline.h"
-#include "detail/TransparentPass.h"
 
 #include <bgfx/bgfx.h>
 
-#include <sys/stat.h>
-
-#include <cstdio>
-#include <iostream>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
-
-#ifndef AY_SHADER_SHADERC_HINT
-#  define AY_SHADER_SHADERC_HINT ""
-#endif
 
 using ayt::render::RenderPipelineDesc;
 using ayt::render::RenderPassSlot;
@@ -81,67 +47,140 @@ using ayt::render::detail::RenderPipeline;
 
 namespace {
 
-bool fileExists(const std::string& path)
+std::size_t countSubstring(const std::string& text,
+                           const std::string& needle)
 {
-    if (path.empty()) {
-        return false;
+    std::size_t count = 0;
+    std::size_t position = 0;
+    while ((position = text.find(needle, position)) != std::string::npos) {
+        ++count;
+        position += needle.size();
     }
-    struct stat st;
-    return ::stat(path.c_str(), &st) == 0;
+    return count;
 }
 
-bool shadercAvailable()
-{
-    return fileExists(AY_SHADER_SHADERC_HINT);
-}
-
-// Mirror of BloomExtractPass.cpp's kBloomExtractPhoskiaSource literal
-// (anonymous-namespace constexpr). Pin the structural surface so
-// drift between this mirror and the live source fails a substring
-// test (cutsheet §S1 "cache key bump" pattern — mirror lives here
-// to pin the contract without exposing the constexpr).
+// Inspect the exact production source. Keeping a second shader literal in the
+// test made the old checks false-green when runtime code changed.
 constexpr const char* kBloomExtractExpectedSubstrings[] = {
     "material BloomExtract",
     "texture2d sceneColor",
     "uniform vec4 bloomThreshold",
-    "uniform vec4 bloomStrength",
-    "smoothstep(bloomThreshold.x - knee, bloomThreshold.x + knee, lum)",
-    "let brightColor = sampled.xyz * soft",
-    "let outRgb = brightColor * bloomStrength.x",
-    "return vec4(outRgb, sampled.w)",
+    "uniform vec4 sourceTexelSize",
+    "let s4 = sample(sceneColor",
+    "let weightSum = max(w0 + w1 + w2 + w3 + w4",
+    "let contribution = max(lum - threshold, soft)",
+    "return vec4(outRgb, 0.0)",
 };
 
-// Mirror the live cache key (cutsheet §S1 "cache-key bump" + Bug
-// fix #3 lesson: pre-self-compare was false-green). If the master
-// cache key changes without bumping here, this case fails.
 constexpr const char* kExpectedBloomExtractCacheKey =
-    "bloomextract_v0_threshold_knee_soft_fs";
+    ayt::render::kBloomExtractCacheKey;
+constexpr const char* kLiveBloomExtractSource =
+    ayt::render::kBloomExtractPhoskiaSource;
 
-constexpr const char* kLiveBloomExtractSource = R"(
-material BloomExtract {
-    texture2d sceneColor
-    uniform vec4 bloomThreshold
-    uniform vec4 bloomStrength
-    vertex {
-        in  pos : position
-        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
-        return vec4(pos.x, pos.y, 0.0, 1.0)
+class RecordingPass final : public RenderPass {
+public:
+    RecordingPass(std::string_view passName, char marker, std::string& trace)
+        : _passName(passName), _marker(marker), _trace(trace)
+    {
     }
-    fragment {
-        in  vUv : texcoord
-        let uv = vec2(vUv.x, 1.0 - vUv.y)
-        let sampled = sample(sceneColor, uv)
-        let lum = dot(sampled.xyz, vec3(0.2126, 0.7152, 0.0722))
-        let knee  = bloomThreshold.x * 0.5
-        let soft  = smoothstep(bloomThreshold.x - knee, bloomThreshold.x + knee, lum)
-        let brightColor = sampled.xyz * soft
-        let outRgb = brightColor * bloomStrength.x
-        return vec4(outRgb, sampled.w)
+
+    std::string_view name() const override { return _passName; }
+
+    uint32_t execute(PassExecContext&) override
+    {
+        _trace.push_back(_marker);
+        return 0;
     }
-}
-)";
+
+private:
+    std::string_view _passName;
+    char _marker;
+    std::string& _trace;
+};
 
 } // namespace
+
+TEST_SUITE(AYRenderer_BloomAuditRound2)
+
+TEST_CASE(bloom_round2_parameters_are_finite_and_bounded) {
+    using namespace ayt::render::detail;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+
+    CHECK(sanitizeBloomStrength(-1.0f) == 0.0f);
+    CHECK(sanitizeBloomStrength(nan) == 0.0f);
+    CHECK(sanitizeBloomStrength(inf) == 0.0f);
+    CHECK(sanitizeBloomStrength(2.5f) == 2.5f);
+    CHECK(sanitizeBloomThreshold(-1.0f) == 0.0f);
+    CHECK(sanitizeBloomThreshold(nan) == 1.0f);
+    CHECK(sanitizeBloomSoftKnee(-1.0f) == 0.0f);
+    CHECK(sanitizeBloomSoftKnee(2.0f) == 1.0f);
+    CHECK(sanitizeBloomSoftKnee(inf) == 0.5f);
+}
+
+TEST_CASE(bloom_round2_stage_truth_table_fails_closed) {
+    using ayt::render::detail::selectBloomStages;
+
+    const auto off = selectBloomStages(0.0f, true, true, true, true);
+    CHECK(!off.extract);
+    CHECK(!off.blur);
+
+    const auto missingExtract =
+        selectBloomStages(0.4f, false, false, true, true);
+    CHECK(!missingExtract.extract);
+    CHECK(!missingExtract.blur);
+
+    const auto extractOnly =
+        selectBloomStages(0.4f, true, true, false, false);
+    CHECK(!extractOnly.extract);
+    CHECK(!extractOnly.blur);
+
+    const auto disabledBlur =
+        selectBloomStages(0.4f, true, true, true, false);
+    CHECK(!disabledBlur.extract);
+    CHECK(!disabledBlur.blur);
+
+    const auto complete =
+        selectBloomStages(0.4f, true, true, true, true);
+    CHECK(complete.extract);
+    CHECK(complete.blur);
+}
+
+TEST_CASE(bloom_round2_composite_requires_current_frame_blur) {
+    using ayt::render::detail::effectiveBloomStrength;
+    CHECK(effectiveBloomStrength(0.4f, false) == 0.0f);
+    CHECK(effectiveBloomStrength(0.4f, true) == 0.4f);
+    CHECK(effectiveBloomStrength(-0.4f, true) == 0.0f);
+    CHECK(effectiveBloomStrength(
+        std::numeric_limits<float>::quiet_NaN(), true) == 0.0f);
+}
+
+TEST_CASE(bloom_round2_intermediates_and_scene_are_hdr) {
+    CHECK(ayt::render::detail::kHdrSceneColorFormat
+          == bgfx::TextureFormat::RGBA16F);
+}
+
+TEST_CASE(bloom_round2_runtime_sources_pin_quality_and_exposure_contract) {
+    const std::string extract(ayt::render::kBloomExtractPhoskiaSource);
+    const std::string blur(ayt::render::kBloomBlurPhoskiaSource);
+    const std::string post(
+        ayt::render::detail::postProcessPhoskiaSourceForTests());
+    const std::string fallback(
+        ayt::render::detail::postProcessFallbackPhoskiaSourceForTests());
+
+    CHECK(countSubstring(extract, "sample(sceneColor") == 5u);
+    CHECK(extract.find("sourceTexelSize") != std::string::npos);
+    CHECK(extract.find("let contribution =") != std::string::npos);
+    CHECK(countSubstring(blur, "sample(source") == 5u);
+    CHECK(blur.find("1.3846153846") != std::string::npos);
+    CHECK(blur.find("3.2307692308") != std::string::npos);
+    const std::string exposedBloom =
+        "bloomSample.xyz * bloomStrength.x * exposure.x";
+    CHECK(post.find(exposedBloom) != std::string::npos);
+    CHECK(fallback.find(exposedBloom) != std::string::npos);
+}
+
+TEST_SUITE_END
 
 TEST_SUITE(AYRenderer_BloomExtractPass_S1a)
 
@@ -176,7 +215,7 @@ TEST_CASE(s1a_bloomextract_noop_backend_returns_zero) {
 
 TEST_CASE(s1a_bloomextract_zero_viewport_short_circuits) {
     // K1 invariant: viewport == 0 ⇒ 0 draws (FBO create would
-    // otherwise allocate a 0x0 RGBA8 target that bgfx rejects on
+    // otherwise allocate a 0x0 render target that bgfx rejects on
     // some backends).
     BloomExtractPass pass;
     FrameContext frame{};
@@ -337,24 +376,19 @@ TEST_CASE(s1a_bloomextract_cache_key_literal_pinned) {
     // self-compare was false-green (P5.5 B Test_B5 history).
     // Test pins the live cache-key constant.
     CHECK(std::string(kExpectedBloomExtractCacheKey)
-          == "bloomextract_v0_threshold_knee_soft_fs");
+          == "bloomextract_v2_hdr_karis_softknee_fs");
 }
 
 // === F. Pipeline dispatch order ======================================
 
 TEST_CASE(s1a_pipeline_dispatch_order_transparent_bloomextract_postprocess) {
-    // When a host assembles a custom pipeline with BloomExtract
-    // inserted between Transparent and PostProcess, the dispatch
-    // order must match the slot-list order. We can't observe real
-    // bgfx draws on Noop, but the per-pass draw counter sum
-    // (=0 on Noop) confirms executeAll() iterated all enabled
-    // passes in the right order.
-    BloomExtractPass bloom;
+    // Record the dispatch order without involving unrelated pass lifecycle,
+    // shader-pool, or rate-limited logging state.
+    std::string trace;
     RenderPipeline pipe;
-    pipe.addPass(std::make_unique<ayt::render::detail::ForwardOpaquePass>());
-    pipe.addPass(std::make_unique<ayt::render::detail::TransparentPass>());
-    pipe.addPass(std::make_unique<BloomExtractPass>());
-    pipe.addPass(std::make_unique<PostProcessPass>());
+    pipe.addPass(std::make_unique<RecordingPass>("Transparent", 'T', trace));
+    pipe.addPass(std::make_unique<RecordingPass>("BloomExtract", 'B', trace));
+    pipe.addPass(std::make_unique<RecordingPass>("PostProcess", 'P', trace));
 
     FrameContext frame{};
     std::unordered_map<uint64_t, GpuMesh> meshes;
@@ -367,8 +401,8 @@ TEST_CASE(s1a_pipeline_dispatch_order_transparent_bloomextract_postprocess) {
         adapter, pool, scene, meshes, textures, materials,
         0, 0, 1280, 720, frame, /*viewId=*/0
     };
-    // On Noop all passes return 0 → sum = 0
     CHECK(pipe.executeAll(ctx) == 0);
+    CHECK(trace == "TBP");
 
     // findPass() name lookup works post-add
     CHECK(pipe.findPass("BloomExtract") != nullptr);
@@ -414,42 +448,13 @@ TEST_CASE(s1a_bloomextract_destroy_resources_idempotent_on_uninit) {
     CHECK(pass.halfHeight() == 0);
 }
 
-// === H. Shaderc path (optional, mirrors Test_PostProcess_R51) =======
+// === H. Production binding contract =================================
 
-TEST_CASE(s1a_bloomextract_phoskia_compile_when_shaderc_available) {
-    // When shaderc is on the host, pool.acquire on the inline
-    // source succeeds and the binding IDs resolve. When shaderc
-    // is missing we SKIP gracefully (cutsheet §S1 K1 invariant
-    // #3: pool acquire failure is not fatal — execute() returns
-    // 0 instead of crashing).
-    if (!shadercAvailable()) {
-        std::cerr << "[S1a test] SKIP: shaderc not available.\n";
-        return;
-    }
-
-    ayt::shader::ShaderResourcePool pool;
-    pool.setShadercExecutable(AY_SHADER_SHADERC_HINT);
-    pool.bindRendererTypeForTests(
-        /*bgfxRendererType=*/0 /*Noop*/,
-        /*platform=*/"linux",
-        /*profile=*/"120");
-
-    ayt::shader::ShaderResource res =
-        pool.acquire(kLiveBloomExtractSource, kExpectedBloomExtractCacheKey);
-    if (!res.isValid()) {
-        std::cerr << "[S1a test] SKIP: Phoskia acquire failed (no GPU backend).\n";
-        for (const std::string& err : pool.lastCompileErrors()) {
-            std::cerr << "[S1a test]   " << err << "\n";
-        }
-        return;
-    }
-    // Binding resolution — matches BloomExtractPass.cpp::ensureProgram
-    const ayt::shader::BindingId uThreshold = res.getUniformBinding("bloomThreshold");
-    const ayt::shader::BindingId uStrength  = res.getUniformBinding("bloomStrength");
-    const ayt::shader::BindingId tSceneColor = res.getTextureBinding("sceneColor");
-    CHECK(uThreshold  != ayt::shader::InvalidBinding);
-    CHECK(uStrength   != ayt::shader::InvalidBinding);
-    CHECK(tSceneColor != ayt::shader::InvalidBinding);
+TEST_CASE(s1a_bloomextract_production_binding_names_are_pinned) {
+    const std::string source(kLiveBloomExtractSource);
+    CHECK(source.find("uniform vec4 bloomThreshold") != std::string::npos);
+    CHECK(source.find("uniform vec4 sourceTexelSize") != std::string::npos);
+    CHECK(source.find("texture2d sceneColor") != std::string::npos);
 }
 
 TEST_SUITE_END

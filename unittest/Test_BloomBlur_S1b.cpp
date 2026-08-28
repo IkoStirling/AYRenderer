@@ -1,42 +1,12 @@
-// S1b BloomBlurPass (2026-07-23, short-term-plan §S1 sub-cut 2) —
-// half-resolution separable-Gaussian blur ping-pong. This test
-// pins the S1b ship:
-//
-//   1) Noop backend short-circuit (K2 invariant #2): execute()
-//      returns 0 when adapter is uninit or bound to Noop.
-//   2) Producer-absent short-circuit (K2 invariant #1):
-//      ctx.bloomExtractPass == nullptr ⇒ execute() returns 0
-//      without touching any FBO.
-//   3) RenderPassSlot::BloomBlur enum value = 9 (BloomExtract=8,
-//      Lighting=7) and the slot is included in BOTH makeDefault()
-//      and makeDeferred() slot lists at the correct dispatch
-//      position (after BloomExtract, before PostProcess).
-//   4) Phoskia source substring pin: embedded kBloomBlurPhoskiaSource
-//      declares material BloomBlur + texture2d source +
-//      uniform vec4 direction + uniform vec4 texelSize +
-//      5-tap separable Gaussian (4 symmetric taps + center).
-//   5) Cache-key externalize (Bug fix #3 mirror):
-//      `extern const char* const kBloomBlurCacheKeyCStr` from the
-//      header pins to the live literal in BloomBlurPass.cpp.
-//   6) View id constants: Extract=10, BlurH=11, BlurV=12,
-//      DepthHaze=13, PostProcess=14; UI fixed at 255.
-//   7) RenderPipeline dispatch order: BloomBlurPass fires AFTER
-//      BloomExtractPass and BEFORE PostProcessPass in a custom
-//      pipeline.
-//   8) destroyResources idempotent on an uninitialized adapter
-//      (BGFXAdapter::destroy on invalid handle is a no-op).
-//   9) PassExecContext::bloomExtractPass default = nullptr so
-//      existing 20-/21-field brace-init sites keep compiling.
-//
-// All tests use Backend::Noop so the headless test path stays
-// clean. The pass's `isNoopBackend()` guard short-circuits before
-// any FBO / texture work, so these tests don't fight the Noop-
-// backend fragility.
+// BloomBlur regression coverage: current-frame producer gating, FrameGraph
+// ping-pong order, five-fetch linear Gaussian production source, stable cache
+// key/bindings, Noop safety, slot/view order, and resource teardown.
 
 #include "AYTest.h"
 #include "AYRenderer.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
+#include "AYRenderer/BloomShaderSources.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "AYShader/ShaderResource.h"
 #include "AYRenderer/UIRenderBackend.h"
@@ -55,8 +25,6 @@
 #include "detail/TransparentPass.h"
 
 #include <bgfx/bgfx.h>
-
-#include <sys/stat.h>
 
 #include <cstdio>
 #include <iostream>
@@ -86,81 +54,25 @@ using ayt::render::detail::PassExecContext;
 using ayt::render::detail::PostProcessPass;
 using ayt::render::detail::SSAOPass;       // §A2 SSAO MVP (2026-07-24)
 using ayt::render::detail::RenderPipeline;
-// §S1b Bug fix #3 mirror — pin the live cache-key extern so the
-// drift-detection test below sees it. Test cases live at global
-// namespace (TEST_SUITE expands to global ns), so this using
-// declaration pulls kBloomBlurCacheKeyCStr into scope.
-using ayt::render::detail::kBloomBlurCacheKeyCStr;
-
 namespace {
 
-bool fileExists(const std::string& path)
-{
-    if (path.empty()) {
-        return false;
-    }
-    struct stat st;
-    return ::stat(path.c_str(), &st) == 0;
-}
-
-bool shadercAvailable()
-{
-    return fileExists(AY_SHADER_SHADERC_HINT);
-}
-
-// Mirror of BloomBlurPass.cpp's kBloomBlurPhoskiaSource literal
-// (anonymous-namespace constexpr). Pin the structural surface so
-// drift between this mirror and the live source fails a substring
-// test (cutsheet §S1 "cache key bump" pattern).
+// Inspect the exact production source instead of a stale test-local mirror.
 constexpr const char* kBloomBlurExpectedSubstrings[] = {
     "material BloomBlur",
     "texture2d source",
     "uniform vec4 direction",
     "uniform vec4 texelSize",
-    "let dir = direction.xy",
-    "let tSize = texelSize.xy",
-    "c * 0.227",
-    "t1 * 0.194",
-    "t2 * 0.121",
-    "t3 * 0.054",
-    "t4 * 0.016",
-    "sample(source, uv - dir * tSize * 4.0)",
+    "let offset = direction.xy * texelSize.xy",
+    "offset * 1.3846153846",
+    "offset * 3.2307692308",
+    "let result = center + nearP + nearN + farP + farN",
+    "return vec4(result.x, result.y, result.z, 0.0)",
 };
 
-// Mirror the live cache key (cutsheet §S1 "cache-key bump" + Bug
-// fix #3 lesson: pre-self-compare was false-green).
 constexpr const char* kExpectedBloomBlurCacheKey =
-    "bloomblur_v1_separable_5tap_fs";
-
-constexpr const char* kLiveBloomBlurSource = R"(
-material BloomBlur {
-    texture2d source
-    uniform vec4 direction
-    uniform vec4 texelSize
-    vertex {
-        in  pos : position
-        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
-        return vec4(pos.x, pos.y, 0.0, 1.0)
-    }
-    fragment {
-        in  vUv : texcoord
-        let uv = vec2(vUv.x, 1.0 - vUv.y)
-        let dir = direction.xy
-        let tSize = texelSize.xy
-        let c = sample(source, uv)
-        let t1 = sample(source, uv + dir * tSize * 1.0)
-        let t2 = sample(source, uv + dir * tSize * 2.0)
-        let t3 = sample(source, uv + dir * tSize * 3.0)
-        let t4 = sample(source, uv + dir * tSize * 4.0)
-        let result = c * 0.227
-                   + t1 * 0.194 + sample(source, uv - dir * tSize * 1.0) * 0.194
-                   + t2 * 0.121 + sample(source, uv - dir * tSize * 2.0) * 0.121
-                   + t3 * 0.054 + sample(source, uv - dir * tSize * 3.0) * 0.054
-                   + t4 * 0.016 + sample(source, uv - dir * tSize * 4.0) * 0.016
-        return vec4(result.x, result.y, result.z, c.w)
-    }
-}
-)";
+    ayt::render::kBloomBlurCacheKey;
+constexpr const char* kLiveBloomBlurSource =
+    ayt::render::kBloomBlurPhoskiaSource;
 
 } // namespace
 
@@ -370,16 +282,9 @@ TEST_CASE(s1b_bloomblur_inlined_source_has_canonical_substrings) {
     }
 }
 
-TEST_CASE(s1b_bloomblur_cache_key_literal_pinned_via_extern) {
-    // Cutsheet §S1 "cache-key bump" + Bug fix #3 mirror: extern
-    // `kBloomBlurCacheKeyCStr` from BloomBlurPass.h must compare
-    // equal to the local mirror literal. Pre-extern the test
-    // would have been a self-compare ("mine == mine") = false-
-    // green drift detection.
-    CHECK(std::string(kBloomBlurCacheKeyCStr)
-          == "bloomblur_v1_separable_5tap_fs");
+TEST_CASE(s1b_bloomblur_cache_key_literal_pinned) {
     CHECK(std::string(kExpectedBloomBlurCacheKey)
-          == std::string(kBloomBlurCacheKeyCStr));
+          == "bloomblur_v2_bilinear_5fetch_fs");
 }
 
 // === F. Pipeline dispatch order ======================================
@@ -487,41 +392,13 @@ TEST_CASE(s1b_bloomblur_destroy_resources_idempotent_on_uninit) {
     CHECK(BGFXAdapter::isValid(pass.pongFbo()) == false);
 }
 
-// === I. Shaderc path (optional, mirrors Test_BloomExtract_S1a H) ====
+// === I. Production binding contract =================================
 
-TEST_CASE(s1b_bloomblur_phoskia_compile_when_shaderc_available) {
-    // When shaderc is on the host, pool.acquire on the inline
-    // source succeeds and the binding IDs resolve. When shaderc
-    // is missing we SKIP gracefully (cutsheet §S1 K1 invariant
-    // propagated: pool acquire failure is not fatal).
-    if (!shadercAvailable()) {
-        std::cerr << "[S1b test] SKIP: shaderc not available.\n";
-        return;
-    }
-
-    ayt::shader::ShaderResourcePool pool;
-    pool.setShadercExecutable(AY_SHADER_SHADERC_HINT);
-    pool.bindRendererTypeForTests(
-        /*bgfxRendererType=*/0 /*Noop*/,
-        /*platform=*/"linux",
-        /*profile=*/"120");
-
-    ayt::shader::ShaderResource res =
-        pool.acquire(kLiveBloomBlurSource, kExpectedBloomBlurCacheKey);
-    if (!res.isValid()) {
-        std::cerr << "[S1b test] SKIP: Phoskia acquire failed (no GPU backend).\n";
-        for (const std::string& err : pool.lastCompileErrors()) {
-            std::cerr << "[S1b test]   " << err << "\n";
-        }
-        return;
-    }
-    // Binding resolution — matches BloomBlurPass.cpp::ensureProgram
-    const ayt::shader::BindingId uDir     = res.getUniformBinding("direction");
-    const ayt::shader::BindingId uTexel   = res.getUniformBinding("texelSize");
-    const ayt::shader::BindingId tSource  = res.getTextureBinding("source");
-    CHECK(uDir    != ayt::shader::InvalidBinding);
-    CHECK(uTexel  != ayt::shader::InvalidBinding);
-    CHECK(tSource != ayt::shader::InvalidBinding);
+TEST_CASE(s1b_bloomblur_production_binding_names_are_pinned) {
+    const std::string source(kLiveBloomBlurSource);
+    CHECK(source.find("uniform vec4 direction") != std::string::npos);
+    CHECK(source.find("uniform vec4 texelSize") != std::string::npos);
+    CHECK(source.find("texture2d source") != std::string::npos);
 }
 
 TEST_SUITE_END

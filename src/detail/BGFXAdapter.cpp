@@ -5,6 +5,7 @@
 
 #include "AYMath/MathTypes.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
@@ -277,6 +278,16 @@ void BGFXAdapter::setViewMode(uint8_t viewId, bgfx::ViewMode::Enum mode)
     bgfx::setViewMode(viewId, mode);
 }
 
+void BGFXAdapter::setViewOrder(bgfx::ViewId firstViewId,
+                               uint16_t count,
+                               const bgfx::ViewId* order)
+{
+    if (!_initialized || order == nullptr || count == 0) {
+        return;
+    }
+    bgfx::setViewOrder(firstViewId, count, order);
+}
+
 void BGFXAdapter::setViewScissor(uint8_t viewId, uint16_t x, uint16_t y,
                                  uint16_t w, uint16_t h)
 {
@@ -499,6 +510,9 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
     }
     const uint64_t textureFlags = BGFX_TEXTURE_RT
                                 | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
+    if (!bgfx::isTextureValid(0, false, 1, colorFormat, textureFlags)) {
+        return BGFX_INVALID_HANDLE;
+    }
     bgfx::TextureHandle color = bgfx::createTexture2D(
         width, height, /*hasMips=*/false, /*numLayers=*/1,
         colorFormat, textureFlags, /*mem=*/nullptr);
@@ -511,7 +525,8 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
     // (cube "behind" ground with shadow still on the floor).
     if (withDepth) {
         bgfx::destroy(color);
-        return createColorDepthFrameBuffer(width, height);
+        return createColorDepthFrameBuffer(width, height, colorFormat,
+                                           /*pointSampled=*/false);
     }
     bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
         /*num=*/1, &color, /*destroyTextures=*/true);
@@ -524,26 +539,33 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
     return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
 }
 
-bgfx::FrameBufferHandle BGFXAdapter::createColorDepthFrameBuffer(uint16_t width,
-                                                                  uint16_t height)
+bgfx::FrameBufferHandle BGFXAdapter::createColorDepthFrameBuffer(
+    uint16_t width,
+    uint16_t height,
+    bgfx::TextureFormat::Enum preferredColorFormat,
+    bool pointSampled)
 {
     if (!_initialized || width == 0 || height == 0) {
         return BGFX_INVALID_HANDLE;
     }
 
-    const uint64_t colorFlags = BGFX_TEXTURE_RT
-                              | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
-                              | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+    uint64_t colorFlags = BGFX_TEXTURE_RT
+                        | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
+    if (pointSampled) {
+        colorFlags |= BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+    }
     const uint64_t depthFlags = BGFX_TEXTURE_RT
                               | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
                               | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
 
-    // Prefer RGBA8: R32F often plain-samples as 0 on D3D when used as a
-    // color RT, which makes step() mark every fragment shadowed (dark
-    // silhouettes, no contact blob). 8-bit is fine once large ground
-    // planes are excluded from casting.
+    // Shadow callers keep the RGBA8 default. Scene/PostProcess callers can
+    // request RGBA16F so highlights survive until final tone mapping.
+    // R32F remains the last fallback because plain sampling has historically
+    // returned zero on some D3D shadow paths.
     bgfx::TextureFormat::Enum colorFormats[] = {
+        preferredColorFormat,
         bgfx::TextureFormat::RGBA8,
+        bgfx::TextureFormat::RGBA16F,
         bgfx::TextureFormat::RGBA32F,
         bgfx::TextureFormat::R32F,
     };
@@ -552,7 +574,17 @@ bgfx::FrameBufferHandle BGFXAdapter::createColorDepthFrameBuffer(uint16_t width,
         bgfx::TextureFormat::D32F,
     };
 
-    for (bgfx::TextureFormat::Enum colorFmt : colorFormats) {
+    for (size_t colorIndex = 0;
+         colorIndex < sizeof(colorFormats) / sizeof(colorFormats[0]);
+         ++colorIndex) {
+        const bgfx::TextureFormat::Enum colorFmt = colorFormats[colorIndex];
+        bool duplicate = false;
+        for (size_t previous = 0; previous < colorIndex; ++previous) {
+            duplicate = duplicate || colorFormats[previous] == colorFmt;
+        }
+        if (duplicate) {
+            continue;
+        }
         if (!bgfx::isTextureValid(0, false, 1, colorFmt, colorFlags)) {
             continue;
         }
@@ -743,10 +775,10 @@ bgfx::FrameBufferHandle BGFXAdapter::createDepthOnlyFrameBuffer(uint16_t width, 
 
 void BGFXAdapter::destroy(bgfx::FrameBufferHandle h)
 {
-    // R5+ — destroy frees the color attachment automatically (bgfx
-    // tracks the lifetime relationship). Same pattern as the VB/IB/
-    // TextureHandle destroys above: no-op on invalid handle or when
-    // not initialized (e.g. Renderer::shutdown ran first).
+    // Whether attachments are also destroyed is fixed when the framebuffer
+    // is created. Borrowed framebuffers use destroyTextures=false, while
+    // owned render-target framebuffers release their attachments here.
+    // Invalid handles and post-shutdown calls remain no-ops.
     if (_initialized && bgfx::isValid(h)) {
         bgfx::destroy(h);
     }

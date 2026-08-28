@@ -275,7 +275,7 @@ TEST_SUITE_END
 
 TEST_SUITE(AuditP5_T5_CacheKeyAndFormat)
 
-TEST_CASE(post_process_cache_key_v8_audit_p5) {
+TEST_CASE(post_process_cache_key_v9_bloom_failclose_exposure) {
     // L1 fix: bumped v7 → v8_audit_p5 (kept the trailing
     // ssao_blur5_fs tag so Test_SSAO_A3's substring check
     // still pins the SSAO composite marker). Pin the new key
@@ -283,7 +283,7 @@ TEST_CASE(post_process_cache_key_v8_audit_p5) {
     // stale cache key across the rate-limited-logging
     // refactor) is caught at test time.
     CHECK(std::string_view(kPostProcessCacheKeyCStr)
-          == "postprocess_tonemap_aces_v8_audit_p5_ssao_blur5_fs");
+          == "postprocess_tonemap_aces_v9_bloom_failclose_exposure_ssao_blur5_fs");
 }
 
 TEST_CASE(post_process_color_format_is_rgba8) {

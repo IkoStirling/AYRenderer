@@ -95,7 +95,7 @@ namespace {
 // Live extern drift detection; this mirror MUST match
 // `kLightingCacheKeyCStr` or this test fails (Bug fix #3).
 inline constexpr const char* kExpectedB5p5CacheKey =
-    "lighting_v29_material_model_decode";
+    "lighting_v30_audit_shadow_brdf_hdr";
 
 // Mirror of LightingPass.cpp worldPos+shadow contract (abbreviated).
 // Full FS also has 8-light Lambert + sky Mix + §P5.5 D envCube
