@@ -167,6 +167,52 @@ public:
     void pushClip(const ayt::math::FRectangle& bounds) override;
     void popClip() override;
 
+    // CPU-authored vector paths are tessellated into triangle meshes and
+    // submitted through the same UI shader/batch stream. Path clips use the
+    // framebuffer stencil plane and therefore support nesting and explicit
+    // clockwise hole contours.
+    PathHandle createPath() override;
+    void releasePath(PathHandle path) override;
+    void addPathRect(PathHandle path, const ayt::math::FRectangle& bounds,
+                     PathWinding winding = PathWinding::CounterClockwise) override;
+    void addPathRoundedRect(PathHandle path, const ayt::math::FRectangle& bounds,
+                            float cornerRadius,
+                            PathWinding winding = PathWinding::CounterClockwise) override;
+    void addPathEllipse(PathHandle path, const ayt::math::FVector2& center,
+                        float radiusX, float radiusY,
+                        PathWinding winding = PathWinding::CounterClockwise) override;
+    void addPathLine(PathHandle path, const ayt::math::FVector2& start,
+                     const ayt::math::FVector2& end) override;
+    void addPathBezier(PathHandle path, const ayt::math::FVector2& start,
+                       const ayt::math::FVector2& control1,
+                       const ayt::math::FVector2& control2,
+                       const ayt::math::FVector2& end) override;
+    void addPathArc(PathHandle path, const ayt::math::FVector2& center,
+                    float radius, float startAngle, float endAngle,
+                    PathWinding winding = PathWinding::CounterClockwise) override;
+    void addPathPolygon(PathHandle path, const ayt::math::FVector2* points,
+                        int count,
+                        PathWinding winding = PathWinding::CounterClockwise) override;
+    void setPathFillColor(PathHandle path, const ayt::math::FVector4& color) override;
+    void setPathStrokeColor(PathHandle path, const ayt::math::FVector4& color) override;
+    void setPathStrokeWidth(PathHandle path, float width) override;
+    void drawPath(PathHandle path,
+                  PathFillMode mode = PathFillMode::Fill) override;
+    void pushPathClip(PathHandle path) override;
+
+    struct PathDebugInfo {
+        size_t contourCount = 0;
+        size_t clockwiseContourCount = 0;
+        size_t openContourCount = 0;
+        size_t fillTriangleCount = 0;
+        size_t strokeTriangleCount = 0;
+        ayt::math::FRectangle bounds;
+    };
+    bool getPathDebugInfo(PathHandle path, PathDebugInfo& outInfo) const;
+    uint8_t getActivePathClipDepthForDebug() const;
+    size_t getPendingUiItemCountForDebug() const;
+    bool hasPathOrderingBarrierForDebug() const;
+
     int getDrawCallCount() const override { return _drawCalls; }
 
 private:

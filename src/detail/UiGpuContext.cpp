@@ -619,7 +619,9 @@ void UiGpuContext::beginView(uint8_t viewId, uint16_t width, uint16_t height)
 
     bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
 
-    bgfx::setViewClear(viewId, BGFX_CLEAR_NONE);
+    // Path clips use the backbuffer stencil plane. Clear only stencil here;
+    // color/depth from the scene/post-process views remain untouched.
+    bgfx::setViewClear(viewId, BGFX_CLEAR_STENCIL, 0x00000000u, 1.0f, 0u);
 
     bgfx::touch(viewId);
 
@@ -899,4 +901,3 @@ void UiGpuContext::releaseTextTexture(BGFXAdapter& adapter, uint16_t textureIdx)
 
 
 } // namespace ayt::render::detail
-

@@ -14,6 +14,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -46,11 +48,48 @@ struct UiVertex {
     float    clipHalfH;
 };
 
+struct UiTriangleMesh {
+    std::vector<ayt::math::FVector2> positions;
+    std::vector<uint32_t> indices;
+};
+
+struct UiPathContour {
+    std::vector<ayt::math::FVector2> points;
+    ayt::ui::PathWinding winding = ayt::ui::PathWinding::CounterClockwise;
+    bool closed = true;
+};
+
+struct UiPathData {
+    std::vector<UiPathContour> contours;
+    ayt::math::FVector4 fillColor{1.0f, 1.0f, 1.0f, 1.0f};
+    ayt::math::FVector4 strokeColor{1.0f, 1.0f, 1.0f, 1.0f};
+    float strokeWidth = 1.0f;
+};
+
+struct UiPathFillContour {
+    UiTriangleMesh mesh;
+    ayt::ui::PathWinding winding = ayt::ui::PathWinding::CounterClockwise;
+};
+
+struct UiPathSnapshot {
+    std::vector<UiPathFillContour> fillContours;
+    UiTriangleMesh strokeMesh;
+    ayt::math::FRectangle bounds;
+    bool hasBounds = false;
+};
+
 // P0 unified batch: every draw entry becomes one UiItem appended to
 // frame.items in submission order (array order == painter order). flush()
 // may derive a safe logical order, but never mutates this source stream.
 // Sdf items arrive in P2.
-enum class UiItemKind : uint8_t { Flat, Sdf };
+enum class UiItemKind : uint8_t {
+    Flat,
+    Sdf,
+    Mesh,
+    PathFill,
+    PathClipPush,
+    PathClipPop
+};
 
 struct UiItem {
     UiItemKind kind        = UiItemKind::Flat;
@@ -80,6 +119,11 @@ struct UiItem {
     float      clipMinY     = 0.0f;
     float      clipMaxX     = 0.0f;
     float      clipMaxY     = 0.0f;
+    // Vector path payload. Mesh items use `mesh`; fill/clip barriers use a
+    // complete immutable snapshot so releasePath is safe before endFrame.
+    std::shared_ptr<const UiTriangleMesh> mesh;
+    std::shared_ptr<const UiPathSnapshot> path;
+    uint8_t stencilDepth = 0;
 };                                          //     (minX..maxY) already expanded
 
 // SdfParams holds FVector4 members (16B-aligned f128) → trailing padding;
@@ -96,13 +140,17 @@ bool sdfParamsEqual(const detail::UiGpuContext::SdfParams& a,
 
 bool batchCompatible(const UiItem& a, const UiItem& b)
 {
-    if (a.kind != b.kind || a.state != b.state) {
+    if (a.kind != b.kind || a.state != b.state
+        || a.stencilDepth != b.stencilDepth) {
         return false;
     }
     if (a.kind == UiItemKind::Flat) {
         return a.textureIdx == b.textureIdx;
     }
-    return sdfParamsEqual(a.sdf, b.sdf);
+    if (a.kind == UiItemKind::Sdf) {
+        return sdfParamsEqual(a.sdf, b.sdf);
+    }
+    return a.kind == UiItemKind::Mesh;
 }
 
 bool hasFiniteBounds(const UiItem& item)
@@ -118,6 +166,13 @@ bool drawBoundsOverlap(const UiItem& a, const UiItem& b)
     // the visually significant falloff area.
     return a.minX < b.maxX && b.minX < a.maxX
         && a.minY < b.maxY && b.minY < a.maxY;
+}
+
+bool isOrderingBarrier(const UiItem& item)
+{
+    return item.kind == UiItemKind::PathFill
+        || item.kind == UiItemKind::PathClipPush
+        || item.kind == UiItemKind::PathClipPop;
 }
 
 #if !defined(NDEBUG)
@@ -185,50 +240,71 @@ bool buildOverlapAwareOrder(const std::vector<UiItem>& items,
     }
 
     next.resize(count);
-    for (uint32_t i = 0; i < static_cast<uint32_t>(count); ++i) {
-        next[i] = (static_cast<size_t>(i) + 1u < count) ? i + 1u : kInvalidIndex;
-    }
     order.reserve(count);
     barriers.reserve(kLookAhead);
 
-    uint32_t head = 0u;
-    while (head != kInvalidIndex) {
-        const uint32_t anchor = head;
-        order.push_back(anchor);
-
-        barriers.clear();
-        uint32_t previous  = anchor;
-        uint32_t candidate = next[anchor];
-        uint32_t inspected = 0u;
-
-        while (candidate != kInvalidIndex && inspected < kLookAhead) {
-            const uint32_t afterCandidate = next[candidate];
-            bool canMove = batchCompatible(items[anchor], items[candidate]);
-            if (canMove) {
-                for (uint32_t barrier : barriers) {
-                    if (drawBoundsOverlap(items[candidate], items[barrier])) {
-                        canMove = false;
-                        break;
-                    }
-                }
-            }
-
-            if (canMove) {
-                // Remove candidate from the remaining linked list and append
-                // it next to the anchor in the optimized logical order.
-                order.push_back(candidate);
-                next[previous] = afterCandidate;
-            } else {
-                barriers.push_back(candidate);
-                previous = candidate;
-            }
-
-            candidate = afterCandidate;
-            ++inspected;
+    // Path fill/clip entries mutate stencil state and are hard ordering
+    // barriers. Optimize each ordinary interval independently so a single
+    // vector path does not disable batching for the rest of the frame.
+    const auto appendOptimizedSegment = [&](uint32_t begin, uint32_t end) {
+        if (begin >= end) return;
+        if (end - begin < 3u) {
+            for (uint32_t i = begin; i < end; ++i) order.push_back(i);
+            return;
         }
 
-        head = next[anchor];
+        for (uint32_t i = begin; i < end; ++i) {
+            next[i] = (i + 1u < end) ? i + 1u : kInvalidIndex;
+        }
+
+        uint32_t head = begin;
+        while (head != kInvalidIndex) {
+            const uint32_t anchor = head;
+            order.push_back(anchor);
+
+            barriers.clear();
+            uint32_t previous  = anchor;
+            uint32_t candidate = next[anchor];
+            uint32_t inspected = 0u;
+
+            while (candidate != kInvalidIndex && inspected < kLookAhead) {
+                const uint32_t afterCandidate = next[candidate];
+                bool canMove = batchCompatible(items[anchor], items[candidate]);
+                if (canMove) {
+                    for (uint32_t barrier : barriers) {
+                        if (drawBoundsOverlap(items[candidate], items[barrier])) {
+                            canMove = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (canMove) {
+                    // Remove candidate from the remaining linked list and append
+                    // it next to the anchor in the optimized logical order.
+                    order.push_back(candidate);
+                    next[previous] = afterCandidate;
+                } else {
+                    barriers.push_back(candidate);
+                    previous = candidate;
+                }
+
+                candidate = afterCandidate;
+                ++inspected;
+            }
+
+            head = next[anchor];
+        }
+    };
+
+    uint32_t segmentBegin = 0u;
+    for (uint32_t i = 0u; i < static_cast<uint32_t>(count); ++i) {
+        if (!isOrderingBarrier(items[i])) continue;
+        appendOptimizedSegment(segmentBegin, i);
+        order.push_back(i);
+        segmentBegin = i + 1u;
     }
+    appendOptimizedSegment(segmentBegin, static_cast<uint32_t>(count));
 
     if (order.size() != count) {
         order.clear();
@@ -309,6 +385,326 @@ bool rectNonEmpty(const ayt::math::FRectangle& r)
     return r.maxX > r.minX && r.maxY > r.minY;
 }
 
+constexpr float kPathEpsilon = 1.0e-5f;
+constexpr float kPi = 3.14159265358979323846f;
+
+float pathCross(const ayt::math::FVector2& a,
+                const ayt::math::FVector2& b,
+                const ayt::math::FVector2& c)
+{
+    return (b.x - a.x) * (c.y - a.y)
+         - (b.y - a.y) * (c.x - a.x);
+}
+
+float pathLength(float x, float y)
+{
+    return std::sqrt(x * x + y * y);
+}
+
+std::vector<ayt::math::FVector2> sanitizeContour(
+    const std::vector<ayt::math::FVector2>& input)
+{
+    std::vector<ayt::math::FVector2> output;
+    output.reserve(input.size());
+    for (const auto& point : input) {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y)) continue;
+        if (!output.empty()) {
+            const float dx = point.x - output.back().x;
+            const float dy = point.y - output.back().y;
+            if (dx * dx + dy * dy <= kPathEpsilon * kPathEpsilon) continue;
+        }
+        output.push_back(point);
+    }
+    if (output.size() > 1u) {
+        const float dx = output.front().x - output.back().x;
+        const float dy = output.front().y - output.back().y;
+        if (dx * dx + dy * dy <= kPathEpsilon * kPathEpsilon) {
+            output.pop_back();
+        }
+    }
+    return output;
+}
+
+bool pointInsideTriangle(const ayt::math::FVector2& p,
+                         const ayt::math::FVector2& a,
+                         const ayt::math::FVector2& b,
+                         const ayt::math::FVector2& c,
+                         float orientation)
+{
+    const float ab = pathCross(a, b, p) * orientation;
+    const float bc = pathCross(b, c, p) * orientation;
+    const float ca = pathCross(c, a, p) * orientation;
+    return ab >= -kPathEpsilon && bc >= -kPathEpsilon && ca >= -kPathEpsilon;
+}
+
+UiTriangleMesh triangulateContour(const std::vector<ayt::math::FVector2>& raw)
+{
+    UiTriangleMesh mesh;
+    mesh.positions = sanitizeContour(raw);
+    const size_t count = mesh.positions.size();
+    if (count < 3u) {
+        mesh.positions.clear();
+        return mesh;
+    }
+
+    float twiceArea = 0.0f;
+    for (size_t i = 0; i < count; ++i) {
+        const auto& a = mesh.positions[i];
+        const auto& b = mesh.positions[(i + 1u) % count];
+        twiceArea += a.x * b.y - b.x * a.y;
+    }
+    if (std::fabs(twiceArea) <= kPathEpsilon) {
+        mesh.positions.clear();
+        return mesh;
+    }
+    const float orientation = twiceArea > 0.0f ? 1.0f : -1.0f;
+
+    std::vector<uint32_t> polygon(count);
+    for (uint32_t i = 0; i < static_cast<uint32_t>(count); ++i) polygon[i] = i;
+    mesh.indices.reserve((count - 2u) * 3u);
+
+    size_t guard = count * count;
+    while (polygon.size() > 3u && guard-- > 0u) {
+        bool clippedEar = false;
+        for (size_t i = 0; i < polygon.size(); ++i) {
+            const uint32_t prev = polygon[(i + polygon.size() - 1u) % polygon.size()];
+            const uint32_t curr = polygon[i];
+            const uint32_t next = polygon[(i + 1u) % polygon.size()];
+            const auto& a = mesh.positions[prev];
+            const auto& b = mesh.positions[curr];
+            const auto& c = mesh.positions[next];
+            if (pathCross(a, b, c) * orientation <= kPathEpsilon) continue;
+
+            bool containsPoint = false;
+            for (uint32_t candidate : polygon) {
+                if (candidate == prev || candidate == curr || candidate == next) continue;
+                if (pointInsideTriangle(mesh.positions[candidate], a, b, c, orientation)) {
+                    containsPoint = true;
+                    break;
+                }
+            }
+            if (containsPoint) continue;
+
+            mesh.indices.push_back(prev);
+            mesh.indices.push_back(curr);
+            mesh.indices.push_back(next);
+            polygon.erase(polygon.begin() + static_cast<std::ptrdiff_t>(i));
+            clippedEar = true;
+            break;
+        }
+        if (!clippedEar) break;
+    }
+    if (polygon.size() == 3u) {
+        mesh.indices.push_back(polygon[0]);
+        mesh.indices.push_back(polygon[1]);
+        mesh.indices.push_back(polygon[2]);
+    }
+    if (mesh.indices.size() != (count - 2u) * 3u) {
+        mesh.positions.clear();
+        mesh.indices.clear();
+    }
+    return mesh;
+}
+
+template <typename Inside, typename Intersect>
+std::vector<ayt::math::FVector2> clipPolygonEdge(
+    const std::vector<ayt::math::FVector2>& input,
+    Inside inside, Intersect intersect)
+{
+    std::vector<ayt::math::FVector2> output;
+    if (input.empty()) return output;
+    output.reserve(input.size() + 2u);
+    ayt::math::FVector2 previous = input.back();
+    bool previousInside = inside(previous);
+    for (const auto& current : input) {
+        const bool currentInside = inside(current);
+        if (currentInside != previousInside) {
+            output.push_back(intersect(previous, current));
+        }
+        if (currentInside) output.push_back(current);
+        previous = current;
+        previousInside = currentInside;
+    }
+    return output;
+}
+
+UiTriangleMesh clipMeshToRect(const UiTriangleMesh& input,
+                              const ayt::math::FRectangle& clip)
+{
+    UiTriangleMesh output;
+    if (!rectNonEmpty(clip)) return output;
+    for (size_t tri = 0; tri + 2u < input.indices.size(); tri += 3u) {
+        std::vector<ayt::math::FVector2> polygon = {
+            input.positions[input.indices[tri]],
+            input.positions[input.indices[tri + 1u]],
+            input.positions[input.indices[tri + 2u]]
+        };
+        const auto verticalIntersect = [](float x) {
+            return [x](const ayt::math::FVector2& a,
+                       const ayt::math::FVector2& b) {
+                const float dx = b.x - a.x;
+                const float t = std::fabs(dx) > kPathEpsilon ? (x - a.x) / dx : 0.0f;
+                return ayt::math::FVector2(x, a.y + (b.y - a.y) * t);
+            };
+        };
+        const auto horizontalIntersect = [](float y) {
+            return [y](const ayt::math::FVector2& a,
+                       const ayt::math::FVector2& b) {
+                const float dy = b.y - a.y;
+                const float t = std::fabs(dy) > kPathEpsilon ? (y - a.y) / dy : 0.0f;
+                return ayt::math::FVector2(a.x + (b.x - a.x) * t, y);
+            };
+        };
+        polygon = clipPolygonEdge(polygon,
+            [&](const auto& p) { return p.x >= clip.minX; }, verticalIntersect(clip.minX));
+        polygon = clipPolygonEdge(polygon,
+            [&](const auto& p) { return p.x <= clip.maxX; }, verticalIntersect(clip.maxX));
+        polygon = clipPolygonEdge(polygon,
+            [&](const auto& p) { return p.y >= clip.minY; }, horizontalIntersect(clip.minY));
+        polygon = clipPolygonEdge(polygon,
+            [&](const auto& p) { return p.y <= clip.maxY; }, horizontalIntersect(clip.maxY));
+        if (polygon.size() < 3u) continue;
+        const uint32_t base = static_cast<uint32_t>(output.positions.size());
+        output.positions.insert(output.positions.end(), polygon.begin(), polygon.end());
+        for (uint32_t i = 1u; i + 1u < static_cast<uint32_t>(polygon.size()); ++i) {
+            output.indices.push_back(base);
+            output.indices.push_back(base + i);
+            output.indices.push_back(base + i + 1u);
+        }
+    }
+    return output;
+}
+
+void appendMesh(UiTriangleMesh& destination, const UiTriangleMesh& source)
+{
+    const uint32_t base = static_cast<uint32_t>(destination.positions.size());
+    destination.positions.insert(destination.positions.end(),
+                                 source.positions.begin(), source.positions.end());
+    destination.indices.reserve(destination.indices.size() + source.indices.size());
+    for (uint32_t index : source.indices) destination.indices.push_back(base + index);
+}
+
+UiTriangleMesh tessellateStroke(const std::vector<UiPathContour>& contours,
+                                float width)
+{
+    UiTriangleMesh output;
+    const float halfWidth = std::max(0.0f, width) * 0.5f;
+    if (halfWidth <= 0.0f) return output;
+
+    for (const UiPathContour& contour : contours) {
+        const auto points = sanitizeContour(contour.points);
+        const size_t count = points.size();
+        if (count < 2u) continue;
+        const bool closed = contour.closed && count > 2u;
+        const size_t segmentCount = closed ? count : count - 1u;
+        const uint32_t base = static_cast<uint32_t>(output.positions.size());
+        output.positions.reserve(output.positions.size() + count * 2u);
+
+        for (size_t i = 0; i < count; ++i) {
+            size_t prevIndex = i == 0u ? (closed ? count - 1u : 0u) : i - 1u;
+            size_t nextIndex = i + 1u < count ? i + 1u : (closed ? 0u : count - 1u);
+            float prevDx = points[i].x - points[prevIndex].x;
+            float prevDy = points[i].y - points[prevIndex].y;
+            float nextDx = points[nextIndex].x - points[i].x;
+            float nextDy = points[nextIndex].y - points[i].y;
+            if (!closed && i == 0u) { prevDx = nextDx; prevDy = nextDy; }
+            if (!closed && i + 1u == count) { nextDx = prevDx; nextDy = prevDy; }
+            const float prevLen = std::max(pathLength(prevDx, prevDy), kPathEpsilon);
+            const float nextLen = std::max(pathLength(nextDx, nextDy), kPathEpsilon);
+            const float prevNx = -prevDy / prevLen;
+            const float prevNy = prevDx / prevLen;
+            const float nextNx = -nextDy / nextLen;
+            const float nextNy = nextDx / nextLen;
+            float miterX = prevNx + nextNx;
+            float miterY = prevNy + nextNy;
+            const float miterLen = pathLength(miterX, miterY);
+            if (miterLen <= kPathEpsilon) {
+                miterX = nextNx;
+                miterY = nextNy;
+            } else {
+                miterX /= miterLen;
+                miterY /= miterLen;
+            }
+            const float denom = std::max(0.25f,
+                std::fabs(miterX * nextNx + miterY * nextNy));
+            const float extent = std::min(halfWidth / denom, halfWidth * 4.0f);
+            output.positions.emplace_back(points[i].x + miterX * extent,
+                                          points[i].y + miterY * extent);
+            output.positions.emplace_back(points[i].x - miterX * extent,
+                                          points[i].y - miterY * extent);
+        }
+
+        for (size_t i = 0; i < segmentCount; ++i) {
+            const size_t next = (i + 1u) % count;
+            const uint32_t a = base + static_cast<uint32_t>(i * 2u);
+            const uint32_t b = base + static_cast<uint32_t>(next * 2u);
+            output.indices.insert(output.indices.end(), {
+                a, b, b + 1u, a, b + 1u, a + 1u
+            });
+        }
+    }
+    return output;
+}
+
+void includeMeshBounds(UiPathSnapshot& snapshot, const UiTriangleMesh& mesh)
+{
+    for (const auto& point : mesh.positions) {
+        if (!snapshot.hasBounds) {
+            snapshot.bounds = ayt::math::FRectangle(point.x, point.y, point.x, point.y);
+            snapshot.hasBounds = true;
+        } else {
+            snapshot.bounds.minX = std::min(snapshot.bounds.minX, point.x);
+            snapshot.bounds.minY = std::min(snapshot.bounds.minY, point.y);
+            snapshot.bounds.maxX = std::max(snapshot.bounds.maxX, point.x);
+            snapshot.bounds.maxY = std::max(snapshot.bounds.maxY, point.y);
+        }
+    }
+}
+
+std::shared_ptr<UiPathSnapshot> snapshotPath(
+    const UiPathData& path, const ayt::math::FRectangle& clip)
+{
+    auto snapshot = std::make_shared<UiPathSnapshot>();
+    for (const UiPathContour& contour : path.contours) {
+        if (!contour.closed) continue;
+        UiTriangleMesh mesh = clipMeshToRect(triangulateContour(contour.points), clip);
+        if (mesh.indices.empty()) continue;
+        includeMeshBounds(*snapshot, mesh);
+        snapshot->fillContours.push_back({std::move(mesh), contour.winding});
+    }
+    snapshot->strokeMesh = clipMeshToRect(
+        tessellateStroke(path.contours, path.strokeWidth), clip);
+    includeMeshBounds(*snapshot, snapshot->strokeMesh);
+    return snapshot;
+}
+
+int adaptiveArcSegments(float radius, float sweep)
+{
+    const float r = std::max(1.0f, std::fabs(radius));
+    const float maxStep = std::acos(std::max(-1.0f, 1.0f - 0.25f / r));
+    const int segments = static_cast<int>(std::ceil(
+        std::fabs(sweep) / std::max(maxStep, kPi / 64.0f)));
+    return std::clamp(segments, 4, 128);
+}
+
+std::vector<ayt::math::FVector2> sampleArc(
+    const ayt::math::FVector2& center, float radiusX, float radiusY,
+    float startAngle, float endAngle, bool includeEnd)
+{
+    const float sweep = endAngle - startAngle;
+    const int segments = adaptiveArcSegments(std::max(radiusX, radiusY), sweep);
+    const int pointCount = includeEnd ? segments + 1 : segments;
+    std::vector<ayt::math::FVector2> points;
+    points.reserve(static_cast<size_t>(pointCount));
+    for (int i = 0; i < pointCount; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(segments);
+        const float angle = startAngle + sweep * t;
+        points.emplace_back(center.x + std::cos(angle) * radiusX,
+                            center.y + std::sin(angle) * radiusY);
+    }
+    return points;
+}
+
 // P1: BlendMode -> bgfx blend state. Write bits are folded in here so
 // every recorded item state is self-sufficient (submit() skips setState
 // when the passed state is 0, so state must never be 0). Additive uses
@@ -352,12 +748,25 @@ const ayt::math::FVector4 kUnknownTextureColor(0.25f, 0.25f, 0.28f, 1.0f);
 
 } // namespace
 
+namespace {
+
+struct UiClipEntry {
+    ayt::math::FRectangle bounds;
+    bool pathClip = false;
+    std::shared_ptr<const UiPathSnapshot> path;
+    uint8_t depth = 0;
+};
+
+} // namespace
+
 struct UIRenderBackend::FrameState {
     std::vector<UiItem>                items;              // ordered draw list (z-order)
     std::vector<UiVertex>              scratchVertices;
     std::vector<uint32_t>              scratchIndices;
     ayt::font::IFont*                  textSyncFont = nullptr;
-    std::vector<ayt::math::FRectangle> clipStack;
+    std::vector<UiClipEntry>           clipStack;
+    uint8_t                            pathClipDepth = 0;
+    bool                               hasOrderingBarriers = false;
     ayt::ui::BlendMode                 currentBlend = ayt::ui::BlendMode::Normal;
     BatchMode                          batchMode = BatchMode::OverlapAware;
     // Overlap-aware planner scratch. These vectors retain capacity across
@@ -373,6 +782,11 @@ struct UIRenderBackend::FrameState {
     // touch it; handles stay valid until releaseUiTexture frees them).
     std::unordered_map<void*, TextureRef> textures;
     uintptr_t                             nextHandle = 1;  // fake-pointer counter
+    // Path resources are CPU-side and persistent across frames. Draw/clip
+    // commands hold immutable snapshots, so releasePath may run immediately
+    // after recording without invalidating the pending frame.
+    std::unordered_map<int, UiPathData> paths;
+    int nextPathId = 1;
 };
 
 namespace {
@@ -467,6 +881,7 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
             }
         }
         _frame->textures.clear();
+        _frame->paths.clear();
         _frame->items.clear();
         _frame->scratchVertices.clear();
         _frame->scratchIndices.clear();
@@ -494,6 +909,7 @@ void UIRenderBackend::shutdownFromRendererWithoutAdapter()
         // No adapter to destroy through; the bgfx context is gone with the
         // renderer anyway. Drop the registry without touching GPU objects.
         _frame->textures.clear();
+        _frame->paths.clear();
         _frame->items.clear();
         _frame->scratchVertices.clear();
         _frame->scratchIndices.clear();
@@ -537,6 +953,8 @@ void UIRenderBackend::beginFrame()
     FrameState& frame = *_frame;
     frame.items.clear();
     frame.clipStack.clear();
+    frame.pathClipDepth = 0;
+    frame.hasOrderingBarriers = false;
     frame.textSyncFont = nullptr;
     frame.currentBlend = ayt::ui::BlendMode::Normal;  // P1: per-frame reset
     // PR-anim: opacity is a per-frame render-state like BlendMode —
@@ -572,7 +990,7 @@ ayt::math::FRectangle UIRenderBackend::activeClipBounds() const
                                      static_cast<float>(_width),
                                      static_cast<float>(_height));
     }
-    return _frame->clipStack.back();
+    return _frame->clipStack.back().bounds;
 }
 
 bool UIRenderBackend::clipRect(ayt::math::FRectangle& inout) const
@@ -580,7 +998,7 @@ bool UIRenderBackend::clipRect(ayt::math::FRectangle& inout) const
     if (_frame == nullptr || _frame->clipStack.empty()) {
         return rectNonEmpty(inout);
     }
-    inout = intersectRect(inout, _frame->clipStack.back());
+    inout = intersectRect(inout, _frame->clipStack.back().bounds);
     return rectNonEmpty(inout);
 }
 
@@ -594,9 +1012,9 @@ void UIRenderBackend::pushClip(const ayt::math::FRectangle& bounds)
 
     ayt::math::FRectangle clipped = bounds;
     if (!_frame->clipStack.empty()) {
-        clipped = intersectRect(bounds, _frame->clipStack.back());
+        clipped = intersectRect(bounds, _frame->clipStack.back().bounds);
     }
-    _frame->clipStack.push_back(clipped);
+    _frame->clipStack.push_back({clipped, false, nullptr, _frame->pathClipDepth});
 }
 
 void UIRenderBackend::popClip()
@@ -604,7 +1022,318 @@ void UIRenderBackend::popClip()
     if (_frame == nullptr || _frame->clipStack.empty()) {
         return;
     }
+    UiClipEntry entry = std::move(_frame->clipStack.back());
     _frame->clipStack.pop_back();
+    if (entry.pathClip) {
+        UiItem item;
+        item.kind = UiItemKind::PathClipPop;
+        item.path = std::move(entry.path);
+        item.stencilDepth = entry.depth;
+        if (item.path != nullptr && item.path->hasBounds) {
+            item.minX = item.path->bounds.minX;
+            item.minY = item.path->bounds.minY;
+            item.maxX = item.path->bounds.maxX;
+            item.maxY = item.path->bounds.maxY;
+        }
+        _frame->items.push_back(std::move(item));
+        if (_frame->pathClipDepth > 0) --_frame->pathClipDepth;
+        _frame->hasOrderingBarriers = true;
+    }
+}
+
+UIRenderBackend::PathHandle UIRenderBackend::createPath()
+{
+    if (_frame == nullptr) _frame = std::make_unique<FrameState>();
+    int id = _frame->nextPathId++;
+    if (id <= 0) {
+        _frame->nextPathId = 2;
+        id = 1;
+    }
+    _frame->paths.emplace(id, UiPathData{});
+    return PathHandle{id};
+}
+
+void UIRenderBackend::releasePath(PathHandle path)
+{
+    if (_frame != nullptr) _frame->paths.erase(path.id);
+}
+
+void UIRenderBackend::addPathRect(PathHandle path,
+                                  const ayt::math::FRectangle& bounds,
+                                  PathWinding winding)
+{
+    if (_frame == nullptr || !rectNonEmpty(bounds)) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+    it->second.contours.push_back({{
+        {bounds.minX, bounds.minY}, {bounds.maxX, bounds.minY},
+        {bounds.maxX, bounds.maxY}, {bounds.minX, bounds.maxY}
+    }, winding, true});
+}
+
+void UIRenderBackend::addPathRoundedRect(PathHandle path,
+                                         const ayt::math::FRectangle& bounds,
+                                         float cornerRadius,
+                                         PathWinding winding)
+{
+    if (_frame == nullptr || !rectNonEmpty(bounds)) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+    const float radius = std::clamp(cornerRadius, 0.0f,
+        std::min(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * 0.5f);
+    if (radius <= kPathEpsilon) {
+        addPathRect(path, bounds, winding);
+        return;
+    }
+
+    std::vector<ayt::math::FVector2> points;
+    const ayt::math::FVector2 centers[4] = {
+        {bounds.maxX - radius, bounds.minY + radius},
+        {bounds.maxX - radius, bounds.maxY - radius},
+        {bounds.minX + radius, bounds.maxY - radius},
+        {bounds.minX + radius, bounds.minY + radius}
+    };
+    const float starts[4] = {-kPi * 0.5f, 0.0f, kPi * 0.5f, kPi};
+    for (int corner = 0; corner < 4; ++corner) {
+        auto arc = sampleArc(centers[corner], radius, radius,
+                             starts[corner], starts[corner] + kPi * 0.5f,
+                             true);
+        if (!points.empty() && !arc.empty()) arc.erase(arc.begin());
+        points.insert(points.end(), arc.begin(), arc.end());
+    }
+    it->second.contours.push_back({std::move(points), winding, true});
+}
+
+void UIRenderBackend::addPathEllipse(PathHandle path,
+                                     const ayt::math::FVector2& center,
+                                     float radiusX, float radiusY,
+                                     PathWinding winding)
+{
+    if (_frame == nullptr || radiusX <= 0.0f || radiusY <= 0.0f) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+    it->second.contours.push_back({
+        sampleArc(center, radiusX, radiusY, 0.0f, kPi * 2.0f, false),
+        winding, true});
+}
+
+void UIRenderBackend::addPathLine(PathHandle path,
+                                  const ayt::math::FVector2& start,
+                                  const ayt::math::FVector2& end)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+    it->second.contours.push_back({{start, end}, PathWinding::CounterClockwise, false});
+}
+
+void UIRenderBackend::addPathBezier(PathHandle path,
+                                    const ayt::math::FVector2& start,
+                                    const ayt::math::FVector2& control1,
+                                    const ayt::math::FVector2& control2,
+                                    const ayt::math::FVector2& end)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+    const float lengthEstimate =
+        pathLength(control1.x - start.x, control1.y - start.y)
+      + pathLength(control2.x - control1.x, control2.y - control1.y)
+      + pathLength(end.x - control2.x, end.y - control2.y);
+    const int segments = std::clamp(
+        static_cast<int>(std::ceil(lengthEstimate / 6.0f)), 8, 128);
+    std::vector<ayt::math::FVector2> points;
+    points.reserve(static_cast<size_t>(segments) + 1u);
+    for (int i = 0; i <= segments; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(segments);
+        const float u = 1.0f - t;
+        const float w0 = u * u * u;
+        const float w1 = 3.0f * u * u * t;
+        const float w2 = 3.0f * u * t * t;
+        const float w3 = t * t * t;
+        points.emplace_back(start.x * w0 + control1.x * w1 + control2.x * w2 + end.x * w3,
+                            start.y * w0 + control1.y * w1 + control2.y * w2 + end.y * w3);
+    }
+    it->second.contours.push_back({std::move(points), PathWinding::CounterClockwise, false});
+}
+
+void UIRenderBackend::addPathArc(PathHandle path,
+                                 const ayt::math::FVector2& center,
+                                 float radius, float startAngle,
+                                 float endAngle, PathWinding winding)
+{
+    if (_frame == nullptr || radius <= 0.0f || startAngle == endAngle) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+    it->second.contours.push_back({
+        sampleArc(center, radius, radius, startAngle, endAngle, true),
+        winding, false});
+}
+
+void UIRenderBackend::addPathPolygon(PathHandle path,
+                                     const ayt::math::FVector2* points,
+                                     int count, PathWinding winding)
+{
+    if (_frame == nullptr || points == nullptr || count < 3) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+    std::vector<ayt::math::FVector2> copy(points, points + count);
+    it->second.contours.push_back({std::move(copy), winding, true});
+}
+
+void UIRenderBackend::setPathFillColor(PathHandle path,
+                                       const ayt::math::FVector4& color)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->paths.find(path.id);
+    if (it != _frame->paths.end()) it->second.fillColor = color;
+}
+
+void UIRenderBackend::setPathStrokeColor(PathHandle path,
+                                         const ayt::math::FVector4& color)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->paths.find(path.id);
+    if (it != _frame->paths.end()) it->second.strokeColor = color;
+}
+
+void UIRenderBackend::setPathStrokeWidth(PathHandle path, float width)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->paths.find(path.id);
+    if (it != _frame->paths.end()) it->second.strokeWidth = std::max(0.0f, width);
+}
+
+void UIRenderBackend::drawPath(PathHandle path, PathFillMode mode)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+    std::shared_ptr<UiPathSnapshot> snapshot = snapshotPath(it->second, activeClipBounds());
+    const bool wantsFill = mode == PathFillMode::Fill || mode == PathFillMode::FillAndStroke;
+    const bool wantsStroke = mode == PathFillMode::Stroke || mode == PathFillMode::FillAndStroke;
+
+    bool hasOuterFill = false;
+    for (const auto& contour : snapshot->fillContours) {
+        if (contour.winding == PathWinding::CounterClockwise) {
+            hasOuterFill = true;
+            break;
+        }
+    }
+    if (wantsFill && hasOuterFill && snapshot->hasBounds) {
+        UiItem item;
+        item.kind = UiItemKind::PathFill;
+        item.path = snapshot;
+        item.state = blendStateBits(_frame->currentBlend);
+        item.stencilDepth = _frame->pathClipDepth;
+        item.minX = snapshot->bounds.minX;
+        item.minY = snapshot->bounds.minY;
+        item.maxX = snapshot->bounds.maxX;
+        item.maxY = snapshot->bounds.maxY;
+        ayt::math::FVector4 color = it->second.fillColor;
+        color.w *= _frame->opacityStack.back();
+        item.abgr[0] = toAbgr(color);
+        _frame->items.push_back(std::move(item));
+        _frame->hasOrderingBarriers = true;
+    }
+    if (wantsStroke && !snapshot->strokeMesh.indices.empty()) {
+        UiItem item;
+        item.kind = UiItemKind::Mesh;
+        item.mesh = std::make_shared<UiTriangleMesh>(snapshot->strokeMesh);
+        item.state = blendStateBits(_frame->currentBlend);
+        item.stencilDepth = _frame->pathClipDepth;
+        item.minX = snapshot->bounds.minX;
+        item.minY = snapshot->bounds.minY;
+        item.maxX = snapshot->bounds.maxX;
+        item.maxY = snapshot->bounds.maxY;
+        ayt::math::FVector4 color = it->second.strokeColor;
+        color.w *= _frame->opacityStack.back();
+        item.abgr[0] = toAbgr(color);
+        _frame->items.push_back(std::move(item));
+    }
+}
+
+void UIRenderBackend::pushPathClip(PathHandle path)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+
+    // Reserve stencil value 255 for the temporary fill mask used by
+    // drawPath().  A saturated clip must still contribute a stack entry so
+    // the caller's matching popClip() cannot accidentally remove its parent.
+    // Treat the unsupported depth as an empty rectangular clip: descendants
+    // are safely rejected on the CPU while the existing stencil depth remains
+    // balanced and unchanged.
+    if (_frame->pathClipDepth >= UINT8_MAX - 1u) {
+        const ayt::math::FRectangle empty(0.0f, 0.0f, 0.0f, 0.0f);
+        _frame->clipStack.push_back({empty, false, nullptr, _frame->pathClipDepth});
+        return;
+    }
+
+    std::shared_ptr<UiPathSnapshot> snapshot = snapshotPath(it->second, activeClipBounds());
+    UiItem item;
+    item.kind = UiItemKind::PathClipPush;
+    item.path = snapshot;
+    item.stencilDepth = _frame->pathClipDepth;
+    if (snapshot->hasBounds) {
+        item.minX = snapshot->bounds.minX;
+        item.minY = snapshot->bounds.minY;
+        item.maxX = snapshot->bounds.maxX;
+        item.maxY = snapshot->bounds.maxY;
+    }
+    _frame->items.push_back(std::move(item));
+    ++_frame->pathClipDepth;
+
+    ayt::math::FRectangle coarse(0.0f, 0.0f, 0.0f, 0.0f);
+    bool hasOuter = false;
+    for (const auto& contour : snapshot->fillContours) {
+        if (contour.winding == PathWinding::CounterClockwise) {
+            hasOuter = true;
+            break;
+        }
+    }
+    if (hasOuter && snapshot->hasBounds) coarse = snapshot->bounds;
+    _frame->clipStack.push_back({coarse, true, snapshot, _frame->pathClipDepth});
+    _frame->hasOrderingBarriers = true;
+}
+
+bool UIRenderBackend::getPathDebugInfo(PathHandle path, PathDebugInfo& outInfo) const
+{
+    outInfo = {};
+    if (_frame == nullptr) return false;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return false;
+    const ayt::math::FRectangle unlimited(-1.0e8f, -1.0e8f, 1.0e8f, 1.0e8f);
+    const auto snapshot = snapshotPath(it->second, unlimited);
+    outInfo.contourCount = it->second.contours.size();
+    for (const auto& contour : it->second.contours) {
+        if (contour.winding == PathWinding::Clockwise) {
+            ++outInfo.clockwiseContourCount;
+        }
+        if (!contour.closed) ++outInfo.openContourCount;
+    }
+    for (const auto& contour : snapshot->fillContours) {
+        outInfo.fillTriangleCount += contour.mesh.indices.size() / 3u;
+    }
+    outInfo.strokeTriangleCount = snapshot->strokeMesh.indices.size() / 3u;
+    if (snapshot->hasBounds) outInfo.bounds = snapshot->bounds;
+    return true;
+}
+
+uint8_t UIRenderBackend::getActivePathClipDepthForDebug() const
+{
+    return _frame != nullptr ? _frame->pathClipDepth : 0u;
+}
+
+size_t UIRenderBackend::getPendingUiItemCountForDebug() const
+{
+    return _frame != nullptr ? _frame->items.size() : 0u;
+}
+
+bool UIRenderBackend::hasPathOrderingBarrierForDebug() const
+{
+    return _frame != nullptr && _frame->hasOrderingBarriers;
 }
 
 void UIRenderBackend::endFrame()
@@ -666,6 +1395,7 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, const ayt::m
     item.abgr[1] = abgr;
     item.abgr[2] = abgr;
     item.abgr[3] = abgr;
+    item.stencilDepth = _frame->pathClipDepth;
     _frame->items.push_back(item);
 }
 
@@ -750,6 +1480,7 @@ void UIRenderBackend::drawGradientRect(const ayt::math::FRectangle& bounds,
     item.abgr[1] = toAbgr(tr);
     item.abgr[2] = toAbgr(br);
     item.abgr[3] = toAbgr(bl);
+    item.stencilDepth = _frame->pathClipDepth;
     _frame->items.push_back(item);
 }
 
@@ -827,6 +1558,7 @@ void UIRenderBackend::drawBorderRect(const ayt::math::FRectangle& bounds,
     item.clipMinY = clip.minY;
     item.clipMaxX = clip.maxX;
     item.clipMaxY = clip.maxY;
+    item.stencilDepth = _frame->pathClipDepth;
     _frame->items.push_back(item);
 }
 
@@ -894,6 +1626,7 @@ void UIRenderBackend::drawRoundedRect(const ayt::math::FRectangle& bounds,
     item.clipMinY = clip.minY;
     item.clipMaxX = clip.maxX;
     item.clipMaxY = clip.maxY;
+    item.stencilDepth = _frame->pathClipDepth;
     _frame->items.push_back(item);
 }
 
@@ -951,6 +1684,7 @@ void UIRenderBackend::drawRectShadow(const ayt::math::FRectangle& bounds,
     item.clipMinY = clip.minY;
     item.clipMaxX = clip.maxX;
     item.clipMaxY = clip.maxY;
+    item.stencilDepth = _frame->pathClipDepth;
     _frame->items.push_back(item);
 }
 
@@ -1034,6 +1768,7 @@ void UIRenderBackend::drawCard(const ayt::math::FRectangle& bounds,
     item.clipMinY = clip.minY;
     item.clipMaxX = clip.maxX;
     item.clipMaxY = clip.maxY;
+    item.stencilDepth = _frame->pathClipDepth;
     _frame->items.push_back(item);
 }
 
@@ -1172,6 +1907,7 @@ void UIRenderBackend::emitClippedTexturedQuad(const ayt::math::FRectangle& bound
     item.v0 = v0;
     item.u1 = u1;
     item.v1 = v1;
+    item.stencilDepth = _frame->pathClipDepth;
     _frame->items.push_back(item);
 }
 
@@ -1296,6 +2032,96 @@ void UIRenderBackend::flushColoredRects()
                                      : frame.items[logicalIndex];
     };
 
+    const auto setDrawStencil = [](uint8_t depth) {
+        if (depth == 0u) {
+            bgfx::setStencil(BGFX_STENCIL_NONE, BGFX_STENCIL_NONE);
+            return;
+        }
+        const uint32_t stencil = BGFX_STENCIL_TEST_EQUAL
+            | BGFX_STENCIL_FUNC_REF(depth)
+            | BGFX_STENCIL_FUNC_RMASK(0xff)
+            | BGFX_STENCIL_OP_FAIL_S_KEEP
+            | BGFX_STENCIL_OP_FAIL_Z_KEEP
+            | BGFX_STENCIL_OP_PASS_Z_KEEP;
+        bgfx::setStencil(stencil, stencil);
+    };
+
+    const auto buildMeshVertices = [&](const UiTriangleMesh& mesh, uint32_t color) {
+        frame.scratchVertices.clear();
+        frame.scratchIndices = mesh.indices;
+        frame.scratchVertices.reserve(mesh.positions.size());
+        for (const auto& point : mesh.positions) {
+            frame.scratchVertices.push_back({
+                toNdcX(point.x, fbW), toNdcY(point.y, fbH), 0.0f,
+                color, 0.0f, 0.0f,
+                0.0f, 0.0f, 0.0f, 0.0f,
+                0.0f, 0.0f, 0.0f, 0.0f
+            });
+        }
+    };
+
+    const auto submitMesh = [&](const UiTriangleMesh& mesh, uint32_t color,
+                                uint64_t state, uint8_t depth) {
+        if (mesh.indices.empty() || mesh.positions.empty()) return;
+        buildMeshVertices(mesh, color);
+        setDrawStencil(depth);
+        _gpu->submitColoredQuads(kViewId, *_adapter, state,
+                                 frame.scratchVertices.data(),
+                                 static_cast<uint32_t>(frame.scratchVertices.size()),
+                                 sizeof(UiVertex), frame.scratchIndices.data(),
+                                 static_cast<uint32_t>(frame.scratchIndices.size()));
+        ++_drawCalls;
+    };
+
+    const auto submitStencilMesh = [&](const UiTriangleMesh& mesh,
+                                       uint8_t reference, uint32_t passOp) {
+        if (mesh.indices.empty() || mesh.positions.empty()) return;
+        buildMeshVertices(mesh, 0xffffffffu);
+        const uint32_t stencil = BGFX_STENCIL_TEST_EQUAL
+            | BGFX_STENCIL_FUNC_REF(reference)
+            | BGFX_STENCIL_FUNC_RMASK(0xff)
+            | BGFX_STENCIL_OP_FAIL_S_KEEP
+            | BGFX_STENCIL_OP_FAIL_Z_KEEP
+            | passOp;
+        bgfx::setStencil(stencil, stencil);
+        // A zero render state disables color/depth writes. ShaderResource's
+        // state==0 path preserves the state we explicitly install here.
+        _adapter->setState(0);
+        _gpu->submitColoredQuads(kViewId, *_adapter, 0,
+                                 frame.scratchVertices.data(),
+                                 static_cast<uint32_t>(frame.scratchVertices.size()),
+                                 sizeof(UiVertex), frame.scratchIndices.data(),
+                                 static_cast<uint32_t>(frame.scratchIndices.size()));
+        ++_drawCalls;
+    };
+
+    const auto collectContours = [](const UiPathSnapshot& path,
+                                    ayt::ui::PathWinding winding) {
+        UiTriangleMesh mesh;
+        for (const auto& contour : path.fillContours) {
+            if (contour.winding == winding) appendMesh(mesh, contour.mesh);
+        }
+        return mesh;
+    };
+
+    const auto pushPathStencil = [&](const UiPathSnapshot& path, uint8_t baseDepth) {
+        const UiTriangleMesh outer = collectContours(
+            path, ayt::ui::PathWinding::CounterClockwise);
+        const UiTriangleMesh holes = collectContours(
+            path, ayt::ui::PathWinding::Clockwise);
+        submitStencilMesh(outer, baseDepth, BGFX_STENCIL_OP_PASS_Z_INCRSAT);
+        if (baseDepth < UINT8_MAX) {
+            submitStencilMesh(holes, static_cast<uint8_t>(baseDepth + 1u),
+                              BGFX_STENCIL_OP_PASS_Z_DECRSAT);
+        }
+    };
+
+    const auto popPathStencil = [&](const UiPathSnapshot& path, uint8_t depth) {
+        const UiTriangleMesh outer = collectContours(
+            path, ayt::ui::PathWinding::CounterClockwise);
+        submitStencilMesh(outer, depth, BGFX_STENCIL_OP_PASS_Z_DECRSAT);
+    };
+
     // Flush a consecutive run in the selected logical order. In fallback
     // mode logical order is exactly the original array/painter order.
     auto flushFlatRun = [&](size_t begin, size_t end) {
@@ -1334,6 +2160,7 @@ void UIRenderBackend::flushColoredRects()
         }
 
         // P1: state is uniform within a run (grouping key), pass first.state.
+        setDrawStencil(first.stencilDepth);
         if (first.textureIdx == whiteIdx) {
             _gpu->submitColoredQuads(kViewId, *_adapter, first.state,
                                      frame.scratchVertices.data(),
@@ -1350,10 +2177,80 @@ void UIRenderBackend::flushColoredRects()
         ++_drawCalls;
     };
 
+    auto flushMeshRun = [&](size_t begin, size_t end) {
+        const UiItem& first = itemAt(begin);
+        // Mesh color is per-item, so rebuild directly instead of using the
+        // single-color submitMesh helper.
+        frame.scratchVertices.clear();
+        frame.scratchIndices.clear();
+        for (size_t itemIndex = begin; itemIndex < end; ++itemIndex) {
+            const UiItem& item = itemAt(itemIndex);
+            if (item.mesh == nullptr) continue;
+            const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
+            for (const auto& point : item.mesh->positions) {
+                frame.scratchVertices.push_back({
+                    toNdcX(point.x, fbW), toNdcY(point.y, fbH), 0.0f,
+                    item.abgr[0], 0.0f, 0.0f,
+                    0.0f, 0.0f, 0.0f, 0.0f,
+                    0.0f, 0.0f, 0.0f, 0.0f
+                });
+            }
+            for (uint32_t index : item.mesh->indices) {
+                frame.scratchIndices.push_back(base + index);
+            }
+        }
+        if (frame.scratchIndices.empty()) return;
+        setDrawStencil(first.stencilDepth);
+        _gpu->submitColoredQuads(kViewId, *_adapter, first.state,
+                                 frame.scratchVertices.data(),
+                                 static_cast<uint32_t>(frame.scratchVertices.size()),
+                                 sizeof(UiVertex), frame.scratchIndices.data(),
+                                 static_cast<uint32_t>(frame.scratchIndices.size()));
+        ++_drawCalls;
+    };
+
     size_t i = 0;
     const size_t n = frame.items.size();
     while (i < n) {
         const UiItem& it = itemAt(i);
+        if (it.kind == UiItemKind::PathClipPush) {
+            if (it.path != nullptr) pushPathStencil(*it.path, it.stencilDepth);
+            ++i;
+            continue;
+        }
+        if (it.kind == UiItemKind::PathClipPop) {
+            if (it.path != nullptr) popPathStencil(*it.path, it.stencilDepth);
+            ++i;
+            continue;
+        }
+        if (it.kind == UiItemKind::PathFill) {
+            if (it.path != nullptr) {
+                pushPathStencil(*it.path, it.stencilDepth);
+                UiTriangleMesh quad;
+                quad.positions = {
+                    {it.minX, it.minY}, {it.maxX, it.minY},
+                    {it.maxX, it.maxY}, {it.minX, it.maxY}
+                };
+                quad.indices = {0, 1, 2, 0, 2, 3};
+                submitMesh(quad, it.abgr[0], it.state,
+                           static_cast<uint8_t>(it.stencilDepth + 1u));
+                popPathStencil(*it.path,
+                               static_cast<uint8_t>(it.stencilDepth + 1u));
+            }
+            ++i;
+            continue;
+        }
+        if (it.kind == UiItemKind::Mesh) {
+            size_t end = i + 1u;
+            while (end < n && itemAt(end).kind == UiItemKind::Mesh
+                   && itemAt(end).state == it.state
+                   && itemAt(end).stencilDepth == it.stencilDepth) {
+                ++end;
+            }
+            flushMeshRun(i, end);
+            i = end;
+            continue;
+        }
         if (it.kind == UiItemKind::Sdf) {
             // Batch knife: consecutive SDF items with IDENTICAL params
             // (shape rect rides per-vertex now, so position/color vary
@@ -1365,6 +2262,7 @@ void UIRenderBackend::flushColoredRects()
             size_t end = i + 1;
             while (end < n && itemAt(end).kind == UiItemKind::Sdf
                    && itemAt(end).state == it.state
+                   && itemAt(end).stencilDepth == it.stencilDepth
                    && sdfParamsEqual(itemAt(end).sdf, it.sdf)) {
                 ++end;
             }
@@ -1419,6 +2317,7 @@ void UIRenderBackend::flushColoredRects()
                 frame.scratchIndices.push_back(base + 3);
             }
 
+            setDrawStencil(it.stencilDepth);
             _gpu->submitSdfQuads(kViewId, *_adapter, it.state,
                                  frame.scratchVertices.data(),
                                  static_cast<uint32_t>(frame.scratchVertices.size()),
@@ -1432,7 +2331,8 @@ void UIRenderBackend::flushColoredRects()
         size_t end = i + 1;
         while (end < n && itemAt(end).kind == UiItemKind::Flat
                && itemAt(end).textureIdx == it.textureIdx
-               && itemAt(end).state == it.state) {
+               && itemAt(end).state == it.state
+               && itemAt(end).stencilDepth == it.stencilDepth) {
             ++end;
         }
         flushFlatRun(i, end);
@@ -1440,6 +2340,7 @@ void UIRenderBackend::flushColoredRects()
     }
 
     frame.items.clear();
+    bgfx::setStencil(BGFX_STENCIL_NONE, BGFX_STENCIL_NONE);
 }
 
 void UIRenderBackend::flushPendingText()
@@ -1816,6 +2717,7 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         item.v0 = tv0;
         item.u1 = tu1;
         item.v1 = tv1;
+        item.stencilDepth = frame.pathClipDepth;
         frame.items.push_back(item);
     };
 
