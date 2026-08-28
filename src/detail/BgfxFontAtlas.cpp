@@ -35,6 +35,22 @@ bool fileExists(const wchar_t* path)
 #endif
 }
 
+uint32_t nextTextCodePoint(const std::wstring& text, size_t& index)
+{
+    const uint32_t first = static_cast<uint32_t>(text[index++]);
+    if constexpr (sizeof(wchar_t) == 2) {
+        if (first >= 0xD800u && first <= 0xDBFFu && index < text.size()) {
+            const uint32_t second = static_cast<uint32_t>(text[index]);
+            if (second >= 0xDC00u && second <= 0xDFFFu) {
+                ++index;
+                return 0x10000u + ((first - 0xD800u) << 10u) + (second - 0xDC00u);
+            }
+        }
+        if (first >= 0xD800u && first <= 0xDFFFu) return 0xFFFDu;
+    }
+    return first;
+}
+
 } // namespace
 
 BgfxFontAtlas::BgfxFontAtlas() = default;
@@ -88,44 +104,51 @@ bool BgfxFontAtlas::initialize(BGFXAdapter& adapter)
     // face at that size.
     static const struct {
         const wchar_t* family;
-        const wchar_t* path;
+        const wchar_t* regular;
+        const wchar_t* bold;
+        const wchar_t* italic;
+        const wchar_t* boldItalic;
     } kFamilyPaths[] = {
-        {L"Microsoft YaHei", L"C:\\Windows\\Fonts\\msyh.ttc"},
-        {L"Microsoft YaHei UI", L"C:\\Windows\\Fonts\\msyh.ttc"},
-        {L"SimSun", L"C:\\Windows\\Fonts\\simsun.ttc"},
-        {L"Segoe UI", L"C:\\Windows\\Fonts\\segoeui.ttf"},
-        {L"Arial", L"C:\\Windows\\Fonts\\arial.ttf"},
+        {L"Microsoft YaHei", L"C:\\Windows\\Fonts\\msyh.ttc",
+         L"C:\\Windows\\Fonts\\msyhbd.ttc", nullptr, nullptr},
+        {L"Microsoft YaHei UI", L"C:\\Windows\\Fonts\\msyh.ttc",
+         L"C:\\Windows\\Fonts\\msyhbd.ttc", nullptr, nullptr},
+        {L"SimSun", L"C:\\Windows\\Fonts\\simsun.ttc", nullptr, nullptr, nullptr},
+        {L"Segoe UI", L"C:\\Windows\\Fonts\\segoeui.ttf",
+         L"C:\\Windows\\Fonts\\segoeuib.ttf",
+         L"C:\\Windows\\Fonts\\segoeuii.ttf",
+         L"C:\\Windows\\Fonts\\segoeuiz.ttf"},
+        {L"Arial", L"C:\\Windows\\Fonts\\arial.ttf",
+         L"C:\\Windows\\Fonts\\arialbd.ttf",
+         L"C:\\Windows\\Fonts\\ariali.ttf",
+         L"C:\\Windows\\Fonts\\arialbi.ttf"},
     };
     for (const auto& entry : kFamilyPaths) {
-        if (fileExists(entry.path)) {
-            _familyPaths[entry.family] = entry.path;
-        }
+        if (!fileExists(entry.regular)) continue;
+        FamilyFaces faces;
+        faces.regular = entry.regular;
+        if (fileExists(entry.bold)) faces.bold = entry.bold;
+        if (fileExists(entry.italic)) faces.italic = entry.italic;
+        if (fileExists(entry.boldItalic)) faces.boldItalic = entry.boldItalic;
+        _familyFaces[entry.family] = std::move(faces);
     }
 
-    _bgraScratch.resize(static_cast<size_t>(kAtlasWidth) * static_cast<size_t>(kAtlasHeight) * 4u);
-
-    const bgfx::TextureHandle handle = bgfx::createTexture2D(
-        static_cast<uint16_t>(kAtlasWidth), static_cast<uint16_t>(kAtlasHeight), false, 1,
-        bgfx::TextureFormat::BGRA8, BGFX_TEXTURE_NONE | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
-        nullptr);
-    if (!bgfx::isValid(handle)) {
+    if (ensureGpuAtlas(acquireFont(14)) == kInvalidIdx) {
         std::fprintf(stderr, "[BgfxFontAtlas] atlas texture creation failed\n");
         return false;
     }
-
-    _atlasTextureIdx = handle.idx;
-    _atlasDirty      = false;
     return true;
 }
 
 void BgfxFontAtlas::shutdown(BGFXAdapter& adapter)
 {
-    if (adapter.isInitialized() && _atlasTextureIdx != kInvalidIdx) {
-        adapter.destroy(bgfx::TextureHandle{_atlasTextureIdx});
-        _atlasTextureIdx = kInvalidIdx;
-    } else if (_atlasTextureIdx != kInvalidIdx) {
-        _atlasTextureIdx = kInvalidIdx;
+    for (auto& entry : _gpuAtlases) {
+        if (entry.second.textureIdx != kInvalidIdx && adapter.isInitialized()) {
+            adapter.destroy(bgfx::TextureHandle{entry.second.textureIdx});
+        }
+        entry.second.textureIdx = kInvalidIdx;
     }
+    _gpuAtlases.clear();
 
     _shapersByFontId.clear();
 
@@ -135,11 +158,8 @@ void BgfxFontAtlas::shutdown(BGFXAdapter& adapter)
     }
 
     _fontsBySize.clear();
-    _familyPaths.clear();
-    _fontsByFamilySize.clear();
-    _bgraScratch.clear();
-    _atlasDirty = true;
-    _knownGlyphs.clear();
+    _familyFaces.clear();
+    _fontsByFaceRequest.clear();
     _adapter    = nullptr;
 }
 
@@ -208,42 +228,58 @@ ayt::font::IFont* BgfxFontAtlas::acquireFont(int pixelSize)
 
 ayt::font::IFont* BgfxFontAtlas::acquireFont(const wchar_t* familyName, int pixelSize)
 {
-    if (_fontManager == nullptr || pixelSize < 8) {
-        return nullptr;
-    }
-    if (familyName == nullptr || familyName[0] == L'\0') {
-        return acquireFont(pixelSize);  // default-family path
-    }
+    return acquireFont(familyName, pixelSize, 400, false);
+}
 
-    const std::wstring family(familyName);
-    auto famIt = _fontsByFamilySize.find(family);
-    if (famIt != _fontsByFamilySize.end()) {
-        const auto sizeIt = famIt->second.find(pixelSize);
-        if (sizeIt != famIt->second.end()) {
-            return _fontManager->getFont(sizeIt->second);
+ayt::font::IFont* BgfxFontAtlas::acquireFont(const wchar_t* familyName,
+                                              int pixelSize,
+                                              int fontWeight,
+                                              bool italic)
+{
+    if (_fontManager == nullptr || pixelSize < 8) return nullptr;
+    const bool bold = fontWeight >= 600;
+    std::wstring family = familyName != nullptr ? familyName : L"";
+    if (family.empty() && !bold && !italic) return acquireFont(pixelSize);
+    if (family.empty()) {
+        if (_familyFaces.find(L"Microsoft YaHei UI") != _familyFaces.end()) {
+            family = L"Microsoft YaHei UI";
+        } else {
+            return acquireFont(pixelSize);
         }
     }
 
-    const auto pathIt = _familyPaths.find(family);
-    if (pathIt == _familyPaths.end()) {
-        return acquireFont(pixelSize);  // unknown family → default face
+    const auto facesIt = _familyFaces.find(family);
+    if (facesIt == _familyFaces.end()) return acquireFont(pixelSize);
+    const FamilyFaces& faces = facesIt->second;
+    const std::wstring* path = &faces.regular;
+    if (bold && italic && !faces.boldItalic.empty()) path = &faces.boldItalic;
+    else if (bold && !faces.bold.empty()) path = &faces.bold;
+    else if (italic && !faces.italic.empty()) path = &faces.italic;
+    if (path->empty()) path = &faces.regular;
+
+    const std::wstring requestKey = family + L"|" + std::to_wstring(pixelSize)
+        + L"|" + std::to_wstring(bold ? 700 : 400)
+        + L"|" + std::to_wstring(italic ? 1 : 0);
+    const auto existing = _fontsByFaceRequest.find(requestKey);
+    if (existing != _fontsByFaceRequest.end()) {
+        return _fontManager->getFont(existing->second);
     }
 
-    // Register lazily per (family, size); the name must be unique so the
-    // FontManager keeps distinct faces (glyph indices are font-local).
-    wchar_t name[64] = {};
+    wchar_t name[128] = {};
 #if defined(_WIN32)
-    swprintf_s(name, L"UI_%ls_%d", family.c_str(), pixelSize);
+    swprintf_s(name, L"UI_%ls_%d_%d_%d", family.c_str(), pixelSize,
+               bold ? 700 : 400, italic ? 1 : 0);
 #else
-    swprintf(name, sizeof(name) / sizeof(name[0]), L"UI_%ls_%d", family.c_str(), pixelSize);
+    swprintf(name, sizeof(name) / sizeof(name[0]), L"UI_%ls_%d_%d_%d",
+             family.c_str(), pixelSize, bold ? 700 : 400, italic ? 1 : 0);
 #endif
     const ayt::font::FontHandle handle =
-        _fontManager->registerFont(name, pathIt->second.c_str(), pixelSize);
+        _fontManager->registerFont(name, path->c_str(), pixelSize);
     if (!handle.isValid() || _fontManager->getFont(handle) == nullptr) {
         return acquireFont(pixelSize);
     }
     _fontManager->preloadFont(handle);
-    _fontsByFamilySize[family][pixelSize] = handle;
+    _fontsByFaceRequest[requestKey] = handle;
     return _fontManager->getFont(handle);
 }
 
@@ -286,6 +322,13 @@ ayt::font::IAYShaper* BgfxFontAtlas::acquireShaper(ayt::font::IFont* font)
 std::vector<ayt::font::ShapedGlyph> BgfxFontAtlas::shapeText(ayt::font::IFont* font,
                                                              const std::wstring& text)
 {
+    return shapeText(font, text, ayt::font::ShapingDirection::Auto, nullptr);
+}
+
+std::vector<ayt::font::ShapedGlyph> BgfxFontAtlas::shapeText(
+    ayt::font::IFont* font, const std::wstring& text,
+    ayt::font::ShapingDirection direction, const char* language)
+{
     if (font == nullptr || text.empty()) {
         return {};
     }
@@ -293,7 +336,10 @@ std::vector<ayt::font::ShapedGlyph> BgfxFontAtlas::shapeText(ayt::font::IFont* f
     if (shaper == nullptr) {
         return {};
     }
-    return shaper->shape(text.c_str(), static_cast<int>(text.size()));
+    ayt::font::ShapingOptions options;
+    options.direction = direction;
+    options.language = language;
+    return shaper->shapeWithOptions(text.c_str(), static_cast<int>(text.size()), options);
 }
 
 void BgfxFontAtlas::prepareShapedGlyphs(ayt::font::IFont* font, int pixelSize,
@@ -304,21 +350,16 @@ void BgfxFontAtlas::prepareShapedGlyphs(ayt::font::IFont* font, int pixelSize,
     }
     for (const ayt::font::ShapedGlyph& sg : shaped) {
         font->getGlyphByIndex(sg.glyphIndex);
-        // Keyed by (fontId, glyph): glyph indices are font-local — a
-        // size-keyed key would collide across same-size families and
-        // suppress the atlas re-upload for the second family's glyphs.
-        const uint64_t key =
-            (static_cast<uint64_t>(static_cast<uint32_t>(font->getHandle().id)) << 32)
-            | sg.glyphIndex;
-        if (_knownGlyphs.insert(key).second) {
-            markAtlasDirty();
+        FontGpuAtlas& atlas = _gpuAtlases[font->getHandle().id];
+        if (atlas.knownGlyphs.insert(sg.glyphIndex).second) {
+            markAtlasDirty(font);
         }
     }
 }
 
-void BgfxFontAtlas::markAtlasDirty()
+void BgfxFontAtlas::markAtlasDirty(ayt::font::IFont* font)
 {
-    _atlasDirty = true;
+    if (font != nullptr) _gpuAtlases[font->getHandle().id].dirty = true;
 }
 
 void BgfxFontAtlas::prepareGlyphs(ayt::font::IFont* font, int pixelSize, const std::wstring& text)
@@ -327,16 +368,12 @@ void BgfxFontAtlas::prepareGlyphs(ayt::font::IFont* font, int pixelSize, const s
         return;
     }
 
-    for (wchar_t ch : text) {
-        const uint32_t codepoint = static_cast<uint32_t>(ch);
+    for (size_t index = 0; index < text.size();) {
+        const uint32_t codepoint = nextTextCodePoint(text, index);
         font->getGlyph(codepoint);
-        // Font-id keyed — see prepareShapedGlyphs (glyph indices are
-        // font-local; same-size families must not share dirty keys).
-        const uint64_t key =
-            (static_cast<uint64_t>(static_cast<uint32_t>(font->getHandle().id)) << 32)
-            | codepoint;
-        if (_knownGlyphs.insert(key).second) {
-            markAtlasDirty();
+        FontGpuAtlas& atlas = _gpuAtlases[font->getHandle().id];
+        if (atlas.knownGlyphs.insert(codepoint).second) {
+            markAtlasDirty(font);
         }
     }
 }
@@ -350,11 +387,43 @@ float BgfxFontAtlas::measureShapedWidth(const std::vector<ayt::font::ShapedGlyph
     return width;
 }
 
+uint16_t BgfxFontAtlas::ensureGpuAtlas(ayt::font::IFont* font)
+{
+    if (font == nullptr) return kInvalidIdx;
+    FontGpuAtlas& atlas = _gpuAtlases[font->getHandle().id];
+    if (atlas.textureIdx != kInvalidIdx) return atlas.textureIdx;
+    const bgfx::TextureHandle handle = bgfx::createTexture2D(
+        static_cast<uint16_t>(kAtlasWidth), static_cast<uint16_t>(kAtlasHeight), false, 1,
+        bgfx::TextureFormat::BGRA8,
+        BGFX_TEXTURE_NONE | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
+        nullptr);
+    if (!bgfx::isValid(handle)) return kInvalidIdx;
+    atlas.textureIdx = handle.idx;
+    atlas.dirty = true;
+    atlas.bgraScratch.resize(
+        static_cast<size_t>(kAtlasWidth) * static_cast<size_t>(kAtlasHeight) * 4u);
+    return atlas.textureIdx;
+}
+
+uint16_t BgfxFontAtlas::atlasTextureIdx(ayt::font::IFont* font) const
+{
+    if (font == nullptr) return kInvalidIdx;
+    const auto it = _gpuAtlases.find(font->getHandle().id);
+    return it == _gpuAtlases.end() ? kInvalidIdx : it->second.textureIdx;
+}
+
+bool BgfxFontAtlas::isAtlasDirty(ayt::font::IFont* font) const
+{
+    if (font == nullptr) return false;
+    const auto it = _gpuAtlases.find(font->getHandle().id);
+    return it == _gpuAtlases.end() || it->second.dirty;
+}
+
 void BgfxFontAtlas::syncAtlasToGpu(ayt::font::IFont* font)
 {
-    if (font == nullptr || _atlasTextureIdx == kInvalidIdx || !_atlasDirty) {
-        return;
-    }
+    if (font == nullptr || ensureGpuAtlas(font) == kInvalidIdx) return;
+    FontGpuAtlas& atlas = _gpuAtlases[font->getHandle().id];
+    if (!atlas.dirty) return;
 
     const uint8_t* gray = static_cast<const uint8_t*>(font->getAtlasTexture());
     if (gray == nullptr) {
@@ -362,25 +431,25 @@ void BgfxFontAtlas::syncAtlasToGpu(ayt::font::IFont* font)
     }
 
     const size_t pixelCount = static_cast<size_t>(kAtlasWidth) * static_cast<size_t>(kAtlasHeight);
-    if (_bgraScratch.size() < pixelCount * 4u) {
-        _bgraScratch.resize(pixelCount * 4u);
+    if (atlas.bgraScratch.size() < pixelCount * 4u) {
+        atlas.bgraScratch.resize(pixelCount * 4u);
     }
 
     for (size_t i = 0; i < pixelCount; ++i) {
         const uint8_t alpha   = gray[i];
         const size_t  dst     = i * 4u;
-        _bgraScratch[dst + 0] = 255;
-        _bgraScratch[dst + 1] = 255;
-        _bgraScratch[dst + 2] = 255;
-        _bgraScratch[dst + 3] = alpha;
+        atlas.bgraScratch[dst + 0] = 255;
+        atlas.bgraScratch[dst + 1] = 255;
+        atlas.bgraScratch[dst + 2] = 255;
+        atlas.bgraScratch[dst + 3] = alpha;
     }
 
     const bgfx::Memory* mem =
-        bgfx::copy(_bgraScratch.data(), static_cast<uint32_t>(_bgraScratch.size()));
-    bgfx::updateTexture2D(bgfx::TextureHandle{_atlasTextureIdx}, 0, 0, 0, 0,
+        bgfx::copy(atlas.bgraScratch.data(), static_cast<uint32_t>(atlas.bgraScratch.size()));
+    bgfx::updateTexture2D(bgfx::TextureHandle{atlas.textureIdx}, 0, 0, 0, 0,
                           static_cast<uint16_t>(kAtlasWidth), static_cast<uint16_t>(kAtlasHeight),
                           mem);
-    _atlasDirty = false;
+    atlas.dirty = false;
 }
 
 } // namespace ayt::render::detail

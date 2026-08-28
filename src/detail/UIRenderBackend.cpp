@@ -23,6 +23,22 @@ namespace ayt::render {
 
 namespace {
 
+uint32_t nextTextCodePoint(const std::wstring& text, size_t& index)
+{
+    const uint32_t first = static_cast<uint32_t>(text[index++]);
+    if constexpr (sizeof(wchar_t) == 2) {
+        if (first >= 0xD800u && first <= 0xDBFFu && index < text.size()) {
+            const uint32_t second = static_cast<uint32_t>(text[index]);
+            if (second >= 0xDC00u && second <= 0xDFFFu) {
+                ++index;
+                return 0x10000u + ((first - 0xD800u) << 10u) + (second - 0xDC00u);
+            }
+        }
+        if (first >= 0xD800u && first <= 0xDFFFu) return 0xFFFDu;
+    }
+    return first;
+}
+
 struct UiVertex {
     float    x;
     float    y;
@@ -710,6 +726,19 @@ std::vector<ayt::math::FVector2> sampleArc(
 // when the passed state is 0, so state must never be 0). Additive uses
 // FUNC(SRC_ALPHA, ONE) to match the interface contract SRC*SRC_ALPHA+DST*1
 // (plain BGFX_STATE_BLEND_ADD would be ONE,ONE = SRC*1+DST*1).
+ayt::font::ShapingDirection toFontDirection(ayt::ui::TextDirection direction)
+{
+    switch (direction) {
+    case ayt::ui::TextDirection::LeftToRight:
+        return ayt::font::ShapingDirection::LeftToRight;
+    case ayt::ui::TextDirection::RightToLeft:
+        return ayt::font::ShapingDirection::RightToLeft;
+    case ayt::ui::TextDirection::Auto:
+    default:
+        return ayt::font::ShapingDirection::Auto;
+    }
+}
+
 uint64_t blendStateBits(ayt::ui::BlendMode mode)
 {
     uint64_t bits = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
@@ -763,7 +792,6 @@ struct UIRenderBackend::FrameState {
     std::vector<UiItem>                items;              // ordered draw list (z-order)
     std::vector<UiVertex>              scratchVertices;
     std::vector<uint32_t>              scratchIndices;
-    ayt::font::IFont*                  textSyncFont = nullptr;
     std::vector<UiClipEntry>           clipStack;
     uint8_t                            pathClipDepth = 0;
     bool                               hasOrderingBarriers = false;
@@ -886,7 +914,6 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
         _frame->items.clear();
         _frame->scratchVertices.clear();
         _frame->scratchIndices.clear();
-        _frame->textSyncFont = nullptr;
     }
 
     if (_fontAtlas != nullptr) {
@@ -914,7 +941,6 @@ void UIRenderBackend::shutdownFromRendererWithoutAdapter()
         _frame->items.clear();
         _frame->scratchVertices.clear();
         _frame->scratchIndices.clear();
-        _frame->textSyncFont = nullptr;
     }
 
     _gpu.reset();
@@ -956,7 +982,6 @@ void UIRenderBackend::beginFrame()
     frame.clipStack.clear();
     frame.pathClipDepth = 0;
     frame.hasOrderingBarriers = false;
-    frame.textSyncFont = nullptr;
     frame.currentBlend = ayt::ui::BlendMode::Normal;  // P1: per-frame reset
     // PR-anim: opacity is a per-frame render-state like BlendMode —
     // Widget::render balances its push/pop every frame, but a buggy
@@ -1361,15 +1386,10 @@ void UIRenderBackend::flushBatches()
     flushColoredRects();
 }
 
-void UIRenderBackend::syncTextAtlasIfNeeded()
+void UIRenderBackend::syncTextAtlasIfNeeded(ayt::font::IFont* font)
 {
-    if (_fontAtlas == nullptr || !_fontAtlas->isAtlasDirty() || _frame == nullptr) {
+    if (_fontAtlas == nullptr || !_fontAtlas->isAtlasDirty(font) || _frame == nullptr) {
         return;
-    }
-
-    ayt::font::IFont* font = _frame->textSyncFont;
-    if (font == nullptr) {
-        font = _fontAtlas->acquireFont(14);
     }
     if (font == nullptr) {
         return;
@@ -2406,6 +2426,14 @@ ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(const std::wst
                                                                   int fontSize,
                                                                   float maxWidth) const
 {
+    ayt::ui::IRenderBackend::TextStyle style;
+    return measureText(text, fontSize, style, maxWidth);
+}
+
+ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(
+    const std::wstring& text, int fontSize,
+    const ayt::ui::IRenderBackend::TextStyle& style, float maxWidth) const
+{
     TextMetrics out{0.0f, 0.0f, 0.0f, 0.0f};
     if (!_initialized || _fontAtlas == nullptr || fontSize < 8) {
         return out;
@@ -2414,7 +2442,9 @@ ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(const std::wst
     auto* atlas = const_cast<detail::BgfxFontAtlas*>(_fontAtlas.get());
     const float scale = getUiScale();
     const int rasterSize = std::max(1, static_cast<int>(std::lround(fontSize * scale)));
-    ayt::font::IFont* font = atlas->acquireFont(rasterSize);
+    const wchar_t* family = style.fontFamily.empty() ? nullptr : style.fontFamily.c_str();
+    const int weight = style.bold ? std::max(700, style.fontWeight) : style.fontWeight;
+    ayt::font::IFont* font = atlas->acquireFont(family, rasterSize, weight, style.italic);
     if (font == nullptr) {
         return out;
     }
@@ -2431,26 +2461,46 @@ ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(const std::wst
 
     // Glyph advances (px). Shaped path = HB 26.6 fixed-point; fallback =
     // per-codepoint advance (same default advance the draw path uses).
-    const std::vector<ayt::font::ShapedGlyph> shaped = atlas->shapeText(font, text);
-    const size_t n = shaped.empty() ? text.size() : shaped.size();
+    const char* language = style.language.empty() ? nullptr : style.language.c_str();
+    const std::vector<ayt::font::ShapedGlyph> shaped = atlas->shapeText(
+        font, text, toFontDirection(style.direction), language);
     std::vector<float> advances;
     std::vector<bool>  isSpace;
-    advances.reserve(n);
-    isSpace.reserve(n);
     if (!shaped.empty()) {
-        for (const ayt::font::ShapedGlyph& sg : shaped) {
-            advances.push_back(static_cast<float>(sg.xAdvance) / (64.0f * scale));
-            const size_t ci = std::min<size_t>(sg.charIndex, text.size() - 1);
+        advances.reserve(shaped.size());
+        isSpace.reserve(shaped.size());
+        for (size_t begin = 0; begin < shaped.size();) {
+            size_t end = begin;
+            float advance = 0.0f;
+            do {
+                advance += static_cast<float>(shaped[end].xAdvance) / (64.0f * scale);
+                ++end;
+            } while (end < shaped.size()
+                     && shaped[end].charIndex == shaped[begin].charIndex);
+            advances.push_back(advance + static_cast<float>(style.letterSpacing));
+            const size_t ci = std::min<size_t>(shaped[begin].charIndex, text.size() - 1u);
             isSpace.push_back(text[ci] == L' ' || text[ci] == L'\t');
+            begin = end;
         }
     } else {
-        for (wchar_t ch : text) {
-            ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
-            advances.push_back((glyph != nullptr) ? static_cast<float>(glyph->metrics.advance) / scale
-                                                  : out.height * 0.25f);
-            isSpace.push_back(ch == L' ' || ch == L'\t');
+        const auto analysis = ayt::ui::analyzeUnicodeText(text, style.direction);
+        advances.reserve(analysis.clusters.size());
+        isSpace.reserve(analysis.clusters.size());
+        for (const auto& cluster : analysis.clusters) {
+            float advance = 0.0f;
+            size_t index = cluster.textStart;
+            const size_t end = cluster.textStart + cluster.textLength;
+            while (index < end) {
+                ayt::font::GlyphInfo* glyph = font->getGlyph(nextTextCodePoint(text, index));
+                advance += (glyph != nullptr)
+                    ? static_cast<float>(glyph->metrics.advance) / scale
+                    : out.height * 0.25f;
+            }
+            advances.push_back(advance + static_cast<float>(style.letterSpacing));
+            isSpace.push_back(cluster.whitespace);
         }
     }
+    const size_t n = advances.size();
 
     if (maxWidth <= 0.0f) {
         // No wrap constraint: single line, full span.
@@ -2503,6 +2553,76 @@ ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(const std::wst
 
     out.width  = maxLineW;
     out.height = static_cast<float>(lines) * lh;
+    return out;
+}
+
+ayt::ui::IRenderBackend::ShapedText UIRenderBackend::shapeText(
+    const std::wstring& text, int fontSize,
+    const ayt::ui::IRenderBackend::TextStyle& style) const
+{
+    ShapedText out;
+    out.metrics = measureText(text, fontSize, style);
+    if (!_initialized || _fontAtlas == nullptr || text.empty() || fontSize < 8) {
+        return out;
+    }
+
+    auto* atlas = const_cast<detail::BgfxFontAtlas*>(_fontAtlas.get());
+    const float scale = getUiScale();
+    const int rasterSize = std::max(1, static_cast<int>(std::lround(fontSize * scale)));
+    const wchar_t* family = style.fontFamily.empty() ? nullptr : style.fontFamily.c_str();
+    const int weight = style.bold ? std::max(700, style.fontWeight) : style.fontWeight;
+    ayt::font::IFont* font = atlas->acquireFont(family, rasterSize, weight, style.italic);
+    if (font == nullptr) {
+        return ayt::ui::IRenderBackend::shapeText(text, fontSize, style);
+    }
+
+    const char* language = style.language.empty() ? nullptr : style.language.c_str();
+    const std::vector<ayt::font::ShapedGlyph> shaped = atlas->shapeText(
+        font, text, toFontDirection(style.direction), language);
+    if (shaped.empty()) {
+        return ayt::ui::IRenderBackend::shapeText(text, fontSize, style);
+    }
+
+    const ayt::ui::UnicodeTextAnalysis analysis =
+        ayt::ui::analyzeUnicodeText(text, style.direction);
+    out.rightToLeft = style.direction == ayt::ui::TextDirection::RightToLeft
+        || (style.direction == ayt::ui::TextDirection::Auto && analysis.baseRightToLeft);
+
+    std::vector<size_t> sourceStarts;
+    sourceStarts.reserve(shaped.size());
+    const size_t lastSourceIndex = text.size() - 1u;
+    for (const ayt::font::ShapedGlyph& glyph : shaped) {
+        sourceStarts.push_back(std::min<size_t>(glyph.charIndex, lastSourceIndex));
+    }
+    std::sort(sourceStarts.begin(), sourceStarts.end());
+    sourceStarts.erase(std::unique(sourceStarts.begin(), sourceStarts.end()),
+                       sourceStarts.end());
+
+    auto sourceLength = [&](size_t start) {
+        const auto next = std::upper_bound(sourceStarts.begin(), sourceStarts.end(), start);
+        const size_t end = next == sourceStarts.end() ? text.size() : *next;
+        return end > start ? end - start : size_t{1};
+    };
+
+    const float letterSpacing = static_cast<float>(style.letterSpacing);
+    float pen = 0.0f;
+    for (size_t begin = 0; begin < shaped.size();) {
+        const size_t start = std::min<size_t>(shaped[begin].charIndex, lastSourceIndex);
+        size_t end = begin + 1u;
+        float advance = static_cast<float>(shaped[begin].xAdvance) / (64.0f * scale);
+        while (end < shaped.size() && shaped[end].charIndex == shaped[begin].charIndex) {
+            advance += static_cast<float>(shaped[end].xAdvance) / (64.0f * scale);
+            ++end;
+        }
+        advance += letterSpacing;
+        const float nextPen = pen + advance;
+        out.clusters.push_back({start, sourceLength(start),
+                                std::min(pen, nextPen), std::max(pen, nextPen),
+                                static_cast<uint8_t>(out.rightToLeft ? 1u : 0u)});
+        pen = nextPen;
+        begin = end;
+    }
+    out.metrics.width = std::abs(pen);
     return out;
 }
 
@@ -2576,13 +2696,18 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
 
     const float scale = getUiScale();
     const int rasterSize = std::max(1, static_cast<int>(std::lround(fontSize * scale)));
-    ayt::font::IFont* font = _fontAtlas->acquireFont(rasterSize);
+    const wchar_t* family = style.fontFamily.empty() ? nullptr : style.fontFamily.c_str();
+    const int weight = style.bold ? std::max(700, style.fontWeight) : style.fontWeight;
+    ayt::font::IFont* font = _fontAtlas->acquireFont(
+        family, rasterSize, weight, style.italic);
     if (font == nullptr) {
         drawRect(bounds, style.color);
         return;
     }
 
-    std::vector<ayt::font::ShapedGlyph> shaped = _fontAtlas->shapeText(font, text);
+    const char* language = style.language.empty() ? nullptr : style.language.c_str();
+    std::vector<ayt::font::ShapedGlyph> shaped = _fontAtlas->shapeText(
+        font, text, toFontDirection(style.direction), language);
     const bool useShaped = !shaped.empty();
     if (useShaped) {
         _fontAtlas->prepareShapedGlyphs(font, rasterSize, shaped);
@@ -2590,10 +2715,9 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         _fontAtlas->prepareGlyphs(font, rasterSize, text);
     }
 
-    frame.textSyncFont = font;
-    syncTextAtlasIfNeeded();
+    syncTextAtlasIfNeeded(font);
 
-    const uint16_t atlasIdx = _fontAtlas->atlasTextureIdx();
+    const uint16_t atlasIdx = _fontAtlas->atlasTextureIdx(font);
 
     const ayt::font::FontMetrics& metrics = font->getMetrics();
     const float boundsW = bounds.maxX - bounds.minX;
@@ -2608,26 +2732,36 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         float yOff;
         float xAdv;
         bool  space;
+        bool  clusterEnd;
     };
     std::vector<GlyphRun> runs;
     if (useShaped) {
         runs.reserve(shaped.size());
-        for (const ayt::font::ShapedGlyph& sg : shaped) {
+        for (size_t index = 0; index < shaped.size(); ++index) {
+            const ayt::font::ShapedGlyph& sg = shaped[index];
             const size_t ci = std::min<size_t>(sg.charIndex, text.size() - 1);
             runs.push_back({font->getGlyphByIndex(sg.glyphIndex),
                             static_cast<float>(sg.xOffset) / (64.0f * scale),
                             static_cast<float>(sg.yOffset) / (64.0f * scale),
                             static_cast<float>(sg.xAdvance) / (64.0f * scale),
-                            text[ci] == L' ' || text[ci] == L'\t'});
+                            text[ci] == L' ' || text[ci] == L'\t',
+                            index + 1u == shaped.size()
+                                || shaped[index + 1u].charIndex != sg.charIndex});
         }
     } else {
+        const auto analysis = ayt::ui::analyzeUnicodeText(text, style.direction);
         runs.reserve(text.size());
-        for (wchar_t ch : text) {
-            ayt::font::GlyphInfo* glyph = font->getGlyph(static_cast<uint32_t>(ch));
-            runs.push_back({glyph, 0.0f, 0.0f,
-                            (glyph != nullptr) ? static_cast<float>(glyph->metrics.advance) / scale
-                                               : (metrics.lineHeight / scale) * 0.25f,
-                            ch == L' ' || ch == L'\t'});
+        for (const auto& cluster : analysis.clusters) {
+            size_t index = cluster.textStart;
+            const size_t end = cluster.textStart + cluster.textLength;
+            while (index < end) {
+                ayt::font::GlyphInfo* glyph = font->getGlyph(nextTextCodePoint(text, index));
+                runs.push_back({glyph, 0.0f, 0.0f,
+                                (glyph != nullptr)
+                                    ? static_cast<float>(glyph->metrics.advance) / scale
+                                    : (metrics.lineHeight / scale) * 0.25f,
+                                cluster.whitespace, index == end});
+            }
         }
     }
     const size_t n = runs.size();
@@ -2637,23 +2771,54 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
 
     const float ls = static_cast<float>(style.letterSpacing);
 
-    // Lines: wrapToBounds + overflow → greedy word wrap (same rules as
-    // measureText); otherwise the single legacy line. letterSpacing rides
-    // the per-glyph advance everywhere (a trailing invisible spacing keeps
-    // wrap widths == pen advances).
-    std::vector<float> advances(n);
-    std::vector<bool>  isSpace(n);
-    for (size_t i = 0; i < n; ++i) {
-        advances[i] = runs[i].xAdv;
-        isSpace[i]  = runs[i].space;
+    // Wrap shaping clusters, never individual glyphs: a ligature, emoji ZWJ
+    // sequence or Arabic joining cluster is indivisible. Letter spacing is
+    // also applied once per cluster, matching shapeText()/measureText().
+    struct TextClusterRun {
+        int begin = 0;
+        int end = 0;
+        float width = 0.0f;
+        bool space = false;
+    };
+    std::vector<TextClusterRun> clusters;
+    for (size_t begin = 0; begin < n;) {
+        size_t end = begin;
+        float width = 0.0f;
+        do {
+            width += runs[end].xAdv;
+            ++end;
+        } while (end < n && !runs[end - 1u].clusterEnd);
+        width += ls;
+        clusters.push_back({static_cast<int>(begin), static_cast<int>(end),
+                            width, runs[begin].space});
+        begin = end;
+    }
+    std::vector<float> clusterAdvances;
+    std::vector<bool> clusterSpaces;
+    clusterAdvances.reserve(clusters.size());
+    clusterSpaces.reserve(clusters.size());
+    for (const TextClusterRun& cluster : clusters) {
+        clusterAdvances.push_back(cluster.width);
+        clusterSpaces.push_back(cluster.space);
     }
     std::vector<UiTextLineRange> lines;
     if (style.wrapToBounds && boundsW > 0.0f
-        && uiTextLineWidth(advances.data(), static_cast<int>(n), ls) > boundsW) {
-        uiTextWrapToLines(advances.data(), isSpace, static_cast<int>(n), boundsW, ls, lines);
+        && uiTextLineWidth(clusterAdvances.data(), static_cast<int>(clusters.size()), 0.0f)
+            > boundsW) {
+        std::vector<UiTextLineRange> clusterLines;
+        uiTextWrapToLines(clusterAdvances.data(), clusterSpaces,
+                          static_cast<int>(clusters.size()), boundsW, 0.0f,
+                          clusterLines);
+        lines.reserve(clusterLines.size());
+        for (const UiTextLineRange& line : clusterLines) {
+            lines.push_back({clusters[static_cast<size_t>(line.begin)].begin,
+                             clusters[static_cast<size_t>(line.end - 1)].end,
+                             line.width});
+        }
     } else {
         lines.push_back({0, static_cast<int>(n),
-                         uiTextLineWidth(advances.data(), static_cast<int>(n), ls)});
+                         uiTextLineWidth(clusterAdvances.data(),
+                                         static_cast<int>(clusters.size()), 0.0f)});
     }
 
     // Block layout: lines sit at lineHeight + lineSpacing stride; VAlign
@@ -2770,7 +2935,7 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
             for (int gi = line.begin; gi < line.end; ++gi) {
                 const GlyphRun& g = runs[static_cast<size_t>(gi)];
                 emitGlyph(g, penX, penY, abgr);
-                penX += g.xAdv + ls;
+                penX += g.xAdv + (g.clusterEnd ? ls : 0.0f);
             }
         }
     }

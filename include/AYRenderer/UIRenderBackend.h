@@ -161,6 +161,11 @@ public:
 
     TextMetrics measureText(const std::wstring& text, int fontSize,
                             float maxWidth = 0.0f) const override;
+    TextMetrics measureText(const std::wstring& text, int fontSize,
+                            const ayt::ui::IRenderBackend::TextStyle& style,
+                            float maxWidth = 0.0f) const override;
+    ShapedText shapeText(const std::wstring& text, int fontSize,
+                         const ayt::ui::IRenderBackend::TextStyle& style) const override;
     ayt::font::FontMetrics getFontMetrics(ayt::font::FontHandle font) const override;
     ayt::font::FontHandle getFontHandle(const wchar_t* familyName, int baseSize) override;
 
@@ -230,7 +235,7 @@ private:
 
     void flushColoredRects();
     void flushPendingText();
-    void syncTextAtlasIfNeeded();
+    void syncTextAtlasIfNeeded(ayt::font::IFont* font);
     void drawTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
                           const ayt::math::FVector4& tint);
     // Textured-quad entry shared by drawRect(texture) / drawWithAlpha /

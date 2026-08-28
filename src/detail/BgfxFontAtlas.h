@@ -35,13 +35,18 @@ public:
     // system candidates in initialize) resolve to their own face; unknown
     // or null/empty family falls back to the default face at that size.
     ayt::font::IFont* acquireFont(const wchar_t* familyName, int pixelSize);
+    ayt::font::IFont* acquireFont(const wchar_t* familyName, int pixelSize,
+                                  int fontWeight, bool italic);
     ayt::font::IFont* fontForHandle(ayt::font::FontHandle handle) const;
     ayt::font::FontHandle handleForSize(int pixelSize) const;
-    uint16_t              atlasTextureIdx() const { return _atlasTextureIdx; }
+    uint16_t              atlasTextureIdx(ayt::font::IFont* font) const;
 
     // Shape UTF-16 text with HarfBuzz (falls back to empty on failure).
     std::vector<ayt::font::ShapedGlyph> shapeText(ayt::font::IFont* font,
                                                   const std::wstring& text);
+    std::vector<ayt::font::ShapedGlyph> shapeText(
+        ayt::font::IFont* font, const std::wstring& text,
+        ayt::font::ShapingDirection direction, const char* language = nullptr);
 
     // Rasterize shaped glyphs; marks atlas dirty when a new glyph index appears.
     void prepareShapedGlyphs(ayt::font::IFont* font, int pixelSize,
@@ -52,30 +57,39 @@ public:
 
     float measureShapedWidth(const std::vector<ayt::font::ShapedGlyph>& shaped) const;
 
-    void markAtlasDirty();
-    bool isAtlasDirty() const { return _atlasDirty; }
+    void markAtlasDirty(ayt::font::IFont* font);
+    bool isAtlasDirty(ayt::font::IFont* font) const;
     void syncAtlasToGpu(ayt::font::IFont* font);
 
 private:
     ayt::font::IFont* registerFontForSize(int pixelSize);
     bool              tryRegisterFont(int pixelSize, const wchar_t* path);
     ayt::font::IAYShaper* acquireShaper(ayt::font::IFont* font);
+    uint16_t ensureGpuAtlas(ayt::font::IFont* font);
+
+    struct FamilyFaces {
+        std::wstring regular;
+        std::wstring bold;
+        std::wstring italic;
+        std::wstring boldItalic;
+    };
+
+    struct FontGpuAtlas {
+        uint16_t textureIdx = UINT16_MAX;
+        bool dirty = true;
+        std::vector<uint8_t> bgraScratch;
+        std::unordered_set<uint32_t> knownGlyphs;
+    };
 
     std::unique_ptr<ayt::font::IFontManager> _fontManager;
     std::unordered_map<int, ayt::font::FontHandle> _fontsBySize;
     // family name → font file path (seeded in initialize from the default
     // candidates; empty = family not installed → default-face fallback).
-    std::unordered_map<std::wstring, std::wstring> _familyPaths;
-    // family → size → handle (family fonts register lazily on first use).
-    std::unordered_map<std::wstring, std::unordered_map<int, ayt::font::FontHandle>>
-        _fontsByFamilySize;
+    std::unordered_map<std::wstring, FamilyFaces> _familyFaces;
+    std::unordered_map<std::wstring, ayt::font::FontHandle> _fontsByFaceRequest;
     std::unordered_map<int, std::unique_ptr<ayt::font::IAYShaper>> _shapersByFontId;
-
-    uint16_t             _atlasTextureIdx = UINT16_MAX;
-    bool                 _atlasDirty      = true;
-    std::vector<uint8_t> _bgraScratch;
+    std::unordered_map<int, FontGpuAtlas> _gpuAtlases;
     BGFXAdapter*         _adapter         = nullptr;
-    std::unordered_set<uint64_t> _knownGlyphs;
 };
 
 } // namespace ayt::render::detail
