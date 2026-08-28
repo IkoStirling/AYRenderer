@@ -1,5 +1,5 @@
-// V1 GBuffer Debug skeleton test (2026-07-24). Pins the SHIP
-// contract for V1:
+// GBuffer Debug contract tests. The suite name is retained for test-runner
+// compatibility even though the pass now contains the live V2 overlay.
 //
 //   1) RenderPassSlot enum ABI:
 //        SSAO = 11 (unchanged by append)
@@ -7,27 +7,19 @@
 //   2) View id reservation lock:
 //        GBufferDebugPass::kGBufferDebugViewId == 250
 //        (verified unused via repo grep, 2026-07-24)
-//   3) FrameContext default state (K-GBD-1 zero alloc):
-//        gbufferDebugEnabled == false, gbufferDebugChannel == 0
-//        ⇒ host central gate false ⇒ FBO not created ⇒ zero alloc
-//   4) GBufferDebugChannel enum completeness (5 channels; WorldPos
-//      and Motion alias gbufferMotionRt() in V1; K-GBD-3).
+//   3) FrameContext defaults to a disabled, zero-allocation path.
+//   4) Five-channel enum, with Motion retained as the Material alias.
 //   5) Cache-key extern mirror (Bug fix #3 pattern):
 //        kGBufferDebugCacheKeyCStr literals must agree between
-//        .h declaration + .cpp definition. Pre-V2 the literal is
-//        a placeholder; V2 bumps it. Drift detection guard.
-//   6) GBufferDebugPass skeleton execute() returns 0 — even on
-//        non-initialized / Noop adapter short-circuits, and
-//        when the central gate fires but the FBO is invalid.
-//   7) GBufferDebugPass::isReady() returns false (V1 stub; V2 lifts).
+//        .h declaration + .cpp definition.
+//   6) Disabled/uninitialized/Noop/missing-GBuffer paths return 0.
+//   7) GBufferDebugPass starts not-ready and allocates lazily.
 //   8) GBufferDebugPass::destroyResources() idempotent.
 //   9) makeDefault() does NOT contain GBufferDebug (Forward no-op).
 //  10) makeDeferred() DOES contain GBufferDebug (and is the LAST
 //        slot so bgfx ascending view-id dispatch runs view 250
 //        strictly after view 15).
-//  11) PassExecContext::gbufferDebugFbo defaults to INVALID
-//        (trailing-default ABI-lock; all 23-field brace-init
-//        test sites keep compiling without edits).
+//  11) PassExecContext keeps producer/frame-graph pointers optional.
 //
 // All tests use Backend::Noop (headless test path). The pass's
 // Noop-backend / uninit-adapter guards short-circuit before any
@@ -39,6 +31,8 @@
 #include "AYRenderer/RenderTypes.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "AYShader/ShaderResource.h"
+#include "AYShader/Ir.h"
+#include "AYShader/Phoskia.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
@@ -46,11 +40,10 @@
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
 
-#include <bgfx/bgfx.h>
-
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 using ayt::render::RenderPassSlot;
 using ayt::render::RenderScene;
@@ -103,12 +96,12 @@ TEST_CASE(v1_view_id_lock_is_250) {
 // ─── B. GBufferDebugChannel enum completeness ──────────────────────
 
 TEST_CASE(v1_channel_enum_completeness_5_values) {
-    // V1 ships 5 logical channels; Count sentinel pins the end.
-    // WorldPos(2) + Motion(3) alias gbufferMotionRt() until V2
-    // splits a real motion RT (K-GBD-3).
+    // Channel 3 is the packed material scalar view. Motion remains its
+    // compatibility alias until a dedicated velocity attachment exists.
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Albedo)   == 0u);
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Normal)   == 1u);
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::WorldPos) == 2u);
+    CHECK(static_cast<uint8_t>(GBufferDebugChannel::Material) == 3u);
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Motion)   == 3u);
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Depth)    == 4u);
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Count)    == 5u);
@@ -118,8 +111,7 @@ TEST_CASE(v1_channel_enum_completeness_5_values) {
 // ─── C. FrameContext default state (K-GBD-1 zero alloc) ───────────
 
 TEST_CASE(v1_frame_context_debug_defaults_off) {
-    // K-GBD-1: default OFF means render() central gate is false ⇒
-    // FBO not created ⇒ zero alloc ⇒ execute returns 0.
+    // Default OFF means execute returns before lazy GPU allocation.
     FrameContext ctx;
     CHECK_FALSE(ctx.gbufferDebugEnabled);
     CHECK(ctx.gbufferDebugChannel == 0u);
@@ -136,7 +128,7 @@ TEST_CASE(v1_frame_context_debug_round_trip) {
     // test pattern).
     FrameContext ctx;
     ctx.gbufferDebugEnabled = true;
-    ctx.gbufferDebugChannel = 3u;  // Motion
+    ctx.gbufferDebugChannel = 3u;  // Material
     CHECK(ctx.gbufferDebugEnabled);
     CHECK(ctx.gbufferDebugChannel == 3u);
 }
@@ -151,15 +143,24 @@ TEST_CASE(v1_cache_key_extern_mirror_non_null) {
 }
 
 TEST_CASE(v1_cache_key_extern_mirror_contains_marker) {
-    // V1 placeholder literal contains "gbufferdebug" + version
-    // stamp "v1" so a future reader searching for the marker
-    // can find this contract. V2 bumps the version to "v2".
+    // Live overlay literal contains "gbufferdebug" + version stamp.
     const std::string key(ayt::render::detail::kGBufferDebugCacheKeyCStr);
     CHECK(key.find("gbufferdebug") != std::string::npos);
-    CHECK(key.find("v1")          != std::string::npos);
+    CHECK(key.find("v2")          != std::string::npos);
 }
 
-// ─── E. Skeleton initial state + destroyResources idempotency ─────
+TEST_CASE(v2_live_overlay_source_generates_valid_ir) {
+    ayt::shader::phoskia::Compiler compiler;
+    ayt::shader::phoskia::ir::IRProgram ir;
+    std::vector<std::string> errors;
+    const bool success = compiler.generateIr(
+        ayt::render::detail::kGBufferDebugPhoskiaSourceCStr,
+        ayt::shader::phoskia::CompileOptions{}, ir, errors);
+    CHECK(success);
+    CHECK(errors.empty());
+}
+
+// ─── E. Lazy initial state + destroyResources idempotency ─────────
 
 TEST_CASE(v1_pass_skeleton_initial_state) {
     GBufferDebugPass pass{};
@@ -168,9 +169,7 @@ TEST_CASE(v1_pass_skeleton_initial_state) {
 }
 
 TEST_CASE(v1_pass_destroy_resources_idempotent) {
-    // V1: pass holds no real GPU resources. destroyResources must
-    // be safe to call on an uninitialized adapter and idempotent
-    // across repeated calls (mirror SSAO A1 pattern).
+    // Destruction before the first enabled execute is a safe idempotent no-op.
     BGFXAdapter adapter;
     GBufferDebugPass pass{};
     pass.destroyResources(adapter);
@@ -178,16 +177,9 @@ TEST_CASE(v1_pass_destroy_resources_idempotent) {
     CHECK_FALSE(pass.isReady());
 }
 
-TEST_CASE(v1_pass_isReady_stub_returns_false) {
-    // V1 isReady() returns _program.isValid(). The program is
-    // never acquired (V1 ships no real Phoskia source) so
-    // isReady() must remain false even after execute() runs
-    // (the V1 path always early-returns 0 before program is
-    // touched, so isReady() cannot flip).
+TEST_CASE(v1_pass_isReady_stays_false_while_disabled) {
     GBufferDebugPass pass{};
     CHECK_FALSE(pass.isReady());
-    // V1 short-circuits at step-4 (target invalid) ⇒ execute()
-    // never touches the program state.
     GBufferDebugV1Stubs stubs;
     PassExecContext ctx{
         stubs.adapter,
@@ -200,7 +192,6 @@ TEST_CASE(v1_pass_isReady_stub_returns_false) {
         stubs.frame,
         0u,
     };
-    ctx.gbufferDebugFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     CHECK(pass.execute(ctx) == 0u);
     CHECK_FALSE(pass.isReady());
 }
@@ -208,7 +199,7 @@ TEST_CASE(v1_pass_isReady_stub_returns_false) {
 // ─── F. execute() short-circuit ladder (K-GBD-1) ──────────────────
 
 TEST_CASE(v1_execute_uninitialized_adapter_returns_zero) {
-    // K-GBD-1 step-1: adapter not initialized ⇒ 0 draw + 0 alloc.
+    // Enabled mode still gates before allocation when the adapter is absent.
     GBufferDebugPass pass{};
     GBufferDebugV1Stubs stubs;
     PassExecContext ctx{
@@ -222,15 +213,13 @@ TEST_CASE(v1_execute_uninitialized_adapter_returns_zero) {
         stubs.frame,
         /*viewId=*/0u,
     };
-    ctx.gbufferDebugFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    stubs.frame.gbufferDebugEnabled = true;
     CHECK(pass.execute(ctx) == 0u);
 }
 
-TEST_CASE(v1_execute_no_target_fbo_returns_zero) {
-    // K-GBD-1 step-4: ctx.gbufferDebugFbo INVALID ⇒ 0 draw + 0 alloc.
-    // This is the central-gate closed case (host did not enable
-    // GBufferDebug ⇒ central gate false ⇒ FBO never created ⇒
-    // ctx field INVALID ⇒ execute early-returns 0).
+TEST_CASE(v1_execute_disabled_returns_zero_without_target_fbo) {
+    // The pass renders to the backbuffer and owns no target FBO. Disabled
+    // mode nevertheless returns before creating its triangle/program.
     GBufferDebugPass pass{};
     GBufferDebugV1Stubs stubs;
     PassExecContext ctx{
@@ -244,15 +233,11 @@ TEST_CASE(v1_execute_no_target_fbo_returns_zero) {
         stubs.frame,
         0u,
     };
-    ctx.gbufferDebugFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     CHECK(pass.execute(ctx) == 0u);
 }
 
 TEST_CASE(v1_execute_no_gbuffer_pass_returns_zero) {
-    // K-GBD-1 step-5: ctx.gbufferPass == nullptr (e.g. Forward
-    // pipeline) ⇒ 0 draw. The central gate also gates on this,
-    // so the ctx field is normally INVALID for Forward hosts;
-    // the step-5 check is a belt-and-braces double-check.
+    // Forward/custom pipelines without the producer cannot visualize it.
     GBufferDebugPass pass{};
     GBufferDebugV1Stubs stubs;
     PassExecContext ctx{
@@ -266,9 +251,7 @@ TEST_CASE(v1_execute_no_gbuffer_pass_returns_zero) {
         stubs.frame,
         0u,
     };
-    // Forge a "valid" FBO so we get past step-4 and exercise the
-    // step-5 double-check.
-    ctx.gbufferDebugFbo.idx = 1u;  // non-INVALID sentinel
+    stubs.frame.gbufferDebugEnabled = true;
     ctx.gbufferPass = nullptr;
     CHECK(pass.execute(ctx) == 0u);
 }
@@ -310,14 +293,9 @@ TEST_CASE(v1_make_deferred_total_slot_count_incremented_by_one) {
     CHECK(desc.passes.size() == 12u);
 }
 
-// ─── H. PassExecContext trailing-default ABI lock ──────────────────
+// ─── H. PassExecContext producer defaults ─────────────────────────
 
-TEST_CASE(v1_pass_exec_context_gbufferdebug_fbo_defaults_invalid) {
-    // Append-only trailing default: every existing 23-field
-    // brace-init test site (Test_SSAO_A1, Test_B2_GBufferPass,
-    // Test_F2_ForwardShadow, ...) keeps compiling without edits.
-    // Verify the new field defaults to INVALID so the gating
-    // contract is enforced at the type level.
+TEST_CASE(v1_pass_exec_context_debug_dependencies_default_null) {
     GBufferDebugV1Stubs stubs;
     PassExecContext ctx{
         stubs.adapter,
@@ -330,9 +308,6 @@ TEST_CASE(v1_pass_exec_context_gbufferdebug_fbo_defaults_invalid) {
         stubs.frame,
         0u,
     };
-    // Pre-fill gbufferDebugFbo is default-constructed ⇒ INVALID.
-    CHECK(ctx.gbufferDebugFbo.idx == UINT16_MAX);
-    // Other trailing-default fields unchanged (regression).
     CHECK(ctx.gbufferPass    == nullptr);
     CHECK(ctx.frameGraph     == nullptr);
 }

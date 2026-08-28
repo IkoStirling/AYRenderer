@@ -189,7 +189,8 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
     // isn't live ⇒ resolve returned invalid above). K3 #4 holds:
     // FS depth reconstruct path is NOT used.
     bgfx::TextureHandle worldPosRt = BGFX_INVALID_HANDLE;
-    if (ctx.gbufferPass != nullptr) {
+    if (ctx.gbufferPass != nullptr
+        && ctx.gbufferPass->producedThisFrame()) {
         worldPosRt = ctx.gbufferPass->gbufferMotionRt();
     }
     if (!BGFXAdapter::isValid(worldPosRt)) {

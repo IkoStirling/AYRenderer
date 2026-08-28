@@ -32,6 +32,20 @@ inline bool reversesWinding(const ayt::math::Float4x4& transform) noexcept
     return linearDeterminant(transform) < 0.0f;
 }
 
+// Normals are covectors: a non-uniform model scale must use inverse-transpose
+// instead of the position/tangent linear transform. Singular transforms have
+// no mathematically defined normal matrix; identity is a stable fallback for
+// zero-scale editor states and avoids feeding infinities to the shader.
+inline ayt::math::Float4x4 normalMatrixForTransform(
+    const ayt::math::Float4x4& transform) noexcept
+{
+    const float determinant = linearDeterminant(transform);
+    if (determinant > -1.0e-8f && determinant < 1.0e-8f) {
+        return ayt::math::Float4x4::identity();
+    }
+    return transform.inverse_fast().transpose();
+}
+
 inline uint64_t cullBackFacesForTransform(
     const ayt::math::Float4x4& transform) noexcept
 {

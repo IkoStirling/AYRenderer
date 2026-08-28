@@ -96,6 +96,7 @@ public:
     bool isReady() const noexcept {
         return _lightingFbo.idx != UINT16_MAX && _programReady;
     }
+    bool producedThisFrame() const noexcept { return _producedThisFrame; }
 
     // Stub accessors — return invalid handle / 0 until B5 wires
     // real GPU state. The output FBO is the consumer-side binding
@@ -113,6 +114,10 @@ public:
     // (GBufferPass.cpp:240-266) — drops the FBO + fullscreen VB/IB
     // + program handle, resets all state.
     void setOutputSize(uint16_t width, uint16_t height) noexcept;
+    // Allocate/rebuild the output before FrameGraph imports SceneColor. This
+    // closes the cold-start/resize frame where the graph previously captured
+    // sceneFbo before LightingPass lazily created its output in execute().
+    void prepareOutput(BGFXAdapter& adapter);
 
     // §P5.5 D — IBL ambient cube strength (uploaded as ambientStrength.x).
     void setAmbientStrength(float strength) noexcept {
@@ -178,6 +183,7 @@ private:
     ayt::shader::ShaderResource _program;
     bool _programReady      = false;  // mirror GBufferPass _acquireFailed semantics: _program.isValid() OR _programReady=true (set on success); failure path leaves _programReady=false
     bool _programAcquireFailed = false;  // mirror GBufferPass _acquireFailed
+    bool _producedThisFrame = false;
 
     // §P5.5 D (2026-07-23) — lazy-resolved binding IDs for the
     // cube-driven ambient lookup (mirror _gbufferSkyRt + skyMix

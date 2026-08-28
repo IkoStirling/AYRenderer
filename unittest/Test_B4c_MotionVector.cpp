@@ -123,13 +123,14 @@ namespace {
 // the standard "golden value" pattern Test_BGFXConverter uses for
 // the builtin names.
 // Live pins (GBufferPass.h externs) — never self-compare a local mirror.
-inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v14_skinned_palette";
+inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v15_normal_matrix";
 inline constexpr const char* kExpectedGBufferBuildStamp = "material-contract-v2-skinned-palette";
 
 // Expected substrings — deferred-shadow contract writes worldPos to
 // RT2 (still named gbufferMotion). Motion NDC encoding deferred.
 inline const char* kExpectedSourceSubstrings[] = {
     "uniform mat4 u_prevViewProj",      // retained for B7+ TAA host wire
+    "uniform mat4 u_normalMatrix",      // inverse-transpose model normal path
     "modelViewProjection * vec4(pos",  // clip = MVP
     "gbufferMotion = vec4(worldPos, materialAo)", // RT2 = worldPos + AO
     "out gbufferMaterial : color",
@@ -173,6 +174,7 @@ material GBufferFill {
     texture2d albedoMap
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     uniform mat4 u_prevViewProj
+    uniform mat4 u_normalMatrix
 
     vertex {
         in pos : position

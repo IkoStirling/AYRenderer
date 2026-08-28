@@ -778,6 +778,12 @@ void LightingPass::setOutputSize(uint16_t width, uint16_t height) noexcept
     // No adapter access here; the next execute() honors the size.
     _lightingW = width;
     _lightingH = height;
+    _producedThisFrame = false;
+}
+
+void LightingPass::prepareOutput(BGFXAdapter& adapter)
+{
+    ensure(adapter, _lightingW, _lightingH);
 }
 
 void LightingPass::destroyResources(BGFXAdapter& adapter)
@@ -810,6 +816,7 @@ void LightingPass::destroyResources(BGFXAdapter& adapter)
     _program.reset();
     _programReady = false;
     _programAcquireFailed = false;
+    _producedThisFrame = false;
     // �P5.5 D (2026-07-23) ??cube binding IDs reset on destroy so
     // the next ensureProgram() re-resolves them after the v22
     // cache-key bump forces a re-acquire.
@@ -952,6 +959,8 @@ void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
 
 uint32_t LightingPass::execute(PassExecContext& ctx)
 {
+    _producedThisFrame = false;
+
     // �P5 B5 (2026-07-22) ??first real GPU work in the Deferred
     // LightingPass. Phoskia VS/FS acquires, binds view 8 to the
     // LightingOutput FBO, dispatches a fullscreen triangle that
@@ -990,6 +999,16 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // Disable signal: host called setOutputSize(0, 0) (or never
     // called it). Mirror GBufferPass.cpp:134-136 size==0 early-out.
     if (_lightingW == 0 || _lightingH == 0) {
+        return 0;
+    }
+
+    // A valid FBO is not proof that the producer ran this frame. Gate before
+    // allocating/dispatching consumers so a failed GBuffer compile, disabled
+    // pass, zero viewport, or caught exception cannot feed stale MRT contents
+    // into the lighting fullscreen draw.
+    if (ctx.gbufferPass == nullptr
+        || !ctx.gbufferPass->producedThisFrame()
+        || !ctx.gbufferPass->hasValidAttachments()) {
         return 0;
     }
 
@@ -1597,6 +1616,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     submitCtx.state  = 0;  // state owned by Adapter
     _program.submit(submitCtx);
 
+    _producedThisFrame = true;
     return 1;  // B5 ships exactly 1 draw (fullscreen triangle)
 }
 

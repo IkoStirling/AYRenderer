@@ -241,8 +241,9 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    if (ctx.gbufferPass == nullptr) {
-        rateLimitedEarlyReturn("SSAOPass", "gbufferPass == nullptr");
+    if (ctx.gbufferPass == nullptr
+        || !ctx.gbufferPass->producedThisFrame()) {
+        rateLimitedEarlyReturn("SSAOPass", "gbuffer not produced this frame");
         return 0;
     }
     const bgfx::TextureHandle worldPosRt = ctx.gbufferPass->gbufferMotionRt();

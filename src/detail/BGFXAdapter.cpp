@@ -671,9 +671,13 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
         /*num=*/5, attachments, /*destroyTextures=*/true);
 
     if (!bgfx::isValid(fb)) {
-        // FBO creation failed — textures are owned by bgfx when
-        // destroyTextures=true was honored upstream. Caller treats
-        // invalid handle as "skip GBuffer this frame".
+        // Ownership transfers only when createFrameBuffer returns a valid
+        // handle (same rule as createDepthOnlyFrameBuffer below). On failure
+        // all five textures are still ours.
+        for (uint8_t i = 0; i < kNumColor; ++i) {
+            bgfx::destroy(colors[i]);
+        }
+        bgfx::destroy(depth);
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
 

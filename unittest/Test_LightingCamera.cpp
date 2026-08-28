@@ -55,6 +55,31 @@ TEST_CASE(lh_clockwise_front_faces_cull_counter_clockwise_backs)
     CHECK(cullFrontFacesForTransform(mirrored) == kCullBackFaces);
 }
 
+TEST_CASE(gbuffer_normal_matrix_handles_non_uniform_scale)
+{
+    ayt::math::Float4x4 model = ayt::math::Float4x4::identity();
+    model.row[0].x = 2.0f;
+    model.row[1].y = 4.0f;
+    model.row[2].z = 5.0f;
+    model.row[0].w = 7.0f;
+    model.row[1].w = -3.0f;
+
+    const ayt::math::Float4x4 normal =
+        ayt::render::detail::normalMatrixForTransform(model);
+    CHECK(std::abs(normal.row[0].x - 0.5f) < 1.0e-6f);
+    CHECK(std::abs(normal.row[1].y - 0.25f) < 1.0e-6f);
+    CHECK(std::abs(normal.row[2].z - 0.2f) < 1.0e-6f);
+
+    ayt::math::Float4x4 singular = ayt::math::Float4x4::identity();
+    singular.row[1].y = 0.0f;
+    const ayt::math::Float4x4 fallback =
+        ayt::render::detail::normalMatrixForTransform(singular);
+    CHECK(std::abs(fallback.row[0].x - 1.0f) < 1.0e-6f);
+    CHECK(std::abs(fallback.row[1].y - 1.0f) < 1.0e-6f);
+    CHECK(std::abs(fallback.row[2].z - 1.0f) < 1.0e-6f);
+    CHECK(std::abs(fallback.row[3].w - 1.0f) < 1.0e-6f);
+}
+
 TEST_CASE(camera_projection_converts_public_degrees_to_aymath_radians)
 {
     constexpr float fovYDegrees = 50.0f;

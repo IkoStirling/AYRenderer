@@ -56,6 +56,7 @@ material GBufferFill {
     property normalYSign = vec4(1.0, 0.0, 0.0, 0.0)
     property castSkinned = vec4(0.0, 0.0, 0.0, 0.0)
     uniform mat4 u_prevViewProj
+    uniform mat4 u_normalMatrix
     uniform vec4 cameraPos
 
     vertex {
@@ -65,7 +66,7 @@ material GBufferFill {
         in uv  : texcoord
         in boneId : boneindices
         in boneWt : boneweights
-        out worldNormal : normal = (modelMatrix * mix(
+        out worldNormal : normal = (u_normalMatrix * mix(
             vec4(nrm, 0.0),
             skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(nrm, 0.0)),
             castSkinned.x)).xyz
@@ -120,9 +121,9 @@ material GBufferFill {
 )";
 
 // Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
-static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v14_skinned_palette";
+static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v15_normal_matrix";
 static constexpr const char* kGBufferAlphaCutoutCacheKey =
-    "gbuffer_fill_v14_alpha_skinned_palette";
+    "gbuffer_fill_v15_alpha_normal_matrix";
 
 constexpr const char* kGBufferAlphaCutoutVaryingSc = R"(
 vec3 v_normal    : NORMAL    = vec3(0.0, 0.0, 1.0);
@@ -142,6 +143,7 @@ $input a_position, a_normal, a_texcoord0, a_tangent, a_indices, a_weight
 $output v_normal, v_texcoord0, v_position, v_tangent
 #include <bgfx_shader.sh>
 uniform mat4 bones[128];
+uniform mat4 u_normalMatrix;
 uniform vec4 castSkinned;
 void main()
 {
@@ -163,7 +165,7 @@ void main()
     vec4 localPos = mix(bindPos, skinPos, castSkinned.x);
     vec4 localNormal = mix(bindNormal, skinNormal, castSkinned.x);
     vec4 localTangent = mix(bindTangent, skinTangent, castSkinned.x);
-    v_normal = mul(u_model[0], localNormal).xyz;
+    v_normal = mul(u_normalMatrix, localNormal).xyz;
     v_texcoord0 = a_texcoord0;
     v_position = mul(u_model[0], localPos).xyz;
     v_tangent = vec4(mul(u_model[0], localTangent).xyz, a_tangent.w);
@@ -322,6 +324,8 @@ void GBufferPass::setPrevViewProj(const ayt::math::Float4x4& view,
 
 uint32_t GBufferPass::execute(PassExecContext& ctx)
 {
+    _producedThisFrame = false;
+
     // §P5 B4a (2026-07-22) — ensure 4-attach MRT FBO + cache attachments.
     // §P5 B4b (2026-07-22) — first real GPU draw dispatch in deferred path:
     //   - Phoskia GBuffer VS/FS acquires via pool.acquire
@@ -345,7 +349,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     }
 
     ensure(ctx.adapter, _gbufferW, _gbufferH);
-    if (!bgfx::isValid(_gbufferFbo)) {
+    if (!isReady()) {
         return 0;
     }
 
@@ -391,6 +395,9 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
                                 /*rgba=*/ayt::render::kGBufferClearRgba,
                                 /*depth=*/1.0f,
                                 /*stencil=*/0);
+    // A clear-only GBuffer is still a valid produced frame (empty scene). bgfx
+    // does not execute a view that has no submit unless it is touched.
+    ctx.adapter.touch(viewId);
 
     // GBufferPass draw state: depth-write + no-blend (same as
     // ForwardOpaquePass opaque defaults — cutsheet §1.4 forward
@@ -514,6 +521,8 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             };
             drawProgram.setUniform(cameraBinding, camera, sizeof(camera));
         }
+        trySetUniformMat4(drawProgram, "u_normalMatrix", nullptr,
+                          normalMatrixForTransform(item.world));
         const shader::BindingId doubleSidedBinding =
             drawProgram.getUniformBinding("doubleSided");
         if (doubleSidedBinding != shader::InvalidBinding) {
@@ -741,6 +750,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         ++s_routeLogFrame;
     }
 
+    _producedThisFrame = true;
     return drawCount;
 }
 
@@ -751,6 +761,7 @@ void GBufferPass::setGbufferSize(uint16_t width, uint16_t height) noexcept
     // initialize() and the next execute() will honor the size.
     _gbufferW = width;
     _gbufferH = height;
+    _producedThisFrame = false;
 }
 
 void GBufferPass::destroyResources(BGFXAdapter& adapter)
@@ -778,6 +789,7 @@ void GBufferPass::destroyResources(BGFXAdapter& adapter)
     _allocatedW = 0;
     _allocatedH = 0;
     _buildStamp = "";
+    _producedThisFrame = false;
     if (bgfx::isValid(_gbufferFbo)) {
         adapter.destroy(_gbufferFbo);
         _gbufferFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};

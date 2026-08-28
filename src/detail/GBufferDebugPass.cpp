@@ -2,29 +2,43 @@
 
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
+#include "detail/GBufferPass.h"
+#include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
 
 #include <cstdio>
+#include <string>
 
 namespace ayt::render::detail
 {
 
 namespace {
 
-// V1 placeholder Phoskia source — body is a no-op `return vec4(0,0,0,1)`.
-// V2 replaces this with the real per-channel Phoskia FS (Albedo
-// direct / Normal remap / WorldPos direct / Motion alias-V1-or-real-
-// RT-V2 / Depth linearize). The placeholder is intentionally NOT
-// compiled in V1 — `ensureProgram()` only runs in V2 (V1 execute
-// returns 0 at step 4 because the host-owned debug FBO is invalid
-// for the default-off case, and at step 8 because the program is
-// invalid even when the host enabled the pass).
+struct alignas(16) FullscreenVertex {
+    float x;
+    float y;
+    float u;
+    float v;
+};
+
+constexpr FullscreenVertex kFullscreenTriangle[3] = {
+    { -1.0f, -1.0f, 0.0f, 1.0f },
+    {  3.0f, -1.0f, 2.0f, 1.0f },
+    { -1.0f,  3.0f, 0.0f, -1.0f },
+};
+
+constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
+
+// Visible view-250 overlay. Channel 3 visualizes the packed PBR scalars
+// (metallic, roughness, material AO); `Motion` remains an enum alias for ABI
+// compatibility until a dedicated velocity RT exists.
 constexpr const char* kGBufferDebugPhoskiaSource = R"(
 material GBufferDebug {
     texture2d albedo
     texture2d normal
     texture2d worldPos
+    texture2d materialSurface
     texture2d depthTex
     uniform vec4 debugChannel
     vertex {
@@ -35,38 +49,48 @@ material GBufferDebug {
     fragment {
         in  vUv : texcoord
         let uv = vec2(vUv.x, 1.0 - vUv.y)
-        return vec4(0.0, 0.0, 0.0, 1.0)
+        let a = sample(albedo, uv)
+        let n = sample(normal, uv)
+        let w = sample(worldPos, uv)
+        let s = sample(materialSurface, uv)
+        let d = sample(depthTex, uv).x
+        let c = debugChannel.x
+        let pick0 = 1.0 - step(0.5, c)
+        let pick1 = step(0.5, c) * (1.0 - step(1.5, c))
+        let pick2 = step(1.5, c) * (1.0 - step(2.5, c))
+        let pick3 = step(2.5, c) * (1.0 - step(3.5, c))
+        let pick4 = step(3.5, c)
+        let albedoView = vec4(a.rgb, 1.0)
+        let normalView = vec4(n.xyz, 1.0)
+        let worldView = vec4(w.xyz * 0.05 + vec3(0.5, 0.5, 0.5), 1.0)
+        let materialView = vec4(a.a, n.a, w.a, 1.0)
+        let depthView = vec4(1.0 - d, 1.0 - d, 1.0 - d, 1.0)
+        let geometryView = (albedoView * pick0 + normalView * pick1
+                         + worldView * pick2 + materialView * pick3)
+                         * step(0.5, s.a)
+        return geometryView + depthView * pick4
     }
 }
 )";
 
-// V1 cache-key — placeholder string. V2 bumps to the real per-
-// channel Phoskia cache key (mirror SSAO A3 v0→v3→v4 bump).
-constexpr const char* kGBufferDebugCacheKey = "gbufferdebug_v1_skeleton_fs";
+constexpr const char* kGBufferDebugCacheKey = "gbufferdebug_v2_visible_mrt_overlay";
 
 } // namespace
 
-// Bug-fix-#3 mirror: file-scope external definition (same pattern as
-// kSSAOCacheKeyCStr at SSAOPass.cpp:208). Tests pin via extern
-// declaration in GBufferDebugPass.h:181-182.
+// File-scope external definition lets contract tests pin the live shader key.
 const char* const kGBufferDebugCacheKeyCStr = kGBufferDebugCacheKey;
+const char* const kGBufferDebugPhoskiaSourceCStr = kGBufferDebugPhoskiaSource;
 
 uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
 {
     BGFXAdapter& adapter = ctx.adapter;
 
-    // The debug pass is part of the fixed pipeline but is intentionally
-    // dormant unless the host asks for a GBuffer visualization.  An invalid
-    // debug FBO is therefore the normal disabled state, not a condition that
-    // should periodically fill an application's log.
+    // The debug pass is part of the fixed pipeline but remains dormant until
+    // the host asks for a GBuffer visualization.
     if (!ctx.frame.gbufferDebugEnabled) {
         return 0;
     }
 
-    // Mirror SSAOPass.cpp:210-225 early-return ladder. V1 K-GBD-1
-    // is enforced here: every short-circuit returns 0 BEFORE any
-    // RT/program access. V2 keeps these guards and adds the
-    // per-channel sampler bind + Phoskia submit.
     if (!adapter.isInitialized()) {
         rateLimitedEarlyReturn("GBufferDebugPass", "adapter not initialized");
         return 0;
@@ -83,22 +107,18 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // V1 K-GBD-1 step-4 — host-owned debug FBO. Invalid ⇒
-    // gbufferDebugEnabled was false at the central gate ⇒ no
-    // allocation ⇒ 0 draw.
-    const bgfx::FrameBufferHandle target = ctx.gbufferDebugFbo;
-    if (!BGFXAdapter::isValid(target)) {
-        rateLimitedEarlyReturn("GBufferDebugPass", "gbufferDebugFbo invalid");
+    if (ctx.gbufferPass == nullptr
+        || !ctx.gbufferPass->producedThisFrame()
+        || !ctx.gbufferPass->hasValidAttachments()) {
+        rateLimitedEarlyReturn("GBufferDebugPass", "gbuffer not produced this frame");
         return 0;
     }
 
-    // V1 K-GBD-1 — Deferred-only MVP. The host's central gate
-    // also gates on gbufferPassPtr != nullptr, so this is a
-    // double-check (cutsheet §5.5 redundancy rule).
-    if (ctx.gbufferPass == nullptr) {
-        rateLimitedEarlyReturn("GBufferDebugPass", "gbufferPass == nullptr");
-        return 0;
-    }
+    const bgfx::TextureHandle albedoRt = ctx.gbufferPass->gbufferAlbedoRt();
+    const bgfx::TextureHandle normalRt = ctx.gbufferPass->gbufferNormalRt();
+    const bgfx::TextureHandle worldPosRt = ctx.gbufferPass->gbufferMotionRt();
+    const bgfx::TextureHandle materialRt = ctx.gbufferPass->gbufferMaterialRt();
+    const bgfx::TextureHandle depthRt = ctx.gbufferPass->gbufferDepthRt();
 
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
@@ -113,38 +133,39 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
         && _tAlbedo       != ayt::shader::InvalidBinding
         && _tNormal       != ayt::shader::InvalidBinding
         && _tWorldPos     != ayt::shader::InvalidBinding
+        && _tMaterial     != ayt::shader::InvalidBinding
         && _tDepth        != ayt::shader::InvalidBinding;
     if (!programReady) {
         rateLimitedEarlyReturn("GBufferDebugPass", "program not ready");
-        // V1 stub: the placeholder Phoskia source is intentionally
-        // never compiled (the cache-key is also a placeholder; V2
-        // will lift the acquire path). Returning 0 here is
-        // byte-equivalent to the V1 default-off case — the host's
-        // FBO stays untouched, no draws, no allocs.
         return 0;
     }
 
-    // V2-ONLY BEGIN (§P3 M10, 2026-08-24 — pinned for grep). V1
-    // returns 0 at the `return 0` above; the block below is the
-    // per-channel sampler-bind + uniform-upload + fullscreen-submit
-    // wire that V2 lights up. Tests should pin
-    // `Test_AuditP3Invariants` substring "V2-ONLY BEGIN" so a
-    // future V3 refactor that lifts V1 to live code is forced to
-    // touch this banner.
-    // V2: view 250 wire + per-channel sampler bind + uniform
-    // upload + fullscreen submit. V1 dead code path.
     constexpr uint8_t viewId = kGBufferDebugViewId;
-    adapter.setViewFrameBuffer(viewId, target);
-    adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
-    adapter.setViewTransform(viewId, ctx.frame.view, ctx.frame.projection);
-    // §P3 L7 (2026-08-24) — dropped trailing `, 1.0f, 0` (matches
-    // setViewClearRaw defaults — see BGFXAdapter.h:262).
-    adapter.setViewClearRaw(viewId, BGFX_CLEAR_COLOR, 0x000000FF);
+    const ayt::math::Float4x4 identity = ayt::math::Float4x4::identity();
+    adapter.setViewFrameBuffer(
+        viewId, bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE});
+    adapter.setViewRect(viewId, ctx.viewportX, ctx.viewportY,
+                        viewportWidth, viewportHeight);
+    adapter.setViewTransform(viewId, identity, identity);
+    adapter.setViewClearRaw(viewId, BGFX_CLEAR_NONE, 0x00000000u);
 
-    // V2: per-channel Phoskia FS. The 4 texture inputs (albedoRt
-    // / normalRt / motionRt-as-worldPos / depthRt) are bound
-    // unconditionally; the channel uniform selects which one
-    // survives. V1 returns 0 before this block.
+    adapter.setTransformIdentity();
+    adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
+    adapter.setIndexBuffer(_fullscreenIB, 0, 3);
+    _program.setTexture(_program.getTextureStage(_tAlbedo), _tAlbedo,
+                        toShaderTexture(albedoRt));
+    _program.setTexture(_program.getTextureStage(_tNormal), _tNormal,
+                        toShaderTexture(normalRt));
+    _program.setTexture(_program.getTextureStage(_tWorldPos), _tWorldPos,
+                        toShaderTexture(worldPosRt));
+    _program.setTexture(_program.getTextureStage(_tMaterial), _tMaterial,
+                        toShaderTexture(materialRt));
+    _program.setTexture(_program.getTextureStage(_tDepth), _tDepth,
+                        toShaderTexture(depthRt));
+    const float channel[4] = {
+        static_cast<float>(ctx.frame.gbufferDebugChannel), 0.0f, 0.0f, 0.0f
+    };
+    _program.setUniform(_uDebugChannel, channel, sizeof(channel));
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
@@ -160,7 +181,7 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
     const uint32_t kFirstRateLimit = 64u;
     if (s_firstFrame == 0 || (s_firstFrame % kFirstRateLimit) == 0) {
         std::fprintf(stderr,
-            "[GBufferDebugPass] V2 frame=%u dispatch view=%u "
+            "[GBufferDebugPass] frame=%u dispatch view=%u "
             "viewport=%ux%u enabled=%d channel=%u\n",
             s_firstFrame,
             static_cast<unsigned>(viewId),
@@ -179,14 +200,14 @@ void GBufferDebugPass::ensureFullscreenQuad(BGFXAdapter& adapter)
         && BGFXAdapter::isValid(_fullscreenIB)) {
         return;
     }
-    // V2-ONLY BEGIN (§P3 M10, 2026-08-24). V1 ships without
-    // lazy-allocating the fullscreen quad. V2 fills in the
-    // kFullscreenTriangle / kFullscreenIndices mirrors (copy from
-    // SSAOPass.cpp:22-35). The early return at the `isValid` check
-    // above keeps V1 byte-equivalent to the pre-V1 state (no
-    // draws, no allocs).
-    // §P3 M10 (2026-08-24) — V2-ONLY END.
-    (void)adapter;
+    const bgfx::VertexLayout layout = adapter.vertexLayoutPosUv();
+    _fullscreenVB = adapter.createVertexBuffer(kFullscreenTriangle,
+                                                sizeof(kFullscreenTriangle),
+                                                layout,
+                                                BGFX_BUFFER_NONE);
+    _fullscreenIB = adapter.createIndexBuffer(kFullscreenIndices,
+                                              sizeof(kFullscreenIndices),
+                                              BGFX_BUFFER_NONE);
 }
 
 void GBufferDebugPass::ensureProgram(shader::ShaderResourcePool& pool)
@@ -202,15 +223,24 @@ void GBufferDebugPass::ensureProgram(shader::ShaderResourcePool& pool)
         return;
     }
 
-    // V2-ONLY BEGIN (§P3 M10, 2026-08-24). V1 intentionally does NOT
-    // call pool.acquire() — the placeholder Phoskia source above
-    // is a skeleton, not the real per-channel FS. V2 will replace
-    // this with the actual acquire + binding resolution block.
-    // We set _programAcquireFailed = false so V2 can run the
-    // real acquire path without tripping the latch.
-    // §P3 M10 (2026-08-24) — V2-ONLY END.
-    (void)pool;
-    _programAcquireFailed = true;
+    ayt::shader::ShaderResource acquired =
+        pool.acquire(kGBufferDebugPhoskiaSource, kGBufferDebugCacheKey);
+    if (!acquired.isValid()) {
+        _programAcquireFailed = true;
+        std::fprintf(stderr,
+                     "[GBufferDebugPass] Phoskia acquire failed; debug overlay skipped\n");
+        for (const std::string& err : pool.lastCompileErrors()) {
+            std::fprintf(stderr, "[GBufferDebugPass]   %s\n", err.c_str());
+        }
+        return;
+    }
+    _program       = acquired;
+    _uDebugChannel = _program.getUniformBinding("debugChannel");
+    _tAlbedo       = _program.getTextureBinding("albedo");
+    _tNormal       = _program.getTextureBinding("normal");
+    _tWorldPos     = _program.getTextureBinding("worldPos");
+    _tMaterial     = _program.getTextureBinding("materialSurface");
+    _tDepth        = _program.getTextureBinding("depthTex");
 }
 
 void GBufferDebugPass::destroyResources(BGFXAdapter& adapter)
@@ -230,6 +260,7 @@ void GBufferDebugPass::destroyResources(BGFXAdapter& adapter)
     _tAlbedo         = ayt::shader::InvalidBinding;
     _tNormal         = ayt::shader::InvalidBinding;
     _tWorldPos       = ayt::shader::InvalidBinding;
+    _tMaterial       = ayt::shader::InvalidBinding;
     _tDepth          = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
 }

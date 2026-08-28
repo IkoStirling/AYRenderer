@@ -88,7 +88,23 @@ public:
     // "FBO handle index is valid (�?UINT16_MAX)". Default-constructed
     // passes return false (BGFX_INVALID_HANDLE = UINT16_MAX), so this
     // is the correct inverse of `_gbufferFbo.isValid()` semantics.
-    bool isReady() const noexcept { return _gbufferFbo.idx != UINT16_MAX; }
+    bool isReady() const noexcept {
+        return _gbufferFbo.idx != UINT16_MAX && hasValidAttachments();
+    }
+
+    // `isReady()` describes allocated resources. `producedThisFrame()` is the
+    // stronger consumer contract: it becomes true only after execute() has
+    // completed normally and queued the MRT clear/draw work for this frame.
+    // Renderer::render() calls setGbufferSize() every frame (including 0x0),
+    // which resets this bit before pipeline dispatch.
+    bool producedThisFrame() const noexcept { return _producedThisFrame; }
+    bool hasValidAttachments() const noexcept {
+        return bgfx::isValid(_gbufferAlbedoRt)
+            && bgfx::isValid(_gbufferNormalRt)
+            && bgfx::isValid(_gbufferMotionRt)
+            && bgfx::isValid(_gbufferMaterialRt)
+            && bgfx::isValid(_gbufferDepthRt);
+    }
 
     // Stub accessors �?return invalid handles / identity until B4
     // wires real GPU state. These exist so B5 LightingPass + B7+
@@ -194,6 +210,7 @@ private:
     ayt::shader::ShaderResource _alphaCutoutProgram;
     bool _acquireFailed = false;
     bool _alphaCutoutAcquireFailed = false;
+    bool _producedThisFrame = false;
 
     // §P5 B4c (2026-07-22) �?previous-frame view/projection cache
     // (mirror ShadowPass's `_lightView/_lightProj` private shape).

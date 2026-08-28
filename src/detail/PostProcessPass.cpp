@@ -825,6 +825,18 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
 bgfx::FrameBufferHandle PostProcessPass::selectSourceFbo(
     const PassExecContext& ctx) noexcept
 {
+    const bool deferredPath = ctx.gbufferPass != nullptr
+        && ctx.lightingPass != nullptr;
+    if (deferredPath
+        && (!ctx.gbufferPass->producedThisFrame()
+            || !ctx.lightingPass->producedThisFrame())) {
+        // Do not fall back to the forward sceneFbo in a mounted deferred
+        // pipeline. That buffer is valid but was not rendered by
+        // ForwardOpaquePass, so selecting it creates a misleading black/stale
+        // cold-start frame and hides producer failures.
+        return BGFX_INVALID_HANDLE;
+    }
+
     // 1) F5 — FinalColorSource semantic from the FrameGraph.
     //    When the frameGraph is wired, the FG compile step
     //    already resolved FinalColorSource to a physical handle

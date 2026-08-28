@@ -40,7 +40,6 @@ struct BorrowedFboGuard {
             adapter->destroy(fbo);
         }
     }
-    void disarm() noexcept { owned = false; }
 };
 
 } // namespace
@@ -204,8 +203,11 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     BGFXAdapter& adapter = ctx.adapter;
     const FrameContext& frame = ctx.frame;
     // §P2 M10 (2026-08-24) — view id hoisted to RenderTypes.h.
-    const bool deferredLitComposite = (ctx.lightingPass != nullptr) &&
-        bgfx::isValid(ctx.lightingPass->lightingOutputFbo());
+    const bool deferredLitComposite = (ctx.lightingPass != nullptr)
+        && (ctx.gbufferPass != nullptr)
+        && ctx.lightingPass->producedThisFrame()
+        && ctx.gbufferPass->producedThisFrame()
+        && bgfx::isValid(ctx.lightingPass->lightingOutputFbo());
     const uint8_t viewId = deferredLitComposite
                                ? ayt::render::kTransparentDeferredViewId
                                : ctx.viewId;
@@ -350,9 +352,6 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         }
     }
 
-    // §P2 M3 — BorrowedFboGuard destroys on scope exit (RAII).
-    depthGuard.disarm();
-
     static uint32_t s_routeLogFrame = 0;
     if (s_routeLogFrame < 8) {
         std::fprintf(stderr,
@@ -363,6 +362,10 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
                      depthGuard.owned ? 1 : 0);
         ++s_routeLogFrame;
     }
+
+    // BorrowedFboGuard remains armed. Its destructor releases only the
+    // temporary framebuffer; destroyTextures=false keeps Lighting color and
+    // GBuffer depth owned by their producer passes.
 
     return drawCount;
 }
