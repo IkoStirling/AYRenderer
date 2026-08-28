@@ -95,7 +95,7 @@ namespace {
 // Live extern drift detection; this mirror MUST match
 // `kLightingCacheKeyCStr` or this test fails (Bug fix #3).
 inline constexpr const char* kExpectedB5p5CacheKey =
-    "lighting_v28_shadow_light_order";
+    "lighting_v29_material_model_decode";
 
 // Mirror of LightingPass.cpp worldPos+shadow contract (abbreviated).
 // Full FS also has 8-light Lambert + sky Mix + §P5.5 D envCube
@@ -113,7 +113,7 @@ uniformblock Lights {
 material Lighting {
     texture2d gbufferAlbedo
     texture2d gbufferNormal
-    texture2d gbufferMotion
+    texture2d gbufferWorldPosition
     texture2d shadowMap
     texture2d gbufferSky
     texturecube envCube
@@ -152,7 +152,7 @@ material Lighting {
         let L1 = Lights.dirs[1].xyz * (1.0 / max(length(Lights.dirs[1].xyz), 0.0001))
         let f0 = max(dot(N, L0), 0.0)
         let f1 = max(dot(N, L1), 0.0)
-        let worldPos = sample(gbufferMotion, baseUv).xyz
+        let worldPos = sample(gbufferWorldPosition, baseUv).xyz
         let clipPos = u_lightViewProj * vec4(worldPos, 1.0)
         let invW = 1.0 / max(clipPos.w, 0.0001)
         let refNdc01 = clipPos.z * invW * 0.5 + 0.5
@@ -219,13 +219,13 @@ material Lighting {
 
 inline const char* kExpectedSourceSubstrings[] = {
     "texture2d shadowMap",
-    "texture2d gbufferMotion",
+    "texture2d gbufferWorldPosition",
     "texture2d gbufferSky",
     "uniform mat4 u_lightViewProj",
     "uniform vec4 shadowBias",
     "uniform vec4 shadowMapTexel",
     "uniform vec4 shadowPcf",
-    "let worldPos = sample(gbufferMotion, baseUv).xyz",
+    "let worldPos = sample(gbufferWorldPosition, baseUv).xyz",
     "let clipPos = u_lightViewProj * vec4(worldPos, 1.0)",
     "let shadowKey =",
     // §P5.5 B (2026-07-23) �?per-light per-type branches.
@@ -324,7 +324,7 @@ TEST_CASE(b5p5_worldpos_from_gbuffer_rt2) {
     // encode mosaicked). Then project via u_lightViewProj.
     const std::string src = mirrorLightingPhoskiaSourceB5p5();
     const size_t worldStage = src.find(
-        "let worldPos = sample(gbufferMotion, baseUv).xyz");
+        "let worldPos = sample(gbufferWorldPosition, baseUv).xyz");
     CHECK(worldStage != std::string::npos);
     const size_t clipStage = src.find(
         "clipPos = u_lightViewProj * vec4(worldPos");

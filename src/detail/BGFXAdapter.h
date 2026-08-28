@@ -140,7 +140,8 @@ public:
 
     // Deferred material GBuffer helper. 5 attachments:
     // RT0 albedo+metallic RGBA8 / RT1 normal+roughness RGBA8 /
-    // RT2 worldPos+AO RGBA16F / RT3 emissive+coverage RGBA8 /
+    // RT2 worldPos+(AO+material-model) RGBA16F /
+    // RT3 emissive+coverage RGBA8 /
     // attachment 4 depth D24S8. Adapter wraps `bgfx::createFrameBuffer`
     // so Pass files never see raw bgfx
     // (cutsheet §6 red line — passes go through adapter only).

@@ -59,21 +59,28 @@ material GBufferDebug {
         let pick1 = step(0.5, c) * (1.0 - step(1.5, c))
         let pick2 = step(1.5, c) * (1.0 - step(2.5, c))
         let pick3 = step(2.5, c) * (1.0 - step(3.5, c))
-        let pick4 = step(3.5, c)
+        let pick4 = step(3.5, c) * (1.0 - step(4.5, c))
+        let pick5 = step(4.5, c)
+        let materialModel = floor(w.a * 0.5 + 0.0001)
+        let materialAo = max(0.0, min(1.0, w.a - materialModel * 2.0))
+        let modelNorm = min(materialModel, 1.0)
         let albedoView = vec4(a.rgb, 1.0)
         let normalView = vec4(n.xyz, 1.0)
         let worldView = vec4(w.xyz * 0.05 + vec3(0.5, 0.5, 0.5), 1.0)
-        let materialView = vec4(a.a, n.a, w.a, 1.0)
+        let materialView = vec4(a.a, n.a, materialAo, 1.0)
+        let modelView = vec4(modelNorm, 1.0 - modelNorm, 0.25, 1.0)
         let depthView = vec4(1.0 - d, 1.0 - d, 1.0 - d, 1.0)
         let geometryView = (albedoView * pick0 + normalView * pick1
-                         + worldView * pick2 + materialView * pick3)
+                         + worldView * pick2 + materialView * pick3
+                         + modelView * pick5)
                          * step(0.5, s.a)
         return geometryView + depthView * pick4
     }
 }
 )";
 
-constexpr const char* kGBufferDebugCacheKey = "gbufferdebug_v2_visible_mrt_overlay";
+constexpr const char* kGBufferDebugCacheKey =
+    "gbufferdebug_v3_material_model_decode";
 
 } // namespace
 
@@ -116,7 +123,8 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
 
     const bgfx::TextureHandle albedoRt = ctx.gbufferPass->gbufferAlbedoRt();
     const bgfx::TextureHandle normalRt = ctx.gbufferPass->gbufferNormalRt();
-    const bgfx::TextureHandle worldPosRt = ctx.gbufferPass->gbufferMotionRt();
+    const bgfx::TextureHandle worldPosRt =
+        ctx.gbufferPass->gbufferWorldPositionRt();
     const bgfx::TextureHandle materialRt = ctx.gbufferPass->gbufferMaterialRt();
     const bgfx::TextureHandle depthRt = ctx.gbufferPass->gbufferDepthRt();
 

@@ -113,6 +113,11 @@ public:
     // unknown handle.
     void setMaterialBlendMode(MaterialHandle material, BlendMode blendMode);
 
+    // Selects the deferred lighting model written into the GBuffer. Coverage
+    // remains independent, so Unlit geometry still occludes and receives the
+    // same depth/transparent-composite behavior as StandardLit geometry.
+    void setMaterialModel(MaterialHandle material, MaterialModel model);
+
     // P2.1 diagnostics and host-side surface overrides. alphaMode uses the
     // resource contract values: 0=Opaque, 1=Mask, 2=Blend.
     void setMaterialSurfaceProperties(MaterialHandle material, int alphaMode,

@@ -75,6 +75,8 @@ struct GpuMaterial {
     // pre-existing materials (all created before this PR) keep their
     // prior no-blend draw path with no behavior change.
     ayt::render::BlendMode      blendMode = ayt::render::BlendMode::Opaque;
+    ayt::render::MaterialModel  materialModel =
+        ayt::render::MaterialModel::StandardLit;
 
     struct UniformSlot {
         std::string          name;

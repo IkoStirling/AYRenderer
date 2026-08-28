@@ -3,6 +3,7 @@
 #include "AYRenderer/RenderTypes.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/FrameContext.h"
+#include "detail/GBufferLayout.h"
 #include "detail/RasterConvention.h"
 #include "detail/RenderPass.h"
 
@@ -19,12 +20,13 @@ namespace ayt::render::detail
 // a re-ensure (next execute() will rebuild the FBO).
 // Stamp bump forces GBuffer FBO rebuild after RT2 format changes
 // (RGBA8 motion → RGBA16F worldPos). Pointer-equal compare in ensure().
-static constexpr const char* kGBufferBuildStamp = "material-contract-v2-skinned-palette";
+static constexpr const char* kGBufferBuildStamp =
+    "material-contract-v3-model-coverage-split";
 
 // §P5 B5.5 / deferred-shadow contract (2026-07-23):
-//   RT0 albedo RGBA8 / RT1 normal RGBA8 / RT2 worldPos RGBA16F /
-//   depth D24S8. Slot is still named `gbufferMotion` (MRT name lock)
-//   but stores raw worldPos xyz for LightingPass key-only PCF.
+//   RT0 albedo+metallic RGBA8 / RT1 normal+roughness RGBA8 /
+//   RT2 worldPos+(AO+material-model) RGBA16F /
+//   RT3 emissive+coverage RGBA8 / depth D24S8.
 //   Motion NDC encoding is deferred until a dedicated RT exists —
 //   writing motion into RGBA8 RT2 previously broke shadows (Lighting
 //   projected [0,1] junk as worldPos).
@@ -32,10 +34,11 @@ static constexpr const char* kGBufferBuildStamp = "material-contract-v2-skinned-
 // `u_prevViewProj` stays declared + uploaded so B7+ TAA can reclaim
 // the slot without another host wire; FS does not write motion today.
 //
-// Three `out color` slots map to gl_FragData[0..2]:
+// Four `out color` slots map to gl_FragData[0..3]:
 //   gl_FragData[0] = gbufferAlbedo
 //   gl_FragData[1] = gbufferNormal
-//   gl_FragData[2] = gbufferMotion  (xyz = worldPos, w = 1)
+//   gl_FragData[2] = gbufferWorldPosition
+//   gl_FragData[3] = gbufferMaterial
 constexpr const char* kGBufferPhoskiaSource = R"(
 uniformblock Skeleton {
     mat4 bones[128]
@@ -52,6 +55,7 @@ material GBufferFill {
     property roughness = vec4(0.5, 0.0, 0.0, 0.0)
     property ao = vec4(1.0, 0.0, 0.0, 0.0)
     property emissive = vec4(0.0, 0.0, 0.0, 0.0)
+    property materialModel = vec4(0.0, 0.0, 0.0, 0.0)
     property doubleSided = vec4(0.0, 0.0, 0.0, 0.0)
     property normalYSign = vec4(1.0, 0.0, 0.0, 0.0)
     property castSkinned = vec4(0.0, 0.0, 0.0, 0.0)
@@ -91,7 +95,7 @@ material GBufferFill {
         in vUv         : texcoord
         out gbufferAlbedo : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
-        out gbufferMotion : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferWorldPosition : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferMaterial : color = vec4(0.0, 0.0, 0.0, 0.0)
         let rawN = normalize(worldNormal)
         let tangentSeed = worldTangent.xyz - rawN * dot(worldTangent.xyz, rawN)
@@ -111,19 +115,21 @@ material GBufferFill {
         let materialMetallic = max(0.0, min(1.0, metallic.x * sample(metallicMap, vUv).x))
         let materialRoughness = max(0.045, min(1.0, roughness.x * sample(roughnessMap, vUv).x))
         let materialAo = max(0.0, min(1.0, ao.x * sample(aoMap, vUv).x))
+        let packedAoModel = materialModel.x * 2.0 + materialAo
         let materialEmissive = emissive.xyz * sample(emissiveMap, vUv).rgb
         gbufferAlbedo = vec4(albedo.rgb, materialMetallic)
         gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), materialRoughness)
-        gbufferMotion = vec4(worldPos, materialAo)
+        gbufferWorldPosition = vec4(worldPos, packedAoModel)
         gbufferMaterial = vec4(materialEmissive, 1.0)
     }
 }
 )";
 
 // Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
-static constexpr const char* kGBufferCacheKey = "gbuffer_fill_v15_normal_matrix";
+static constexpr const char* kGBufferCacheKey =
+    "gbuffer_fill_v16_model_coverage_split";
 static constexpr const char* kGBufferAlphaCutoutCacheKey =
-    "gbuffer_fill_v15_alpha_normal_matrix";
+    "gbuffer_fill_v16_alpha_model_coverage_split";
 
 constexpr const char* kGBufferAlphaCutoutVaryingSc = R"(
 vec3 v_normal    : NORMAL    = vec3(0.0, 0.0, 1.0);
@@ -187,6 +193,7 @@ uniform vec4 metallic;
 uniform vec4 roughness;
 uniform vec4 ao;
 uniform vec4 emissive;
+uniform vec4 materialModel;
 SAMPLER2D(albedoMap, 0);
 SAMPLER2D(opacityMap, 1);
 SAMPLER2D(normalMap, 2);
@@ -223,16 +230,18 @@ void main()
     float materialMetallic = clamp(metallic.x * texture2D(metallicMap, v_texcoord0).x, 0.0, 1.0);
     float materialRoughness = clamp(roughness.x * texture2D(roughnessMap, v_texcoord0).x, 0.045, 1.0);
     float materialAo = clamp(ao.x * texture2D(aoMap, v_texcoord0).x, 0.0, 1.0);
+    float packedAoModel = materialModel.x * 2.0 + materialAo;
     vec3 materialEmissive = emissive.xyz * texture2D(emissiveMap, v_texcoord0).rgb;
     gl_FragData[0] = vec4(albedo.rgb, materialMetallic);
     gl_FragData[1] = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), materialRoughness);
-    gl_FragData[2] = vec4(v_position, materialAo);
+    gl_FragData[2] = vec4(v_position, packedAoModel);
     gl_FragData[3] = vec4(materialEmissive, 1.0);
 }
 )";
 
 const char* const kGBufferCacheKeyCStr = kGBufferCacheKey;
 const char* const kGBufferBuildStampCStr = kGBufferBuildStamp;
+const char* const kGBufferPhoskiaSourceCStr = kGBufferPhoskiaSource;
 
 GBufferPass::~GBufferPass() = default;
 
@@ -335,8 +344,8 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     //   - iterate RenderScene.items() and submit draw calls (mirror
     //     ForwardOpaquePass shape, but view 7 + 3-output FS)
     //
-    // B5 LightingPass will consume gbufferFbo() + the 3 RT attachments
-    // as its scene-color/normal/motion inputs.
+    // Lighting consumes all four color attachments; depth remains available
+    // to debug and future screen-space passes.
     if (!ctx.adapter.isInitialized() || ctx.adapter.isNoopBackend()) {
         return 0;
     }
@@ -470,9 +479,8 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // for `u_prevViewProj`; on Noop the upload is a no-op
         // (ShaderResource::setUniform short-circuits).
         //
-        // First frame: prevViewProj = identity (default) ⇒
-        // currClip - 0/1 = currClip ⇒ motion = currNDC*0.5+0.5 —
-        // B7+ TAA consumer tolerates this single-frame noise.
+        // The current shader declares this binding for future velocity work;
+        // no active MRT output consumes it yet.
         {
             const shader::BindingId prevVpBinding =
                 drawProgram.getUniformBinding("u_prevViewProj");
@@ -558,6 +566,15 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         uploadMaterialScalar("metallic", 0.0f);
         uploadMaterialScalar("roughness", 0.5f);
         uploadMaterialScalar("ao", 1.0f);
+        const shader::BindingId materialModelBinding =
+            drawProgram.getUniformBinding("materialModel");
+        if (materialModelBinding != shader::InvalidBinding) {
+            const float model[4] = {
+                static_cast<float>(static_cast<uint8_t>(material.materialModel)),
+                0.0f, 0.0f, 0.0f
+            };
+            drawProgram.setUniform(materialModelBinding, model, sizeof(model));
+        }
         const shader::BindingId emissiveBinding =
             drawProgram.getUniformBinding("emissive");
         if (emissiveBinding != shader::InvalidBinding) {
@@ -727,7 +744,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // (the host material's program). On a real backend the B4b
         // path was submitting the host material's draws into view
         // 7, which is wrong: the GBufferFill VS/FS (which writes
-        // albedo/normal/motion to gl_FragData[0..2]) is the program
+        // all four GBuffer outputs to gl_FragData[0..3]) is the program
         // that MUST bind view 7, otherwise the MRT attachments stay
         // untouched. Fix: bind `_program` (GBufferFill), use the
         // host material only for per-draw state (VB/IB/world) and
@@ -782,7 +799,7 @@ void GBufferPass::destroyResources(BGFXAdapter& adapter)
     _gbufferDepthRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferAlbedoRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferNormalRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
-    _gbufferMotionRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    _gbufferWorldPositionRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferMaterialRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferW = 0;
     _gbufferH = 0;
@@ -831,7 +848,7 @@ void GBufferPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
         _gbufferFbo       = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
         _gbufferAlbedoRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
         _gbufferNormalRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
-        _gbufferMotionRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+        _gbufferWorldPositionRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
         _gbufferMaterialRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
         _gbufferDepthRt   = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
         _allocatedW = _allocatedH = 0;
@@ -855,17 +872,22 @@ void GBufferPass::cacheAttachments(BGFXAdapter& adapter)
     // adapter.getFboAttachment and never call bgfx::destroy on them.
     _gbufferAlbedoRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferNormalRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
-    _gbufferMotionRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    _gbufferWorldPositionRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferMaterialRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _gbufferDepthRt  = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     if (!bgfx::isValid(_gbufferFbo)) {
         return;
     }
-    _gbufferAlbedoRt = adapter.getFboAttachment(_gbufferFbo, 0);
-    _gbufferNormalRt = adapter.getFboAttachment(_gbufferFbo, 1);
-    _gbufferMotionRt = adapter.getFboAttachment(_gbufferFbo, 2);
-    _gbufferMaterialRt = adapter.getFboAttachment(_gbufferFbo, 3);
-    _gbufferDepthRt  = adapter.getFboAttachment(_gbufferFbo, 4);
+    _gbufferAlbedoRt = adapter.getFboAttachment(
+        _gbufferFbo, GBufferLayout::kAlbedoMetallicAttachment);
+    _gbufferNormalRt = adapter.getFboAttachment(
+        _gbufferFbo, GBufferLayout::kNormalRoughnessAttachment);
+    _gbufferWorldPositionRt = adapter.getFboAttachment(
+        _gbufferFbo, GBufferLayout::kWorldPositionPackedAttachment);
+    _gbufferMaterialRt = adapter.getFboAttachment(
+        _gbufferFbo, GBufferLayout::kEmissiveCoverageAttachment);
+    _gbufferDepthRt = adapter.getFboAttachment(
+        _gbufferFbo, GBufferLayout::kDepthAttachment);
 }
 
 } // namespace ayt::render::detail

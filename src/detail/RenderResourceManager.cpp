@@ -1194,6 +1194,22 @@ bool RenderResourceManager::setMaterialBlendMode(MaterialHandle material,
     return true;
 }
 
+bool RenderResourceManager::setMaterialModel(MaterialHandle material,
+                                             MaterialModel model)
+{
+    if (!material.isValid()
+        || static_cast<uint8_t>(model)
+            >= static_cast<uint8_t>(MaterialModel::Count)) {
+        return false;
+    }
+    const auto it = _materials.find(material.id);
+    if (it == _materials.end()) {
+        return false;
+    }
+    it->second.materialModel = model;
+    return true;
+}
+
 TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint32_t height,
                                                             const uint8_t* pixels,
                                                             const std::string& cacheKey)

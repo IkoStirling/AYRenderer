@@ -1,5 +1,8 @@
 # Deferred Pass（GBuffer + Lighting）使用说明（B0 ── 现场重置，预设）
 
+> 注：本文是早期切片规划，保留作为历史记录。当前已实现的 GBuffer 附件、数据流和材质契约见
+> [`gbuffer-current.md`](gbuffer-current.md)。
+
 > **状态**：B0 ── 现场重置（docs only,0 代码,2026-07-22）。  
 > 配套 [`pass-lessons-from-deferred.md`](pass-lessons-from-deferred.md) 看 B1–B6 红线 / 切片 / 复用 API 表。  
 > 配套 [`execution-plan.md`](execution-plan.md) §P5 / §5.3 看优先级 / 红线 / 隔离实验。  

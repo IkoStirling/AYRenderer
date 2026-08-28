@@ -107,6 +107,7 @@ public:
     // and any external caches that key off blendMode (Forward/Transparent
     // pass routing). Returns false when the handle is invalid.
     bool setMaterialBlendMode(MaterialHandle material, BlendMode blendMode);
+    bool setMaterialModel(MaterialHandle material, MaterialModel model);
 
     TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
                                          const uint8_t* pixels,

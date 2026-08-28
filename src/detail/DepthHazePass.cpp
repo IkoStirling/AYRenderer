@@ -51,7 +51,7 @@ constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 //                          PostProcessPass layered blits).
 //
 // dist = length(worldPos.xyz - camPos.xyz) — §S4 决策:
-//   Deferred: sample GBuffer RT2 (gbufferMotionRt, RGBA16F worldPos)
+//   Deferred: sample GBuffer RT2 (RGBA16F world position)
 //   Forward (no gbuffer): safe no-haze (handled at the host side
 //   in render() — render() central `hazePassEnabled` is computed
 //   from `frame.hazeEnabled && frame.hazeStrength > 0 &&
@@ -183,7 +183,7 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // Deferred: GBuffer RT2 (gbufferMotionRt) holds RGBA16F
+    // Deferred: GBuffer RT2 holds RGBA16F
     // worldPos. Forward / no-gbuffer case: render() central
     // `hazePassEnabled` already excluded this frame (so HazeHalf
     // isn't live ⇒ resolve returned invalid above). K3 #4 holds:
@@ -191,7 +191,7 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
     bgfx::TextureHandle worldPosRt = BGFX_INVALID_HANDLE;
     if (ctx.gbufferPass != nullptr
         && ctx.gbufferPass->producedThisFrame()) {
-        worldPosRt = ctx.gbufferPass->gbufferMotionRt();
+        worldPosRt = ctx.gbufferPass->gbufferWorldPositionRt();
     }
     if (!BGFXAdapter::isValid(worldPosRt)) {
         return 0;

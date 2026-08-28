@@ -21,7 +21,7 @@
 //     owned privately — duplicate the kFullscreenTriangle constant
 //     rather than exposing PostProcessPass's private state).
 //   - Phoskia `material Lighting` source (Lambert directional, 3
-//     samplers: gbufferAlbedo/gbufferNormal/gbufferMotion + 3 vec4
+//     samplers: gbufferAlbedo/gbufferNormal/gbufferWorldPosition + material
 //     uniforms: u_lightDirection / u_lightColor / u_cameraPos).
 //   - `execute()` dispatches the fullscreen triangle on view 8
 //     (cutsheet §5.1 lock + kLightingViewId=8 already shipped in B3)
@@ -33,8 +33,8 @@
 //   - Touch FrameContext (sizeof守门)
 //   - Add RenderScene::Light struct (永久退休)
 //   - Read shadowMap (B5.5 boundary — deferred to next cut)
-//   - Use motion attachment as input (motion is for B7+ TAA, B5 only
-//     samples albedo + normal)
+//   - Reconstruct world position from depth (the verified path stores it in
+//     RT2 for shadow/SSAO/haze precision and backend consistency)
 //   - Change RenderPass::execute signature
 //
 // Cutsheet §5.3 red lines we still respect:
@@ -237,5 +237,6 @@ private:
 // per the AY naming rules). The actual string literal lives in
 // LightingPass.cpp as the canonical definition.
 extern const char* const kLightingCacheKeyCStr;
+extern const char* const kLightingPhoskiaSourceCStr;
 
 } // namespace ayt::render::detail

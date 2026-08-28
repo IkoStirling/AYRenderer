@@ -35,6 +35,14 @@ enum class BlendMode : uint8_t {
     Additive = 2, // source + destination
 };
 
+// Deferred shading model encoded in the GBuffer independently from geometry
+// coverage. Values are append-only because assets/tools may persist the byte.
+enum class MaterialModel : uint8_t {
+    StandardLit = 0,
+    Unlit       = 1,
+    Count,
+};
+
 constexpr bool isTransparentBlendMode(BlendMode mode) noexcept
 {
     return mode != BlendMode::Opaque;

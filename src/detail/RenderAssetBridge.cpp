@@ -161,6 +161,27 @@ std::string resolveShaderPath(const std::string& materialPath,
     return baseHit;
 }
 
+MaterialModel inferMaterialModel(const ayt::resource::IMaterial& material,
+                                 const std::string& shaderRef)
+{
+    if (material.hasParameter("__ayMaterialModel")) {
+        const int persisted = material.getInt("__ayMaterialModel");
+        if (persisted >= 0
+            && persisted < static_cast<int>(MaterialModel::Count)) {
+            return static_cast<MaterialModel>(persisted);
+        }
+    }
+
+    std::string lower = shaderRef;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char ch) {
+                       return static_cast<char>(std::tolower(ch));
+                   });
+    return lower.find("unlit") != std::string::npos
+        ? MaterialModel::Unlit
+        : MaterialModel::StandardLit;
+}
+
 } // namespace
 
 std::string normalizeAssetPathKey(const std::string& path)
@@ -676,6 +697,8 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     mgr.setMaterialSurfaceProperties(
         handle, static_cast<int>(material.getAlphaMode()),
         material.getAlphaCutoff(), material.isDoubleSided());
+    const MaterialModel materialModel = inferMaterialModel(material, shaderRef);
+    (void)mgr.setMaterialModel(handle, materialModel);
     // Source blend composition is independent from alpha pass routing. The
     // importer serializes this reserved parameter so Assimp and a future FBX
     // SDK adapter feed the same renderer contract.
@@ -699,14 +722,15 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
         std::fprintf(stderr,
                      "[MaterialContract] id=%llu name='%s' alphaMode=%d "
                      "cutoff=%.3f doubleSided=%d alpha=%s opacitySource=%.0f "
-                     "normalY=%+g mat='%s'\n",
+                     "normalY=%+g model=%u mat='%s'\n",
                      static_cast<unsigned long long>(handle.id),
                      material.getName() != nullptr ? material.getName() : "",
                      static_cast<int>(material.getAlphaMode()),
                      material.getAlphaCutoff(), material.isDoubleSided() ? 1 : 0,
                      premultiplied ? "premultiplied" : "straight",
                      opacitySource,
-                     normalY < 0.0f ? -1.0 : 1.0, materialPath.c_str());
+                     normalY < 0.0f ? -1.0 : 1.0,
+                     static_cast<unsigned>(materialModel), materialPath.c_str());
     }
 
     if (!material.hasParameter("baseColor")) {

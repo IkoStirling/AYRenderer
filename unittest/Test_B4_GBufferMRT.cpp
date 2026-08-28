@@ -155,6 +155,7 @@ TEST_CASE(b4a_gbuffer_pass_destroy_resources_resets_state) {
     CHECK(bgfx::isValid(pass.gbufferAlbedoRt()) == false);
     CHECK(bgfx::isValid(pass.gbufferNormalRt()) == false);
     CHECK(bgfx::isValid(pass.gbufferMotionRt()) == false);
+    CHECK(bgfx::isValid(pass.gbufferWorldPositionRt()) == false);
     CHECK(bgfx::isValid(pass.gbufferMaterialRt()) == false);
     CHECK(bgfx::isValid(pass.gbufferDepthRt()) == false);
     CHECK(pass.isReady() == false);

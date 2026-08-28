@@ -1761,6 +1761,14 @@ void Renderer::setMaterialBlendMode(MaterialHandle material, BlendMode blendMode
     (void)_impl->resources.setMaterialBlendMode(material, blendMode);
 }
 
+void Renderer::setMaterialModel(MaterialHandle material, MaterialModel model)
+{
+    if (!_impl || !material.isValid()) {
+        return;
+    }
+    (void)_impl->resources.setMaterialModel(material, model);
+}
+
 void Renderer::setMaterialSurfaceProperties(MaterialHandle material, int alphaMode,
                                              float alphaCutoff, bool doubleSided)
 {

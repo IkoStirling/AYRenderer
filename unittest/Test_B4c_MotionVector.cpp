@@ -123,16 +123,19 @@ namespace {
 // the standard "golden value" pattern Test_BGFXConverter uses for
 // the builtin names.
 // Live pins (GBufferPass.h externs) — never self-compare a local mirror.
-inline constexpr const char* kExpectedGBufferCacheKey = "gbuffer_fill_v15_normal_matrix";
-inline constexpr const char* kExpectedGBufferBuildStamp = "material-contract-v2-skinned-palette";
+inline constexpr const char* kExpectedGBufferCacheKey =
+    "gbuffer_fill_v16_model_coverage_split";
+inline constexpr const char* kExpectedGBufferBuildStamp =
+    "material-contract-v3-model-coverage-split";
 
 // Expected substrings — deferred-shadow contract writes worldPos to
-// RT2 (still named gbufferMotion). Motion NDC encoding deferred.
+// RT2 world-position output. Motion NDC encoding remains deferred.
 inline const char* kExpectedSourceSubstrings[] = {
     "uniform mat4 u_prevViewProj",      // retained for B7+ TAA host wire
     "uniform mat4 u_normalMatrix",      // inverse-transpose model normal path
     "modelViewProjection * vec4(pos",  // clip = MVP
-    "gbufferMotion = vec4(worldPos, materialAo)", // RT2 = worldPos + AO
+    "gbufferWorldPosition = vec4(worldPos, packedAoModel)",
+    "property materialModel",
     "out gbufferMaterial : color",
     "out gbufferAlbedo : color",
     "vec3(0.5, 0.5, 0.5)",              // HLSL-safe normal encode
@@ -173,6 +176,7 @@ std::string mirrorGBufferPhoskiaSource()
 material GBufferFill {
     texture2d albedoMap
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
+    property materialModel = vec4(0.0, 0.0, 0.0, 0.0)
     uniform mat4 u_prevViewProj
     uniform mat4 u_normalMatrix
 
@@ -191,14 +195,15 @@ material GBufferFill {
         in vUv         : texcoord
         out gbufferAlbedo : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
-        out gbufferMotion : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferWorldPosition : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferMaterial : color = vec4(0.0, 0.0, 0.0, 0.0)
         let n = normalize(worldNormal)
         let albedo = sample(albedoMap, vUv) * baseColor
         gbufferAlbedo = vec4(albedo.rgb, albedo.a)
         gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), 1.0)
         let materialAo = max(0.0, min(1.0, ao.x * sample(aoMap, vUv).x))
-        gbufferMotion = vec4(worldPos, materialAo)
+        let packedAoModel = materialModel.x * 2.0 + materialAo
+        gbufferWorldPosition = vec4(worldPos, packedAoModel)
     }
 }
 )");
@@ -342,10 +347,10 @@ TEST_CASE(b4c_phoskia_gbuffer_source_motion_contract) {
     for (const char* needle : kForbiddenSourceSubstrings) {
         CHECK(src.find(needle) == std::string::npos);
     }
-    // The fragment stage MUST write worldPos into gbufferMotion
+    // The fragment stage MUST write worldPos into the named RT2 output.
     // (deferred-shadow / B5.5 RT2 contract). Motion NDC encoding is
     // forbidden here — it breaks Lighting PCF.
-    CHECK(src.find("gbufferMotion = vec4(worldPos, materialAo)")
+    CHECK(src.find("gbufferWorldPosition = vec4(worldPos, packedAoModel)")
           != std::string::npos);
     CHECK(src.find("gbufferMotion = vec4(motionNDC")
           == std::string::npos);

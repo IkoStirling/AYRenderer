@@ -39,8 +39,9 @@
 namespace ayt::render::detail
 {
 
-// Five logical visualizations. Material reads the scalars packed into
-// RT0.a/RT1.a/RT2.a; Motion remains a compatibility alias.
+// Six logical visualizations. Material decodes AO from RT2.a while the model
+// view shows the independently packed shading-model ID. Motion remains a
+// compatibility alias.
 enum class GBufferDebugChannel : uint8_t {
     Albedo   = 0,  // RT0.rgb
     Normal   = 1,  // RT1.xyz, already encoded to [0,1]
@@ -48,7 +49,8 @@ enum class GBufferDebugChannel : uint8_t {
     Material = 3,  // RGB = metallic / roughness / material AO
     Motion   = Material, // compatibility alias; no velocity RT exists yet
     Depth    = 4,  // depth attachment, reversed to near=white
-    Count    = 5,
+    MaterialModel = 5, // StandardLit=green, Unlit=red
+    Count    = 6,
 };
 
 class GBufferDebugPass : public RenderPass {

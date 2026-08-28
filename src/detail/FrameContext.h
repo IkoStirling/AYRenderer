@@ -68,7 +68,7 @@ struct FrameContext {
     //      (W+1)/2 × (H+1)/2 (mirror BloomExtractPass) + Phoskia
     //      exponential fog blit on view 13 (before Final PP=14).
     //   3. depth source — Deferred samples GBuffer RT2 worldPos via
-    //      ctx.gbufferPass->gbufferMotionRt(); Forward / missing
+    //      ctx.gbufferPass->gbufferWorldPositionRt(); Forward / missing
     //      gbuffer ⇒ DepthHazePass returns 0 (safe no-haze).
     //
     // Default = haze OFF (hazeEnabled=false, hazeStrength=0) so
@@ -125,9 +125,9 @@ struct FrameContext {
 
     // Deferred GBuffer fullscreen overlay. Default OFF gates before pass GPU
     // resource creation. Channels: albedo, encoded normal, world position,
-    // packed material scalars, depth.
+    // packed material scalars, depth, material model.
     bool              gbufferDebugEnabled  = false;
-    uint8_t           gbufferDebugChannel  = 0;     // GBufferDebugChannel 0=Albedo..4=Depth
+    uint8_t           gbufferDebugChannel  = 0; // GBufferDebugChannel
 };
 
 } // namespace ayt::render::detail

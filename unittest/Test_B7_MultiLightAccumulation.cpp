@@ -121,7 +121,7 @@ namespace {
 // fails. Same TU-local-mirror pattern used by
 // Test_B5_LightingDirectional.cpp::kExpectedLightingCacheKey.
 inline constexpr const char* kExpectedB7LightingCacheKey =
-    "lighting_v28_shadow_light_order";
+    "lighting_v29_material_model_decode";
 
 // §P5 B7+ (2026-07-22) �?Phoskia source substring pins. Drift =
 // test fails. Note PascalCase `Lights` block name (matches
@@ -193,7 +193,7 @@ uniformblock Lights {
 material Lighting {
     texture2d gbufferAlbedo
     texture2d gbufferNormal
-    texture2d gbufferMotion
+    texture2d gbufferWorldPosition
     texturecube envCube
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
@@ -223,7 +223,7 @@ material Lighting {
         // (2 of 8) to keep size manageable; the live source has
         // all 8 unrolled with the same shape.
         let Ld0 = Lights.dirs[0].xyz * (1.0 / max(length(Lights.dirs[0].xyz), 0.0001))
-        let toL0 = Lights.dirs[0].xyz - sample(gbufferMotion, baseUv).xyz
+        let toL0 = Lights.dirs[0].xyz - sample(gbufferWorldPosition, baseUv).xyz
         let d0 = length(toL0)
         let Lp0 = toL0 * (1.0 / max(d0, 0.0001))
         let sdn0 = Lights.spotDir[0].xyz * (1.0 / max(length(Lights.spotDir[0].xyz), 0.0001))
@@ -242,7 +242,7 @@ material Lighting {
         let isSpot0 = step(1.5, Lights.dirs[0].w)
         let keyContrib = dirPart0 * isDir0 + pointPart0 * isPoint0 + spotPart0 * isSpot0
         let Ld7 = Lights.dirs[7].xyz * (1.0 / max(length(Lights.dirs[7].xyz), 0.0001))
-        let toL7 = Lights.dirs[7].xyz - sample(gbufferMotion, baseUv).xyz
+        let toL7 = Lights.dirs[7].xyz - sample(gbufferWorldPosition, baseUv).xyz
         let d7 = length(toL7)
         let Lp7 = toL7 * (1.0 / max(d7, 0.0001))
         let sdn7 = Lights.spotDir[7].xyz * (1.0 / max(length(Lights.spotDir[7].xyz), 0.0001))
@@ -599,7 +599,7 @@ TEST_CASE(b7_lighting_cache_key_bump_pinned_live) {
     CHECK(std::string(kExpectedB7LightingCacheKey).size() >= 20u);
     CHECK(std::string(kLightingCacheKeyCStr).size() >= 20u);
     // The literal must contain the §P5.5 D version bump marker.
-    CHECK(std::string(kLightingCacheKeyCStr).find("v28_shadow_light_order")
+    CHECK(std::string(kLightingCacheKeyCStr).find("v29_material_model_decode")
           != std::string::npos);
 }
 

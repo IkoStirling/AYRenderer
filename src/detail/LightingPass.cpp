@@ -36,7 +36,7 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
 // nested material uniformblocks never reach the HLSL preamble
 // (`undeclared identifier 'Lights'` / D3D X3004).
 // �P5 B5.5 (2026-07-22) ??bump on top of v11:
-//   + `texture2d gbufferMotion` carries encoded worldPos (RT2;
+//   + `texture2d gbufferWorldPosition` carries worldPos (RT2;
 //     GBufferFill v6) ??Lighting decodes instead of sampling D24S8
 //   + `texture2d shadowMap` + 4 shadow uniforms (u_lightViewProj,
 //     shadowBias, shadowMapTexel, shadowPcf)
@@ -81,7 +81,7 @@ static constexpr const char* kLightingBuildStamp = "b5-2026-07-22";
 //   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
 //   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v28_shadow_light_order";
+    "lighting_v29_material_model_decode";
 
 // �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -113,11 +113,7 @@ constexpr uint16_t kLightingFullscreenIndices[3] = { 0, 1, 2 };
 // Sampler inputs (cutsheet B5 spec):
 //   - gbufferAlbedo : color (RGB = baseColor, A = opacity) from B4b
 //   - gbufferNormal : color (RGB = world-space normal encoded [0,1])
-//   - gbufferMotion : color (xy = prev-frame displacement, [0,1] ??
-//                                   B5 currently does NOT consume
-//                                   motion; binding present for B7+
-//                                   TAA consumer symmetry ??cutsheet
-//                                   B5 boundary documented)
+//   - gbufferWorldPosition : xyz world position, w packed AO/model
 //
 // Uniform inputs (cutsheet B5 spec, all from FrameContext):
 //   - u_lightDirection : vec3 = -frame.lightDirection (Phoskia wants
@@ -178,7 +174,7 @@ uniformblock Lights {
 material Lighting {
     texture2d gbufferAlbedo
     texture2d gbufferNormal
-    texture2d gbufferMotion
+    texture2d gbufferWorldPosition
     texture2d gbufferMaterial
     texture2d shadowMap
     texture2d gbufferSky
@@ -213,7 +209,7 @@ material Lighting {
         let baseUv = vec2(vUv.x, 1.0 - vUv.y)
         let albedo = sample(gbufferAlbedo, baseUv)
         let normalSample = sample(gbufferNormal, baseUv)
-        let worldSample = sample(gbufferMotion, baseUv)
+        let worldSample = sample(gbufferWorldPosition, baseUv)
         let surface = sample(gbufferMaterial, baseUv)
         let N = normalSample.xyz * 2.0 - vec3(1.0, 1.0, 1.0)
         // �P5.5 D (2026-07-23) ??IBL MVP ambient term. Default
@@ -737,7 +733,8 @@ material Lighting {
         let directionalSum = keyContrib + f1 + f2 + f3 + f4 + f5 + f6 + f7
         let materialMetallic = max(0.0, min(1.0, albedo.a))
         let materialRoughness = max(0.045, min(1.0, normalSample.a))
-        let materialAo = max(0.0, min(1.0, worldSample.a))
+        let materialModel = floor(worldSample.a * 0.5 + 0.0001)
+        let materialAo = max(0.0, min(1.0, worldSample.a - materialModel * 2.0))
         let V = normalize(u_cameraPos.xyz - worldPos)
         let keyL = normalize(Ld0 * isDir0 + Lp0 * (isPoint0 + isSpot0))
         let H = normalize(V + keyL)
@@ -753,7 +750,10 @@ material Lighting {
         let diffuseLit = albedo.rgb * diffuseWeight * directionalSum
         let specularLit = F * (D * G / max(4.0 * NdotV * NdotLKey, 0.001)) * keyContrib
         let ambientLit = albedo.rgb * diffuseWeight * ambient * materialAo
-        let lit = ambientLit + diffuseLit + specularLit + surface.rgb
+        let pbrLit = ambientLit + diffuseLit + specularLit + surface.rgb
+        let unlit = albedo.rgb + surface.rgb
+        let isUnlit = step(0.5, materialModel) * (1.0 - step(1.5, materialModel))
+        let lit = mix(pbrLit, unlit, isUnlit)
         // �Skybox0 (2026-07-23) ??backdrop blend: sky only shows
         // where lit is near zero (so geometry keeps its color;
         // sky fills gaps in scene coverage). When
@@ -768,6 +768,8 @@ material Lighting {
     }
 }
 )";
+
+const char* const kLightingPhoskiaSourceCStr = kLightingPhoskiaSource;
 
 LightingPass::~LightingPass() = default;
 
@@ -980,9 +982,8 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // to a fully-lit white texture + identity LVP so the FS
     // reads stay valid without UB.
     //
-    // B7+ TAA boundary (unchanged): NOT consuming gbufferMotion
-    // (binding present for TAA consumer symmetry, FS does not
-    // read it ??see cutsheet B5 boundary doc).
+    // RT2 is a live input: xyz world position for local lights/shadows and
+    // w packed AO/material-model data.
     //
     // �5.4 (2026-07-22, FO/Trans PR) ??`isInitialized()` guard only,
     // NOT `|| isNoopBackend()`. Noop short-circuits inside
@@ -1089,16 +1090,16 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                                     toShaderTexture(normalHandle));
             }
         }
-        // motion sampler (binding present, FS does not currently read it;
-        // bound for B7+ TAA consumer symmetry ??cutsheet B5 boundary)
-        const shader::BindingId motionBinding =
-            _program.getTextureBinding("gbufferMotion");
-        if (motionBinding != shader::InvalidBinding) {
-            bgfx::TextureHandle motionHandle = ctx.gbufferPass->gbufferMotionRt();
-            if (bgfx::isValid(motionHandle)) {
-                const uint8_t stage = _program.getTextureStage(motionBinding);
-                _program.setTexture(stage, motionBinding,
-                                    toShaderTexture(motionHandle));
+        const shader::BindingId worldPositionBinding =
+            _program.getTextureBinding("gbufferWorldPosition");
+        if (worldPositionBinding != shader::InvalidBinding) {
+            const bgfx::TextureHandle worldPositionHandle =
+                ctx.gbufferPass->gbufferWorldPositionRt();
+            if (bgfx::isValid(worldPositionHandle)) {
+                const uint8_t stage =
+                    _program.getTextureStage(worldPositionBinding);
+                _program.setTexture(stage, worldPositionBinding,
+                                    toShaderTexture(worldPositionHandle));
             }
         }
         const shader::BindingId materialBinding =
@@ -1113,7 +1114,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             }
         }
         // �Skybox0 (2026-07-23) ??gbufferSky backdrop sampler.
-        // Mirror gbufferAlbedoRt / gbufferNormalRt / gbufferMotionRt
+        // Mirror the other borrowed GBuffer attachment bindings.
         // shape: lazy-resolve binding, bind from ctx.skyboxPass
         // (SkyboxPass-borrowed-pointer mirror), cache the handle in
         // `_gbufferSkyRt` for symmetry with the other GBuffer RTs.
@@ -1596,7 +1597,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     tryBindShadowSampler(_program, ctx.adapter, ctx.shadowPass,
                          kShadowCastAndReceive, frame.shadowBias);
 
-    // �P5 B5.5 v15 ??worldPos comes from gbufferMotion (RT2), already
+    // World position comes from RT2, already
     // bound above with the other GBuffer color attachments. No depth
     // reconstruct / u_depthToClip / gbufferDepth bind.
 

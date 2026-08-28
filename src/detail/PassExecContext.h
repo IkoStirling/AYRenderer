@@ -55,13 +55,10 @@ namespace ayt::render::detail
 // mutability (per docs/execution-plan.md §5.3 + §5.4 E6).
 class ShadowPass;
 
-// §P5 B2 (2026-07-22) — GBufferPass is the future B4 producer of the
-// GBuffer MRT (RT0 albedo + RT1 normal + RT2 motion + depth). The
-// B5 LightingPass consumes these attachments as its scene-color /
-// scene-normal / scene-motion inputs. Until then the shell class
-// is empty; this forward decl lets us carry the borrowed pointer on
-// PassExecContext in B2 without dragging the full GBufferPass
-// definition into every TU that already includes PassExecContext.h.
+// GBufferPass owns the deferred MRT: albedo/metallic, normal/roughness,
+// world-position/packed material data, emissive/coverage, and depth.
+// Consumers borrow it through PassExecContext without exposing GPU handles in
+// FrameContext.
 class GBufferPass;
 
 // §P5 B3 (2026-07-22) — LightingPass is the B5 producer of the

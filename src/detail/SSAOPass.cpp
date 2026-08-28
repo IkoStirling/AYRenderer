@@ -246,10 +246,12 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
         rateLimitedEarlyReturn("SSAOPass", "gbuffer not produced this frame");
         return 0;
     }
-    const bgfx::TextureHandle worldPosRt = ctx.gbufferPass->gbufferMotionRt();
+    const bgfx::TextureHandle worldPosRt =
+        ctx.gbufferPass->gbufferWorldPositionRt();
     const bgfx::TextureHandle worldNrmRt = ctx.gbufferPass->gbufferNormalRt();
     if (!BGFXAdapter::isValid(worldPosRt) || !BGFXAdapter::isValid(worldNrmRt)) {
-        rateLimitedEarlyReturn("SSAOPass", "gbuffer motion/normal RT invalid");
+        rateLimitedEarlyReturn(
+            "SSAOPass", "gbuffer world-position/normal RT invalid");
         return 0;
     }
 

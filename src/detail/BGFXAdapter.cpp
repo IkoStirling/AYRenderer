@@ -1,4 +1,5 @@
 #include "detail/BGFXAdapter.h"
+#include "detail/GBufferLayout.h"
 #include "detail/RasterConvention.h"
 #include "detail/BgfxMatrix.h"
 
@@ -598,10 +599,11 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
         return BGFX_INVALID_HANDLE;
     }
 
-    constexpr uint8_t kNumColor = 4;
+    constexpr uint8_t kNumColor = GBufferLayout::kColorAttachmentCount;
     // Deferred material contract:
     // RT0 albedo+metallic RGBA8 / RT1 normal+roughness RGBA8 /
-    // RT2 worldPos+AO RGBA16F / RT3 emissive+coverage RGBA8.
+    // RT2 worldPos+(AO+material-model) RGBA16F /
+    // RT3 emissive+coverage RGBA8.
     // RGBA8 on RT2 quantized worldPos (~0.16m) → mosaic shadow UVs.
     const bgfx::TextureFormat::Enum colorFmts[kNumColor] = {
         bgfx::TextureFormat::RGBA8,

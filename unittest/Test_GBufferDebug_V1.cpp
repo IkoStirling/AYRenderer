@@ -8,7 +8,7 @@
 //        GBufferDebugPass::kGBufferDebugViewId == 250
 //        (verified unused via repo grep, 2026-07-24)
 //   3) FrameContext defaults to a disabled, zero-allocation path.
-//   4) Five-channel enum, with Motion retained as the Material alias.
+//   4) Six-channel enum, with Motion retained as the Material alias.
 //   5) Cache-key extern mirror (Bug fix #3 pattern):
 //        kGBufferDebugCacheKeyCStr literals must agree between
 //        .h declaration + .cpp definition.
@@ -95,7 +95,7 @@ TEST_CASE(v1_view_id_lock_is_250) {
 
 // ─── B. GBufferDebugChannel enum completeness ──────────────────────
 
-TEST_CASE(v1_channel_enum_completeness_5_values) {
+TEST_CASE(v1_channel_enum_append_only_values) {
     // Channel 3 is the packed material scalar view. Motion remains its
     // compatibility alias until a dedicated velocity attachment exists.
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Albedo)   == 0u);
@@ -104,8 +104,9 @@ TEST_CASE(v1_channel_enum_completeness_5_values) {
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Material) == 3u);
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Motion)   == 3u);
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Depth)    == 4u);
-    CHECK(static_cast<uint8_t>(GBufferDebugChannel::Count)    == 5u);
-    CHECK(GBufferDebugPass::kGBufferDebugChannelCount == 5u);
+    CHECK(static_cast<uint8_t>(GBufferDebugChannel::MaterialModel) == 5u);
+    CHECK(static_cast<uint8_t>(GBufferDebugChannel::Count)    == 6u);
+    CHECK(GBufferDebugPass::kGBufferDebugChannelCount == 6u);
 }
 
 // ─── C. FrameContext default state (K-GBD-1 zero alloc) ───────────
@@ -146,7 +147,7 @@ TEST_CASE(v1_cache_key_extern_mirror_contains_marker) {
     // Live overlay literal contains "gbufferdebug" + version stamp.
     const std::string key(ayt::render::detail::kGBufferDebugCacheKeyCStr);
     CHECK(key.find("gbufferdebug") != std::string::npos);
-    CHECK(key.find("v2")          != std::string::npos);
+    CHECK(key.find("v3")          != std::string::npos);
 }
 
 TEST_CASE(v2_live_overlay_source_generates_valid_ir) {

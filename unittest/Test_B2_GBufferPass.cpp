@@ -166,6 +166,7 @@ TEST_CASE(b2_gbuffer_pass_accessors_return_invalid_on_shell) {
     CHECK(bgfx::isValid(pass.gbufferAlbedoRt()) == false);
     CHECK(bgfx::isValid(pass.gbufferNormalRt()) == false);
     CHECK(bgfx::isValid(pass.gbufferMotionRt()) == false);
+    CHECK(bgfx::isValid(pass.gbufferWorldPositionRt()) == false);
     CHECK(bgfx::isValid(pass.gbufferMaterialRt()) == false);
     CHECK(pass.gbufferWidth() == 0u);
     CHECK(pass.gbufferHeight() == 0u);

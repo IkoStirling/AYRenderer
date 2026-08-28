@@ -24,7 +24,7 @@
 //
 //   4) Phoskia source contract: kLightingPhoskiaSource contains
 //      the required samplers (gbufferAlbedo/gbufferNormal/
-//      gbufferMotion) + uniforms (u_lightDirection/u_lightColor/
+//      gbufferWorldPosition) + uniforms (u_lightDirection/u_lightColor/
 //      u_cameraPos) + Lambert formula (N = sample * 2 - 1;
 //      NdotL; ambient). Drift = test fails. This is the source-
 //      contract pin (mirror B4c.4 substring discipline).
@@ -102,14 +102,14 @@ namespace {
 // key via `kLightingCacheKeyCStr` in LightingPass.h, so this test
 // compares the mirror against the live key �?drift now fails.
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v28_shadow_light_order";
+    "lighting_v29_material_model_decode";
 inline constexpr const char* kExpectedLightingBuildStamp =
     "b5-2026-07-22";
 
 inline const char* kExpectedSourceSubstrings[] = {
     "texture2d gbufferAlbedo",    // sampler declaration (Phoskia keyword)
     "texture2d gbufferNormal",
-    "texture2d gbufferMotion",
+    "texture2d gbufferWorldPosition",
     "texture2d gbufferMaterial",
     "texturecube envCube",        // §P5.5 D: IBL ambient sampler
     "uniform vec4 u_lightDirection",
@@ -155,7 +155,7 @@ uniformblock Lights {
 material Lighting {
     texture2d gbufferAlbedo
     texture2d gbufferNormal
-    texture2d gbufferMotion
+    texture2d gbufferWorldPosition
     texture2d gbufferMaterial
     texture2d shadowMap
     texture2d gbufferSky
@@ -186,7 +186,7 @@ material Lighting {
         let ambientFlat = vec3(0.1, 0.1, 0.1)
         let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x
         let ambient = ambientFlat + ambientCube
-        let worldPos = sample(gbufferMotion, baseUv).xyz
+        let worldPos = sample(gbufferWorldPosition, baseUv).xyz
         let Ld0 = Lights.dirs[0].xyz * (1.0 / max(length(Lights.dirs[0].xyz), 0.0001))
         let toL0 = Lights.dirs[0].xyz - worldPos
         let d0 = length(toL0)

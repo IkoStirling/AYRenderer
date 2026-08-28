@@ -6,7 +6,7 @@
 // lands the exponential fog shader (主人拍板 B), the half-resolution
 // RGBA8 FBO ensure (later deferred to FrameGraph in F4), Deferred
 // GBuffer-RT2 worldPos distance (`length(worldPos - camPos)`),
-// Forward safe no-haze when gbufferMotionRt is missing, and the
+// Forward safe no-haze when gbufferWorldPositionRt is missing, and the
 // hazeEnabled/hazeStrength zero-cost gate (K3 invariant #2:
 // frame.hazeEnabled=false ⇒ HazeHalf 不 live ⇒ resolve 返 invalid
 // ⇒ no FBO allocation; mirrors frame-graph-mvp.md §7 第 3 条).
@@ -61,7 +61,7 @@
 //      branchless composite collapses to `raw * (1 - 0) = raw`.
 //      Mirror §S1c bloomBlurPass==nullptr invariant.
 //   4. Deferred: dist = length(GBuffer RT2 worldPos - camPos);
-//      Forward / no gbufferMotionRt ⇒ render() central
+//      Forward / no gbufferWorldPositionRt ⇒ render() central
 //      `hazePassEnabled` is false ⇒ FG compile doesn't add
 //      HazeHalf ⇒ resolve() returns invalid ⇒ execute returns 0.
 //      Avoids the failed D3D invVP reconstruct path.
