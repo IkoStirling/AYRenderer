@@ -225,8 +225,9 @@ TEST_CASE(ui_nine_patch_run_boundaries)
                        ayt::math::FRectangle(0.0f, 0.0f, 1.0f, 1.0f),
                        ayt::math::FVector4(8.0f, 8.0f, 8.0f, 8.0f));       // texture run again
     h.ui.endFrame();
-    // Texture↔white switches break the run: 3 calls (never merged).
-    CHECK(h.ui.getDrawCallCount() == 3);
+    // The white quad does not overlap either NinePatch. The two texture
+    // groups can therefore join without changing any covered pixel order.
+    CHECK(h.ui.getDrawCallCount() == 2);
 
     h.ui.releaseUiTexture(tex);
 }

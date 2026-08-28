@@ -215,6 +215,20 @@ D:\Projects\out\build\x64-Debug\AYRuntime\AYRenderer\demo\AYSuzanneSkinned_Demo.
 
 ---
 
+## UI 合批
+
+`UIRenderBackend` 默认使用 `BatchMode::OverlapAware`。它不会对整帧 UI 做全局排序，而是在一个有界窗口内寻找兼容绘制；候选项只能跨过与自身绘制包围盒不相交的项，因此所有重叠元素仍保持原始 painter order。
+
+- Flat UI 按纹理与 bgfx state 合批。
+- SDF UI 按 state 与完整 SDF 参数合批。
+- 搜索窗口固定为 96 项，调度成本随 UI item 数量线性增长，不会出现无界排序开销。
+- 包围盒含非有限值或调度校验失败时，自动回退到原始顺序。
+- `setBatchMode(BatchMode::OrderedRuns)` 可显式启用旧的“仅相邻兼容项合批”路径，便于兼容、排障和 A/B 对比。
+
+专项基线场景中，默认模式把 23 次 UI submit 降至 6 次；旧路径仍由同一组测试锁定为 23 次。
+
+---
+
 ## 与 AYShader 的分工
 
 | 层 | 职责 |

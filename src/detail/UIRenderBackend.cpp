@@ -47,8 +47,9 @@ struct UiVertex {
 };
 
 // P0 unified batch: every draw entry becomes one UiItem appended to
-// frame.items in submission order (array order == z-order; runs are
-// grouped at flush time, never re-sorted). Sdf items arrive in P2.
+// frame.items in submission order (array order == painter order). flush()
+// may derive a safe logical order, but never mutates this source stream.
+// Sdf items arrive in P2.
 enum class UiItemKind : uint8_t { Flat, Sdf };
 
 struct UiItem {
@@ -91,6 +92,114 @@ bool sdfParamsEqual(const detail::UiGpuContext::SdfParams& a,
         && a.strokeWidth == b.strokeWidth && a.strokeInset == b.strokeInset
         && a.shadowColor == b.shadowColor && a.shadowOffset == b.shadowOffset
         && a.shadowBlur == b.shadowBlur;
+}
+
+bool batchCompatible(const UiItem& a, const UiItem& b)
+{
+    if (a.kind != b.kind || a.state != b.state) {
+        return false;
+    }
+    if (a.kind == UiItemKind::Flat) {
+        return a.textureIdx == b.textureIdx;
+    }
+    return sdfParamsEqual(a.sdf, b.sdf);
+}
+
+bool hasFiniteBounds(const UiItem& item)
+{
+    return std::isfinite(item.minX) && std::isfinite(item.minY)
+        && std::isfinite(item.maxX) && std::isfinite(item.maxY);
+}
+
+bool drawBoundsOverlap(const UiItem& a, const UiItem& b)
+{
+    // Touching edges do not cover a common pixel. SDF draw bounds already
+    // include AA, outside-stroke and shadow extents, so this test also guards
+    // the visually significant falloff area.
+    return a.minX < b.maxX && b.minX < a.maxX
+        && a.minY < b.maxY && b.minY < a.maxY;
+}
+
+// Material-aware, painter-order-safe scheduler. A later item may move before
+// skipped items only when its draw bounds do not overlap any item it crosses.
+// Therefore every overlapping pair retains its original relative order while
+// disjoint controls (button/list/grid rows are the common case) can collapse
+// into much larger batches. Work is bounded by a local look-ahead window;
+// unlike an all-pairs overlap DAG this remains linear in N for a fixed window
+// (O(N * window^2) worst case, with a deliberately small constant window).
+bool buildOverlapAwareOrder(const std::vector<UiItem>& items,
+                            std::vector<uint32_t>& order,
+                            std::vector<uint32_t>& next,
+                            std::vector<uint32_t>& barriers)
+{
+    constexpr uint32_t kInvalidIndex = UINT32_MAX;
+    constexpr uint32_t kLookAhead    = 96u;
+
+    const size_t count = items.size();
+    order.clear();
+    if (count < 3u || count > static_cast<size_t>(UINT32_MAX)) {
+        return false;
+    }
+
+    for (const UiItem& item : items) {
+        // Invalid geometry is treated as a planner failure, not as disjoint
+        // geometry. The caller then uses the original ordered-run fallback.
+        if (!hasFiniteBounds(item)) {
+            return false;
+        }
+    }
+
+    next.resize(count);
+    for (uint32_t i = 0; i < static_cast<uint32_t>(count); ++i) {
+        next[i] = (static_cast<size_t>(i) + 1u < count) ? i + 1u : kInvalidIndex;
+    }
+    order.reserve(count);
+    barriers.reserve(kLookAhead);
+
+    uint32_t head = 0u;
+    while (head != kInvalidIndex) {
+        const uint32_t anchor = head;
+        order.push_back(anchor);
+
+        barriers.clear();
+        uint32_t previous  = anchor;
+        uint32_t candidate = next[anchor];
+        uint32_t inspected = 0u;
+
+        while (candidate != kInvalidIndex && inspected < kLookAhead) {
+            const uint32_t afterCandidate = next[candidate];
+            bool canMove = batchCompatible(items[anchor], items[candidate]);
+            if (canMove) {
+                for (uint32_t barrier : barriers) {
+                    if (drawBoundsOverlap(items[candidate], items[barrier])) {
+                        canMove = false;
+                        break;
+                    }
+                }
+            }
+
+            if (canMove) {
+                // Remove candidate from the remaining linked list and append
+                // it next to the anchor in the optimized logical order.
+                order.push_back(candidate);
+                next[previous] = afterCandidate;
+            } else {
+                barriers.push_back(candidate);
+                previous = candidate;
+            }
+
+            candidate = afterCandidate;
+            ++inspected;
+        }
+
+        head = next[anchor];
+    }
+
+    if (order.size() != count) {
+        order.clear();
+        return false;
+    }
+    return true;
 }
 
 // Per-corner radii helpers. Shader u_radius order is TL TR BR BL —
@@ -209,6 +318,12 @@ struct UIRenderBackend::FrameState {
     ayt::font::IFont*                  textSyncFont = nullptr;
     std::vector<ayt::math::FRectangle> clipStack;
     ayt::ui::BlendMode                 currentBlend = ayt::ui::BlendMode::Normal;
+    BatchMode                          batchMode = BatchMode::OverlapAware;
+    // Overlap-aware planner scratch. These vectors retain capacity across
+    // frames; beginFrame clears only the logical command stream.
+    std::vector<uint32_t>              batchOrder;
+    std::vector<uint32_t>              batchNext;
+    std::vector<uint32_t>              batchBarriers;
     // PR-anim: stacked global opacity (LIFO, mirrors clipStack). Every
     // color-emitting entry multiplies its alpha by the stack top; the
     // base frame is 1.0 so default rendering is byte-identical.
@@ -355,6 +470,19 @@ void UIRenderBackend::setFramebufferSize(uint16_t width, uint16_t height)
 {
     _width  = width;
     _height = height;
+}
+
+void UIRenderBackend::setBatchMode(BatchMode mode)
+{
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+    _frame->batchMode = mode;
+}
+
+UIRenderBackend::BatchMode UIRenderBackend::getBatchMode() const
+{
+    return _frame != nullptr ? _frame->batchMode : BatchMode::OverlapAware;
 }
 
 void UIRenderBackend::beginFrame()
@@ -1113,9 +1241,24 @@ void UIRenderBackend::flushColoredRects()
     const float    fbW       = static_cast<float>(_width);
     const float    fbH       = static_cast<float>(_height);
 
-    // Consecutive-runs only — never re-sort (z-order = array order).
+    // OrderedRuns is the original fallback. The optimized path builds a
+    // logical order only; UiItems themselves stay in recording order so a
+    // planner failure can fall back without reconstructing the command list.
+    const std::vector<uint32_t>* batchOrder = nullptr;
+    if (frame.batchMode == BatchMode::OverlapAware
+        && buildOverlapAwareOrder(frame.items, frame.batchOrder,
+                                  frame.batchNext, frame.batchBarriers)) {
+        batchOrder = &frame.batchOrder;
+    }
+    const auto itemAt = [&](size_t logicalIndex) -> const UiItem& {
+        return batchOrder != nullptr ? frame.items[(*batchOrder)[logicalIndex]]
+                                     : frame.items[logicalIndex];
+    };
+
+    // Flush a consecutive run in the selected logical order. In fallback
+    // mode logical order is exactly the original array/painter order.
     auto flushFlatRun = [&](size_t begin, size_t end) {
-        const UiItem& first = frame.items[begin];
+        const UiItem& first = itemAt(begin);
         const size_t  count = end - begin;
 
         frame.scratchVertices.clear();
@@ -1124,7 +1267,7 @@ void UIRenderBackend::flushColoredRects()
         frame.scratchIndices.reserve(count * 6u);
 
         for (size_t i = begin; i < end; ++i) {
-            const UiItem& it = frame.items[i];
+            const UiItem& it = itemAt(i);
             const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
             const float    z    = 0.0f;
 
@@ -1169,18 +1312,19 @@ void UIRenderBackend::flushColoredRects()
     size_t i = 0;
     const size_t n = frame.items.size();
     while (i < n) {
-        const UiItem& it = frame.items[i];
+        const UiItem& it = itemAt(i);
         if (it.kind == UiItemKind::Sdf) {
             // Batch knife: consecutive SDF items with IDENTICAL params
             // (shape rect rides per-vertex now, so position/color vary
             // freely within a run) and same blend state merge into one
             // submission. Per-item uniforms would force one call per
             // quad; same-skin buttons/panels collapse to a single call.
-            // Never re-sort (z-order = array order).
+            // itemAt() already reflects either the overlap-safe logical
+            // order or the untouched painter-order fallback.
             size_t end = i + 1;
-            while (end < n && frame.items[end].kind == UiItemKind::Sdf
-                   && frame.items[end].state == it.state
-                   && sdfParamsEqual(frame.items[end].sdf, it.sdf)) {
+            while (end < n && itemAt(end).kind == UiItemKind::Sdf
+                   && itemAt(end).state == it.state
+                   && sdfParamsEqual(itemAt(end).sdf, it.sdf)) {
                 ++end;
             }
 
@@ -1191,7 +1335,7 @@ void UIRenderBackend::flushColoredRects()
             const float z = 0.0f;
 
             for (size_t k = i; k < end; ++k) {
-                const UiItem& s = frame.items[k];
+                const UiItem& s = itemAt(k);
                 const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
                 // Fill from abgr[0] (drawRoundedRect); borders leave it 0.
                 const uint32_t fill = s.abgr[0];
@@ -1245,9 +1389,9 @@ void UIRenderBackend::flushColoredRects()
             continue;
         }
         size_t end = i + 1;
-        while (end < n && frame.items[end].kind == UiItemKind::Flat
-               && frame.items[end].textureIdx == it.textureIdx
-               && frame.items[end].state == it.state) {
+        while (end < n && itemAt(end).kind == UiItemKind::Flat
+               && itemAt(end).textureIdx == it.textureIdx
+               && itemAt(end).state == it.state) {
             ++end;
         }
         flushFlatRun(i, end);

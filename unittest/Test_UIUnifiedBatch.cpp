@@ -1,5 +1,5 @@
-// Test_UIUnifiedBatch.cpp — P0 unified UiItem batch: one ordered draw
-// list, consecutive-run grouping at flush, no mid-frame z-order flushes.
+// Test_UIUnifiedBatch.cpp — unified UiItem command stream with
+// overlap-aware material grouping and an ordered-run safety fallback.
 
 #include "AYRenderer.h"
 #include "AYTest.h"
@@ -96,7 +96,7 @@ TEST_CASE(ui_unified_batch_text_and_rects_two_runs)
     CHECK(h.ui.getDrawCallCount() == 2);
 }
 
-TEST_CASE(ui_unified_batch_interleaved_runs_preserve_order)
+TEST_CASE(ui_unified_batch_disjoint_interleaved_runs_merge)
 {
     if (!systemFontAvailable()) {
         std::fprintf(stderr, "[UIUnifiedBatch interleave test] SKIP: system UI font not found\n");
@@ -111,8 +111,9 @@ TEST_CASE(ui_unified_batch_interleaved_runs_preserve_order)
                   ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
     drawRectAt(h.ui, 210.0f, 10.0f, 40.0f, 40.0f);
     h.ui.endFrame();
-    // rect / text / rect: three consecutive runs; never merged (z-order wins).
-    CHECK(h.ui.getDrawCallCount() == 3);
+    // The final rect is disjoint from the text glyph bounds, so it may move
+    // next to the first rect: white run + atlas run.
+    CHECK(h.ui.getDrawCallCount() == 2);
 }
 
 TEST_CASE(ui_unified_batch_empty_frame_zero)
@@ -184,10 +185,9 @@ TEST_CASE(ui_unified_batch_clip_culls)
     CHECK(h.ui.getDrawCallCount() == 0);
 }
 
-// Batch knife: consecutive SDF items with identical params (radius /
-// stroke / shadow — shape rect and fill color are per-vertex now) merge
-// into one submission. Non-contiguous or param-differing items keep
-// their own calls (z-order = array order, never re-sorted).
+// SDF items with identical params (radius / stroke / shadow — shape rect
+// and fill color are per-vertex) merge when they are adjacent or can be
+// moved across non-overlapping barriers.
 
 TEST_CASE(ui_sdf_batch_same_params_merge)
 {
@@ -285,13 +285,31 @@ TEST_CASE(ui_sdf_batch_fill_stroke_do_not_merge)
     CHECK(h.ui.getDrawCallCount() == 2);
 }
 
-TEST_CASE(ui_sdf_batch_noncontiguous_not_merged)
+TEST_CASE(ui_sdf_batch_noncontiguous_disjoint_items_merge)
 {
     UiHarness h;
     CHECK(h.init());
 
-    // Identical params but interleaved with a different item: z-order
-    // (array order) must win — runs never jump across items.
+    // Identical params interleaved per control. Controls are disjoint, so
+    // all fills can group and all borders can group.
+    h.ui.beginFrame();
+    for (int i = 0; i < 4; ++i) {
+        const float x = 20.0f + static_cast<float>(i) * 60.0f;
+        h.ui.drawRoundedRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                             ayt::math::FVector4(0.3f, 0.5f, 0.9f, 1.0f), 6.0f);
+        h.ui.drawBorderRect(ayt::math::FRectangle(x, 20.0f, x + 50.0f, 50.0f),
+                            ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f), 1.0f, 6.0f);
+    }
+    h.ui.endFrame();
+    CHECK(h.ui.getDrawCallCount() == 2);
+}
+
+TEST_CASE(ui_sdf_batch_ordered_runs_fallback_keeps_eight_calls)
+{
+    UiHarness h;
+    CHECK(h.init());
+    h.ui.setBatchMode(ayt::render::UIRenderBackend::BatchMode::OrderedRuns);
+
     h.ui.beginFrame();
     for (int i = 0; i < 4; ++i) {
         const float x = 20.0f + static_cast<float>(i) * 60.0f;

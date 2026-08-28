@@ -471,6 +471,24 @@ static constexpr std::string_view kFullPipelineOrder[] = {
 };
 ```
 
+### 8.4 UI 合批与绘制顺序
+
+`UIRenderBackend` 先按 AYUI 产生的顺序记录整帧 `UiItem`，随后在 `flush()` 中选择提交顺序。默认的 `BatchMode::OverlapAware` 使用固定 96 项的前视窗口：后续兼容项只有在其与所有跨越项的绘制包围盒均不相交时才可前移。由此得到两个约束：
+
+1. 任意重叠项的相对顺序不变，透明 UI、文字、阴影和边框仍遵守 painter order。
+2. 不相交区域允许按纹理、state 或 SDF 参数聚拢，减少 submit 与状态切换。
+
+兼容键如下：
+
+| 类型 | 合批键 |
+|---|---|
+| Flat | bgfx state + texture |
+| SDF | bgfx state + 完整 SDF 参数 |
+
+调度器只生成逻辑索引，不改写原始 item 数组；实际 vertex/index 数据仍按既有路径构建和提交。窗口大小为常数，因此相对 item 数量的渐进复杂度保持线性。非有限包围盒、过大输入或内部校验失败会自动使用原始输入顺序。
+
+`BatchMode::OrderedRuns` 完整保留旧实现：只合并相邻且兼容的 item。该模式作为运行时兜底、排障开关和性能 A/B 基线存在，不需要维护第二套渲染后端。
+
 ---
 
 ## 9. AYRenderer 主类
@@ -688,11 +706,12 @@ include/AYRenderer/
 - [x] `RenderSystem` + `bootstrapModule()` 引导
 - [x] `AYEngineIntegration_Demo`：旋转 ECS 立方体 + overlay
 - [x] 单线程 render callback（`setRenderThreadEnabled(false)`）
+- [x] `UIRenderBackend` overlap-aware 合批 + `OrderedRuns` 兜底
 
 ### Phase R5+ — 延后
 
 - [ ] Shadow / GBuffer / PostProcess
-- [ ] `DrawListBuilder` 合批
+- [ ] 场景渲染 `DrawListBuilder` 合批（UI 合批已独立完成）
 - [ ] Command Queue
 - [ ] `material_shader_mapping` 数据库
 - [ ] 从 AliyatRenderer 迁移 2D/UI/Skybox（**单独评估**；旧栈为 OpenGL，非直接移植）

@@ -117,8 +117,9 @@ TEST_CASE(ui_gradient_blend_mode_breaks_runs)
     h.ui.setBlendMode(ayt::ui::BlendMode::Normal);
     drawRectAt(h.ui, 110.0f, 10.0f, 40.0f, 40.0f);           // Normal
     h.ui.endFrame();
-    // Different states never merge — three consecutive runs.
-    CHECK(h.ui.getDrawCallCount() == 3);
+    // The two Normal rects are disjoint from the Additive rect, so the
+    // overlap-aware planner safely groups them: Normal + Additive.
+    CHECK(h.ui.getDrawCallCount() == 2);
 }
 
 TEST_CASE(ui_gradient_blend_adjacent_same_mode_merges)
@@ -135,6 +136,43 @@ TEST_CASE(ui_gradient_blend_adjacent_same_mode_merges)
     h.ui.setBlendMode(ayt::ui::BlendMode::Normal);
     drawRectAt(h.ui, 210.0f, 10.0f, 40.0f, 40.0f);
     h.ui.endFrame();
+    CHECK(h.ui.getDrawCallCount() == 2);
+}
+
+TEST_CASE(ui_gradient_blend_overlap_preserves_painter_order)
+{
+    Harness h;
+    CHECK(h.init());
+
+    h.ui.beginFrame();
+    drawRectAt(h.ui, 10.0f, 10.0f, 80.0f, 80.0f);  // Normal, bottom
+    h.ui.setBlendMode(ayt::ui::BlendMode::Additive);
+    drawRectAt(h.ui, 20.0f, 20.0f, 60.0f, 60.0f);  // Additive, middle
+    h.ui.setBlendMode(ayt::ui::BlendMode::Normal);
+    drawRectAt(h.ui, 30.0f, 30.0f, 40.0f, 40.0f);  // Normal, top
+    h.ui.endFrame();
+
+    // The final Normal item overlaps the Additive barrier and cannot move.
+    CHECK(h.ui.getDrawCallCount() == 3);
+}
+
+TEST_CASE(ui_gradient_blend_ordered_runs_fallback)
+{
+    Harness h;
+    CHECK(h.init());
+
+    h.ui.setBatchMode(ayt::render::UIRenderBackend::BatchMode::OrderedRuns);
+    CHECK(h.ui.getBatchMode() == ayt::render::UIRenderBackend::BatchMode::OrderedRuns);
+
+    h.ui.beginFrame();
+    drawRectAt(h.ui, 10.0f, 10.0f, 40.0f, 40.0f);
+    h.ui.setBlendMode(ayt::ui::BlendMode::Additive);
+    drawRectAt(h.ui, 60.0f, 10.0f, 40.0f, 40.0f);
+    h.ui.setBlendMode(ayt::ui::BlendMode::Normal);
+    drawRectAt(h.ui, 110.0f, 10.0f, 40.0f, 40.0f);
+    h.ui.endFrame();
+
+    // Original conservative implementation: only adjacent runs merge.
     CHECK(h.ui.getDrawCallCount() == 3);
 }
 

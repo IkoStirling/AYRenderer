@@ -32,6 +32,15 @@ class UiGpuContext;
 // incrementally rebuilt with mismatched layouts.
 class UIRenderBackend : public ayt::ui::IRenderBackend {
 public:
+    // OrderedRuns is the original conservative implementation: only
+    // immediately adjacent compatible items merge. OverlapAware keeps the
+    // same painter-order result while allowing non-overlapping items to move
+    // across incompatible neighbours and join a larger material batch.
+    enum class BatchMode : uint8_t {
+        OverlapAware,
+        OrderedRuns
+    };
+
     // Composite view map (ascending bgfx order):
     //   0 = full-window clear
     //   1 = ShadowPass caster → shadow FBO
@@ -62,6 +71,11 @@ public:
     bool isInitialized() const { return _initialized; }
 
     void setFramebufferSize(uint16_t width, uint16_t height);
+
+    // OverlapAware is the default. OrderedRuns remains available as a
+    // runtime safety fallback and for A/B diagnostics.
+    void setBatchMode(BatchMode mode);
+    BatchMode getBatchMode() const;
 
     void beginFrame() override;
     void endFrame() override;
