@@ -1108,13 +1108,10 @@ void LightingPass::ensureFullscreenQuad(BGFXAdapter& adapter)
         return;
     }
     const bgfx::VertexLayout layout = adapter.vertexLayoutPosUv();
-    _fullscreenVB = adapter.createVertexBuffer(kLightingFullscreenTriangle,
-                                                sizeof(kLightingFullscreenTriangle),
-                                                layout,
-                                                BGFX_BUFFER_NONE);
-    _fullscreenIB = adapter.createIndexBuffer(kLightingFullscreenIndices,
-                                              sizeof(kLightingFullscreenIndices),
-                                              BGFX_BUFFER_NONE);
+    (void)ensureFullscreenTriangleBuffers(
+        adapter, _fullscreenVB, _fullscreenIB,
+        kLightingFullscreenTriangle, sizeof(kLightingFullscreenTriangle), layout,
+        kLightingFullscreenIndices, sizeof(kLightingFullscreenIndices));
 }
 
 void LightingPass::ensureProgram(ayt::shader::ShaderResourcePool& pool,

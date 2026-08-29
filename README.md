@@ -229,6 +229,31 @@ D:\Projects\out\build\x64-Debug\AYRuntime\AYRenderer\demo\AYSuzanneSkinned_Demo.
 
 ---
 
+## Production UI Layer 与 RenderTargetPool
+
+`UIRenderBackend` 已启用 AYUI 的 RenderTarget/Layer capability。静态 UI 主树可以绘制到保留像素层；
+clean 帧只在主 UI view 提交一次 composite，popup、modal、tooltip 和 drag visual 继续在其后即时提交。
+离屏层完整复用现有 flat/SDF/text/nine-patch/vector-path 流程，包含 depth/stencil，因此复杂路径与嵌套
+path clip 不需要维护第二套实现。create/update/paint 失败或 device reset 后，AYUI 会标脏并同帧回退/
+重绘。显式 dirty rect 使用 damage clip 做局部 replay；Transparent/Color Layer 先以无混合覆盖写
+清除受损区域，区域外像素保持不变，Preserve Layer 则跳过该清除。
+
+Renderer 持有一个共享 `RenderTargetPool`，FrameGraph 的 Bloom/Haze/SSAO 等目标与 UI Layer 都从该池
+取得 generation-checked lease。池按尺寸、格式、depth、sampleCount 精确复用，release 后默认隔离两帧，
+空闲目标按 LRU 受 256 MiB best-effort 预算约束；resize、MSAA 切换和 device reset 会统一失效所有
+lease。当前限制为：
+
+- 仅支持 1× sample 的池目标；leased/quarantined 目标可能暂时超过预算。
+- UI 离屏 paint 使用 view 26–249（250 保留给 GBufferDebug），每帧最多 224 次；第 225 次失败并由
+  AYUI 同帧回退，下一帧从 view 26 恢复。该上限是 pass 调度容量，不是 UI 独占 framebuffer 数量。
+- 池和 UI backend 都是 renderer-thread-only。
+- Noop 契约测试覆盖复杂绘制、局部 damage、clean composite、离屏 pass 溢出恢复与 reset 重绘；
+  OpenGL/Vulkan RenderTarget 纹理方向和真实局部清除仍需 GPU 图像回归验证。
+
+Windows Debug 当前全量基线为 `3211 / 3211` 条断言通过。
+
+---
+
 ## 与 AYShader 的分工
 
 | 层 | 职责 |

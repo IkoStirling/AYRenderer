@@ -3,7 +3,7 @@
 // `_pongFbo` (the vertically-blurred half-res FBO produced by
 // BloomBlurPass in S1b) as the actual bloom contribution, replacing
 // the pre-S1 fake `raw + raw*bloomStrength` shader hack with
-// `raw + sample(bloomTexture, uv) * bloomStrength`.
+// `(scene + sample(bloomTexture, uv) * bloomStrength) * exposure`.
 //
 // This test pins the S1c ship:
 //
@@ -19,11 +19,8 @@
 //      declares texture2d sceneColor + texture2d bloomTexture +
 //      the S1c composite line `bloomSample.xyz * bloomStrength.x`
 //      (replacing the fake `raw + raw*bloomStrength.x`).
-//   4) Cache-key bump: PostProcessPass now compiles under
-//      `postprocess_tonemap_aces_v3_bloom_composite_fs`. The
-//      passthrough fallback key also bumped
-//      (`postprocess_passthrough_tonemap_aces_v3_bloom_composite_fs`).
-//      Future cuts force a re-acquire.
+//   4) Cache-key pin: PostProcessPass uses the current v12 sanitized-
+//      parameter primary program. Future source changes must bump it.
 //   5) PassExecContext::bloomBlurPass default = nullptr so
 //      existing 20-/21-field brace-init sites keep compiling
 //      (C++14 trailing-default behavior — K3 invariant #3).
@@ -35,17 +32,16 @@
 //   7) RenderPipeline dispatch order: PostProcess fires AFTER
 //      BloomBlur in a custom pipeline (so ctx.bloomBlurPass is
 //      the same pointer the pass reads during its execute).
-//   8) Shaderc SKIP-safe (mirror S1a / S1b pattern) — when
-//      shaderc is unavailable, the test logs SKIP and continues.
+//   8) Production source compiles through Phoskia + shaderc without
+//      requiring an initialized bgfx GPU backend.
 //   9) DestroyResources idempotent on uninitialized adapter
 //      (BGFXAdapter::destroy on invalid handle is a no-op).
 //  10) Two-sampler contract: the Phoskia source declares
 //      `texture2d sceneColor` + `texture2d bloomTexture`, and
-//      both `getTextureBinding()` calls return non-zero
-//      BindingIds on a valid acquire.
+//      both logical texture names are present in reflection.
 //
-// All tests use Backend::Noop so the headless test path stays
-// clean (no shaderc, no FBO create, no GPU). The pass's
+// Runtime-dispatch tests use Backend::Noop. The source-contract test invokes
+// shaderc directly but never creates a GPU program. The pass's
 // `isNoopBackend()` guard short-circuits before any FBO /
 // texture work, so these tests don't fight the Noop-backend
 // fragility.
@@ -54,8 +50,9 @@
 #include "AYRenderer.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
+#include "AYShader/BGFXConverter.h"
+#include "AYShader/Phoskia.h"
 #include "AYShader/ShaderResourcePool.h"
-#include "AYShader/ShaderResource.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/BloomBlurPass.h"
@@ -70,8 +67,7 @@
 
 #include <bgfx/bgfx.h>
 
-#include <sys/stat.h>
-
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <memory>
@@ -101,18 +97,41 @@ using ayt::render::detail::RenderPipeline;
 
 namespace {
 
-bool fileExists(const std::string& path)
+void compileFinalPP(ayt::shader::CompiledShaderProgram& program)
 {
-    if (path.empty()) {
-        return false;
-    }
-    struct stat st;
-    return ::stat(path.c_str(), &st) == 0;
+    ayt::shader::phoskia::Compiler compiler;
+    ayt::shader::phoskia::CompileOptions frontend;
+    ayt::shader::BGFXCompileOptions backend;
+    backend.shadercPath = AY_SHADER_SHADERC_HINT;
+    backend.platform = "linux";
+    backend.profile = "430";
+#ifdef AY_SHADER_BGFX_COMMON_HINT
+    backend.includeDirs.emplace_back(AY_SHADER_BGFX_COMMON_HINT);
+#endif
+#ifdef AY_SHADER_BGFX_SRC_HINT
+    backend.includeDirs.emplace_back(AY_SHADER_BGFX_SRC_HINT);
+#endif
+    compiler.compileToProgram(
+        ayt::render::detail::postProcessPhoskiaSourceForTests(),
+        frontend, backend, program);
 }
 
-bool shadercAvailable()
+bool hasUniform(const ayt::shader::CompiledShaderProgram& program,
+                const char* name)
 {
-    return fileExists(AY_SHADER_SHADERC_HINT);
+    return std::any_of(program.uniforms.begin(), program.uniforms.end(),
+        [name](const ayt::shader::BGFXUniform& uniform) {
+            return uniform.name == name;
+        });
+}
+
+bool hasTexture(const ayt::shader::CompiledShaderProgram& program,
+                const char* name)
+{
+    return std::any_of(program.textures.begin(), program.textures.end(),
+        [name](const ayt::shader::BGFXTexture& texture) {
+            return texture.name == name;
+        });
 }
 
 // Mirror of PostProcessPass.cpp's kPostProcessPhoskiaSource after
@@ -125,63 +144,15 @@ constexpr const char* kFinalPPExpectedSubstrings[] = {
     "texture2d sceneColor",
     "texture2d bloomTexture",            // §S1c (2026-07-23) — new sampler
     "let bloomSample = sample(bloomTexture, uv)",  // §S1c — real bloom composite
-    "raw + bloomSample.xyz * bloomStrength.x",      // §S1c — replaces `raw + raw*bloomStrength.x`
+    "bloomSample.xyz * bloomStrength.x * exposure.x",
     "uniform vec4 bloomStrength",
     "uniform vec4 exposure",
     "uniform vec4 tonemapMode",
     "step(1.5, m)",
 };
 
-// Mirror the live cache-key literal after the S1c bump
-// (cutsheet §S1 "cache-key bump" + Bug fix #3 mirror: pre-extern
-// the test was self-compare ("mine == mine") = false-green drift
-// detection).
 constexpr const char* kExpectedFinalPPCacheKey =
-    "postprocess_tonemap_aces_v3_bloom_composite_fs";
-
-constexpr const char* kLiveFinalPPSource = R"(
-material PostProcess {
-    texture2d sceneColor
-    texture2d bloomTexture
-    uniform vec4 bloomStrength
-    uniform vec4 exposure
-    uniform vec4 tonemapMode
-    uniform vec4 uTime
-    uniform vec4 gammaParams
-    vertex {
-        in  pos : position
-        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
-        return vec4(pos.x, pos.y, 0.0, 1.0)
-    }
-    fragment {
-        in  vUv : texcoord
-        let uv = vec2(vUv.x, 1.0 - vUv.y)
-        let sampled = sample(sceneColor, uv)
-        let bloomSample = sample(bloomTexture, uv)
-        let raw = sampled.xyz * exposure.x
-        let withBloom = raw + bloomSample.xyz * bloomStrength.x
-        let cx = max(withBloom.x, 0.0)
-        let cy = max(withBloom.y, 0.0)
-        let cz = max(withBloom.z, 0.0)
-        let rx = cx / (1.0 + cx)
-        let ry = cy / (1.0 + cy)
-        let rz = cz / (1.0 + cz)
-        let ax = (cx * (2.51 * cx + 0.03)) / (cx * (2.43 * cx + 0.59) + 0.14)
-        let ay = (cy * (2.51 * cy + 0.03)) / (cy * (2.43 * cy + 0.59) + 0.14)
-        let az = (cz * (2.51 * cz + 0.03)) / (cz * (2.43 * cz + 0.59) + 0.14)
-        let m = tonemapMode.x
-        let selX = mix(mix(cx, rx, step(0.5, m)), ax, step(1.5, m))
-        let selY = mix(mix(cy, ry, step(0.5, m)), ay, step(1.5, m))
-        let selZ = mix(mix(cz, rz, step(0.5, m)), az, step(1.5, m))
-        let mx = max(selX, 0.0)
-        let my = max(selY, 0.0)
-        let mz = max(selZ, 0.0)
-        let invG = 1.0 / max(gammaParams.x, 0.0001)
-        let encoded = vec3(pow(mx, invG), pow(my, invG), pow(mz, invG))
-        return vec4(encoded, sampled.w)
-    }
-}
-)";
+    "postprocess_tonemap_aces_v12_sanitized_params_fs";
 
 } // namespace
 
@@ -251,10 +222,8 @@ TEST_CASE(s1c_finalpp_producer_absent_returns_zero) {
 // === C. Phoskia source substring + cache key pins ===================
 
 TEST_CASE(s1c_finalpp_inlined_source_has_canonical_substrings) {
-    // Pin that kLiveFinalPPSource (mirror) contains all the
-    // canonical S1c structural elements. If PostProcessPass.cpp's
-    // anonymous-namespace constexpr ever drifts, this case fails.
-    const std::string haystack(kLiveFinalPPSource);
+    const std::string haystack(
+        ayt::render::detail::postProcessPhoskiaSourceForTests());
     for (const char* needle : kFinalPPExpectedSubstrings) {
         const std::string n(needle);
         CHECK(haystack.find(n) != std::string::npos);
@@ -262,12 +231,8 @@ TEST_CASE(s1c_finalpp_inlined_source_has_canonical_substrings) {
 }
 
 TEST_CASE(s1c_finalpp_cache_key_literal_pinned) {
-    // Cutsheet §S1 "cache-key bump": post-S1c the live cache key
-    // is `postprocess_tonemap_aces_v3_bloom_composite_fs`. If the
-    // bump was forgotten this test fails immediately. (Bug fix #3
-    // mirror — pre-extern the test was self-compare = false green.)
-    CHECK(std::string(kExpectedFinalPPCacheKey)
-          == "postprocess_tonemap_aces_v3_bloom_composite_fs");
+    CHECK(std::string(ayt::render::detail::kPostProcessCacheKeyCStr)
+          == kExpectedFinalPPCacheKey);
 }
 
 // === D. PassExecContext::bloomBlurPass default ========================
@@ -381,50 +346,25 @@ TEST_CASE(s1c_finalpp_producer_zero_size_returns_zero) {
 
 // === F. Two-sampler contract ========================================
 
-TEST_CASE(s1c_finalpp_phoskia_compile_when_shaderc_available) {
-    // When shaderc is on the host, pool.compile on the inline
-    // source succeeds and BOTH binding IDs resolve (sceneColor +
-    // bloomTexture). When shaderc is missing we SKIP gracefully
-    // (mirror S1a / S1b pattern). This pins the S1c two-sampler
-    // contract — if a future edit accidentally drops
-    // `texture2d bloomTexture`, the binding resolution below
-    // surfaces it as InvalidBinding immediately.
-    if (!shadercAvailable()) {
-        std::cerr << "[S1c test] SKIP: shaderc not available.\n";
-        return;
-    }
-
-    ayt::shader::ShaderResourcePool pool;
-    pool.setShadercExecutable(AY_SHADER_SHADERC_HINT);
-    pool.bindRendererTypeForTests(
-        /*bgfxRendererType=*/0 /*Noop*/,
-        /*platform=*/"linux",
-        /*profile=*/"120");
-
-    ayt::shader::ShaderResource res =
-        pool.compile(kLiveFinalPPSource);
-    if (!res.isValid()) {
-        std::cerr << "[S1c test] SKIP: Phoskia compile failed (no GPU backend).\n";
-        for (const std::string& err : pool.lastCompileErrors()) {
-            std::cerr << "[S1c test]   " << err << "\n";
+TEST_CASE(s1c_finalpp_production_source_compiles_headless) {
+    // Compile the exact runtime source to binaries + reflection without
+    // acquiring a GPU program. This stays valid in a headless process and
+    // fails, rather than silently skipping, on source or shaderc regressions.
+    ayt::shader::CompiledShaderProgram program;
+    compileFinalPP(program);
+    if (!program.success) {
+        for (const std::string& error : program.errors) {
+            std::cerr << "[S1c final PP] " << error << '\n';
         }
-        return;
     }
-    // Two-sampler contract — both must resolve to non-zero binding
-    // IDs. If either drops, the execute() path's setTexture call
-    // becomes a no-op and the visual bloom contribution vanishes.
-    const ayt::shader::BindingId tSceneColor =
-        res.getTextureBinding("sceneColor");
-    const ayt::shader::BindingId tBloomTexture =
-        res.getTextureBinding("bloomTexture");
-    CHECK(tSceneColor  != ayt::shader::InvalidBinding);
-    CHECK(tBloomTexture != ayt::shader::InvalidBinding);
-    // Uniform bindings retained from R5.1.
-    CHECK(res.getUniformBinding("bloomStrength") != ayt::shader::InvalidBinding);
-    CHECK(res.getUniformBinding("exposure")      != ayt::shader::InvalidBinding);
-    CHECK(res.getUniformBinding("tonemapMode")   != ayt::shader::InvalidBinding);
-    CHECK(res.getUniformBinding("uTime")         != ayt::shader::InvalidBinding);
-    CHECK(res.getUniformBinding("gammaParams")   != ayt::shader::InvalidBinding);
+    CHECK(program.success);
+    CHECK(hasTexture(program, "sceneColor"));
+    CHECK(hasTexture(program, "bloomTexture"));
+    CHECK(hasUniform(program, "bloomStrength"));
+    CHECK(hasUniform(program, "exposure"));
+    CHECK(hasUniform(program, "tonemapMode"));
+    CHECK_FALSE(hasUniform(program, "uTime"));
+    CHECK(hasUniform(program, "gammaParams"));
 }
 
 // === G. MakeDefault / MakeDeferred slot table =================================

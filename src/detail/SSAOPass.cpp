@@ -172,13 +172,10 @@ void SSAOPass::ensureFullscreenQuad(BGFXAdapter& adapter)
         return;
     }
     const bgfx::VertexLayout layout = adapter.vertexLayoutPosUv();
-    _fullscreenVB = adapter.createVertexBuffer(kFullscreenTriangle,
-                                                sizeof(kFullscreenTriangle),
-                                                layout,
-                                                BGFX_BUFFER_NONE);
-    _fullscreenIB = adapter.createIndexBuffer(kFullscreenIndices,
-                                              sizeof(kFullscreenIndices),
-                                              BGFX_BUFFER_NONE);
+    (void)ensureFullscreenTriangleBuffers(
+        adapter, _fullscreenVB, _fullscreenIB,
+        kFullscreenTriangle, sizeof(kFullscreenTriangle), layout,
+        kFullscreenIndices, sizeof(kFullscreenIndices));
 }
 
 void SSAOPass::ensureProgram(shader::ShaderResourcePool& pool)

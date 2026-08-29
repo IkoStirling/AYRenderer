@@ -228,13 +228,10 @@ void BloomBlurPass::ensureFullscreenQuad(BGFXAdapter& adapter)
     // Layout MUST match FullscreenVertex {x,y,u,v}: a 0-stride
     // bgfx::VertexLayout triggers bgfx::fatal under Debug.
     const bgfx::VertexLayout layout = adapter.vertexLayoutPosUv();
-    _fullscreenVB = adapter.createVertexBuffer(kFullscreenTriangle,
-                                                sizeof(kFullscreenTriangle),
-                                                layout,
-                                                BGFX_BUFFER_NONE);
-    _fullscreenIB = adapter.createIndexBuffer(kFullscreenIndices,
-                                              sizeof(kFullscreenIndices),
-                                              BGFX_BUFFER_NONE);
+    (void)ensureFullscreenTriangleBuffers(
+        adapter, _fullscreenVB, _fullscreenIB,
+        kFullscreenTriangle, sizeof(kFullscreenTriangle), layout,
+        kFullscreenIndices, sizeof(kFullscreenIndices));
 }
 
 void BloomBlurPass::ensureProgram(shader::ShaderResourcePool& pool)

@@ -3,6 +3,7 @@
 #include "AYRenderer.h"
 #include "detail/BgfxFontAtlas.h"
 #include "detail/BGFXAdapter.h"
+#include "detail/RenderTargetPool.h"
 #include "detail/UiGpuContext.h"
 #include "AYShader/ShaderResourcePool.h"
 
@@ -374,6 +375,19 @@ uint32_t toAbgr(const ayt::math::FVector4& color)
     const uint8_t b = static_cast<uint8_t>(color.z * 255.0f);
     const uint8_t a = static_cast<uint8_t>(color.w * 255.0f);
     return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+uint32_t toRgbaClear(const ayt::math::FVector4& color)
+{
+    const auto channel = [](float value) {
+        return static_cast<uint8_t>(std::lround(
+            std::clamp(value, 0.0f, 1.0f) * 255.0f));
+    };
+    const uint32_t r = channel(color.x);
+    const uint32_t g = channel(color.y);
+    const uint32_t b = channel(color.z);
+    const uint32_t a = channel(color.w);
+    return (r << 24u) | (g << 16u) | (b << 8u) | a;
 }
 
 float toNdcX(float px, float width)
@@ -772,6 +786,20 @@ struct TextureRef {
     uint16_t height     = 0;
 };
 
+struct RenderTargetRef {
+    ayt::ui::IRenderBackend::RenderTargetDesc desc{};
+    detail::PooledRenderTargetHandle pooled{};
+    void* textureToken = nullptr;
+};
+
+struct LayerRef {
+    ayt::ui::IRenderBackend::LayerDesc desc{};
+    ayt::ui::IRenderBackend::RenderTargetHandle target{};
+    ayt::math::FRectangle damage{};
+    bool dirty = true;
+    bool painting = false;
+};
+
 // Pre-P3 gray-block fallback for unknown / released handles.
 const ayt::math::FVector4 kUnknownTextureColor(0.25f, 0.25f, 0.28f, 1.0f);
 
@@ -811,6 +839,27 @@ struct UIRenderBackend::FrameState {
     // touch it; handles stay valid until releaseUiTexture frees them).
     std::unordered_map<void*, TextureRef> textures;
     uintptr_t                             nextHandle = 1;  // fake-pointer counter
+    std::unordered_map<int, RenderTargetRef> renderTargets;
+    std::unordered_map<void*, int> targetTextures;
+    std::unordered_map<int, LayerRef> layers;
+    int nextTargetId = 1;
+    int nextLayerId = 1;
+    RenderTargetHandle boundTarget{};
+    LayerHandle activeLayer{};
+    uint16_t activeWidth = 0;
+    uint16_t activeHeight = 0;
+    uint8_t activeViewId = kViewId;
+    uint16_t nextOffscreenViewId = kFirstLayerViewId;
+    float originX = 0.0f;
+    float originY = 0.0f;
+    // A target transition is a batch barrier. The caller-visible render
+    // state is restored after the offscreen pass, even if a subtree leaks a
+    // clip/opacity push internally.
+    std::vector<UiClipEntry> savedClipStack;
+    std::vector<float> savedOpacityStack;
+    uint8_t savedPathClipDepth = 0;
+    ayt::ui::BlendMode savedBlend = ayt::ui::BlendMode::Normal;
+    float savedUiScale = 1.0f;
     // Path resources are CPU-side and persistent across frames. Draw/clip
     // commands hold immutable snapshots, so releasePath may run immediately
     // after recording without invalidating the pending frame.
@@ -857,7 +906,6 @@ bool UIRenderBackend::initialize(Renderer& renderer)
 bool UIRenderBackend::initializeFromRenderer(Renderer& renderer, detail::BGFXAdapter& adapter,
                                              shader::ShaderResourcePool& shaderPool)
 {
-    AYUNREFERENCED_PARAM(renderer);
     if (_initialized) {
         return true;
     }
@@ -868,6 +916,7 @@ bool UIRenderBackend::initializeFromRenderer(Renderer& renderer, detail::BGFXAda
 
     _gpu        = std::make_unique<detail::UiGpuContext>();
     _adapter    = &adapter;
+    _targetPool = renderer.renderTargetPool();
     _shaderPool = &shaderPool;
     if (!_gpu->initialize(shaderPool, adapter)) {
         shutdownFromRenderer(adapter, shaderPool);
@@ -910,6 +959,14 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
             }
         }
         _frame->textures.clear();
+        if (_targetPool != nullptr) {
+            for (const auto& entry : _frame->renderTargets) {
+                _targetPool->release(entry.second.pooled);
+            }
+        }
+        _frame->renderTargets.clear();
+        _frame->targetTextures.clear();
+        _frame->layers.clear();
         _frame->paths.clear();
         _frame->items.clear();
         _frame->scratchVertices.clear();
@@ -927,6 +984,7 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
     }
 
     _adapter     = nullptr;
+    _targetPool  = nullptr;
     _shaderPool  = nullptr;
     _initialized = false;
 }
@@ -937,6 +995,9 @@ void UIRenderBackend::shutdownFromRendererWithoutAdapter()
         // No adapter to destroy through; the bgfx context is gone with the
         // renderer anyway. Drop the registry without touching GPU objects.
         _frame->textures.clear();
+        _frame->renderTargets.clear();
+        _frame->targetTextures.clear();
+        _frame->layers.clear();
         _frame->paths.clear();
         _frame->items.clear();
         _frame->scratchVertices.clear();
@@ -946,6 +1007,7 @@ void UIRenderBackend::shutdownFromRendererWithoutAdapter()
     _gpu.reset();
     _fontAtlas.reset();
     _adapter     = nullptr;
+    _targetPool  = nullptr;
     _shaderPool  = nullptr;
     _initialized = false;
 }
@@ -954,6 +1016,398 @@ void UIRenderBackend::setFramebufferSize(uint16_t width, uint16_t height)
 {
     _width  = width;
     _height = height;
+}
+
+bool UIRenderBackend::supportsRenderTargets() const
+{
+    return _initialized && _adapter != nullptr && _adapter->isInitialized()
+        && _targetPool != nullptr;
+}
+
+UIRenderBackend::RenderTargetHandle UIRenderBackend::createRenderTarget(
+    int width, int height, bool hasAlpha)
+{
+    RenderTargetDesc desc;
+    desc.width = width;
+    desc.height = height;
+    desc.hasAlpha = hasAlpha;
+    return createRenderTarget(desc);
+}
+
+UIRenderBackend::RenderTargetHandle UIRenderBackend::createRenderTarget(
+    const RenderTargetDesc& desc)
+{
+    if (!supportsRenderTargets() || desc.width <= 0 || desc.height <= 0
+        || desc.width > UINT16_MAX || desc.height > UINT16_MAX
+        || !std::isfinite(desc.dpiScale) || desc.dpiScale <= 0.0f) {
+        return {-1};
+    }
+    const detail::RenderTargetKey key{
+        static_cast<uint16_t>(desc.width), static_cast<uint16_t>(desc.height),
+        bgfx::TextureFormat::RGBA8, true, 1};
+    const detail::PooledRenderTargetHandle pooled = _targetPool->acquire(key);
+    if (!pooled.isValid()) return {-1};
+
+    const RenderTargetHandle handle{_frame->nextTargetId++};
+    RenderTargetRef ref;
+    ref.desc = desc;
+    ref.pooled = pooled;
+    ref.textureToken = reinterpret_cast<void*>(_frame->nextHandle++);
+    _frame->targetTextures.emplace(ref.textureToken, handle.id);
+    _frame->renderTargets.emplace(handle.id, ref);
+    return handle;
+}
+
+bool UIRenderBackend::ensureRenderTarget(int targetId)
+{
+    if (!supportsRenderTargets() || _frame == nullptr) return false;
+    auto it = _frame->renderTargets.find(targetId);
+    if (it == _frame->renderTargets.end()) return false;
+    RenderTargetRef& ref = it->second;
+    const detail::RenderTargetKey key{
+        static_cast<uint16_t>(ref.desc.width), static_cast<uint16_t>(ref.desc.height),
+        bgfx::TextureFormat::RGBA8, true, 1};
+    if (_targetPool->matches(ref.pooled, key)) {
+        const bgfx::TextureHandle texture = _targetPool->texture(ref.pooled);
+        if (detail::BGFXAdapter::isValid(texture)) return true;
+        // A framebuffer attachment can become stale after a backend/device
+        // event even when its numeric framebuffer handle still looks valid.
+        // Quarantine that lease and allocate fresh storage before painting.
+        _targetPool->release(ref.pooled);
+        ref.pooled = {};
+    }
+    ref.pooled = _targetPool->acquire(key);
+    return ref.pooled.isValid();
+}
+
+bool UIRenderBackend::resizeRenderTarget(RenderTargetHandle target,
+                                         const RenderTargetDesc& desc)
+{
+    if (_frame == nullptr || desc.width <= 0 || desc.height <= 0
+        || desc.width > UINT16_MAX || desc.height > UINT16_MAX
+        || !std::isfinite(desc.dpiScale) || desc.dpiScale <= 0.0f) {
+        return false;
+    }
+    auto it = _frame->renderTargets.find(target.id);
+    if (it == _frame->renderTargets.end()) return false;
+    RenderTargetRef& ref = it->second;
+    const bool shapeChanged = ref.desc.width != desc.width
+        || ref.desc.height != desc.height || ref.desc.hasAlpha != desc.hasAlpha;
+    if (!shapeChanged) {
+        ref.desc = desc;
+        return ensureRenderTarget(target.id);
+    }
+    if (desc.preserveContents) return false;
+
+    const detail::RenderTargetKey key{
+        static_cast<uint16_t>(desc.width), static_cast<uint16_t>(desc.height),
+        bgfx::TextureFormat::RGBA8, true, 1};
+    const detail::PooledRenderTargetHandle replacement = _targetPool->acquire(key);
+    if (!replacement.isValid()) return false;
+    _targetPool->release(ref.pooled);
+    ref.pooled = replacement;
+    ref.desc = desc;
+    return true;
+}
+
+void UIRenderBackend::releaseRenderTarget(RenderTargetHandle target)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->renderTargets.find(target.id);
+    if (it == _frame->renderTargets.end()) return;
+    if (_targetPool != nullptr) _targetPool->release(it->second.pooled);
+    _frame->targetTextures.erase(it->second.textureToken);
+    _frame->renderTargets.erase(it);
+    if (_frame->boundTarget.id == target.id) bindRenderTarget({-1});
+}
+
+void UIRenderBackend::bindRenderTarget(RenderTargetHandle target)
+{
+    if (_frame == nullptr || _adapter == nullptr || _frame->activeLayer.isValid()) return;
+    FrameState& frame = *_frame;
+    if (!target.isValid()) {
+        if (!frame.boundTarget.isValid()) return;
+        flushColoredRects();
+        frame.boundTarget = {-1};
+        frame.activeViewId = kViewId;
+        frame.activeWidth = _width;
+        frame.activeHeight = _height;
+        frame.originX = frame.originY = 0.0f;
+        frame.uiScale = frame.savedUiScale;
+        frame.clipStack = std::move(frame.savedClipStack);
+        frame.opacityStack = std::move(frame.savedOpacityStack);
+        frame.pathClipDepth = frame.savedPathClipDepth;
+        frame.currentBlend = frame.savedBlend;
+        return;
+    }
+    if (frame.boundTarget.isValid() || frame.nextOffscreenViewId > kLastLayerViewId
+        || !ensureRenderTarget(target.id)) return;
+    auto it = frame.renderTargets.find(target.id);
+    if (it == frame.renderTargets.end()) return;
+    flushColoredRects();
+    frame.savedClipStack = frame.clipStack;
+    frame.savedOpacityStack = frame.opacityStack;
+    frame.savedPathClipDepth = frame.pathClipDepth;
+    frame.savedBlend = frame.currentBlend;
+    frame.savedUiScale = frame.uiScale;
+    frame.clipStack.clear();
+    frame.opacityStack.assign(1, 1.0f);
+    frame.pathClipDepth = 0;
+    frame.currentBlend = ayt::ui::BlendMode::Normal;
+    frame.boundTarget = target;
+    frame.activeViewId = static_cast<uint8_t>(frame.nextOffscreenViewId++);
+    frame.activeWidth = static_cast<uint16_t>(it->second.desc.width);
+    frame.activeHeight = static_cast<uint16_t>(it->second.desc.height);
+    frame.uiScale = it->second.desc.dpiScale;
+    frame.originX = frame.originY = 0.0f;
+    _adapter->setViewFrameBuffer(frame.activeViewId,
+        _targetPool->framebuffer(it->second.pooled));
+    _adapter->setViewRect(frame.activeViewId, 0, 0, frame.activeWidth, frame.activeHeight);
+    _adapter->setViewMode(frame.activeViewId, bgfx::ViewMode::Sequential);
+    _adapter->setViewClearRaw(frame.activeViewId, BGFX_CLEAR_STENCIL, 0, 1.0f, 0);
+    _adapter->touch(frame.activeViewId);
+}
+
+void* UIRenderBackend::getRenderTargetTexture(RenderTargetHandle target)
+{
+    if (_frame == nullptr) return nullptr;
+    auto it = _frame->renderTargets.find(target.id);
+    if (it == _frame->renderTargets.end() || !ensureRenderTarget(target.id)) return nullptr;
+    return it->second.textureToken;
+}
+
+void UIRenderBackend::blitRenderTarget(RenderTargetHandle source,
+                                       const ayt::math::FRectangle& destBounds)
+{
+    if (_frame == nullptr || !ensureRenderTarget(source.id)) return;
+    const auto it = _frame->renderTargets.find(source.id);
+    if (it == _frame->renderTargets.end()) return;
+    const bgfx::TextureHandle texture = _targetPool->texture(it->second.pooled);
+    if (!detail::BGFXAdapter::isValid(texture)) return;
+    emitClippedTexturedQuad(destBounds, texture.idx,
+        ayt::math::FRectangle(0, 0, 1, 1), ayt::math::FVector4(1, 1, 1, 1));
+}
+
+UIRenderBackend::LayerHandle UIRenderBackend::createLayer(const LayerDesc& desc)
+{
+    const float logicalWidth = desc.logicalBounds.maxX - desc.logicalBounds.minX;
+    const float logicalHeight = desc.logicalBounds.maxY - desc.logicalBounds.minY;
+    if (!supportsRenderTargets() || logicalWidth <= 0.0f || logicalHeight <= 0.0f
+        || !std::isfinite(desc.dpiScale) || desc.dpiScale <= 0.0f) {
+        return {-1};
+    }
+    RenderTargetDesc targetDesc;
+    targetDesc.width = std::max(1, static_cast<int>(std::ceil(logicalWidth * desc.dpiScale)));
+    targetDesc.height = std::max(1, static_cast<int>(std::ceil(logicalHeight * desc.dpiScale)));
+    targetDesc.dpiScale = desc.dpiScale;
+    targetDesc.hasAlpha = desc.hasAlpha;
+    targetDesc.preserveContents = false;
+    const RenderTargetHandle target = createRenderTarget(targetDesc);
+    if (!target.isValid()) return {-1};
+
+    const LayerHandle layer{_frame->nextLayerId++};
+    LayerRef ref;
+    ref.desc = desc;
+    ref.target = target;
+    _frame->layers.emplace(layer.id, ref);
+    return layer;
+}
+
+void UIRenderBackend::releaseLayer(LayerHandle layer)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->layers.find(layer.id);
+    if (it == _frame->layers.end()) return;
+    if (_frame->activeLayer.id == layer.id) endLayerPaint(layer);
+    const RenderTargetHandle target = it->second.target;
+    _frame->layers.erase(it);
+    releaseRenderTarget(target);
+}
+
+bool UIRenderBackend::updateLayer(LayerHandle layer, const LayerDesc& desc)
+{
+    if (_frame == nullptr) return false;
+    auto it = _frame->layers.find(layer.id);
+    if (it == _frame->layers.end() || it->second.painting) return false;
+    const float logicalWidth = desc.logicalBounds.maxX - desc.logicalBounds.minX;
+    const float logicalHeight = desc.logicalBounds.maxY - desc.logicalBounds.minY;
+    if (logicalWidth <= 0.0f || logicalHeight <= 0.0f
+        || !std::isfinite(desc.dpiScale) || desc.dpiScale <= 0.0f) {
+        return false;
+    }
+    RenderTargetDesc targetDesc;
+    targetDesc.width = std::max(1, static_cast<int>(std::ceil(logicalWidth * desc.dpiScale)));
+    targetDesc.height = std::max(1, static_cast<int>(std::ceil(logicalHeight * desc.dpiScale)));
+    targetDesc.dpiScale = desc.dpiScale;
+    targetDesc.hasAlpha = desc.hasAlpha;
+    // Layer resize always schedules a full repaint; retaining old pixels is
+    // unnecessary and would make resize support backend-dependent.
+    targetDesc.preserveContents = false;
+    if (!resizeRenderTarget(it->second.target, targetDesc)) return false;
+    it->second.desc = desc;
+    it->second.dirty = true;
+    it->second.damage = {};
+    return true;
+}
+
+bool UIRenderBackend::beginLayerPaint(LayerHandle layer, const LayerPaint& paint)
+{
+    if (_frame == nullptr || _adapter == nullptr || _targetPool == nullptr) return false;
+    FrameState& frame = *_frame;
+    auto it = frame.layers.find(layer.id);
+    if (it == frame.layers.end() || frame.activeLayer.isValid()
+        || frame.boundTarget.isValid() || frame.nextOffscreenViewId > kLastLayerViewId) {
+        return false;
+    }
+    LayerRef& ref = it->second;
+    if (!paint.fullRedraw && !rectNonEmpty(paint.damage)) return false;
+    if (!ensureRenderTarget(ref.target.id)) return false;
+    auto targetIt = frame.renderTargets.find(ref.target.id);
+    if (targetIt == frame.renderTargets.end()) return false;
+
+    flushColoredRects();
+    frame.savedClipStack = frame.clipStack;
+    frame.savedOpacityStack = frame.opacityStack;
+    frame.savedPathClipDepth = frame.pathClipDepth;
+    frame.savedBlend = frame.currentBlend;
+    frame.savedUiScale = frame.uiScale;
+    frame.clipStack.clear();
+    frame.opacityStack.assign(1, 1.0f);
+    frame.pathClipDepth = 0;
+    frame.currentBlend = ayt::ui::BlendMode::Normal;
+    frame.uiScale = ref.desc.dpiScale;
+    frame.originX = ref.desc.logicalBounds.minX;
+    frame.originY = ref.desc.logicalBounds.minY;
+    frame.activeWidth = static_cast<uint16_t>(targetIt->second.desc.width);
+    frame.activeHeight = static_cast<uint16_t>(targetIt->second.desc.height);
+    frame.activeViewId = static_cast<uint8_t>(frame.nextOffscreenViewId++);
+    frame.activeLayer = layer;
+    ref.painting = true;
+
+    const bgfx::FrameBufferHandle framebuffer =
+        _targetPool->framebuffer(targetIt->second.pooled);
+    _adapter->setViewFrameBuffer(frame.activeViewId, framebuffer);
+    _adapter->setViewRect(frame.activeViewId, 0, 0, frame.activeWidth, frame.activeHeight);
+    _adapter->setViewMode(frame.activeViewId, bgfx::ViewMode::Sequential);
+    uint16_t clearFlags = BGFX_CLEAR_STENCIL;
+    uint32_t clearColor = 0;
+    if (paint.fullRedraw && ref.desc.clearMode != LayerClearMode::Preserve) {
+        clearFlags |= BGFX_CLEAR_COLOR;
+        if (ref.desc.clearMode == LayerClearMode::Color) {
+            clearColor = toRgbaClear(ref.desc.clearColor);
+        }
+    }
+    _adapter->setViewClearRaw(frame.activeViewId, clearFlags, clearColor, 1.0f, 0);
+    _adapter->touch(frame.activeViewId);
+
+    // Partial Transparent/Color repaint preserves pixels outside damage but
+    // must erase stale pixels inside it before replaying the clipped subtree.
+    // A no-blend white-texture quad gives us a scissored color clear without
+    // changing the view rect/projection. Preserve mode intentionally skips it.
+    if (!paint.fullRedraw && ref.desc.clearMode != LayerClearMode::Preserve) {
+        const ayt::math::FRectangle damage = intersectRect(
+            paint.damage, ref.desc.logicalBounds);
+        if (!rectNonEmpty(damage)) {
+            endLayerPaint(layer);
+            ref.dirty = true;
+            return false;
+        }
+        UiItem clearItem;
+        clearItem.textureIdx = _gpu != nullptr ? _gpu->whiteTextureIdx()
+                                                : detail::UiGpuContext::kInvalidIdx;
+        clearItem.state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
+        clearItem.minX = damage.minX;
+        clearItem.minY = damage.minY;
+        clearItem.maxX = damage.maxX;
+        clearItem.maxY = damage.maxY;
+        const ayt::math::FVector4 color = ref.desc.clearMode == LayerClearMode::Color
+            ? ref.desc.clearColor : ayt::math::FVector4(0, 0, 0, 0);
+        const uint32_t abgr = toAbgr(color);
+        clearItem.abgr[0] = clearItem.abgr[1] = abgr;
+        clearItem.abgr[2] = clearItem.abgr[3] = abgr;
+        frame.items.push_back(clearItem);
+    }
+    return true;
+}
+
+void UIRenderBackend::endLayerPaint(LayerHandle layer)
+{
+    if (_frame == nullptr || _frame->activeLayer.id != layer.id) return;
+    FrameState& frame = *_frame;
+    auto it = frame.layers.find(layer.id);
+    if (it == frame.layers.end()) return;
+    flushColoredRects();
+    it->second.painting = false;
+    it->second.dirty = false;
+    it->second.damage = {};
+    frame.activeLayer = {-1};
+    frame.activeViewId = kViewId;
+    frame.activeWidth = _width;
+    frame.activeHeight = _height;
+    frame.originX = frame.originY = 0.0f;
+    frame.uiScale = frame.savedUiScale;
+    frame.clipStack = std::move(frame.savedClipStack);
+    frame.opacityStack = std::move(frame.savedOpacityStack);
+    frame.pathClipDepth = frame.savedPathClipDepth;
+    frame.currentBlend = frame.savedBlend;
+}
+
+void UIRenderBackend::compositeLayer(LayerHandle layer,
+                                     const ayt::math::FRectangle& destBounds,
+                                     float opacity)
+{
+    if (_frame == nullptr || _targetPool == nullptr) return;
+    auto it = _frame->layers.find(layer.id);
+    if (it == _frame->layers.end() || it->second.dirty || it->second.painting) return;
+    auto targetIt = _frame->renderTargets.find(it->second.target.id);
+    if (targetIt == _frame->renderTargets.end()
+        || !_targetPool->isValid(targetIt->second.pooled)) {
+        it->second.dirty = true;
+        return;
+    }
+    const bgfx::TextureHandle texture = _targetPool->texture(targetIt->second.pooled);
+    if (!detail::BGFXAdapter::isValid(texture)) {
+        it->second.dirty = true;
+        return;
+    }
+    emitClippedTexturedQuad(destBounds, texture.idx,
+        ayt::math::FRectangle(0, 0, 1, 1),
+        ayt::math::FVector4(1, 1, 1, std::clamp(opacity, 0.0f, 1.0f)));
+}
+
+void UIRenderBackend::invalidateLayer(LayerHandle layer,
+                                      const ayt::math::FRectangle& damage)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->layers.find(layer.id);
+    if (it == _frame->layers.end()) return;
+    LayerRef& ref = it->second;
+    ref.dirty = true;
+    if (!rectNonEmpty(damage)) {
+        ref.damage = {};
+    } else if (!rectNonEmpty(ref.damage)) {
+        ref.damage = damage;
+    } else {
+        ref.damage = ayt::math::FRectangle(
+            std::min(ref.damage.minX, damage.minX),
+            std::min(ref.damage.minY, damage.minY),
+            std::max(ref.damage.maxX, damage.maxX),
+            std::max(ref.damage.maxY, damage.maxY));
+    }
+}
+
+bool UIRenderBackend::isLayerDirty(LayerHandle layer) const
+{
+    if (_frame == nullptr || _targetPool == nullptr) return true;
+    const auto it = _frame->layers.find(layer.id);
+    if (it == _frame->layers.end() || it->second.dirty) return true;
+    const auto targetIt = _frame->renderTargets.find(it->second.target.id);
+    if (targetIt == _frame->renderTargets.end()
+        || !_targetPool->isValid(targetIt->second.pooled)) {
+        return true;
+    }
+    return !detail::BGFXAdapter::isValid(
+        _targetPool->texture(targetIt->second.pooled));
 }
 
 void UIRenderBackend::setBatchMode(BatchMode mode)
@@ -978,6 +1432,13 @@ void UIRenderBackend::beginFrame()
     }
 
     FrameState& frame = *_frame;
+    if (frame.activeLayer.isValid()) {
+        auto active = frame.layers.find(frame.activeLayer.id);
+        if (active != frame.layers.end()) {
+            active->second.painting = false;
+            active->second.dirty = true;
+        }
+    }
     frame.items.clear();
     frame.clipStack.clear();
     frame.pathClipDepth = 0;
@@ -987,6 +1448,21 @@ void UIRenderBackend::beginFrame()
     // Widget::render balances its push/pop every frame, but a buggy
     // tree must not leak a stale frame into the next frame.
     frame.opacityStack.assign(1, 1.0f);
+    frame.boundTarget = {-1};
+    frame.activeLayer = {-1};
+    frame.activeViewId = kViewId;
+    frame.activeWidth = _width;
+    frame.activeHeight = _height;
+    frame.nextOffscreenViewId = kFirstLayerViewId;
+    frame.originX = frame.originY = 0.0f;
+    for (auto& entry : frame.layers) {
+        const auto target = frame.renderTargets.find(entry.second.target.id);
+        if (target == frame.renderTargets.end() || _targetPool == nullptr
+            || !_targetPool->isValid(target->second.pooled)) {
+            entry.second.dirty = true;
+        }
+        entry.second.painting = false;
+    }
 
     if (frame.scratchVertices.capacity() < 1024u) {
         frame.scratchVertices.reserve(1024u);
@@ -1024,9 +1500,13 @@ ayt::math::FRectangle UIRenderBackend::activeClipBounds() const
 {
     if (_frame == nullptr || _frame->clipStack.empty()) {
         const float scale = getUiScale();
-        return ayt::math::FRectangle(0.0f, 0.0f,
-                                     static_cast<float>(_width) / scale,
-                                     static_cast<float>(_height) / scale);
+        return ayt::math::FRectangle(
+            _frame != nullptr ? _frame->originX : 0.0f,
+            _frame != nullptr ? _frame->originY : 0.0f,
+            (_frame != nullptr ? _frame->originX : 0.0f)
+                + static_cast<float>(_frame != nullptr ? _frame->activeWidth : _width) / scale,
+            (_frame != nullptr ? _frame->originY : 0.0f)
+                + static_cast<float>(_frame != nullptr ? _frame->activeHeight : _height) / scale);
     }
     return _frame->clipStack.back().bounds;
 }
@@ -1376,6 +1856,12 @@ bool UIRenderBackend::hasPathOrderingBarrierForDebug() const
 
 void UIRenderBackend::endFrame()
 {
+    if (_frame != nullptr && _frame->activeLayer.isValid()) {
+        endLayerPaint(_frame->activeLayer);
+    }
+    if (_frame != nullptr && _frame->boundTarget.isValid()) {
+        bindRenderTarget({-1});
+    }
     flushColoredRects();
     flushPendingText();
 }
@@ -1843,6 +2329,31 @@ void UIRenderBackend::releaseUiTexture(void* textureHandle)
     }
 }
 
+bool UIRenderBackend::resolveTextureHandle(void* handle, uint16_t& textureIdx,
+                                           uint16_t& width, uint16_t& height) const
+{
+    textureIdx = detail::UiGpuContext::kInvalidIdx;
+    width = height = 0;
+    if (_frame == nullptr || handle == nullptr) return false;
+    if (const TextureRef* ref = findTextureRef(_frame->textures, handle)) {
+        textureIdx = ref->textureIdx;
+        width = ref->width;
+        height = ref->height;
+        return textureIdx != detail::UiGpuContext::kInvalidIdx;
+    }
+    const auto token = _frame->targetTextures.find(handle);
+    if (token == _frame->targetTextures.end() || _targetPool == nullptr) return false;
+    const auto target = _frame->renderTargets.find(token->second);
+    if (target == _frame->renderTargets.end()
+        || !_targetPool->isValid(target->second.pooled)) return false;
+    const bgfx::TextureHandle texture = _targetPool->texture(target->second.pooled);
+    if (!detail::BGFXAdapter::isValid(texture)) return false;
+    textureIdx = texture.idx;
+    width = static_cast<uint16_t>(target->second.desc.width);
+    height = static_cast<uint16_t>(target->second.desc.height);
+    return true;
+}
+
 void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textureHandle,
                                const ayt::math::FRectangle& uv)
 {
@@ -1850,8 +2361,10 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textur
         _frame = std::make_unique<FrameState>();
     }
 
-    const TextureRef* ref = findTextureRef(_frame->textures, textureHandle);
-    if (ref == nullptr) {
+    uint16_t textureIdx = detail::UiGpuContext::kInvalidIdx;
+    uint16_t textureWidth = 0;
+    uint16_t textureHeight = 0;
+    if (!resolveTextureHandle(textureHandle, textureIdx, textureWidth, textureHeight)) {
         // Unknown / released handle — pre-P3 gray-block fallback.
         drawRect(bounds, kUnknownTextureColor);
         return;
@@ -1859,7 +2372,7 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textur
 
     // Flat item on the UI texture with an opaque white tint — the shader
     // multiplies v_color0 by the texture sample, so alpha rides through.
-    emitClippedTexturedQuad(bounds, ref->textureIdx, uv,
+    emitClippedTexturedQuad(bounds, textureIdx, uv,
                             ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
 }
 
@@ -1870,8 +2383,10 @@ void UIRenderBackend::drawWithAlpha(const ayt::math::FRectangle& bounds, void* t
         _frame = std::make_unique<FrameState>();
     }
 
-    const TextureRef* ref = findTextureRef(_frame->textures, textureHandle);
-    if (ref == nullptr) {
+    uint16_t textureIdx = detail::UiGpuContext::kInvalidIdx;
+    uint16_t textureWidth = 0;
+    uint16_t textureHeight = 0;
+    if (!resolveTextureHandle(textureHandle, textureIdx, textureWidth, textureHeight)) {
         // Unknown handle — gray fallback tinted by the requested alpha.
         drawRect(bounds, ayt::math::FVector4(
                              kUnknownTextureColor.x, kUnknownTextureColor.y,
@@ -1882,7 +2397,7 @@ void UIRenderBackend::drawWithAlpha(const ayt::math::FRectangle& bounds, void* t
 
     // Interface contract: alpha multiplies the texture's alpha channel —
     // carried by the tint (shader does v_color0 * sample).
-    emitClippedTexturedQuad(bounds, ref->textureIdx,
+    emitClippedTexturedQuad(bounds, textureIdx,
                             ayt::math::FRectangle(0.0f, 0.0f, 1.0f, 1.0f),
                             ayt::math::FVector4(
                                 1.0f, 1.0f, 1.0f, std::max(0.0f, std::min(1.0f, alpha))));
@@ -1952,8 +2467,10 @@ void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* t
         _frame = std::make_unique<FrameState>();
     }
 
-    const TextureRef* ref = findTextureRef(_frame->textures, textureHandle);
-    if (ref == nullptr) {
+    uint16_t textureIdx = detail::UiGpuContext::kInvalidIdx;
+    uint16_t textureWidth = 0;
+    uint16_t textureHeight = 0;
+    if (!resolveTextureHandle(textureHandle, textureIdx, textureWidth, textureHeight)) {
         drawRect(bounds, kUnknownTextureColor);
         return;
     }
@@ -1980,20 +2497,20 @@ void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* t
     const float padSumY = padT + padB;
     if (padSumX <= 0.0f || padSumY <= 0.0f) {
         // No corner area at all — a single stretched quad.
-        emitClippedTexturedQuad(bounds, ref->textureIdx, uvRegion,
+        emitClippedTexturedQuad(bounds, textureIdx, uvRegion,
                                 ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
         return;
     }
     const float s  = std::min(1.0f, std::min(bW / padSumX, bH / padSumY));
     const float pl = padL * s, pr = padR * s, pt = padT * s, pb = padB * s;
 
-    const float texW = static_cast<float>(ref->width);
-    const float texH = static_cast<float>(ref->height);
+    const float texW = static_cast<float>(textureWidth);
+    const float texH = static_cast<float>(textureHeight);
 
     const float uSpan = std::max(0.0f, uvRegion.maxX - uvRegion.minX);
     const float vSpan = std::max(0.0f, uvRegion.maxY - uvRegion.minY);
     if (uSpan <= 0.0f || vSpan <= 0.0f) {
-        emitClippedTexturedQuad(bounds, ref->textureIdx, uvRegion,
+        emitClippedTexturedQuad(bounds, textureIdx, uvRegion,
                                 ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
         return;
     }
@@ -2027,7 +2544,7 @@ void UIRenderBackend::drawNinePatch(const ayt::math::FRectangle& bounds, void* t
     for (int j = 0; j < 3; ++j) {
         for (int i = 0; i < 3; ++i) {
             emitClippedTexturedQuad(ayt::math::FRectangle(x[i], y[j], x[i + 1], y[j + 1]),
-                                    ref->textureIdx,
+                                    textureIdx,
                                     ayt::math::FRectangle(u[i], v[j], u[i + 1], v[j + 1]),
                                     white);
         }
@@ -2042,15 +2559,17 @@ void UIRenderBackend::flushColoredRects()
 
     FrameState& frame = *_frame;
     if (frame.items.empty() || !_initialized || _gpu == nullptr || _adapter == nullptr
-        || _width < 1 || _height < 1) {
+        || frame.activeWidth < 1 || frame.activeHeight < 1) {
         frame.items.clear();
         return;
     }
 
     const uint16_t whiteIdx  = _gpu->whiteTextureIdx();
-    const float    fbW       = static_cast<float>(_width);
-    const float    fbH       = static_cast<float>(_height);
+    const float    fbW       = static_cast<float>(frame.activeWidth);
+    const float    fbH       = static_cast<float>(frame.activeHeight);
     const float    uiScale   = getUiScale();
+    const auto pxX = [&](float logicalX) { return (logicalX - frame.originX) * uiScale; };
+    const auto pxY = [&](float logicalY) { return (logicalY - frame.originY) * uiScale; };
 
     // OrderedRuns is the original fallback. The optimized path builds a
     // logical order only; UiItems themselves stay in recording order so a
@@ -2086,7 +2605,7 @@ void UIRenderBackend::flushColoredRects()
         frame.scratchVertices.reserve(mesh.positions.size());
         for (const auto& point : mesh.positions) {
             frame.scratchVertices.push_back({
-                toNdcX(point.x * uiScale, fbW), toNdcY(point.y * uiScale, fbH), 0.0f,
+                toNdcX(pxX(point.x), fbW), toNdcY(pxY(point.y), fbH), 0.0f,
                 color, 0.0f, 0.0f,
                 0.0f, 0.0f, 0.0f, 0.0f,
                 0.0f, 0.0f, 0.0f, 0.0f
@@ -2099,7 +2618,7 @@ void UIRenderBackend::flushColoredRects()
         if (mesh.indices.empty() || mesh.positions.empty()) return;
         buildMeshVertices(mesh, color);
         setDrawStencil(depth);
-        _gpu->submitColoredQuads(kViewId, *_adapter, state,
+        _gpu->submitColoredQuads(frame.activeViewId, *_adapter, state,
                                  frame.scratchVertices.data(),
                                  static_cast<uint32_t>(frame.scratchVertices.size()),
                                  sizeof(UiVertex), frame.scratchIndices.data(),
@@ -2121,7 +2640,7 @@ void UIRenderBackend::flushColoredRects()
         // A zero render state disables color/depth writes. ShaderResource's
         // state==0 path preserves the state we explicitly install here.
         _adapter->setState(0);
-        _gpu->submitColoredQuads(kViewId, *_adapter, 0,
+        _gpu->submitColoredQuads(frame.activeViewId, *_adapter, 0,
                                  frame.scratchVertices.data(),
                                  static_cast<uint32_t>(frame.scratchVertices.size()),
                                  sizeof(UiVertex), frame.scratchIndices.data(),
@@ -2172,16 +2691,16 @@ void UIRenderBackend::flushColoredRects()
             const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
             const float    z    = 0.0f;
 
-            frame.scratchVertices.push_back({toNdcX(it.minX * uiScale, fbW), toNdcY(it.minY * uiScale, fbH), z,
+            frame.scratchVertices.push_back({toNdcX(pxX(it.minX), fbW), toNdcY(pxY(it.minY), fbH), z,
                                              it.abgr[0], it.u0, it.v0,
                                              0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
-            frame.scratchVertices.push_back({toNdcX(it.maxX * uiScale, fbW), toNdcY(it.minY * uiScale, fbH), z,
+            frame.scratchVertices.push_back({toNdcX(pxX(it.maxX), fbW), toNdcY(pxY(it.minY), fbH), z,
                                              it.abgr[1], it.u1, it.v0,
                                              0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
-            frame.scratchVertices.push_back({toNdcX(it.maxX * uiScale, fbW), toNdcY(it.maxY * uiScale, fbH), z,
+            frame.scratchVertices.push_back({toNdcX(pxX(it.maxX), fbW), toNdcY(pxY(it.maxY), fbH), z,
                                              it.abgr[2], it.u1, it.v1,
                                              0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
-            frame.scratchVertices.push_back({toNdcX(it.minX * uiScale, fbW), toNdcY(it.maxY * uiScale, fbH), z,
+            frame.scratchVertices.push_back({toNdcX(pxX(it.minX), fbW), toNdcY(pxY(it.maxY), fbH), z,
                                              it.abgr[3], it.u0, it.v1,
                                              0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f});
 
@@ -2196,13 +2715,13 @@ void UIRenderBackend::flushColoredRects()
         // P1: state is uniform within a run (grouping key), pass first.state.
         setDrawStencil(first.stencilDepth);
         if (first.textureIdx == whiteIdx) {
-            _gpu->submitColoredQuads(kViewId, *_adapter, first.state,
+            _gpu->submitColoredQuads(frame.activeViewId, *_adapter, first.state,
                                      frame.scratchVertices.data(),
                                      static_cast<uint32_t>(frame.scratchVertices.size()),
                                      sizeof(UiVertex), frame.scratchIndices.data(),
                                      static_cast<uint32_t>(frame.scratchIndices.size()));
         } else {
-            _gpu->submitTexturedQuads(kViewId, *_adapter, first.state, first.textureIdx,
+            _gpu->submitTexturedQuads(frame.activeViewId, *_adapter, first.state, first.textureIdx,
                                       frame.scratchVertices.data(),
                                       static_cast<uint32_t>(frame.scratchVertices.size()),
                                       sizeof(UiVertex), frame.scratchIndices.data(),
@@ -2223,7 +2742,7 @@ void UIRenderBackend::flushColoredRects()
             const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
             for (const auto& point : item.mesh->positions) {
                 frame.scratchVertices.push_back({
-                    toNdcX(point.x * uiScale, fbW), toNdcY(point.y * uiScale, fbH), 0.0f,
+                    toNdcX(pxX(point.x), fbW), toNdcY(pxY(point.y), fbH), 0.0f,
                     item.abgr[0], 0.0f, 0.0f,
                     0.0f, 0.0f, 0.0f, 0.0f,
                     0.0f, 0.0f, 0.0f, 0.0f
@@ -2235,7 +2754,7 @@ void UIRenderBackend::flushColoredRects()
         }
         if (frame.scratchIndices.empty()) return;
         setDrawStencil(first.stencilDepth);
-        _gpu->submitColoredQuads(kViewId, *_adapter, first.state,
+        _gpu->submitColoredQuads(frame.activeViewId, *_adapter, first.state,
                                  frame.scratchVertices.data(),
                                  static_cast<uint32_t>(frame.scratchVertices.size()),
                                  sizeof(UiVertex), frame.scratchIndices.data(),
@@ -2312,16 +2831,16 @@ void UIRenderBackend::flushColoredRects()
                 const uint32_t base = static_cast<uint32_t>(frame.scratchVertices.size());
                 // Fill from abgr[0] (drawRoundedRect); borders leave it 0.
                 const uint32_t fill = s.abgr[0];
-                const float cx = (s.shapeMinX + s.shapeMaxX) * 0.5f * uiScale;
-                const float cy = (s.shapeMinY + s.shapeMaxY) * 0.5f * uiScale;
+                const float cx = pxX((s.shapeMinX + s.shapeMaxX) * 0.5f);
+                const float cy = pxY((s.shapeMinY + s.shapeMaxY) * 0.5f);
                 const float hw = (s.shapeMaxX - s.shapeMinX) * 0.5f * uiScale;
                 const float hh = (s.shapeMaxY - s.shapeMinY) * 0.5f * uiScale;
                 // Soft-clip rect as (center, half-extent); all-zero
                 // (chw == 0) = no clip, shader skips the seam fade.
                 float ccx = 0.0f, ccy = 0.0f, chw = 0.0f, chh = 0.0f;
                 if (s.clipMaxX > s.clipMinX && s.clipMaxY > s.clipMinY) {
-                    ccx = (s.clipMinX + s.clipMaxX) * 0.5f * uiScale;
-                    ccy = (s.clipMinY + s.clipMaxY) * 0.5f * uiScale;
+                    ccx = pxX((s.clipMinX + s.clipMaxX) * 0.5f);
+                    ccy = pxY((s.clipMinY + s.clipMaxY) * 0.5f);
                     chw = (s.clipMaxX - s.clipMinX) * 0.5f * uiScale;
                     chh = (s.clipMaxY - s.clipMinY) * 0.5f * uiScale;
                 }
@@ -2331,17 +2850,17 @@ void UIRenderBackend::flushColoredRects()
                 // packing shape corners warps SDF space so stroke rings
                 // collapse to corner arcs and soft shadows become solid
                 // blocks. Shape silhouette stays in TexCoord1 (cx,cy,hw,hh).
-                frame.scratchVertices.push_back({toNdcX(s.minX * uiScale, fbW), toNdcY(s.minY * uiScale, fbH), z,
-                                                 fill, s.minX * uiScale, s.minY * uiScale, cx, cy, hw, hh,
+                frame.scratchVertices.push_back({toNdcX(pxX(s.minX), fbW), toNdcY(pxY(s.minY), fbH), z,
+                                                 fill, pxX(s.minX), pxY(s.minY), cx, cy, hw, hh,
                                                  ccx, ccy, chw, chh});
-                frame.scratchVertices.push_back({toNdcX(s.maxX * uiScale, fbW), toNdcY(s.minY * uiScale, fbH), z,
-                                                 fill, s.maxX * uiScale, s.minY * uiScale, cx, cy, hw, hh,
+                frame.scratchVertices.push_back({toNdcX(pxX(s.maxX), fbW), toNdcY(pxY(s.minY), fbH), z,
+                                                 fill, pxX(s.maxX), pxY(s.minY), cx, cy, hw, hh,
                                                  ccx, ccy, chw, chh});
-                frame.scratchVertices.push_back({toNdcX(s.maxX * uiScale, fbW), toNdcY(s.maxY * uiScale, fbH), z,
-                                                 fill, s.maxX * uiScale, s.maxY * uiScale, cx, cy, hw, hh,
+                frame.scratchVertices.push_back({toNdcX(pxX(s.maxX), fbW), toNdcY(pxY(s.maxY), fbH), z,
+                                                 fill, pxX(s.maxX), pxY(s.maxY), cx, cy, hw, hh,
                                                  ccx, ccy, chw, chh});
-                frame.scratchVertices.push_back({toNdcX(s.minX * uiScale, fbW), toNdcY(s.maxY * uiScale, fbH), z,
-                                                 fill, s.minX * uiScale, s.maxY * uiScale, cx, cy, hw, hh,
+                frame.scratchVertices.push_back({toNdcX(pxX(s.minX), fbW), toNdcY(pxY(s.maxY), fbH), z,
+                                                 fill, pxX(s.minX), pxY(s.maxY), cx, cy, hw, hh,
                                                  ccx, ccy, chw, chh});
                 frame.scratchIndices.push_back(base + 0);
                 frame.scratchIndices.push_back(base + 1);
@@ -2362,7 +2881,7 @@ void UIRenderBackend::flushColoredRects()
                 it.sdf.shadowOffset.x * uiScale,
                 it.sdf.shadowOffset.y * uiScale);
             scaledSdf.shadowBlur *= uiScale;
-            _gpu->submitSdfQuads(kViewId, *_adapter, it.state,
+            _gpu->submitSdfQuads(frame.activeViewId, *_adapter, it.state,
                                  frame.scratchVertices.data(),
                                  static_cast<uint32_t>(frame.scratchVertices.size()),
                                  sizeof(UiVertex), frame.scratchIndices.data(),
@@ -2397,28 +2916,35 @@ void UIRenderBackend::flushPendingText()
 void UIRenderBackend::drawTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
                                        const ayt::math::FVector4& tint)
 {
-    if (!_initialized || _gpu == nullptr || _adapter == nullptr || _width < 1 || _height < 1) {
+    if (!_initialized || _gpu == nullptr || _adapter == nullptr || _frame == nullptr
+        || _frame->activeWidth < 1 || _frame->activeHeight < 1) {
         return;
     }
 
     const uint32_t abgr = toAbgr(tint);
+    const float scale = getUiScale();
+    const float fbW = static_cast<float>(_frame->activeWidth);
+    const float fbH = static_cast<float>(_frame->activeHeight);
+    const auto pxX = [&](float x) { return (x - _frame->originX) * scale; };
+    const auto pxY = [&](float y) { return (y - _frame->originY) * scale; };
     const UiVertex vertices[4] = {
-        {toNdcX(bounds.minX * getUiScale(), static_cast<float>(_width)),
-         toNdcY(bounds.minY * getUiScale(), static_cast<float>(_height)), 0.0f, abgr, 0.0f, 0.0f,
+        {toNdcX(pxX(bounds.minX), fbW), toNdcY(pxY(bounds.minY), fbH),
+         0.0f, abgr, 0.0f, 0.0f,
          0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-        {toNdcX(bounds.maxX * getUiScale(), static_cast<float>(_width)),
-         toNdcY(bounds.minY * getUiScale(), static_cast<float>(_height)), 0.0f, abgr, 1.0f, 0.0f,
+        {toNdcX(pxX(bounds.maxX), fbW), toNdcY(pxY(bounds.minY), fbH),
+         0.0f, abgr, 1.0f, 0.0f,
          0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-        {toNdcX(bounds.maxX * getUiScale(), static_cast<float>(_width)),
-         toNdcY(bounds.maxY * getUiScale(), static_cast<float>(_height)), 0.0f, abgr, 1.0f, 1.0f,
+        {toNdcX(pxX(bounds.maxX), fbW), toNdcY(pxY(bounds.maxY), fbH),
+         0.0f, abgr, 1.0f, 1.0f,
          0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-        {toNdcX(bounds.minX * getUiScale(), static_cast<float>(_width)),
-         toNdcY(bounds.maxY * getUiScale(), static_cast<float>(_height)), 0.0f, abgr, 0.0f, 1.0f,
+        {toNdcX(pxX(bounds.minX), fbW), toNdcY(pxY(bounds.maxY), fbH),
+         0.0f, abgr, 0.0f, 1.0f,
          0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
     };
     const uint32_t indices[6] = {0, 1, 2, 0, 2, 3};
 
-    _gpu->submitTexturedQuads(kViewId, *_adapter, blendStateBits(ayt::ui::BlendMode::Normal),
+    _gpu->submitTexturedQuads(_frame->activeViewId, *_adapter,
+                              blendStateBits(ayt::ui::BlendMode::Normal),
                               textureIdx, vertices, 4, sizeof(UiVertex), indices, 6);
 }
 

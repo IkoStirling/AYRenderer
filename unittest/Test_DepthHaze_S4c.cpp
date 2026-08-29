@@ -134,7 +134,7 @@ TEST_CASE(postprocess_consumes_haze_as_primary_source_not_halfres_sampler) {
     CHECK(primary.find("ssaoTexture") == std::string::npos);
     CHECK(fallback.find("ssaoTexture") == std::string::npos);
     CHECK(std::string(ayt::render::detail::kPostProcessCacheKeyCStr)
-          == "postprocess_tonemap_aces_v11_haze_source_bloom_fs");
+          == "postprocess_tonemap_aces_v12_sanitized_params_fs");
 }
 
 TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {

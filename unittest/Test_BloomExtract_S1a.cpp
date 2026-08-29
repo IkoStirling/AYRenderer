@@ -177,7 +177,11 @@ TEST_CASE(bloom_round2_runtime_sources_pin_quality_and_exposure_contract) {
     const std::string exposedBloom =
         "bloomSample.xyz * bloomStrength.x * exposure.x";
     CHECK(post.find(exposedBloom) != std::string::npos);
-    CHECK(fallback.find(exposedBloom) != std::string::npos);
+    // The fallback is intentionally independent from bloom/exposure math so
+    // a primary-only compile failure can still leave a visible scene blit.
+    CHECK(fallback.find(exposedBloom) == std::string::npos);
+    CHECK(fallback.find("bloomTexture") == std::string::npos);
+    CHECK(fallback.find("return sample(sceneColor, uv)") != std::string::npos);
 }
 
 TEST_SUITE_END

@@ -6,7 +6,7 @@
 #include "detail/GBufferPass.h"
 #include "detail/SkyboxPass.h"
 #include "detail/DepthHazePass.h"
-#include "detail/PostProcessPass.h"
+#include "detail/SceneColorPipeline.h"
 
 #include "AYRenderer/RenderTypes.h"
 #include "AYShader/ShaderResource.h"
@@ -402,7 +402,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     bool borrowedDepth = false;
     if (deferredLitComposite) {
         const bgfx::FrameBufferHandle lightingFbo =
-            PostProcessPass::selectSourceFbo(ctx);
+            selectSceneColorSourceFbo(ctx);
         const bgfx::TextureHandle color =
             adapter.getFboAttachment(lightingFbo, 0);
         const bgfx::TextureHandle depth = ctx.gbufferPass->gbufferDepthRt();

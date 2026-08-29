@@ -35,7 +35,10 @@
 
 #include <bgfx/bgfx.h>
 
+#include "detail/RenderTargetPool.h"
+
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace ayt::render::detail
@@ -87,7 +90,8 @@ inline constexpr bgfx::TextureFormat::Enum kHdrSceneColorFormat =
 
 // 资源声明 ── 描述一个 logical 资源(format / 实际尺寸 / 是否 FG own
 // / 是否带 depth attachment)。`transient == false` 表示该资源由外部
-// import 而非 FG 创建(MVP 不会用 ── 留口子给未来 RT pool 共享)。
+// import 而非 FG 创建；FG-owned transient targets 由 Renderer 级共享池
+// 分配，独立 FrameGraph 测试则使用内部池。
 struct FgTextureDesc {
     bgfx::TextureFormat::Enum format   = bgfx::TextureFormat::RGBA8;
     FgTextureScale            scale    = FgTextureScale::Full;
@@ -107,7 +111,7 @@ struct FgPassDesc {
 
 // Semantic ── F5 接入;Final PostProcess 想知道 base color 从哪取、
 // Bloom/Haze 旁路 sampler 从哪取。`Invalid` 表示该 semantic 无
-// 物理资源可读(由 PostProcessPass::selectSourceFbo / FS fallback
+// 物理资源可读(由 selectSceneColorSourceFbo / FS fallback
 // 处理)。
 enum class FgSemantic : uint8_t {
     FinalColorSource = 0,
@@ -160,6 +164,7 @@ struct FgPingPong {
 class FrameGraph final {
 public:
     explicit FrameGraph(BGFXAdapter& adapter) noexcept;
+    FrameGraph(BGFXAdapter& adapter, RenderTargetPool& targetPool) noexcept;
     ~FrameGraph();
 
     FrameGraph(const FrameGraph&) = delete;
@@ -211,11 +216,11 @@ public:
     bgfx::FrameBufferHandle resolveSemantic(FgSemantic sem) const;
 
     // ─── 生命周期 / 统计 ───────────────────────────────────────
-    // 只 destroy FG owned RT(external 不动)。尺寸变化时 owned RT
-    // 重建;logical 资源声明保留。
+    // 释放 FG-owned pool leases(external 不动)。尺寸变化时 owned RT
+    // 在下次 resolve 时按新 key 获取；logical 资源声明保留。
     void resize(uint16_t width, uint16_t height);
 
-    // 释放全部 FG owned RT + 清空所有 logical 声明。重复调安全。
+    // 释放全部 FG-owned pool leases + 清空所有 logical 声明。重复调安全。
     void shutdown();
 
     const FgCompileStats& stats() const noexcept { return _stats; }
@@ -225,6 +230,8 @@ public:
 
 private:
     BGFXAdapter*    _adapter     = nullptr;
+    std::unique_ptr<RenderTargetPool> _ownedTargetPool;
+    RenderTargetPool* _targetPool = nullptr;
     uint16_t        _viewportW   = 0;
     uint16_t        _viewportH   = 0;
     bool            _compiled    = false;
@@ -243,6 +250,7 @@ private:
         // create-on-first-resolve 路径必须能写 physical。
         mutable bgfx::FrameBufferHandle physical =
             bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+        mutable PooledRenderTargetHandle pooled{};
         // F6 才填 ── 物理尺寸 / alias 索引
         // `mutable`: resolve() is const but may fill size on first
         // lazy create when compile left zeros (defensive).

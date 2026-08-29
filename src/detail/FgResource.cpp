@@ -36,10 +36,17 @@ uint16_t scaledDim(uint16_t viewport, FgTextureScale scale)
 // ─── ctor / dtor ──────────────────────────────────────────────
 
 FrameGraph::FrameGraph(BGFXAdapter& adapter) noexcept
-    : _adapter(&adapter)
+    : _adapter(&adapter),
+      _ownedTargetPool(std::make_unique<RenderTargetPool>(adapter)),
+      _targetPool(_ownedTargetPool.get())
 {
     // _resources / _passes / _semantics 默认初始化(ResourceEntry
     // POD-default,PassEntry default,SemanticEntry default)。
+}
+
+FrameGraph::FrameGraph(BGFXAdapter& adapter, RenderTargetPool& targetPool) noexcept
+    : _adapter(&adapter), _targetPool(&targetPool)
+{
 }
 
 FrameGraph::~FrameGraph()
@@ -85,6 +92,10 @@ void FrameGraph::importExternal(FgResourceId id, bgfx::FrameBufferHandle handle)
         return;
     }
     ResourceEntry& r = _resources[static_cast<size_t>(id)];
+    if (_targetPool != nullptr && r.pooled.isValid()) {
+        _targetPool->release(r.pooled);
+        r.pooled = {};
+    }
     r.declared   = true;
     r.isExternal = true;
     r.physical   = handle;  // 借用 ── FG 不 own,resize/shutdown 不动。
@@ -101,6 +112,9 @@ void FrameGraph::addResource(FgResourceId id, const FgTextureDesc& desc)
         return;
     }
     ResourceEntry& r = _resources[static_cast<size_t>(id)];
+    if (r.isExternal) {
+        r.physical = BGFX_INVALID_HANDLE;
+    }
     r.declared   = true;
     r.isExternal = false;  // 即使前一次是 external,这次声明覆盖所有权
     r.desc       = desc;
@@ -198,7 +212,7 @@ bgfx::FrameBufferHandle FrameGraph::resolve(FgResourceId id) const
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
     const ResourceEntry& r = _resources[static_cast<size_t>(id)];
-    if (_adapter == nullptr) {
+    if (_adapter == nullptr || _targetPool == nullptr) {
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
     // External borrow first — SceneColor may be imported for
@@ -226,23 +240,16 @@ bgfx::FrameBufferHandle FrameGraph::resolve(FgResourceId id) const
         r.physicalW = w;
         r.physicalH = h;
     }
-    // F6.1: each owned live RT has a unique aliasGroup — create
-    // per logical entry. If a future whitelist shares groups,
-    // scan for an existing valid handle in the same group first.
-    if (!BGFXAdapter::isValid(r.physical) && r.aliasGroup >= 0) {
-        for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
-            const ResourceEntry& other = _resources[i];
-            if (other.aliasGroup == r.aliasGroup
-                && BGFXAdapter::isValid(other.physical)) {
-                r.physical = other.physical;
-                break;
-            }
-        }
+    const RenderTargetKey key{w, h, r.desc.format, r.desc.withDepth, 1};
+    if (r.pooled.isValid() && !_targetPool->matches(r.pooled, key)) {
+        _targetPool->release(r.pooled);
+        r.pooled = {};
+        r.physical = BGFX_INVALID_HANDLE;
     }
-    if (!BGFXAdapter::isValid(r.physical)) {
-        r.physical = _adapter->createFrameBuffer(
-            w, h, r.desc.format, r.desc.withDepth);
+    if (!r.pooled.isValid() || !_targetPool->isValid(r.pooled)) {
+        r.pooled = _targetPool->acquire(key);
     }
+    r.physical = _targetPool->framebuffer(r.pooled);
     return r.physical;
 }
 
@@ -275,58 +282,37 @@ void FrameGraph::resize(uint16_t width, uint16_t height)
 {
     _viewportW = width;
     _viewportH = height;
-    // §F6 / F6.1 ── 集中 resize: destroy owned RT once per unique
-    // handle (defensive if a future alias whitelist shares).
-    // External 不动。下一帧 compile + resolve lazy recreate。
-    if (_adapter != nullptr && _adapter->isInitialized()) {
-        for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
-            ResourceEntry& r = _resources[i];
-            if (r.isExternal || !BGFXAdapter::isValid(r.physical)) {
-                continue;
-            }
-            const bgfx::FrameBufferHandle handle = r.physical;
-            _adapter->destroy(handle);
-            for (size_t j = 0; j < static_cast<size_t>(FgResourceId::Count); ++j) {
-                ResourceEntry& other = _resources[j];
-                if (!other.isExternal
-                    && BGFXAdapter::isValid(other.physical)
-                    && other.physical.idx == handle.idx) {
-                    other.physical  = BGFX_INVALID_HANDLE;
-                    other.physicalW = 0;
-                    other.physicalH = 0;
-                }
-            }
+    // Shared pools keep released targets quarantined for later exact-key
+    // reuse. Standalone FrameGraph tests own their pool, so reset preserves
+    // the historical immediate-destruction lifecycle.
+    for (ResourceEntry& r : _resources) {
+        if (!r.isExternal && _targetPool != nullptr && r.pooled.isValid()) {
+            _targetPool->release(r.pooled);
         }
+        if (!r.isExternal) {
+            r.pooled = {};
+            r.physical = BGFX_INVALID_HANDLE;
+            r.physicalW = 0;
+            r.physicalH = 0;
+        }
+    }
+    if (_ownedTargetPool != nullptr) {
+        _ownedTargetPool->reset();
     }
 }
 
 void FrameGraph::shutdown()
 {
-    // §F6 / F6.1 ── 释放所有 FG owned RT（unique handle once）;
-    // external 不动。
-    if (_adapter != nullptr && _adapter->isInitialized()) {
-        for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
-            ResourceEntry& r = _resources[i];
-            if (r.isExternal || !BGFXAdapter::isValid(r.physical)) {
-                continue;
-            }
-            const bgfx::FrameBufferHandle handle = r.physical;
-            _adapter->destroy(handle);
-            for (size_t j = 0; j < static_cast<size_t>(FgResourceId::Count); ++j) {
-                ResourceEntry& other = _resources[j];
-                if (!other.isExternal
-                    && BGFXAdapter::isValid(other.physical)
-                    && other.physical.idx == handle.idx) {
-                    other.physical  = BGFX_INVALID_HANDLE;
-                    other.physicalW = 0;
-                    other.physicalH = 0;
-                }
-            }
+    // Release leases; external handles remain borrowed and untouched.
+    for (ResourceEntry& r : _resources) {
+        if (!r.isExternal && _targetPool != nullptr && r.pooled.isValid()) {
+            _targetPool->release(r.pooled);
         }
     }
     for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
         ResourceEntry& r = _resources[i];
         r.physical   = BGFX_INVALID_HANDLE;
+        r.pooled     = {};
         r.physicalW  = 0;
         r.physicalH  = 0;
         r.declared   = false;
@@ -343,6 +329,9 @@ void FrameGraph::shutdown()
     _viewportH = 0;
     _compiled  = false;
     _stats     = FgCompileStats{};
+    if (_ownedTargetPool != nullptr) {
+        _ownedTargetPool->shutdown();
+    }
 }
 
 } // namespace ayt::render::detail

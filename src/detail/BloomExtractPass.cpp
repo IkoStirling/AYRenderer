@@ -6,8 +6,8 @@
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
-#include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
+#include "detail/SceneColorPipeline.h"
 
 #include "AYRenderer/BloomShaderSources.h"
 #include "AYShader/ShaderResource.h"
@@ -64,11 +64,8 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // Source-FBO priority = identical to PostProcessPass (cutsheet
-    // §P5 B6 lock — deferred LightingOutput wins over forward
-    // sceneFbo; both invalid ⇒ no work). Reuses the static helper
-    // so the priority decision stays a single source of truth.
-    const bgfx::FrameBufferHandle sourceFbo = PostProcessPass::selectSourceFbo(ctx);
+    const bgfx::FrameBufferHandle sourceFbo =
+        selectSceneColorSourceFbo(ctx);
     if (!BGFXAdapter::isValid(sourceFbo)) {
         return 0;
     }
@@ -193,13 +190,10 @@ void BloomExtractPass::ensureFullscreenQuad(BGFXAdapter& adapter)
     // Layout MUST match FullscreenVertex {x,y,u,v}: a 0-stride
     // bgfx::VertexLayout triggers bgfx::fatal under Debug.
     const bgfx::VertexLayout layout = adapter.vertexLayoutPosUv();
-    _fullscreenVB = adapter.createVertexBuffer(kFullscreenTriangle,
-                                                sizeof(kFullscreenTriangle),
-                                                layout,
-                                                BGFX_BUFFER_NONE);
-    _fullscreenIB = adapter.createIndexBuffer(kFullscreenIndices,
-                                              sizeof(kFullscreenIndices),
-                                              BGFX_BUFFER_NONE);
+    (void)ensureFullscreenTriangleBuffers(
+        adapter, _fullscreenVB, _fullscreenIB,
+        kFullscreenTriangle, sizeof(kFullscreenTriangle), layout,
+        kFullscreenIndices, sizeof(kFullscreenIndices));
 }
 
 void BloomExtractPass::ensureProgram(shader::ShaderResourcePool& pool)

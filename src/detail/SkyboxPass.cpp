@@ -282,13 +282,10 @@ void SkyboxPass::ensureFullscreenQuad(BGFXAdapter& adapter)
         return;
     }
     const bgfx::VertexLayout layout = adapter.vertexLayoutPosUv();
-    _fullscreenVB = adapter.createVertexBuffer(kSkyboxFullscreenTriangle,
-                                               sizeof(kSkyboxFullscreenTriangle),
-                                               layout,
-                                               BGFX_BUFFER_NONE);
-    _fullscreenIB = adapter.createIndexBuffer(kSkyboxFullscreenIndices,
-                                              sizeof(kSkyboxFullscreenIndices),
-                                              BGFX_BUFFER_NONE);
+    (void)ensureFullscreenTriangleBuffers(
+        adapter, _fullscreenVB, _fullscreenIB,
+        kSkyboxFullscreenTriangle, sizeof(kSkyboxFullscreenTriangle), layout,
+        kSkyboxFullscreenIndices, sizeof(kSkyboxFullscreenIndices));
 }
 
 void SkyboxPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)

@@ -18,9 +18,11 @@
 #include "detail/LightingPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
+#include "detail/PostProcessPipeline.h"
 #include "detail/EditorOverlayPass.h"
 #include "detail/Forward2DOpaquePass.h"  // CM-1 (2026-08-11) — 2D lane pass factory.
 #include "detail/RenderPipeline.h"
+#include "detail/RenderTargetPool.h"
 #include "detail/RenderViewOrder.h"
 #include "detail/SSAOPass.h"        // §A1 SSAO MVP (2026-07-24) — SSAOPass factory + FrameGraph SSAOTexture resolve gate.
 #include "detail/SSAOPipeline.h"
@@ -266,6 +268,7 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
 struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
     ayt::shader::ShaderResourcePool    shaderPool;
+    detail::RenderTargetPool      renderTargetPool{adapter};
     // Product default = RenderPipelineDesc::makeDefault()
     // (Shadow → FO → Transparent → PostProcess → UI), Shadow enabled
     // by default (E5 §5.4, 2026-07-22). Hosts that want to opt out
@@ -300,7 +303,7 @@ struct Renderer::Impl {
     // matches Renderer and is borrowed through PassExecContext each frame.
     // Constructed with the adapter reference (it queries the
     // adapter's isInitialized/isNoopBackend per-frame).
-    detail::FrameGraph            frameGraph{adapter};
+    detail::FrameGraph            frameGraph{adapter, renderTargetPool};
 
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
@@ -618,6 +621,14 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
+    if (detail::RenderPass* postProcessPass =
+            pipeline.findPass("PostProcess")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::PostProcessPass*>(postProcessPass)
+                ->destroyResources(adapter);
+        }
+    }
+
     pipeline.clear();
     // E5 (§5.4, 2026-07-22): default pipeline now mounts EVERY slot
     // at its RenderPass base default (_enabled == true), Shadow
@@ -735,6 +746,13 @@ bool Renderer::initialize(const InitDesc& desc)
     // check it before dereferencing Impl. If the Renderer was destroyed
     // and the callback raced past setOnHotReload({}), the token will
     // be false and we skip silently instead of touching dead memory.
+    // A Renderer may be initialized again after shutdown(). Give the new
+    // callback its own live token; callbacks copied before shutdown retain
+    // the old, permanently-false token and remain safely disabled.
+    if (!_impl->aliveToken
+        || !_impl->aliveToken->load(std::memory_order_acquire)) {
+        _impl->aliveToken = std::make_shared<std::atomic<bool>>(true);
+    }
     auto aliveToken = _impl->aliveToken;
     ayt::resource::ResourceManager::instance().setOnHotReload(
         [this, aliveToken](const std::string& path) {
@@ -770,6 +788,74 @@ void Renderer::shutdown()
         }
     }
 
+    // Pipeline instances survive shutdown() so the same Renderer can be
+    // initialized again. Reset every Pass-owned GPU handle before bgfx shuts
+    // down; bgfx::isValid only checks the numeric handle sentinel and cannot
+    // distinguish a stale handle from one allocated by the next context.
+    if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::ShadowPass*>(shadowPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+    if (detail::RenderPass* gbufferPass = _impl->pipeline.findPass("GBuffer")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::GBufferPass*>(gbufferPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+    if (detail::RenderPass* lightingPass = _impl->pipeline.findPass("Lighting")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::LightingPass*>(lightingPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+    if (detail::RenderPass* skyboxPass = _impl->pipeline.findPass("Skybox")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::SkyboxPass*>(skyboxPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+    if (detail::RenderPass* bloomExtractPass =
+            _impl->pipeline.findPass("BloomExtract")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::BloomExtractPass*>(bloomExtractPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+    if (detail::RenderPass* bloomBlurPass =
+            _impl->pipeline.findPass("BloomBlur")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::BloomBlurPass*>(bloomBlurPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+    if (detail::RenderPass* depthHazePass =
+            _impl->pipeline.findPass("DepthHaze")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::DepthHazePass*>(depthHazePass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+    if (detail::RenderPass* debugPass =
+            _impl->pipeline.findPass("GBufferDebug")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::GBufferDebugPass*>(debugPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+
+    // PostProcess owns raw fullscreen geometry and a ShaderResource. Clear
+    // both while the adapter and shader pool are still alive so a later
+    // initialize() cannot mistake stale numeric handles for live objects.
+    if (detail::RenderPass* postProcessPass =
+            _impl->pipeline.findPass("PostProcess")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::PostProcessPass*>(postProcessPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+
     // SSAO keeps raw fullscreen geometry handles in the pass instance. Reset
     // them before adapter shutdown so initialize() on the same Renderer never
     // mistakes stale numeric handles for live resources.
@@ -800,6 +886,7 @@ void Renderer::shutdown()
     // above. fg.shutdown() iterates all owned resources and
     // destroys each (externals are skipped). Idempotent.
     _impl->frameGraph.shutdown();
+    _impl->renderTargetPool.shutdown();
 
     ayt::resource::ResourceManager::instance().setOnHotReload({});
     _impl->resources.shutdown();
@@ -821,6 +908,7 @@ void Renderer::beginFrame(const ClearDesc& clear)
     _impl->compositeSceneViewId = -1;
     _impl->pipeline.resetFrameStats();
     _impl->debugOverlay.onBeginFrame();
+    _impl->renderTargetPool.beginFrame();
     _impl->adapter.beginFrame();
     _impl->adapter.setViewClear(detail::ForwardOpaquePass::kMainViewId, clear);
 }
@@ -832,6 +920,7 @@ void Renderer::beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uin
     }
     _impl->pipeline.resetFrameStats();
     _impl->debugOverlay.onBeginFrame();
+    _impl->renderTargetPool.beginFrame();
 
     // View 0: full-window clear only (never shrink this rect to the 3D hole).
     _impl->adapter.setViewRect(0, 0, 0, fbWidth, fbHeight);
@@ -888,8 +977,10 @@ void Renderer::render(const RenderScene& scene)
     // stack-local; cost is negligible (3 floats + 1 byte enum).
     frame.bloomStrength    = detail::sanitizeBloomStrength(
         _impl->postProcessBloomStrength);
-    frame.exposure         = _impl->postProcessExposure;
-    frame.gamma            = _impl->postProcessGamma;
+    frame.exposure         = detail::sanitizePostProcessExposure(
+        _impl->postProcessExposure);
+    frame.gamma            = detail::sanitizePostProcessGamma(
+        _impl->postProcessGamma);
     frame.tonemapMode      = _impl->postProcessTonemapMode;
     // §S4d — DepthHaze knobs (Editor / host). Defaults keep haze off.
     frame.hazeEnabled      = _impl->depthHazeEnabled;
@@ -1397,6 +1488,9 @@ void Renderer::resize(uint32_t width, uint32_t height)
     // / PostProcess) get a single fg.resize() call instead of
     // four individual destroyResources blocks.
     _impl->frameGraph.resize(width, height);
+    // A bgfx reset invalidates retained framebuffer storage. FrameGraph has
+    // returned its leases above; invalidate UI/other leases before reset.
+    _impl->renderTargetPool.reset();
 
     _impl->initDesc.width  = width;
     _impl->initDesc.height = height;
@@ -1865,11 +1959,19 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
     if (!_impl) {
         return;
     }
+    uint32_t requestedSamples = 0;
+    switch (samples) {
+    case 2: case 4: case 8: case 16:
+        requestedSamples = samples;
+        break;
+    default:
+        break;
+    }
     const uint32_t before = _impl->adapter.msaaSampleCount();
-    _impl->adapter.setMsaaSampleCount(samples);
-    _impl->initDesc.msaa = _impl->adapter.msaaSampleCount();
-    // bgfx::reset drops view attachments; recycle scene RT like resize().
-    if (before != _impl->initDesc.msaa) {
+    // BGFXAdapter::setMsaaSampleCount performs bgfx::reset immediately.
+    // Release every framebuffer owner first so retained UI/FrameGraph leases
+    // cannot keep a numerically-valid but device-stale handle afterward.
+    if (before != requestedSamples) {
         if (detail::BGFXAdapter::isValid(_impl->sceneFbo)) {
             _impl->adapter.destroy(_impl->sceneFbo);
             _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
@@ -1931,6 +2033,10 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
                     ->destroyResources(_impl->adapter);
             }
         }
+        _impl->frameGraph.resize(_impl->initDesc.width, _impl->initDesc.height);
+        _impl->renderTargetPool.reset();
+        _impl->adapter.setMsaaSampleCount(requestedSamples);
+        _impl->initDesc.msaa = _impl->adapter.msaaSampleCount();
     }
 }
 
@@ -2044,7 +2150,8 @@ void Renderer::setPostProcessExposure(float exposure)
     if (!_impl) {
         return;
     }
-    _impl->postProcessExposure = exposure;
+    _impl->postProcessExposure =
+        detail::sanitizePostProcessExposure(exposure);
 }
 
 void Renderer::setPostProcessGamma(float gamma)
@@ -2052,7 +2159,7 @@ void Renderer::setPostProcessGamma(float gamma)
     if (!_impl) {
         return;
     }
-    _impl->postProcessGamma = gamma;
+    _impl->postProcessGamma = detail::sanitizePostProcessGamma(gamma);
 }
 
 void Renderer::setPostProcessClockPaused(bool paused)
@@ -2441,6 +2548,16 @@ detail::BGFXAdapter* Renderer::bgfxAdapter() noexcept
 const detail::BGFXAdapter* Renderer::bgfxAdapter() const noexcept
 {
     return _impl ? &_impl->adapter : nullptr;
+}
+
+detail::RenderTargetPool* Renderer::renderTargetPool() noexcept
+{
+    return _impl ? &_impl->renderTargetPool : nullptr;
+}
+
+const detail::RenderTargetPool* Renderer::renderTargetPool() const noexcept
+{
+    return _impl ? &_impl->renderTargetPool : nullptr;
 }
 
 ayt::shader::ShaderResourcePool* Renderer::shaderPool() noexcept

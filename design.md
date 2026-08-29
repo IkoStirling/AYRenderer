@@ -502,6 +502,35 @@ Debug 构建还会对调度结果执行独立的不变量校验：结果必须�
 
 `BatchMode::OrderedRuns` 完整保留旧实现：只合并相邻且兼容的 item。该模式作为运行时兜底、排障开关和性能 A/B 基线存在，不需要维护第二套渲染后端。
 
+### 8.5 Production UI Layer 与共享 RenderTargetPool
+
+Renderer 在 adapter 初始化后创建 renderer-wide `RenderTargetPool`，并把同一实例注入 FrameGraph 与
+`UIRenderBackend`。这不是“UI 专用缓存池”和“Pass 专用缓存池”两套实现；物理 FBO 的创建、复用、
+延迟回收、预算和 reset 生命周期只有一个 owner。shutdown 顺序固定为：消费者释放 lease → pool
+shutdown → adapter shutdown；resize/MSAA 切换顺序固定为：FrameGraph 释放 → pool reset → bgfx reset。
+
+池的 key 为 `(width, height, colorFormat, withDepth, sampleCount)`，只做精确匹配。lease 由 slot 与
+generation 组成，release 后旧 handle 立即失效；物理目标默认 quarantine 两帧，避免 CPU 已结束但
+bgfx 队列仍引用 attachment。256 MiB 预算只淘汰已空闲且越过 quarantine 的 LRU 目标，因此是
+best-effort：leased/quarantined 资源可暂时超预算。当前明确拒绝 sampleCount != 1。
+
+`UIRenderBackend` 实现完整 RenderTarget create/resize/release/bind/texture/blit 和 Layer
+create/update/release/paint/composite/invalidate。Layer 使用 RGBA8 + depth/stencil backing target；
+逻辑 bounds 与 DPI 决定物理尺寸。offscreen paint 使用 view 26–249（250 留给 GBufferDebug），主
+composite 使用 view 255。
+target 切换是 batch barrier：进入离屏前 flush，保存 canvas/clip/path-clip/opacity/blend 状态；结束
+paint 后 flush 并恢复。由此 flat、SDF、text、nine-patch、vector fill/stroke 和 nested stencil clip
+继续走同一条生产图元路径。
+
+AYUI 的 root Production Layer 是 opt-in。首次、无范围 dirty、resize/DPI/reset 帧完整绘制主树；
+显式 dirty rect 帧只 replay damage clip。Transparent/Color Layer 先用无混合覆盖写清除 damage，
+保留区域外像素；Preserve Layer 跳过清除。clean 帧只 composite 一次；overlay 与 drag visual 随后
+即时绘制。capability、target 或 paint 失败时 AYUI 同帧回退原始路径。当前每帧最多 224 次
+offscreen paint，第 225 次确定失败，下一帧重新从 view 26 分配。该上限只描述 pass 数量，不承诺
+UI 独占 224 个共享 framebuffer。池与 UI backend 均限定 renderer thread。Noop 测试锁定生命周期和
+submit 形态，但 OpenGL/Vulkan 的 RenderTarget 纹理方向、真实局部 clear/preserve 与 resize 视觉
+结果仍需 GPU 图像基线关闭门禁。
+
 ---
 
 ## 9. AYRenderer 主类
@@ -720,6 +749,7 @@ include/AYRenderer/
 - [x] `AYEngineIntegration_Demo`：旋转 ECS 立方体 + overlay
 - [x] 单线程 render callback（`setRenderThreadEnabled(false)`）
 - [x] `UIRenderBackend` overlap-aware 合批 + `OrderedRuns` 兜底
+- [x] Production UI Layer + renderer-wide RenderTargetPool（FrameGraph/UI 共享）
 
 ### Phase R5+ — Deferred 与高级 Pass
 
@@ -771,9 +801,15 @@ include/AYRenderer/
 - `Test_RenderResources::textured_material_draw_one_frame`(双 Renderer + shaderc)
 - `Test_PostProcess_R5Plus_*`(R5.1 wire + P2 改动)
 - `Test_ShadowPass`(cut-1 + 未来 cut-2)
-- `Test_UIPass_AI1`(composite + UI view 2 锁)
+- `Test_UIPass_AI1`(composite + UI view 255 锁)
+- `Test_RenderTargetPool`(generation、quarantine、精确键复用、预算淘汰、reset)
+- `Test_UILayerRenderTarget`(复杂图元/path clip、局部 damage、clean 单 composite、224 次离屏 pass
+  溢出/跨帧恢复、resize/MSAA reset 重绘)
 
 跑法:同一 commit **连续 3 次**全量 `AYRenderer_Test`,记录 PASS/FAIL;**3 次不全绿**则按 `docs/execution-plan.md` §5 处理,不许合并带赌的 ABI 变更。
+
+2026-08-29 Production UI Layer/RenderTargetPool 局部 damage 阶段的 Windows Debug Noop 全量基线为
+`3211 / 3211`。该结果验证 API、生命周期、view/submit 契约，不替代真实 GPU 图像和 capture。
 
 ### 14.4 MSVC 增量对象与内部 ABI
 
@@ -808,6 +844,19 @@ include/AYRenderer/
 ---
 
 ## 16. 变更记录
+
+### 2026-08-29 — Production UI Layer 与共享 RenderTargetPool
+
+- Renderer 新增唯一的 renderer-wide RenderTargetPool；FrameGraph 和 UIRenderBackend 共用，按精确
+  descriptor 复用 generation lease，并提供两帧 quarantine、LRU best-effort 预算、reset/shutdown。
+- FrameGraph 的 owned target 从直接创建/销毁迁移为 pool lease，standalone 测试仍可使用内部 owned pool。
+- UIRenderBackend 完成 RenderTarget 和 Layer 全生命周期、纹理/blit、透明/color/preserve clear、
+  offscreen view 26–249、主 view 255、target transition batch barrier 与状态恢复。
+- AYUI root 主树可 opt-in retained pixel layer；clean frame 单 composite，overlay/drag visual 即时叠加，
+  显式 dirty rect 局部清除/replay，无范围 dirty、resize/device reset 全量重绘，能力或 paint 失败同帧回退。
+- Noop 回归覆盖复杂 gradients/SDF/nine-patch/vector fill/stroke/nested path clip、pool 回收和
+  partial damage、224 次离屏 pass 溢出恢复、resize/MSAA reset；Windows Debug 全量 `3211 / 3211`。
+  OpenGL/Vulkan RenderTarget 纹理方向与真实局部 clear 仍需 GPU 图像基线。
 
 ### 2026-08-28 — GBuffer v3 冻结，进入 LightingPass 审核
 
@@ -854,7 +903,7 @@ include/AYRenderer/
 - Extract 在 scene-linear HDR 上执行中心加四角共 5 次采样的 Karis 权重降采样，再以 `threshold` 与 fractional `softKnee` 提取高亮；Blur 使用线性过滤折叠的高斯核，每轴 5 fetch，替代原先每轴 9 fetch。
 - Bloom 被视为单一完整能力：strength 必须为有限正数，且 Extract/Blur 均存在并启用，才声明三个 FG 资源；任一阶段缺失或禁用时零分配。strength、threshold、soft-knee 对负数、NaN、Inf 做统一清洗。
 - Extract 与 Blur 每帧先清除 `producedThisFrame`，仅在真实 submit 后置位。Final 只有在 Blur 本帧生产且 `BloomSource`/attachment 均有效时才保留非零 strength；fallback sampler 仍绑定合法纹理，但 strength 强制为 0，避免旧帧采样和 `raw + scene * strength` 双亮。
-- Bloom 与 scene color 在曝光前保持同一线性空间，Final 使用 `(scene + bloom * strength) * exposure` 的等价组合后再 tone map/gamma；主 shader 与 fallback shader 使用同一表达式和独立 cache key。
+- Bloom 与 scene color 在曝光前保持同一线性空间，Final 主 shader 使用 `(scene + bloom * strength) * exposure` 的等价组合后再 tone map/gamma；独立最小 fallback 只做 sceneColor blit，不依赖 bloom、曝光或 tone-map 语法。
 - 测试直接检查生产 shader 字符串，不再维护易漂移的测试镜像；覆盖完整链 truth table、逐帧 fail-close、参数边界、HDR 格式、采样数/offset、binding 与曝光合成。精确生产源已手动通过 Phoskia IR、Linux GLSL 430 和 Windows s_5_0 检查；稳定全量 `AYRenderer_Test` 为 3022/3022。
 - 可选后续优化按收益排序：先做真实 D3D11/12 capture 和阈值/曝光标定；需要更宽光晕时升级为多级 downsample/upsample 金字塔；再考虑 quarter-res 质量档、lens dirt、anamorphic streak 或 temporal stabilization。现阶段不引入多级链，避免在没有 GPU 基线前增加 RT、带宽与调参维度。
 - 仍未关闭的生产门禁：真实 GPU capture、边缘采样/resize 观测、RGBA16F fallback 后的视觉降级验证；当前为单层半分辨率 Bloom，不具备多尺度光晕。
@@ -884,6 +933,19 @@ include/AYRenderer/
 - 修改 `PostProcessPass` 私有布局后的增量产物曾在 `FinalPPPass_S1c` 触发 `Stack around the variable 'pass' was corrupted`；同一配置完整 clean rebuild 后该套件 46/46 正常退出，确认是新旧 `.obj` 混用导致的 ABI 污染，不是 SSAO shader 越界。随后 SSAO 161/161、Lighting 32/32、DepthHaze 64/64 定向回归通过，最终 MSVC Debug 全量 `AYRenderer_Test` 为 3095/3095，未再出现断言窗或异常退出。
 - 暂不实施的可选优化：half-resolution + depth/normal-aware bilateral upsample、`R8` 单通道目标、由 depth 重建 view position、蓝噪声/temporal accumulation 与 GTAO。先用 D3D11/12 capture 测量 SSAO 带宽、边缘 halo、噪声和参数尺度，再按收益选择，避免在无 GPU 基线时同时改变格式、分辨率和算法。
 
+### 2026-08-29 — PostProcessPass 审核与正确性收敛
+
+- PostProcess 固定为最终全屏 composite，不再拥有私有 FBO：输入由共享 `SceneColorPipeline` 选择 Forward `sceneFbo`、Deferred `LightingOutput` 或本帧有效的 `HazeColor`，输出直接写默认 backbuffer，随后由 UI view 255 合成。
+- `SceneColorPipeline` 成为 Haze、Transparent、Bloom 与 PostProcess 的共同路由所有者；`PostProcessPass::selectSourceFbo` 只保留兼容转发，避免其它 Pass 依赖最终合成类的私有策略。
+- Pass 本地生命周期仅包含 fullscreen VB/IB、ShaderResource 与 binding。Renderer 在 `applyPipelineDesc()` 的 `pipeline.clear()` 前以及 shutdown 的 shader pool/adapter teardown 前显式调用 `destroyResources()`，关闭重配和 shutdown→initialize 的 stale numeric handle 路径。
+- 主 Shader 删除未消费的 `uTime` ABI。Exposure 在 `[0,64]`、Gamma 在 `[0.1,8]` 内清洗；NaN/Inf 使用中性默认值，并在公开 setter、FrameContext 广播和 Pass 上传三层 fail-safe。
+- 原先与主 Shader 几乎同构的 fallback 改为只声明 `sceneColor` 的独立最小 blit；fallback 可见时仍每 120 帧尝试恢复主程序，两者都失败时也不会逐帧调用 shaderc。
+- ForwardOpaque 在设置 scene clear 后显式 `touch(viewId)`，保证场景列表非空但没有有效 opaque submit 时仍写入本帧清屏色，PostProcess 不再采样上一帧 scene FBO。
+- `PostProcessPass` 构造/析构改为 `.cpp` 唯一定义，避免 Visual Studio 增量构建从旧测试对象选择按历史类尺寸生成的 inline COMDAT；本轮已用链接器符号定位并定点重编相关 AYRenderer 测试对象，没有执行全引擎 clean。ForwardOpaque 的 initialized gate 同时前移到 `setViewMode` 之前，修复未初始化 bgfx 下的旧 R5Plus pipeline 挂起。
+- 测试不再维护 PostProcess Shader 的本地镜像或用故意编译失败代替生产编译；主/回退源码直接从运行时代码导出，覆盖 binding、cache key、参数边界、共享路由、bounded retry、teardown 顺序与 Forward touch。
+- PostProcess 定向回归全部通过：R51 Smoke 2/2、R51 62/62、FinalPP S1c 54/54、P0 13/13、F5 27/27、R5Plus 19/19、B6 SourceFbo 9/9，并通过相关 Bloom、DepthHaze、SSAO 与 AuditP5 回归。最初 3 个 UI Layer 容量断言把“每帧 224 个 offscreen pass”误写成“同时持有 225 个共享 framebuffer”；改为在同一有效 Layer 上隔离验证 view 分配并锁定 26/249/224 常量后，MSVC Debug 全量为 `3211 / 3211`。
+- 暂不加入 dithering、精确 sRGB OETF、HDR swapchain 输出、额外 tone-map 算法或多级 bloom；先完成 D3D11/12 真机 Shader 编译与 RenderDoc capture，再按 banding、色彩管理和性能数据决定。
+
 ### 2026-07 — 引擎闭环（R4 + Engine）
 
 - `RendererSubSystem`：GameLoop 子系统，单线程 `renderFrame` callback。
@@ -912,4 +974,4 @@ include/AYRenderer/
 
 ### 下一步
 
-按 Pass 顺序进入 PostProcess 审核；并行保留 GBuffer、Lighting、Transparent、Bloom、DepthHaze 与 SSAO 的真实 GPU capture 门禁。之后继续推进 Point/Spot 高级阴影、Command Queue 与 DrawListBuilder。
+PostProcess 正确性修复完成后，按 Pass 顺序进入 UIPass/最终合成边界审核；并行保留 GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO 与 PostProcess 的真实 GPU capture 门禁。之后继续推进 Point/Spot 高级阴影、Command Queue 与 DrawListBuilder。

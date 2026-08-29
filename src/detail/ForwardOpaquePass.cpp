@@ -194,10 +194,6 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     // Preserve source submesh order for coincident opaque/masked surface
     // layers. This mirrors GBufferPass so switching render paths does not
     // change which eye/mouth/decal layer wins an equal-depth tie.
-    //
-    // §P2 M1 (2026-08-24) — routed through BGFXAdapter (cutsheet red line:
-    // pass files never call bgfx::* functions directly).
-    adapter.setViewMode(viewId, bgfx::ViewMode::Sequential);
     const auto& meshes    = ctx.meshes;
     const auto& textures  = ctx.textures;
     auto& materials       = ctx.materials;
@@ -231,6 +227,10 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         return 0;
     }
 
+    // Keep every bgfx-facing adapter call behind the lifecycle gate. Calling
+    // setViewMode before bgfx::init can stall the headless pipeline tests and
+    // is undefined on real backends during startup/reconfiguration.
+    adapter.setViewMode(viewId, bgfx::ViewMode::Sequential);
     adapter.setViewTransform(viewId, frame.view, frame.projection);
 
     // P2 (PR-D, 2026-07-20) — bind the shared scene FBO so this pass's
@@ -267,6 +267,12 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
                                 /*depth=*/1.0f,
                                 /*stencil=*/0);
     }
+
+    // setViewClear only configures the view; bgfx applies it when the view is
+    // touched or receives a submit. Touch now so a frame containing no valid
+    // opaque draws still publishes a freshly-cleared sceneColor instead of
+    // leaving PostProcess to sample the previous frame.
+    adapter.touch(viewId);
 
     // §P2 M7 (2026-08-24) — `setStateOpaque()` here was dead: the per-draw
     // state rebuild at the bottom of the loop overrides it on every

@@ -22,6 +22,7 @@ class Renderer;
 namespace detail {
 class BGFXAdapter;
 class BgfxFontAtlas;
+class RenderTargetPool;
 class UiGpuContext;
 }
 
@@ -51,9 +52,15 @@ public:
     //  11 = BloomBlur horizontal, 12 = BloomBlur vertical
     //  13 = DepthHaze (half-res fog; before Final so same-frame sample)
     //  14 = PostProcess blit → backbuffer panel (Forward + Deferred)
+    //  26–249 = retained UI Layer / generic offscreen paint targets
+    //            (250 is reserved by GBufferDebug)
     //  255 = UI chrome / menus (fixed high slot — insert Post passes
     //        without reshuffling UI; must stay > Final PP)
     static constexpr uint8_t kViewId = 255;
+    static constexpr uint8_t kFirstLayerViewId = 26;
+    static constexpr uint8_t kLastLayerViewId = 249;
+    static constexpr uint16_t kMaxOffscreenPaintsPerFrame =
+        static_cast<uint16_t>(kLastLayerViewId - kFirstLayerViewId + 1u);
 
     UIRenderBackend();
     ~UIRenderBackend() override;
@@ -70,11 +77,30 @@ public:
     void shutdown();
     bool isInitialized() const { return _initialized; }
 
-    // Retained display lists are replayed into this backend today. Pixel-
-    // retained UI layers are intentionally capability-gated until the bgfx
-    // framebuffer/texture lifetime implementation lands; AYUI callers see
-    // false and keep the immediate compositing fallback.
-    bool supportsRenderTargets() const override { return false; }
+    bool supportsRenderTargets() const override;
+    RenderTargetHandle createRenderTarget(int width, int height,
+                                          bool hasAlpha = true) override;
+    RenderTargetHandle createRenderTarget(const RenderTargetDesc& desc) override;
+    bool resizeRenderTarget(RenderTargetHandle target,
+                            const RenderTargetDesc& desc) override;
+    void releaseRenderTarget(RenderTargetHandle target) override;
+    void bindRenderTarget(RenderTargetHandle target) override;
+    void* getRenderTargetTexture(RenderTargetHandle target) override;
+    void blitRenderTarget(RenderTargetHandle source,
+                          const ayt::math::FRectangle& destBounds) override;
+
+    LayerHandle createLayer(const LayerDesc& desc) override;
+    void releaseLayer(LayerHandle layer) override;
+    bool updateLayer(LayerHandle layer, const LayerDesc& desc) override;
+    bool beginLayerPaint(LayerHandle layer, const LayerPaint& paint) override;
+    void endLayerPaint(LayerHandle layer) override;
+    void compositeLayer(LayerHandle layer,
+                        const ayt::math::FRectangle& destBounds,
+                        float opacity = 1.0f) override;
+    void invalidateLayer(LayerHandle layer,
+                         const ayt::math::FRectangle& damage =
+                             ayt::math::FRectangle()) override;
+    bool isLayerDirty(LayerHandle layer) const override;
 
     void setFramebufferSize(uint16_t width, uint16_t height);
 
@@ -245,6 +271,9 @@ private:
     void emitClippedTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
                                  const ayt::math::FRectangle& uv,
                                  const ayt::math::FVector4& tint);
+    bool resolveTextureHandle(void* handle, uint16_t& textureIdx,
+                              uint16_t& width, uint16_t& height) const;
+    bool ensureRenderTarget(int targetId);
     ayt::math::FRectangle activeClipBounds() const;
     bool clipRect(ayt::math::FRectangle& inout) const;
 
@@ -254,6 +283,7 @@ private:
     int      _drawCalls     = 0;
 
     detail::BGFXAdapter*                  _adapter     = nullptr;
+    detail::RenderTargetPool*             _targetPool  = nullptr;
     shader::ShaderResourcePool*           _shaderPool  = nullptr;
     std::unique_ptr<detail::UiGpuContext> _gpu;
     std::unique_ptr<detail::BgfxFontAtlas> _fontAtlas;

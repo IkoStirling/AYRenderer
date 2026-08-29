@@ -7,8 +7,8 @@
 #include "detail/GBufferPass.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
-#include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
+#include "detail/SceneColorPipeline.h"
 
 #include <cstdio>
 #include <string>
@@ -65,10 +65,10 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // resetFrameState() makes selectSourceFbo return the underlying scene here;
+    // resetFrameState() makes the shared selector return the underlying scene;
     // later consumers select HazeSource only after this submit succeeds.
     const bgfx::FrameBufferHandle sourceFbo =
-        PostProcessPass::selectSourceFbo(ctx);
+        selectSceneColorSourceFbo(ctx);
     if (!BGFXAdapter::isValid(sourceFbo)) {
         return 0;
     }
@@ -154,11 +154,10 @@ void DepthHazePass::ensureFullscreenQuad(BGFXAdapter& adapter)
         return;
     }
     const bgfx::VertexLayout layout = adapter.vertexLayoutPosUv();
-    _fullscreenVB = adapter.createVertexBuffer(
+    (void)ensureFullscreenTriangleBuffers(
+        adapter, _fullscreenVB, _fullscreenIB,
         kFullscreenTriangle, sizeof(kFullscreenTriangle), layout,
-        BGFX_BUFFER_NONE);
-    _fullscreenIB = adapter.createIndexBuffer(
-        kFullscreenIndices, sizeof(kFullscreenIndices), BGFX_BUFFER_NONE);
+        kFullscreenIndices, sizeof(kFullscreenIndices));
 }
 
 void DepthHazePass::ensureProgram(shader::ShaderResourcePool& pool)

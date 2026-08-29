@@ -9,17 +9,14 @@
 //                `return 0;` (verified by string-grep on the
 //                source file at test time — guarantees the
 //                count won't regress silently).
-//   T3  M4    — FBO create-failed path uses
-//                rateLimitedEarlyReturn (not unconditional
-//                fprintf).
+//   T3  M4    — PostProcess owns no private FBO or FBO-format ABI.
 //   T4  M5    — DebugOverlay caches bgfx::getStats() once per
 //                frame: onEndFrame() reads from the cached
 //                pointer set by sampleBgfxStats(); the test
 //                verifies the cache field exists and is
 //                cleared on resetStats().
-//   T5  L1+L3 — kPostProcessCacheKey bumped to v8_audit_p5;
-//                kPostProcessColorFormat hoisted to a named
-//                constant equal to bgfx::TextureFormat::RGBA8.
+//   T5  L1+L3 — current shader cache key and resource teardown
+//                ordering stay pinned.
 
 #include "AYTest.h"
 
@@ -43,7 +40,6 @@ extern const char* const kPostProcessCacheKeyCStr;
 
 using ayt::render::detail::DebugOverlay;
 using ayt::render::detail::kPostProcessCacheKeyCStr;
-using ayt::render::detail::kPostProcessColorFormat;
 using ayt::render::detail::rateLimitedEarlyReturn;
 
 namespace {
@@ -138,8 +134,8 @@ TEST_CASE(post_process_source_rate_limits_failure_exits) {
     // Count "rateLimitedEarlyReturn(" calls in PostProcessPass.cpp.
     // The fix introduced diagnostics for failure exits in execute() (1 each for
     // !isInitialized, isNoopBackend, zero-viewport, sourceFbo
-    // invalid, VB/IB invalid, fboColor invalid) + 1 in ensureFbo
-    // (M4) + 1 before the s_loggedMissing return (M1). Successful
+    // invalid, VB/IB invalid, fboColor invalid) + 1 before the
+    // s_loggedMissing return (M1). Successful
     // blits deliberately do not use an early-return diagnostic.
     const std::size_t calls = countSubstr(
         src, "rateLimitedEarlyReturn(");
@@ -154,37 +150,17 @@ TEST_SUITE_END
 
 TEST_SUITE(AuditP5_T3_FboCreateFailLog)
 
-TEST_CASE(post_process_ensure_fbo_log_calls_helper) {
-    // M4 fix: ensureFbo()'s `else { fprintf(...) }` branch
-    // now calls rateLimitedEarlyReturn before the printf so
-    // a sustained failure (resize storm + failing backend)
-    // doesn't spam stderr at frame rate. Pin by source-grep
-    // for the helper invocation within 50 lines of the
-    // "FBO create failed" comment marker.
-    const std::string path =
-        rendererSourcePath("src/detail/PostProcessPass.cpp");
-    const std::string src = readEntireFile(path);
-    CHECK(!src.empty());
-    if (src.empty()) {
-        return;
-    }
-
-    const std::size_t markerPos = src.find("FBO create failed");
-    CHECK(markerPos != std::string::npos);
-    if (markerPos == std::string::npos) {
-        return;
-    }
-    // Look in the surrounding 1500-char window for a
-    // rateLimitedEarlyReturn call.
-    const std::size_t windowBegin =
-        (markerPos > 1500u) ? markerPos - 1500u : 0u;
-    const std::size_t windowEnd =
-        std::min(markerPos + 1500u, src.size());
-    const std::string window =
-        src.substr(windowBegin, windowEnd - windowBegin);
-    CHECK(window.find("rateLimitedEarlyReturn(")
-          != std::string::npos);
-    CHECK(window.find("std::fprintf") == std::string::npos);
+TEST_CASE(post_process_has_no_private_render_target_lifecycle) {
+    const std::string header = readEntireFile(
+        rendererSourcePath("src/detail/PostProcessPass.h"));
+    const std::string source = readEntireFile(
+        rendererSourcePath("src/detail/PostProcessPass.cpp"));
+    CHECK(!header.empty());
+    CHECK(!source.empty());
+    CHECK(header.find("ensureFbo(") == std::string::npos);
+    CHECK(source.find("ensureFbo(") == std::string::npos);
+    CHECK(source.find("createFrameBuffer(") == std::string::npos);
+    CHECK(header.find("kPostProcessColorFormat") == std::string::npos);
 }
 
 TEST_SUITE_END
@@ -270,29 +246,30 @@ TEST_CASE(debug_overlay_source_uses_cached_pointer_in_on_end_frame) {
 TEST_SUITE_END
 
 // ─────────────────────────────────────────────────────────────────────
-// T5 — L1+L3: kPostProcessCacheKey bumped + kPostProcessColorFormat
+// T5 — current cache key + resource teardown ordering
 // ─────────────────────────────────────────────────────────────────────
 
 TEST_SUITE(AuditP5_T5_CacheKeyAndFormat)
 
-TEST_CASE(post_process_cache_key_v10_haze_source_ssao_failclose_bloom) {
-    // L1 fix: bumped v7 → v8_audit_p5 (kept the trailing
-    // ssao_blur5_fs tag so Test_SSAO_A3's substring check
-    // still pins the SSAO composite marker). Pin the new key
-    // so a future refactor that drops the bump (re-using a
-    // stale cache key across the rate-limited-logging
-    // refactor) is caught at test time.
+TEST_CASE(post_process_cache_key_tracks_sanitized_parameter_abi) {
+    // Pin the runtime key so shader ABI changes cannot reuse stale binaries.
     CHECK(std::string_view(kPostProcessCacheKeyCStr)
-          == "postprocess_tonemap_aces_v11_haze_source_bloom_fs");
+          == "postprocess_tonemap_aces_v12_sanitized_params_fs");
 }
 
-TEST_CASE(post_process_color_format_is_rgba8) {
-    // L3 fix: hoisted bgfx::TextureFormat::RGBA8 literal
-    // into kPostProcessColorFormat. Pin the enum value so a
-    // future sRGB post-process pass flip has to update the
-    // constant (and the test) together.
-    CHECK(kPostProcessColorFormat
-          == bgfx::TextureFormat::RGBA8);
+TEST_CASE(post_process_renderer_owns_teardown_before_pipeline_clear) {
+    const std::string source = readEntireFile(
+        rendererSourcePath("src/AYRenderer.cpp"));
+    CHECK(!source.empty());
+    const std::size_t passLookup = source.find(
+        "pipeline.findPass(\"PostProcess\")");
+    const std::size_t destroyCall = source.find(
+        "->destroyResources(adapter)", passLookup);
+    const std::size_t pipelineClear = source.find("pipeline.clear()", passLookup);
+    CHECK(passLookup != std::string::npos);
+    CHECK(destroyCall != std::string::npos);
+    CHECK(pipelineClear != std::string::npos);
+    CHECK(destroyCall < pipelineClear);
 }
 
 TEST_SUITE_END

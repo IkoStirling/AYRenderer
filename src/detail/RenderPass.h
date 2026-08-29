@@ -91,6 +91,54 @@ inline void trySetUniformVec4(shader::ShaderResource& shader, const char* name, 
     shader.setUniform(binding, values, sizeof(float) * 4);
 }
 
+// Fullscreen passes cache one immutable VB/IB pair. Creation must be
+// transactional: if either allocation fails, retaining or overwriting the
+// other handle leaks a GPU resource on every retry. Clear any partial cached
+// pair first, build into locals, and publish only after both allocations
+// succeed.
+inline bool ensureFullscreenTriangleBuffers(
+    BGFXAdapter& adapter,
+    bgfx::VertexBufferHandle& vertexBuffer,
+    bgfx::IndexBufferHandle& indexBuffer,
+    const void* vertexData,
+    uint32_t vertexDataSize,
+    const bgfx::VertexLayout& layout,
+    const void* indexData,
+    uint32_t indexDataSize)
+{
+    if (BGFXAdapter::isValid(vertexBuffer)
+        && BGFXAdapter::isValid(indexBuffer)) {
+        return true;
+    }
+
+    if (BGFXAdapter::isValid(vertexBuffer)) {
+        adapter.destroy(vertexBuffer);
+        vertexBuffer = BGFX_INVALID_HANDLE;
+    }
+    if (BGFXAdapter::isValid(indexBuffer)) {
+        adapter.destroy(indexBuffer);
+        indexBuffer = BGFX_INVALID_HANDLE;
+    }
+
+    const bgfx::VertexBufferHandle newVertexBuffer =
+        adapter.createVertexBuffer(vertexData, vertexDataSize, layout,
+                                   BGFX_BUFFER_NONE);
+    if (!BGFXAdapter::isValid(newVertexBuffer)) {
+        return false;
+    }
+
+    const bgfx::IndexBufferHandle newIndexBuffer =
+        adapter.createIndexBuffer(indexData, indexDataSize, BGFX_BUFFER_NONE);
+    if (!BGFXAdapter::isValid(newIndexBuffer)) {
+        adapter.destroy(newVertexBuffer);
+        return false;
+    }
+
+    vertexBuffer = newVertexBuffer;
+    indexBuffer = newIndexBuffer;
+    return true;
+}
+
 inline void tryBindWhiteTexture(shader::ShaderResource& shader,
                                 BGFXAdapter& adapter,
                                 const char* name,

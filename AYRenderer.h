@@ -22,6 +22,7 @@ class UIRenderBackend;
 
 namespace detail {
 class BGFXAdapter;
+class RenderTargetPool;
 }
 
 // High-level renderer: frame loop, resource handles, draw submission.
@@ -424,6 +425,8 @@ private:
     friend class UIRenderBackend;
     detail::BGFXAdapter* bgfxAdapter() noexcept;
     const detail::BGFXAdapter* bgfxAdapter() const noexcept;
+    detail::RenderTargetPool* renderTargetPool() noexcept;
+    const detail::RenderTargetPool* renderTargetPool() const noexcept;
     ayt::shader::ShaderResourcePool* shaderPool() noexcept;
     const ayt::shader::ShaderResourcePool* shaderPool() const noexcept;
 

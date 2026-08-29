@@ -536,6 +536,10 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
     if (bgfx::isValid(fb)) {
         return fb;
     }
+    // Ownership transfers only when createFrameBuffer succeeds. On failure
+    // the texture is still ours; leaving it alive makes every lazy retry leak
+    // another render target.
+    bgfx::destroy(color);
     return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
 }
 
