@@ -43,10 +43,12 @@ struct RenderTargetPoolStats {
     uint32_t reuses = 0;
     uint32_t releases = 0;
     uint32_t evictions = 0;
+    uint32_t budgetMisses = 0;
     uint32_t liveLeases = 0;
     uint32_t idleTargets = 0;
     size_t allocatedBytes = 0;
     size_t budgetBytes = 0;
+    size_t peakAllocatedBytes = 0;
 };
 
 // Renderer-wide pool for transient and retained framebuffer targets.
@@ -65,7 +67,11 @@ public:
 
     void beginFrame();
 
-    PooledRenderTargetHandle acquire(const RenderTargetKey& key);
+    // `allowBudgetOverflow=true` preserves the FrameGraph's historical soft
+    // budget. Retained UI uses false so pressure can degrade to immediate
+    // rendering instead of growing GPU memory without bound.
+    PooledRenderTargetHandle acquire(const RenderTargetKey& key,
+                                     bool allowBudgetOverflow = true);
     void release(PooledRenderTargetHandle handle);
 
     bool isValid(PooledRenderTargetHandle handle) const noexcept;
@@ -81,6 +87,7 @@ public:
     uint32_t deferredFrames() const noexcept { return _deferredFrames; }
 
     RenderTargetPoolStats stats() const noexcept;
+    void resetStats() noexcept;
 
     // Device reset invalidates every lease immediately. shutdown additionally
     // drops the slot table; both are idempotent.
@@ -101,6 +108,7 @@ private:
     const Entry* find(PooledRenderTargetHandle handle) const noexcept;
     Entry* find(PooledRenderTargetHandle handle) noexcept;
     void trimToBudget();
+    void trimToBytes(size_t bytes);
     void destroyEntry(Entry& entry);
     static size_t estimateBytes(const RenderTargetKey& key) noexcept;
 
@@ -109,11 +117,13 @@ private:
     uint64_t _frameIndex = 0;
     size_t _budgetBytes = 256u * 1024u * 1024u;
     size_t _allocatedBytes = 0;
+    size_t _peakAllocatedBytes = 0;
     uint32_t _deferredFrames = 2;
     uint32_t _allocations = 0;
     uint32_t _reuses = 0;
     uint32_t _releases = 0;
     uint32_t _evictions = 0;
+    uint32_t _budgetMisses = 0;
 };
 
 } // namespace ayt::render::detail

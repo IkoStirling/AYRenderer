@@ -101,6 +101,9 @@ public:
                          const ayt::math::FRectangle& damage =
                              ayt::math::FRectangle()) override;
     bool isLayerDirty(LayerHandle layer) const override;
+    LayerCacheStats getLayerCacheStats() const override;
+    void setLayerCacheBudgetBytes(size_t bytes) override;
+    void resetLayerCacheStats() override;
 
     void setFramebufferSize(uint16_t width, uint16_t height);
 
@@ -275,6 +278,7 @@ private:
     bool resolveTextureHandle(void* handle, uint16_t& textureIdx,
                               uint16_t& width, uint16_t& height) const;
     bool ensureRenderTarget(int targetId);
+    bool releaseLruLayerBacking(int excludeTargetId);
     ayt::math::FRectangle activeClipBounds() const;
     bool clipRect(ayt::math::FRectangle& inout) const;
 

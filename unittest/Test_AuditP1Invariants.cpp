@@ -153,6 +153,7 @@ TEST_CASE(bgf_x_adapter_caps_homogeneous_depth_is_const) {
     // Noop the function should return a stable bool and not crash.
     BGFXAdapter adapter;
     (void)adapter.capsHomogeneousDepth();
+    (void)adapter.capsOriginBottomLeft();
     (void)adapter.capsTextureBlit();
     (void)adapter.capsTextureReadBack();
     CHECK(true);

@@ -511,11 +511,17 @@ shutdown → adapter shutdown；resize/MSAA 切换顺序固定为：FrameGraph �
 
 池的 key 为 `(width, height, colorFormat, withDepth, sampleCount, pointSampled)`，只做精确匹配。lease 由 slot 与
 generation 组成，release 后旧 handle 立即失效；物理目标默认 quarantine 两帧，避免 CPU 已结束但
-bgfx 队列仍引用 attachment。256 MiB 预算只淘汰已空闲且越过 quarantine 的 LRU 目标，因此是
-best-effort：leased/quarantined 资源可暂时超预算。当前明确拒绝 sampleCount != 1。
+bgfx 队列仍引用 attachment。256 MiB 预算只淘汰已空闲且越过 quarantine 的 LRU 目标。`acquire(key,
+true)` 是 FrameGraph 的 soft/best-effort 路径，允许既有 leased/quarantined 资源令预算暂时超限；
+`acquire(key, false)` 是 UI 的 strict 路径，先把 idle LRU 清到 `budget-request`，仍放不下就拒绝分配。
+当前明确拒绝 sampleCount != 1。
 
 `UIRenderBackend` 实现完整 RenderTarget create/resize/release/bind/texture/blit 和 Layer
 create/update/release/paint/composite/invalidate。Layer 使用 RGBA8 + depth/stencil backing target；
+createLayer 只创建稳定的逻辑 handle，backing 在首次 paint 时按 strict budget 懒申请。申请失败时，
+backend 选择最久未 composite、且当前未 paint 的 Layer 撤销 backing；受害 Layer 保持 handle 并标脏，
+本帧调用方 immediate fallback，后续帧跨过 quarantine 后可复用 target。由此压力降级不制造第二套
+Widget 绘制路线，也不会把 dangling target token 暴露给 AYUI。
 逻辑 bounds 的 min/max 分别按 DPI 向外 `floor/ceil` 到物理像素，二者之差决定物理尺寸；完整
 backing composite 后裁回 logical bounds。这个约束使小数 origin/extent 的离屏像素中心仍与主
 framebuffer 对齐，不能退回只对 logical width/height 做 `ceil`。offscreen paint 使用 view 26–249
@@ -526,7 +532,10 @@ paint 后 flush 并恢复。由此 flat、SDF、text、nine-patch、vector fill/
 继续走同一条生产图元路径。
 
 UI RenderTarget 申请 point-sampled backing，保证同物理尺寸 composite 保持 texel identity；FrameGraph
-目标默认仍为 linear，并由 pool key 隔离。Layer paint 对 straight-alpha 输出使用 RGB
+目标默认仍为 linear，并由 pool key 隔离。RenderTarget composite 的 V 方向读取
+`bgfx::Caps::originBottomLeft`，OpenGL 不再把 Layer 倒置；point-sampled glyph bitmap 的最终 quad
+吸附物理像素网格，pen/kerning advance 仍保持小数精度，保证默认 framebuffer 与 FBO 在 1.0×/1.5×
+下使用一致 coverage。Layer paint 对 straight-alpha 输出使用 RGB
 `SRC_ALPHA/INV_SRC_ALPHA`、alpha `ONE/INV_SRC_ALPHA`，使目标保存 premultiplied RGB 和正确 coverage；
 composite 再使用 premultiplied-over，不能对 alpha 做第二次相乘。局部 damage replay 必须保持原图元
 参数空间：纹理按 clip fraction 重映射 UV，四角渐变按原 bounds 双线性重映射颜色。
@@ -535,17 +544,24 @@ Screen 保留各自 RGB 方程，但 alpha 独立使用 `ONE/INV_SRC_ALPHA` cove
 Multiply/Screen convenience state 会把 RGB factor 复用于 alpha，破坏不透明隔离层，属于错误实现。
 
 AYUI 的 root Production Layer 是 opt-in。首次、无范围 dirty、resize/DPI/reset 帧完整绘制主树；
-显式 dirty rect 帧只 replay damage clip。Transparent/Color Layer 先用无混合覆盖写清除 damage，
+显式 dirty rect 由 sidecar 保留最多 8 个独立 damage region 并逐区 replay；重叠/相邻区域合并，
+第 9 个区域退化为 union，累计面积达到 layer 的 70% 时 full repaint。Widget 的 Always/Auto policy
+可对复杂子树使用同一 Layer 能力，Auto 由稳定帧、面积、display-command 数和连续 invalidation
+决定晋升/降级。Transparent/Color Layer 先用无混合覆盖写清除 damage，
 保留区域外像素；Preserve Layer 跳过清除。clean 帧只 composite 一次；overlay 与 drag visual 随后
 即时绘制。capability、target 或 paint 失败时 AYUI 同帧回退原始路径。当前每帧最多 224 次
 offscreen paint，第 225 次确定失败，下一帧重新从 view 26 分配。该上限只描述 pass 数量，不承诺
-UI 独占 224 个共享 framebuffer。池与 UI backend 均限定 renderer thread。Noop 测试锁定生命周期和
-submit 形态；显式 D3D11 运行 36 次独立 capture：原 1.0×/1.5× 复杂控件路径，以及透明 Layer、
+UI 独占 224 个共享 framebuffer。`LayerCacheStats` 汇总 layer paint/composite/cache hit/physical
+repaint area、allocation failure/degradation，并拼接 pool allocation/reuse/eviction、live/idle、
+allocated/budget bytes；reset stats 不销毁资源。池与 UI backend 均限定 renderer thread。Noop 测试
+锁定生命周期和 submit 形态；D3D11/D3D12/Vulkan/OpenGL 各运行 36 次独立 capture：原 1.0×/1.5×
+复杂控件路径，以及透明 Layer、
 group/nested opacity、Additive/Multiply/Screen 隔离组、resize、动态 DPI、device/MSAA reset lease
 恢复和 Transparent/Color/Preserve 局部 clear。clean reuse、isolated blend、Preserve 字节精确；
 通常最多差 1 LSB，RGBA8 group opacity 因离屏与最终合成两次量化最多差 2 LSB。MSAA 后 Layer 仍是
 1× sample，因此生命周期门禁比较 recovered Layer 与 reset 后 fresh Layer，不拿 multisampled immediate
-边缘作为错误参考。D3D12、OpenGL、Vulkan 同矩阵仍需补齐。
+边缘作为错误参考。`RunLayerVisualRegressionMatrix.ps1` 默认串行运行 D3D12/Vulkan/OpenGL 并汇总
+失败，单后端脚本仍可用于 D3D11 或诊断。
 
 ---
 
@@ -819,14 +835,14 @@ include/AYRenderer/
 - `Test_ShadowPass`(cut-1 + 未来 cut-2)
 - `Test_UIPass_AI1`(composite + UI view 255 锁)
 - `Test_RenderTargetPool`(generation、quarantine、精确键复用、预算淘汰、reset)
-- `Test_UILayerRenderTarget`(复杂图元/path clip、局部 damage、clean 单 composite、224 次离屏 pass
-  溢出/跨帧恢复、resize/MSAA reset 重绘)
+- `Test_UILayerRenderTarget`(复杂图元/path clip、多区域 damage、clean 单 composite、strict budget/LRU
+  降级、224 次离屏 pass 溢出/跨帧恢复、resize/MSAA reset 重绘)
 
 跑法:同一 commit **连续 3 次**全量 `AYRenderer_Test`,记录 PASS/FAIL;**3 次不全绿**则按 `docs/execution-plan.md` §5 处理,不许合并带赌的 ABI 变更。
 
 2026-08-29 Production UI Layer/RenderTargetPool 阶段的 Windows Debug Noop 全量基线为
-`3284 / 3284`。该结果验证 API、生命周期、view/submit 契约；D3D11 图像矩阵已补充像素正确性，
-但仍不替代其余后端和 RenderDoc capture。
+`3334 / 3334`。该结果验证 API、生命周期、view/submit、strict budget 和压力降级契约；四后端
+36-capture 图像矩阵补充像素正确性，但仍不替代 RenderDoc capture。
 
 ### 14.4 MSVC 增量对象与内部 ABI
 
@@ -866,14 +882,18 @@ include/AYRenderer/
 
 - Renderer 新增唯一的 renderer-wide RenderTargetPool；FrameGraph 和 UIRenderBackend 共用，按精确
   descriptor 复用 generation lease，并提供两帧 quarantine、LRU best-effort 预算、reset/shutdown。
+- Pool 新增 strict acquire/预算 miss/peak bytes；FrameGraph 保持 soft acquire，UI target 不能新增
+  超预算 storage。UI Layer backing 改为懒申请，压力下撤销 LRU backing、保持逻辑 handle 并同帧降级。
 - FrameGraph 的 owned target 从直接创建/销毁迁移为 pool lease，standalone 测试仍可使用内部 owned pool。
 - UIRenderBackend 完成 RenderTarget 和 Layer 全生命周期、纹理/blit、透明/color/preserve clear、
   offscreen view 26–249、主 view 255、target transition batch barrier 与状态恢复。
 - AYUI root 主树可 opt-in retained pixel layer；clean frame 单 composite，overlay/drag visual 即时叠加，
   显式 dirty rect 局部清除/replay，无范围 dirty、resize/device reset 全量重绘，能力或 paint 失败同帧回退。
+- AYUI damage 扩展为最多 8 region 与 70% full 阈值，并支持 Always/Auto subtree Layer；backend 暴露
+  repaint/cache/pool/pressure 统计和可调 UI budget。
 - Noop 回归覆盖复杂 gradients/SDF/nine-patch/vector fill/stroke/nested path clip、pool 回收和
-  partial damage、224 次离屏 pass 溢出恢复、resize/MSAA reset；当前 Windows Debug 全量
-  `3284 / 3284`。
+  partial damage、strict budget/LRU 压力、224 次离屏 pass 溢出恢复、resize/MSAA reset；当前 Windows
+  Debug 全量 `3334 / 3334`。
 - UI 目标的 point/linear sampling 纳入 pool 精确键；保留四参 framebuffer 入口并增加五参重载，
   避免增量对象 ABI 断裂。Layer 改用 coverage-correct alpha 与 premultiplied composite，gradient clip
   按原 bounds 重映射颜色。
@@ -882,7 +902,8 @@ include/AYRenderer/
 - D3D11 图像门禁扩展为 36 次 capture，新增透明 Layer、group/nested opacity、三种高级 blend、
   resize/动态 DPI、device/MSAA reset lease recovery 与 Transparent/Color/Preserve partial clear。
   该矩阵定位并修复小数 Layer origin 像素中心错位、高级 blend alpha 方程错误和半透明 Color clear
-  未 premultiply 三项真实 GPU 缺陷；D3D12/OpenGL/Vulkan 同矩阵仍待完成。
+  未 premultiply 三项真实 GPU 缺陷。D3D12/Vulkan/OpenGL 随后通过同矩阵；跨后端验证另外定位并
+  修复 D3D12 shaderc profile、capture DPI/真实 HWND resize、OpenGL RT V 翻转及 glyph 半像素覆盖。
 
 ### 2026-08-28 — GBuffer v3 冻结，进入 LightingPass 审核
 

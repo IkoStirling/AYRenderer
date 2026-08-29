@@ -25,7 +25,8 @@ void RenderTargetPool::beginFrame()
     trimToBudget();
 }
 
-PooledRenderTargetHandle RenderTargetPool::acquire(const RenderTargetKey& key)
+PooledRenderTargetHandle RenderTargetPool::acquire(const RenderTargetKey& key,
+                                                   bool allowBudgetOverflow)
 {
     if (_adapter == nullptr || !_adapter->isInitialized()
         || key.width == 0 || key.height == 0 || key.sampleCount != 1) {
@@ -44,6 +45,19 @@ PooledRenderTargetHandle RenderTargetPool::acquire(const RenderTargetKey& key)
         if (entry.generation == 0) ++entry.generation;
         ++_reuses;
         return {slot, entry.generation};
+    }
+
+    const size_t requestedBytes = estimateBytes(key);
+    if (!allowBudgetOverflow) {
+        if (requestedBytes > _budgetBytes) {
+            ++_budgetMisses;
+            return {};
+        }
+        trimToBytes(_budgetBytes - requestedBytes);
+        if (_allocatedBytes > _budgetBytes - requestedBytes) {
+            ++_budgetMisses;
+            return {};
+        }
     }
 
     bgfx::FrameBufferHandle framebuffer = _adapter->createFrameBuffer(
@@ -70,10 +84,11 @@ PooledRenderTargetHandle RenderTargetPool::acquire(const RenderTargetKey& key)
     entry.leased = true;
     entry.lastUsedFrame = _frameIndex;
     entry.reusableAfterFrame = _frameIndex;
-    entry.estimatedBytes = estimateBytes(key);
+    entry.estimatedBytes = requestedBytes;
     ++entry.generation;
     if (entry.generation == 0) ++entry.generation;
     _allocatedBytes += entry.estimatedBytes;
+    _peakAllocatedBytes = std::max(_peakAllocatedBytes, _allocatedBytes);
     ++_allocations;
     return {slot, entry.generation};
 }
@@ -131,14 +146,26 @@ RenderTargetPoolStats RenderTargetPool::stats() const noexcept
     out.reuses = _reuses;
     out.releases = _releases;
     out.evictions = _evictions;
+    out.budgetMisses = _budgetMisses;
     out.allocatedBytes = _allocatedBytes;
     out.budgetBytes = _budgetBytes;
+    out.peakAllocatedBytes = _peakAllocatedBytes;
     for (const Entry& entry : _entries) {
         if (!BGFXAdapter::isValid(entry.framebuffer)) continue;
         if (entry.leased) ++out.liveLeases;
         else ++out.idleTargets;
     }
     return out;
+}
+
+void RenderTargetPool::resetStats() noexcept
+{
+    _allocations = 0;
+    _reuses = 0;
+    _releases = 0;
+    _evictions = 0;
+    _budgetMisses = 0;
+    _peakAllocatedBytes = _allocatedBytes;
 }
 
 void RenderTargetPool::reset()
@@ -179,7 +206,12 @@ RenderTargetPool::Entry* RenderTargetPool::find(PooledRenderTargetHandle handle)
 
 void RenderTargetPool::trimToBudget()
 {
-    while (_allocatedBytes > _budgetBytes) {
+    trimToBytes(_budgetBytes);
+}
+
+void RenderTargetPool::trimToBytes(size_t bytes)
+{
+    while (_allocatedBytes > bytes) {
         Entry* victim = nullptr;
         for (Entry& entry : _entries) {
             if (entry.leased || entry.reusableAfterFrame > _frameIndex

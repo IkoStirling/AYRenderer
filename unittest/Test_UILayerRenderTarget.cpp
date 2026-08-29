@@ -111,6 +111,15 @@ TEST_CASE(UIRenderBackend_LayerHandlesComplexPaintReuseAndDeviceReset)
     ui.endFrame();
     CHECK(ui.getDrawCallCount() == 3);
     CHECK_FALSE(ui.isLayerDirty(layer));
+    const auto earlyStats = ui.getLayerCacheStats();
+    CHECK(earlyStats.layerCreates == 1u);
+    CHECK(earlyStats.fullPaints == 1u);
+    CHECK(earlyStats.partialPaints == 1u);
+    CHECK(earlyStats.composites == 3u);
+    CHECK(earlyStats.cacheHits == 1u);
+    CHECK(earlyStats.repaintPixelArea == 49284u);
+    CHECK(earlyStats.liveLayers == 1u);
+    CHECK(earlyStats.liveTargetLeases == 1u);
 
     // Renderer resize resets the shared target pool. The public layer
     // handle remains stable but must become dirty before it can composite.
@@ -162,6 +171,87 @@ TEST_CASE(UIRenderBackend_LayerHandlesComplexPaintReuseAndDeviceReset)
     ui.releaseUiTexture(texture);
     ui.releaseLayer(layer);
     CHECK_TRUE(ui.isLayerDirty(layer));
+    ui.shutdown();
+    renderer.shutdown();
+}
+
+TEST_CASE(UIRenderBackend_StrictLayerBudgetDegradesLruAndKeepsLogicalHandles)
+{
+    Renderer renderer;
+    InitDesc init;
+    init.backend = Backend::Noop;
+    init.width = 320;
+    init.height = 180;
+    init.vsync = false;
+    init.msaa = 0;
+    CHECK_TRUE(renderer.initialize(init));
+    if (!renderer.isInitialized()) return;
+
+    UIRenderBackend ui;
+    CHECK_TRUE(ui.initialize(renderer));
+    if (!ui.isInitialized()) {
+        renderer.shutdown();
+        return;
+    }
+    ui.setFramebufferSize(320, 180);
+    constexpr size_t kOneLayerBudget = 64u * 64u * 8u;
+    ui.setLayerCacheBudgetBytes(kOneLayerBudget);
+
+    IRenderBackend::LayerDesc desc;
+    desc.logicalBounds = FRectangle(0.0f, 0.0f, 64.0f, 64.0f);
+    desc.dpiScale = 1.0f;
+    desc.clearMode = IRenderBackend::LayerClearMode::Transparent;
+    const auto first = ui.createLayer(desc);
+    const auto second = ui.createLayer(desc);
+    CHECK_TRUE(first.isValid());
+    CHECK_TRUE(second.isValid());
+
+    IRenderBackend::LayerPaint paint;
+    paint.damage = desc.logicalBounds;
+    paint.fullRedraw = true;
+    renderer.beginFrame();
+    ui.beginFrame();
+    CHECK_TRUE(ui.beginLayerPaint(first, paint));
+    ui.drawRect(desc.logicalBounds, FVector4(1, 0, 0, 1));
+    ui.endLayerPaint(first);
+    ui.compositeLayer(first, desc.logicalBounds);
+    CHECK_FALSE(ui.beginLayerPaint(second, paint));
+    ui.endFrame();
+    renderer.endFrame();
+
+    auto stats = ui.getLayerCacheStats();
+    CHECK(stats.liveLayers == 2u);
+    CHECK(stats.allocatedTargetBytes == kOneLayerBudget);
+    CHECK(stats.targetBudgetBytes == kOneLayerBudget);
+    CHECK(stats.degradedLayers == 1u);
+    CHECK(stats.allocationFailures == 1u);
+    CHECK_TRUE(ui.isLayerDirty(first));
+    CHECK_TRUE(ui.isLayerDirty(second));
+
+    // The evicted lease is quarantined for two renderer frames. Once safe,
+    // the pool reclaims it and the second logical LayerHandle paints without
+    // being destroyed/recreated by the caller.
+    renderer.beginFrame();
+    ui.beginFrame();
+    ui.endFrame();
+    renderer.endFrame();
+
+    renderer.beginFrame();
+    ui.beginFrame();
+    CHECK_TRUE(ui.beginLayerPaint(second, paint));
+    ui.drawRect(desc.logicalBounds, FVector4(0, 1, 0, 1));
+    ui.endLayerPaint(second);
+    ui.compositeLayer(second, desc.logicalBounds);
+    ui.endFrame();
+    renderer.endFrame();
+    CHECK_FALSE(ui.isLayerDirty(second));
+    stats = ui.getLayerCacheStats();
+    CHECK(stats.targetAllocations == 1u);
+    CHECK(stats.targetReuses >= 1u);
+    CHECK(stats.liveTargetLeases == 1u);
+
+    ui.releaseLayer(first);
+    ui.releaseLayer(second);
     ui.shutdown();
     renderer.shutdown();
 }

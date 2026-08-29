@@ -847,6 +847,8 @@ struct LayerRef {
     ayt::math::FRectangle damage{};
     bool dirty = true;
     bool painting = false;
+    uint64_t lastCompositeFrame = 0;
+    uint64_t lastPaintFrame = 0;
 };
 
 // Pre-P3 gray-block fallback for unknown / released handles.
@@ -899,6 +901,8 @@ struct UIRenderBackend::FrameState {
     uint16_t activeHeight = 0;
     uint8_t activeViewId = kViewId;
     uint16_t nextOffscreenViewId = kFirstLayerViewId;
+    uint64_t frameIndex = 0;
+    ayt::ui::IRenderBackend::LayerCacheStats layerStats{};
     float originX = 0.0f;
     float originY = 0.0f;
     // A target transition is a batch barrier. The caller-visible render
@@ -1094,8 +1098,11 @@ UIRenderBackend::RenderTargetHandle UIRenderBackend::createRenderTarget(
     const detail::RenderTargetKey key{
         static_cast<uint16_t>(desc.width), static_cast<uint16_t>(desc.height),
         bgfx::TextureFormat::RGBA8, true, 1, true};
-    const detail::PooledRenderTargetHandle pooled = _targetPool->acquire(key);
-    if (!pooled.isValid()) return {-1};
+    const detail::PooledRenderTargetHandle pooled = _targetPool->acquire(key, false);
+    if (!pooled.isValid()) {
+        ++_frame->layerStats.allocationFailures;
+        return {-1};
+    }
 
     const RenderTargetHandle handle{_frame->nextTargetId++};
     RenderTargetRef ref;
@@ -1125,8 +1132,48 @@ bool UIRenderBackend::ensureRenderTarget(int targetId)
         _targetPool->release(ref.pooled);
         ref.pooled = {};
     }
-    ref.pooled = _targetPool->acquire(key);
-    return ref.pooled.isValid();
+    ref.pooled = _targetPool->acquire(key, false);
+    if (ref.pooled.isValid()) return true;
+
+    // Long-lived retained layers are the only leases the UI backend can
+    // safely sacrifice under pressure. Revoke the least recently composed
+    // backing (the public LayerHandle stays stable), then let quarantine and
+    // the pool's idle LRU reclaim it on subsequent frames. This frame falls
+    // back to immediate rendering if the strict allocation still cannot fit.
+    if (releaseLruLayerBacking(targetId)) {
+        ref.pooled = _targetPool->acquire(key, false);
+        if (ref.pooled.isValid()) return true;
+    }
+    ++_frame->layerStats.allocationFailures;
+    return false;
+}
+
+bool UIRenderBackend::releaseLruLayerBacking(int excludeTargetId)
+{
+    if (_frame == nullptr || _targetPool == nullptr) return false;
+    LayerRef* victim = nullptr;
+    RenderTargetRef* victimTarget = nullptr;
+    for (auto& [layerId, layer] : _frame->layers) {
+        AYUNREFERENCED_PARAM(layerId);
+        if (layer.painting || layer.target.id == excludeTargetId) continue;
+        auto target = _frame->renderTargets.find(layer.target.id);
+        if (target == _frame->renderTargets.end()
+            || !_targetPool->isValid(target->second.pooled)) {
+            continue;
+        }
+        if (victim == nullptr
+            || layer.lastCompositeFrame < victim->lastCompositeFrame) {
+            victim = &layer;
+            victimTarget = &target->second;
+        }
+    }
+    if (victim == nullptr || victimTarget == nullptr) return false;
+    _targetPool->release(victimTarget->pooled);
+    victimTarget->pooled = {};
+    victim->dirty = true;
+    victim->damage = {};
+    ++_frame->layerStats.degradedLayers;
+    return true;
 }
 
 bool UIRenderBackend::resizeRenderTarget(RenderTargetHandle target,
@@ -1151,7 +1198,7 @@ bool UIRenderBackend::resizeRenderTarget(RenderTargetHandle target,
     const detail::RenderTargetKey key{
         static_cast<uint16_t>(desc.width), static_cast<uint16_t>(desc.height),
         bgfx::TextureFormat::RGBA8, true, 1, true};
-    const detail::PooledRenderTargetHandle replacement = _targetPool->acquire(key);
+    const detail::PooledRenderTargetHandle replacement = _targetPool->acquire(key, false);
     if (!replacement.isValid()) return false;
     _targetPool->release(ref.pooled);
     ref.pooled = replacement;
@@ -1233,8 +1280,11 @@ void UIRenderBackend::blitRenderTarget(RenderTargetHandle source,
     if (it == _frame->renderTargets.end()) return;
     const bgfx::TextureHandle texture = _targetPool->texture(it->second.pooled);
     if (!detail::BGFXAdapter::isValid(texture)) return;
+    const bool flipV = _adapter != nullptr && _adapter->capsOriginBottomLeft();
     emitClippedTexturedQuad(destBounds, texture.idx,
-        ayt::math::FRectangle(0, 0, 1, 1), ayt::math::FVector4(1, 1, 1, 1));
+        ayt::math::FRectangle(0, flipV ? 1.0f : 0.0f,
+                             1, flipV ? 0.0f : 1.0f),
+        ayt::math::FVector4(1, 1, 1, 1));
 }
 
 UIRenderBackend::LayerHandle UIRenderBackend::createLayer(const LayerDesc& desc)
@@ -1255,8 +1305,15 @@ UIRenderBackend::LayerHandle UIRenderBackend::createLayer(const LayerDesc& desc)
     targetDesc.dpiScale = desc.dpiScale;
     targetDesc.hasAlpha = desc.hasAlpha;
     targetDesc.preserveContents = false;
-    const RenderTargetHandle target = createRenderTarget(targetDesc);
-    if (!target.isValid()) return {-1};
+    // Layer handles are logical and survive budget pressure. Allocate the
+    // backing lazily in beginLayerPaint so failure can use the immediate
+    // fallback without destroying/recreating public state every frame.
+    const RenderTargetHandle target{_frame->nextTargetId++};
+    RenderTargetRef targetRef;
+    targetRef.desc = targetDesc;
+    targetRef.textureToken = reinterpret_cast<void*>(_frame->nextHandle++);
+    _frame->targetTextures.emplace(targetRef.textureToken, target.id);
+    _frame->renderTargets.emplace(target.id, targetRef);
 
     const LayerHandle layer{_frame->nextLayerId++};
     LayerRef ref;
@@ -1264,6 +1321,7 @@ UIRenderBackend::LayerHandle UIRenderBackend::createLayer(const LayerDesc& desc)
     ref.backingBounds = backingBounds;
     ref.target = target;
     _frame->layers.emplace(layer.id, ref);
+    ++_frame->layerStats.layerCreates;
     return layer;
 }
 
@@ -1276,6 +1334,7 @@ void UIRenderBackend::releaseLayer(LayerHandle layer)
     const RenderTargetHandle target = it->second.target;
     _frame->layers.erase(it);
     releaseRenderTarget(target);
+    ++_frame->layerStats.layerReleases;
 }
 
 bool UIRenderBackend::updateLayer(LayerHandle layer, const LayerDesc& desc)
@@ -1301,7 +1360,17 @@ bool UIRenderBackend::updateLayer(LayerHandle layer, const LayerDesc& desc)
     // Layer resize always schedules a full repaint; retaining old pixels is
     // unnecessary and would make resize support backend-dependent.
     targetDesc.preserveContents = false;
-    if (!resizeRenderTarget(it->second.target, targetDesc)) return false;
+    auto target = _frame->renderTargets.find(it->second.target.id);
+    if (target == _frame->renderTargets.end()) return false;
+    const bool shapeChanged = target->second.desc.width != targetDesc.width
+        || target->second.desc.height != targetDesc.height
+        || target->second.desc.hasAlpha != targetDesc.hasAlpha;
+    if (shapeChanged && _targetPool != nullptr
+        && target->second.pooled.isValid()) {
+        _targetPool->release(target->second.pooled);
+        target->second.pooled = {};
+    }
+    target->second.desc = targetDesc;
     it->second.desc = desc;
     it->second.backingBounds = backingBounds;
     it->second.dirty = true;
@@ -1342,6 +1411,16 @@ bool UIRenderBackend::beginLayerPaint(LayerHandle layer, const LayerPaint& paint
     frame.activeViewId = static_cast<uint8_t>(frame.nextOffscreenViewId++);
     frame.activeLayer = layer;
     ref.painting = true;
+    ref.lastPaintFrame = frame.frameIndex;
+    if (paint.fullRedraw) ++frame.layerStats.fullPaints;
+    else ++frame.layerStats.partialPaints;
+    const ayt::math::FRectangle paintBounds = paint.fullRedraw
+        ? ref.desc.logicalBounds : intersectRect(paint.damage, ref.desc.logicalBounds);
+    const double physicalArea = std::max(0.0, static_cast<double>(paintBounds.maxX - paintBounds.minX))
+        * std::max(0.0, static_cast<double>(paintBounds.maxY - paintBounds.minY))
+        * static_cast<double>(ref.desc.dpiScale)
+        * static_cast<double>(ref.desc.dpiScale);
+    frame.layerStats.repaintPixelArea += static_cast<uint64_t>(std::ceil(physicalArea));
 
     const bgfx::FrameBufferHandle framebuffer =
         _targetPool->framebuffer(targetIt->second.pooled);
@@ -1458,11 +1537,18 @@ void UIRenderBackend::compositeLayer(LayerHandle layer,
     // UVs for the full snapped texture; this keeps pixel centres aligned and
     // prevents Color clear from painting outside LayerDesc::logicalBounds.
     pushClip(destBounds);
+    const bool flipV = _adapter != nullptr && _adapter->capsOriginBottomLeft();
     emitClippedTexturedQuad(backingDest, texture.idx,
-        ayt::math::FRectangle(0, 0, 1, 1),
+        ayt::math::FRectangle(0, flipV ? 1.0f : 0.0f,
+                             1, flipV ? 0.0f : 1.0f),
         ayt::math::FVector4(alpha, alpha, alpha, alpha),
         premultipliedOverStateBits());
     popClip();
+    ++_frame->layerStats.composites;
+    if (it->second.lastPaintFrame != _frame->frameIndex) {
+        ++_frame->layerStats.cacheHits;
+    }
+    it->second.lastCompositeFrame = _frame->frameIndex;
 }
 
 void UIRenderBackend::invalidateLayer(LayerHandle layer,
@@ -1500,6 +1586,36 @@ bool UIRenderBackend::isLayerDirty(LayerHandle layer) const
         _targetPool->texture(targetIt->second.pooled));
 }
 
+UIRenderBackend::LayerCacheStats UIRenderBackend::getLayerCacheStats() const
+{
+    LayerCacheStats out = _frame != nullptr ? _frame->layerStats : LayerCacheStats{};
+    if (_frame != nullptr) {
+        out.liveLayers = static_cast<uint32_t>(_frame->layers.size());
+    }
+    if (_targetPool != nullptr) {
+        const detail::RenderTargetPoolStats pool = _targetPool->stats();
+        out.targetAllocations = pool.allocations;
+        out.targetReuses = pool.reuses;
+        out.targetEvictions = pool.evictions;
+        out.liveTargetLeases = pool.liveLeases;
+        out.idleTargets = pool.idleTargets;
+        out.allocatedTargetBytes = pool.allocatedBytes;
+        out.targetBudgetBytes = pool.budgetBytes;
+    }
+    return out;
+}
+
+void UIRenderBackend::setLayerCacheBudgetBytes(size_t bytes)
+{
+    if (_targetPool != nullptr) _targetPool->setBudgetBytes(bytes);
+}
+
+void UIRenderBackend::resetLayerCacheStats()
+{
+    if (_frame != nullptr) _frame->layerStats = {};
+    if (_targetPool != nullptr) _targetPool->resetStats();
+}
+
 void UIRenderBackend::setBatchMode(BatchMode mode)
 {
     if (_frame == nullptr) {
@@ -1522,6 +1638,7 @@ void UIRenderBackend::beginFrame()
     }
 
     FrameState& frame = *_frame;
+    ++frame.frameIndex;
     if (frame.activeLayer.isValid()) {
         auto active = frame.layers.find(frame.activeLayer.id);
         if (active != frame.layers.end()) {
@@ -3514,11 +3631,18 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
             return;
         }
 
-        const float x0 = penX + g.xOff
-                       + static_cast<float>(g.glyph->metrics.bearingX) / scale;
+        const float unsnappedX0 = penX + g.xOff
+                                + static_cast<float>(g.glyph->metrics.bearingX) / scale;
         // HB y_offset is up-positive; screen Y grows downward.
-        const float y0 = penY - g.yOff
-                       - static_cast<float>(g.glyph->metrics.bearingY) / scale;
+        const float unsnappedY0 = penY - g.yOff
+                                - static_cast<float>(g.glyph->metrics.bearingY) / scale;
+        // Glyph bitmaps are point sampled.  Keep their quad edges on the
+        // physical pixel grid so a default framebuffer and an offscreen FBO
+        // cannot choose opposite coverage for the same half-pixel boundary.
+        // The pen and HarfBuzz advances remain fractional; only each bitmap's
+        // final placement is snapped, so kerning does not accumulate error.
+        const float x0 = std::round(unsnappedX0 * scale) / scale;
+        const float y0 = std::round(unsnappedY0 * scale) / scale;
         const float x1 = x0 + static_cast<float>(glyphW) / scale;
         const float y1 = y0 + static_cast<float>(glyphH) / scale;
 

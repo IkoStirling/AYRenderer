@@ -947,6 +947,15 @@ bool BGFXAdapter::capsHomogeneousDepth() const noexcept
     return caps != nullptr && caps->homogeneousDepth;
 }
 
+bool BGFXAdapter::capsOriginBottomLeft() const noexcept
+{
+    if (!_initialized) {
+        return false;
+    }
+    const bgfx::Caps* caps = bgfx::getCaps();
+    return caps != nullptr && caps->originBottomLeft;
+}
+
 bool BGFXAdapter::capsTextureBlit() const noexcept
 {
     if (!_initialized) {

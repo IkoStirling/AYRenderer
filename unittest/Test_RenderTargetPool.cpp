@@ -116,4 +116,76 @@ TEST_CASE(RenderTargetPool_RejectsUnsupportedDescriptorsWithoutAllocating)
     CHECK(pool.stats().allocatedBytes == 0u);
 }
 
+TEST_CASE(RenderTargetPool_StrictBudgetRejectsPressureUntilQuarantineExpires)
+{
+    BGFXAdapter adapter;
+    BGFXInitParams init;
+    init.backend = Backend::Noop;
+    init.width = 320;
+    init.height = 180;
+    init.vsync = false;
+    CHECK_TRUE(adapter.initialize(init));
+    if (!adapter.isInitialized()) return;
+
+    RenderTargetPool pool(adapter);
+    pool.setDeferredFrames(2);
+    constexpr size_t kTargetBytes = 64u * 64u * 4u;
+    pool.setBudgetBytes(kTargetBytes);
+
+    RenderTargetKey firstKey;
+    firstKey.width = 64;
+    firstKey.height = 64;
+    firstKey.withDepth = false;
+    RenderTargetKey secondKey = firstKey;
+    secondKey.width = 32;
+    secondKey.height = 128;
+
+    const auto first = pool.acquire(firstKey, false);
+    CHECK_TRUE(first.isValid());
+    CHECK_FALSE(pool.acquire(secondKey, false).isValid());
+    pool.release(first);
+    CHECK_FALSE(pool.acquire(secondKey, false).isValid());
+    CHECK(pool.stats().budgetMisses == 2u);
+
+    pool.beginFrame();
+    CHECK_FALSE(pool.acquire(secondKey, false).isValid());
+    pool.beginFrame();
+    const auto second = pool.acquire(secondKey, false);
+    CHECK_TRUE(second.isValid());
+    CHECK(pool.stats().evictions == 1u);
+    CHECK(pool.stats().allocatedBytes == kTargetBytes);
+    CHECK(pool.stats().peakAllocatedBytes <= kTargetBytes);
+
+    pool.release(second);
+    pool.shutdown();
+    adapter.shutdown();
+}
+
+TEST_CASE(RenderTargetPool_SoftBudgetRemainsAvailableForFrameGraph)
+{
+    BGFXAdapter adapter;
+    BGFXInitParams init;
+    init.backend = Backend::Noop;
+    init.width = 64;
+    init.height = 64;
+    init.vsync = false;
+    CHECK_TRUE(adapter.initialize(init));
+    if (!adapter.isInitialized()) return;
+
+    RenderTargetPool pool(adapter);
+    pool.setBudgetBytes(0u);
+    RenderTargetKey key;
+    key.width = 16;
+    key.height = 16;
+    key.withDepth = false;
+    const auto lease = pool.acquire(key);
+    CHECK_TRUE(lease.isValid());
+    CHECK(pool.stats().allocatedBytes == 16u * 16u * 4u);
+    CHECK(pool.stats().budgetMisses == 0u);
+
+    pool.release(lease);
+    pool.shutdown();
+    adapter.shutdown();
+}
+
 TEST_SUITE_END

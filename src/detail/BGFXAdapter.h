@@ -262,6 +262,7 @@ public:
     // bgfx::getCaps() directly. Return false when the adapter is not
     // initialized (matches the Noop-backend "no caps" contract).
     bool capsHomogeneousDepth() const noexcept;
+    bool capsOriginBottomLeft() const noexcept;
     bool capsTextureBlit() const noexcept;
     bool capsTextureReadBack() const noexcept;
     // §P4 H1 (2026-08-24) — cached rendererType getter. Returns
