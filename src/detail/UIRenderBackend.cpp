@@ -390,6 +390,16 @@ uint32_t toRgbaClear(const ayt::math::FVector4& color)
     return (r << 24u) | (g << 16u) | (b << 8u) | a;
 }
 
+ayt::math::FVector4 premultipliedLayerColor(const ayt::math::FVector4& color)
+{
+    const float alpha = std::clamp(color.w, 0.0f, 1.0f);
+    return ayt::math::FVector4(
+        std::clamp(color.x, 0.0f, 1.0f) * alpha,
+        std::clamp(color.y, 0.0f, 1.0f) * alpha,
+        std::clamp(color.z, 0.0f, 1.0f) * alpha,
+        alpha);
+}
+
 float toNdcX(float px, float width)
 {
     return (px / width) * 2.0f - 1.0f;
@@ -413,6 +423,21 @@ ayt::math::FRectangle intersectRect(const ayt::math::FRectangle& a,
 bool rectNonEmpty(const ayt::math::FRectangle& r)
 {
     return r.maxX > r.minX && r.maxY > r.minY;
+}
+
+ayt::math::FRectangle pixelAlignedLayerBounds(
+    const ayt::math::FRectangle& logicalBounds, float dpiScale)
+{
+    // A Layer whose logical origin/extent is fractional cannot map directly
+    // to ceil(width*dpi) pixels: using the unsnapped origin shifts offscreen
+    // pixel centres relative to the main framebuffer, and a later point-sampled
+    // composite produces one-pixel seams. Retain the full outward-snapped
+    // physical coverage and clip the composite back to logicalBounds.
+    return ayt::math::FRectangle(
+        std::floor(logicalBounds.minX * dpiScale) / dpiScale,
+        std::floor(logicalBounds.minY * dpiScale) / dpiScale,
+        std::ceil(logicalBounds.maxX * dpiScale) / dpiScale,
+        std::ceil(logicalBounds.maxY * dpiScale) / dpiScale);
 }
 
 constexpr float kPathEpsilon = 1.0e-5f;
@@ -739,7 +764,10 @@ std::vector<ayt::math::FVector2> sampleArc(
 // every recorded item state is self-sufficient (submit() skips setState
 // when the passed state is 0, so state must never be 0). Additive uses
 // FUNC(SRC_ALPHA, ONE) to match the interface contract SRC*SRC_ALPHA+DST*1
-// (plain BGFX_STATE_BLEND_ADD would be ONE,ONE = SRC*1+DST*1).
+// (plain BGFX_STATE_BLEND_ADD would be ONE,ONE = SRC*1+DST*1). Every
+// non-Normal mode still accumulates alpha as source-over coverage; bgfx's
+// convenience Multiply/Screen macros reuse their RGB factors for alpha and
+// would make an opaque isolated Layer translucent after one blended draw.
 ayt::font::ShapingDirection toFontDirection(ayt::ui::TextDirection direction)
 {
     switch (direction) {
@@ -758,13 +786,19 @@ uint64_t blendStateBits(ayt::ui::BlendMode mode)
     uint64_t bits = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
     switch (mode) {
     case ayt::ui::BlendMode::Additive:
-        bits |= BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_ONE);
+        bits |= BGFX_STATE_BLEND_FUNC_SEPARATE(
+            BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_ONE,
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
         break;
     case ayt::ui::BlendMode::Multiply:
-        bits |= BGFX_STATE_BLEND_MULTIPLY;
+        bits |= BGFX_STATE_BLEND_FUNC_SEPARATE(
+            BGFX_STATE_BLEND_DST_COLOR, BGFX_STATE_BLEND_ZERO,
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
         break;
     case ayt::ui::BlendMode::Screen:
-        bits |= BGFX_STATE_BLEND_SCREEN;
+        bits |= BGFX_STATE_BLEND_FUNC_SEPARATE(
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_COLOR,
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
         break;
     case ayt::ui::BlendMode::Normal:
     default:
@@ -808,6 +842,7 @@ struct RenderTargetRef {
 
 struct LayerRef {
     ayt::ui::IRenderBackend::LayerDesc desc{};
+    ayt::math::FRectangle backingBounds{};
     ayt::ui::IRenderBackend::RenderTargetHandle target{};
     ayt::math::FRectangle damage{};
     bool dirty = true;
@@ -1210,9 +1245,13 @@ UIRenderBackend::LayerHandle UIRenderBackend::createLayer(const LayerDesc& desc)
         || !std::isfinite(desc.dpiScale) || desc.dpiScale <= 0.0f) {
         return {-1};
     }
+    const ayt::math::FRectangle backingBounds =
+        pixelAlignedLayerBounds(desc.logicalBounds, desc.dpiScale);
     RenderTargetDesc targetDesc;
-    targetDesc.width = std::max(1, static_cast<int>(std::ceil(logicalWidth * desc.dpiScale)));
-    targetDesc.height = std::max(1, static_cast<int>(std::ceil(logicalHeight * desc.dpiScale)));
+    targetDesc.width = std::max(1, static_cast<int>(std::lround(
+        (backingBounds.maxX - backingBounds.minX) * desc.dpiScale)));
+    targetDesc.height = std::max(1, static_cast<int>(std::lround(
+        (backingBounds.maxY - backingBounds.minY) * desc.dpiScale)));
     targetDesc.dpiScale = desc.dpiScale;
     targetDesc.hasAlpha = desc.hasAlpha;
     targetDesc.preserveContents = false;
@@ -1222,6 +1261,7 @@ UIRenderBackend::LayerHandle UIRenderBackend::createLayer(const LayerDesc& desc)
     const LayerHandle layer{_frame->nextLayerId++};
     LayerRef ref;
     ref.desc = desc;
+    ref.backingBounds = backingBounds;
     ref.target = target;
     _frame->layers.emplace(layer.id, ref);
     return layer;
@@ -1249,9 +1289,13 @@ bool UIRenderBackend::updateLayer(LayerHandle layer, const LayerDesc& desc)
         || !std::isfinite(desc.dpiScale) || desc.dpiScale <= 0.0f) {
         return false;
     }
+    const ayt::math::FRectangle backingBounds =
+        pixelAlignedLayerBounds(desc.logicalBounds, desc.dpiScale);
     RenderTargetDesc targetDesc;
-    targetDesc.width = std::max(1, static_cast<int>(std::ceil(logicalWidth * desc.dpiScale)));
-    targetDesc.height = std::max(1, static_cast<int>(std::ceil(logicalHeight * desc.dpiScale)));
+    targetDesc.width = std::max(1, static_cast<int>(std::lround(
+        (backingBounds.maxX - backingBounds.minX) * desc.dpiScale)));
+    targetDesc.height = std::max(1, static_cast<int>(std::lround(
+        (backingBounds.maxY - backingBounds.minY) * desc.dpiScale)));
     targetDesc.dpiScale = desc.dpiScale;
     targetDesc.hasAlpha = desc.hasAlpha;
     // Layer resize always schedules a full repaint; retaining old pixels is
@@ -1259,6 +1303,7 @@ bool UIRenderBackend::updateLayer(LayerHandle layer, const LayerDesc& desc)
     targetDesc.preserveContents = false;
     if (!resizeRenderTarget(it->second.target, targetDesc)) return false;
     it->second.desc = desc;
+    it->second.backingBounds = backingBounds;
     it->second.dirty = true;
     it->second.damage = {};
     return true;
@@ -1290,8 +1335,8 @@ bool UIRenderBackend::beginLayerPaint(LayerHandle layer, const LayerPaint& paint
     frame.pathClipDepth = 0;
     frame.currentBlend = ayt::ui::BlendMode::Normal;
     frame.uiScale = ref.desc.dpiScale;
-    frame.originX = ref.desc.logicalBounds.minX;
-    frame.originY = ref.desc.logicalBounds.minY;
+    frame.originX = ref.backingBounds.minX;
+    frame.originY = ref.backingBounds.minY;
     frame.activeWidth = static_cast<uint16_t>(targetIt->second.desc.width);
     frame.activeHeight = static_cast<uint16_t>(targetIt->second.desc.height);
     frame.activeViewId = static_cast<uint8_t>(frame.nextOffscreenViewId++);
@@ -1308,7 +1353,7 @@ bool UIRenderBackend::beginLayerPaint(LayerHandle layer, const LayerPaint& paint
     if (paint.fullRedraw && ref.desc.clearMode != LayerClearMode::Preserve) {
         clearFlags |= BGFX_CLEAR_COLOR;
         if (ref.desc.clearMode == LayerClearMode::Color) {
-            clearColor = toRgbaClear(ref.desc.clearColor);
+            clearColor = toRgbaClear(premultipliedLayerColor(ref.desc.clearColor));
         }
     }
     _adapter->setViewClearRaw(frame.activeViewId, clearFlags, clearColor, 1.0f, 0);
@@ -1335,7 +1380,8 @@ bool UIRenderBackend::beginLayerPaint(LayerHandle layer, const LayerPaint& paint
         clearItem.maxX = damage.maxX;
         clearItem.maxY = damage.maxY;
         const ayt::math::FVector4 color = ref.desc.clearMode == LayerClearMode::Color
-            ? ref.desc.clearColor : ayt::math::FVector4(0, 0, 0, 0);
+            ? premultipliedLayerColor(ref.desc.clearColor)
+            : ayt::math::FVector4(0, 0, 0, 0);
         const uint32_t abgr = toAbgr(color);
         clearItem.abgr[0] = clearItem.abgr[1] = abgr;
         clearItem.abgr[2] = clearItem.abgr[3] = abgr;
@@ -1385,13 +1431,38 @@ void UIRenderBackend::compositeLayer(LayerHandle layer,
         return;
     }
     const float alpha = std::clamp(opacity, 0.0f, 1.0f);
+    const float logicalWidth = it->second.desc.logicalBounds.maxX
+        - it->second.desc.logicalBounds.minX;
+    const float logicalHeight = it->second.desc.logicalBounds.maxY
+        - it->second.desc.logicalBounds.minY;
+    const float destWidth = destBounds.maxX - destBounds.minX;
+    const float destHeight = destBounds.maxY - destBounds.minY;
+    if (logicalWidth <= 0.0f || logicalHeight <= 0.0f
+        || destWidth <= 0.0f || destHeight <= 0.0f) {
+        return;
+    }
+    const float scaleX = destWidth / logicalWidth;
+    const float scaleY = destHeight / logicalHeight;
+    const ayt::math::FRectangle& sourceBounds = it->second.desc.logicalBounds;
+    const ayt::math::FRectangle& backingBounds = it->second.backingBounds;
+    const ayt::math::FRectangle backingDest(
+        destBounds.minX + (backingBounds.minX - sourceBounds.minX) * scaleX,
+        destBounds.minY + (backingBounds.minY - sourceBounds.minY) * scaleY,
+        destBounds.maxX + (backingBounds.maxX - sourceBounds.maxX) * scaleX,
+        destBounds.maxY + (backingBounds.maxY - sourceBounds.maxY) * scaleY);
     // Normal Layer paint stores premultiplied RGB plus source-over coverage
     // alpha. Opacity therefore scales both sampled RGB and alpha, and the
     // composite uses ONE/INV_SRC_ALPHA instead of applying alpha twice.
-    emitClippedTexturedQuad(destBounds, texture.idx,
+    // The outward backing can contain transparent padding (or Color-clear
+    // pixels). Clip it to the public logical destination while preserving
+    // UVs for the full snapped texture; this keeps pixel centres aligned and
+    // prevents Color clear from painting outside LayerDesc::logicalBounds.
+    pushClip(destBounds);
+    emitClippedTexturedQuad(backingDest, texture.idx,
         ayt::math::FRectangle(0, 0, 1, 1),
         ayt::math::FVector4(alpha, alpha, alpha, alpha),
         premultipliedOverStateBits());
+    popClip();
 }
 
 void UIRenderBackend::invalidateLayer(LayerHandle layer,

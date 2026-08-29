@@ -516,7 +516,10 @@ best-effort：leased/quarantined 资源可暂时超预算。当前明确拒绝 s
 
 `UIRenderBackend` 实现完整 RenderTarget create/resize/release/bind/texture/blit 和 Layer
 create/update/release/paint/composite/invalidate。Layer 使用 RGBA8 + depth/stencil backing target；
-逻辑 bounds 与 DPI 决定物理尺寸。offscreen paint 使用 view 26–249（250 留给 GBufferDebug），主
+逻辑 bounds 的 min/max 分别按 DPI 向外 `floor/ceil` 到物理像素，二者之差决定物理尺寸；完整
+backing composite 后裁回 logical bounds。这个约束使小数 origin/extent 的离屏像素中心仍与主
+framebuffer 对齐，不能退回只对 logical width/height 做 `ceil`。offscreen paint 使用 view 26–249
+（250 留给 GBufferDebug），主
 composite 使用 view 255。
 target 切换是 batch barrier：进入离屏前 flush，保存 canvas/clip/path-clip/opacity/blend 状态；结束
 paint 后 flush 并恢复。由此 flat、SDF、text、nine-patch、vector fill/stroke 和 nested stencil clip
@@ -527,6 +530,9 @@ UI RenderTarget 申请 point-sampled backing，保证同物理尺寸 composite �
 `SRC_ALPHA/INV_SRC_ALPHA`、alpha `ONE/INV_SRC_ALPHA`，使目标保存 premultiplied RGB 和正确 coverage；
 composite 再使用 premultiplied-over，不能对 alpha 做第二次相乘。局部 damage replay 必须保持原图元
 参数空间：纹理按 clip fraction 重映射 UV，四角渐变按原 bounds 双线性重映射颜色。
+Color clear 的全量 view clear 与局部覆盖 clear 都先写入 `(rgb*alpha, alpha)`；Additive、Multiply、
+Screen 保留各自 RGB 方程，但 alpha 独立使用 `ONE/INV_SRC_ALPHA` coverage source-over。直接使用 bgfx
+Multiply/Screen convenience state 会把 RGB factor 复用于 alpha，破坏不透明隔离层，属于错误实现。
 
 AYUI 的 root Production Layer 是 opt-in。首次、无范围 dirty、resize/DPI/reset 帧完整绘制主树；
 显式 dirty rect 帧只 replay damage clip。Transparent/Color Layer 先用无混合覆盖写清除 damage，
@@ -534,10 +540,12 @@ AYUI 的 root Production Layer 是 opt-in。首次、无范围 dirty、resize/DP
 即时绘制。capability、target 或 paint 失败时 AYUI 同帧回退原始路径。当前每帧最多 224 次
 offscreen paint，第 225 次确定失败，下一帧重新从 view 26 分配。该上限只描述 pass 数量，不承诺
 UI 独占 224 个共享 framebuffer。池与 UI backend 均限定 renderer thread。Noop 测试锁定生命周期和
-submit 形态；Auto/显式 D3D11 的 1.0×/1.5× 矩阵以 1280×720 DIP 画布和
-1280×720/1920×1080 framebuffer 验证纹理方向、alpha、UV、stencil、full/clean/
-partial clear，clean reuse 字节精确，即时与 Layer 最多相差一次 RGBA8 离屏舍入的 1 LSB。D3D12、
-OpenGL、Vulkan 及 Preserve/resize/device-reset 视觉结果仍需补齐。
+submit 形态；显式 D3D11 运行 36 次独立 capture：原 1.0×/1.5× 复杂控件路径，以及透明 Layer、
+group/nested opacity、Additive/Multiply/Screen 隔离组、resize、动态 DPI、device/MSAA reset lease
+恢复和 Transparent/Color/Preserve 局部 clear。clean reuse、isolated blend、Preserve 字节精确；
+通常最多差 1 LSB，RGBA8 group opacity 因离屏与最终合成两次量化最多差 2 LSB。MSAA 后 Layer 仍是
+1× sample，因此生命周期门禁比较 recovered Layer 与 reset 后 fresh Layer，不拿 multisampled immediate
+边缘作为错误参考。D3D12、OpenGL、Vulkan 同矩阵仍需补齐。
 
 ---
 
@@ -871,7 +879,10 @@ include/AYRenderer/
   按原 bounds 重映射颜色。
 - Auto 与显式 D3D11 在 1.0×/1.5× 下完成 10 场景真实纹理矩阵：immediate 30、full Layer 31、
   clean Layer 1、partial Layer 11 draw calls；语义差异最多 1 LSB，clean reuse 字节精确。
-  D3D12/OpenGL/Vulkan 及 Preserve/resize/device-reset 图像基线仍待完成。
+- D3D11 图像门禁扩展为 36 次 capture，新增透明 Layer、group/nested opacity、三种高级 blend、
+  resize/动态 DPI、device/MSAA reset lease recovery 与 Transparent/Color/Preserve partial clear。
+  该矩阵定位并修复小数 Layer origin 像素中心错位、高级 blend alpha 方程错误和半透明 Color clear
+  未 premultiply 三项真实 GPU 缺陷；D3D12/OpenGL/Vulkan 同矩阵仍待完成。
 
 ### 2026-08-28 — GBuffer v3 冻结，进入 LightingPass 审核
 

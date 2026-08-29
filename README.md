@@ -249,11 +249,14 @@ lease。当前限制为：
 - 池和 UI backend 都是 renderer-thread-only。
 - UI RenderTarget 使用 point sampling，避免同尺寸 composite 对抗锯齿边缘和 texel 做线性重采样；
   FrameGraph 目标仍默认线性采样，pool key 保证两者不会误复用。
+- Layer backing 的物理 min/max 分别按 DPI 向外对齐，保留与主 framebuffer 相同的像素中心；合成完整
+  backing 后裁回 logical bounds，支持小数 origin/extent 而不产生一像素接缝。
 - Layer 内部按正确 coverage alpha 累积 straight-alpha 图元，最终以 premultiplied-over composite；
-  damage clip 下纹理 UV 和四角渐变颜色都按原 bounds 重映射。
+  半透明 Color clear 写入 premultiplied color，Additive/Multiply/Screen 的 alpha 独立按 source-over
+  coverage 累积。damage clip 下纹理 UV 和四角渐变颜色都按原 bounds 重映射。
 - Noop 契约测试覆盖复杂绘制、局部 damage、clean composite、离屏 pass 溢出恢复与 reset 重绘；
-  Auto/显式 D3D11 已通过 1.0×/1.5× 的 full/clean/partial 真实 GPU 图像矩阵，D3D12、OpenGL、Vulkan
-  及 Preserve/resize/device-reset 截图仍待补齐。
+  显式 D3D11 已通过 36-capture 的 1.0×/1.5× full/clean/partial、透明/opacity/blend、resize/DPI、
+  reset/MSAA lease 恢复和三种 clear mode 真实 GPU 图像矩阵。D3D12、OpenGL、Vulkan 同矩阵待补齐。
 
 Windows Debug 当前全量基线为 `3284 / 3284` 条断言通过。
 
