@@ -239,7 +239,7 @@ path clip 不需要维护第二套实现。create/update/paint 失败或 device 
 清除受损区域，区域外像素保持不变，Preserve Layer 则跳过该清除。
 
 Renderer 持有一个共享 `RenderTargetPool`，FrameGraph 的 Bloom/Haze/SSAO 等目标与 UI Layer 都从该池
-取得 generation-checked lease。池按尺寸、格式、depth、sampleCount 精确复用，release 后默认隔离两帧，
+取得 generation-checked lease。池按尺寸、格式、depth、sampleCount、采样方式精确复用，release 后默认隔离两帧，
 空闲目标按 LRU 受 256 MiB best-effort 预算约束；resize、MSAA 切换和 device reset 会统一失效所有
 lease。当前限制为：
 
@@ -247,10 +247,15 @@ lease。当前限制为：
 - UI 离屏 paint 使用 view 26–249（250 保留给 GBufferDebug），每帧最多 224 次；第 225 次失败并由
   AYUI 同帧回退，下一帧从 view 26 恢复。该上限是 pass 调度容量，不是 UI 独占 framebuffer 数量。
 - 池和 UI backend 都是 renderer-thread-only。
+- UI RenderTarget 使用 point sampling，避免同尺寸 composite 对抗锯齿边缘和 texel 做线性重采样；
+  FrameGraph 目标仍默认线性采样，pool key 保证两者不会误复用。
+- Layer 内部按正确 coverage alpha 累积 straight-alpha 图元，最终以 premultiplied-over composite；
+  damage clip 下纹理 UV 和四角渐变颜色都按原 bounds 重映射。
 - Noop 契约测试覆盖复杂绘制、局部 damage、clean composite、离屏 pass 溢出恢复与 reset 重绘；
-  OpenGL/Vulkan RenderTarget 纹理方向和真实局部清除仍需 GPU 图像回归验证。
+  Auto/显式 D3D11 已通过 1.0×/1.5× 的 full/clean/partial 真实 GPU 图像矩阵，D3D12、OpenGL、Vulkan
+  及 Preserve/resize/device-reset 截图仍待补齐。
 
-Windows Debug 当前全量基线为 `3211 / 3211` 条断言通过。
+Windows Debug 当前全量基线为 `3284 / 3284` 条断言通过。
 
 ---
 

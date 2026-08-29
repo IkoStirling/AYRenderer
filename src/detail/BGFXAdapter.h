@@ -131,6 +131,10 @@ public:
                                               bgfx::TextureFormat::Enum colorFormat =
                                                   bgfx::TextureFormat::RGBA8,
                                               bool withDepth = true);
+    bgfx::FrameBufferHandle createFrameBuffer(uint16_t width, uint16_t height,
+                                              bgfx::TextureFormat::Enum colorFormat,
+                                              bool withDepth,
+                                              bool pointSampled);
 
     // R5+ (Phase Shadow, 2026-07-20) — depth-only FBO (legacy / tests).
     // Prefer createColorDepthFrameBuffer for sampleable shadow maps:

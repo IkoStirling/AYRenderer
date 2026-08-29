@@ -11,6 +11,18 @@ using ayt::render::detail::RenderTargetPool;
 
 TEST_SUITE(AYRenderer_RenderTargetPool)
 
+TEST_CASE(RenderTargetKey_PointSamplingParticipatesInExactReuseKey)
+{
+    RenderTargetKey linear;
+    linear.width = 64;
+    linear.height = 64;
+    RenderTargetKey point = linear;
+    point.pointSampled = true;
+    CHECK_FALSE(linear == point);
+    point.pointSampled = false;
+    CHECK_TRUE(linear == point);
+}
+
 TEST_CASE(RenderTargetPool_QuarantinesReusesAndEvictsExactKeyTargets)
 {
     BGFXAdapter adapter;

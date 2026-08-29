@@ -17,13 +17,15 @@ struct RenderTargetKey {
     bgfx::TextureFormat::Enum colorFormat = bgfx::TextureFormat::RGBA8;
     bool withDepth = false;
     uint8_t sampleCount = 1;
+    bool pointSampled = false;
 
     bool operator==(const RenderTargetKey& other) const noexcept
     {
         return width == other.width && height == other.height
             && colorFormat == other.colorFormat
             && withDepth == other.withDepth
-            && sampleCount == other.sampleCount;
+            && sampleCount == other.sampleCount
+            && pointSampled == other.pointSampled;
     }
 };
 

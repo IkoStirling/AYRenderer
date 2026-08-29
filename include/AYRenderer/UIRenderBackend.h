@@ -270,7 +270,8 @@ private:
     // the opacity stack like every color-emitting entry).
     void emitClippedTexturedQuad(const ayt::math::FRectangle& bounds, uint16_t textureIdx,
                                  const ayt::math::FRectangle& uv,
-                                 const ayt::math::FVector4& tint);
+                                 const ayt::math::FVector4& tint,
+                                 uint64_t stateOverride = 0);
     bool resolveTextureHandle(void* handle, uint16_t& textureIdx,
                               uint16_t& width, uint16_t& height) const;
     bool ensureRenderTarget(int targetId);

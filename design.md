@@ -509,7 +509,7 @@ Renderer 在 adapter 初始化后创建 renderer-wide `RenderTargetPool`，并�
 延迟回收、预算和 reset 生命周期只有一个 owner。shutdown 顺序固定为：消费者释放 lease → pool
 shutdown → adapter shutdown；resize/MSAA 切换顺序固定为：FrameGraph 释放 → pool reset → bgfx reset。
 
-池的 key 为 `(width, height, colorFormat, withDepth, sampleCount)`，只做精确匹配。lease 由 slot 与
+池的 key 为 `(width, height, colorFormat, withDepth, sampleCount, pointSampled)`，只做精确匹配。lease 由 slot 与
 generation 组成，release 后旧 handle 立即失效；物理目标默认 quarantine 两帧，避免 CPU 已结束但
 bgfx 队列仍引用 attachment。256 MiB 预算只淘汰已空闲且越过 quarantine 的 LRU 目标，因此是
 best-effort：leased/quarantined 资源可暂时超预算。当前明确拒绝 sampleCount != 1。
@@ -522,14 +522,22 @@ target 切换是 batch barrier：进入离屏前 flush，保存 canvas/clip/path
 paint 后 flush 并恢复。由此 flat、SDF、text、nine-patch、vector fill/stroke 和 nested stencil clip
 继续走同一条生产图元路径。
 
+UI RenderTarget 申请 point-sampled backing，保证同物理尺寸 composite 保持 texel identity；FrameGraph
+目标默认仍为 linear，并由 pool key 隔离。Layer paint 对 straight-alpha 输出使用 RGB
+`SRC_ALPHA/INV_SRC_ALPHA`、alpha `ONE/INV_SRC_ALPHA`，使目标保存 premultiplied RGB 和正确 coverage；
+composite 再使用 premultiplied-over，不能对 alpha 做第二次相乘。局部 damage replay 必须保持原图元
+参数空间：纹理按 clip fraction 重映射 UV，四角渐变按原 bounds 双线性重映射颜色。
+
 AYUI 的 root Production Layer 是 opt-in。首次、无范围 dirty、resize/DPI/reset 帧完整绘制主树；
 显式 dirty rect 帧只 replay damage clip。Transparent/Color Layer 先用无混合覆盖写清除 damage，
 保留区域外像素；Preserve Layer 跳过清除。clean 帧只 composite 一次；overlay 与 drag visual 随后
 即时绘制。capability、target 或 paint 失败时 AYUI 同帧回退原始路径。当前每帧最多 224 次
 offscreen paint，第 225 次确定失败，下一帧重新从 view 26 分配。该上限只描述 pass 数量，不承诺
 UI 独占 224 个共享 framebuffer。池与 UI backend 均限定 renderer thread。Noop 测试锁定生命周期和
-submit 形态，但 OpenGL/Vulkan 的 RenderTarget 纹理方向、真实局部 clear/preserve 与 resize 视觉
-结果仍需 GPU 图像基线关闭门禁。
+submit 形态；Auto/显式 D3D11 的 1.0×/1.5× 矩阵以 1280×720 DIP 画布和
+1280×720/1920×1080 framebuffer 验证纹理方向、alpha、UV、stencil、full/clean/
+partial clear，clean reuse 字节精确，即时与 Layer 最多相差一次 RGBA8 离屏舍入的 1 LSB。D3D12、
+OpenGL、Vulkan 及 Preserve/resize/device-reset 视觉结果仍需补齐。
 
 ---
 
@@ -808,8 +816,9 @@ include/AYRenderer/
 
 跑法:同一 commit **连续 3 次**全量 `AYRenderer_Test`,记录 PASS/FAIL;**3 次不全绿**则按 `docs/execution-plan.md` §5 处理,不许合并带赌的 ABI 变更。
 
-2026-08-29 Production UI Layer/RenderTargetPool 局部 damage 阶段的 Windows Debug Noop 全量基线为
-`3211 / 3211`。该结果验证 API、生命周期、view/submit 契约，不替代真实 GPU 图像和 capture。
+2026-08-29 Production UI Layer/RenderTargetPool 阶段的 Windows Debug Noop 全量基线为
+`3284 / 3284`。该结果验证 API、生命周期、view/submit 契约；D3D11 图像矩阵已补充像素正确性，
+但仍不替代其余后端和 RenderDoc capture。
 
 ### 14.4 MSVC 增量对象与内部 ABI
 
@@ -855,8 +864,14 @@ include/AYRenderer/
 - AYUI root 主树可 opt-in retained pixel layer；clean frame 单 composite，overlay/drag visual 即时叠加，
   显式 dirty rect 局部清除/replay，无范围 dirty、resize/device reset 全量重绘，能力或 paint 失败同帧回退。
 - Noop 回归覆盖复杂 gradients/SDF/nine-patch/vector fill/stroke/nested path clip、pool 回收和
-  partial damage、224 次离屏 pass 溢出恢复、resize/MSAA reset；Windows Debug 全量 `3211 / 3211`。
-  OpenGL/Vulkan RenderTarget 纹理方向与真实局部 clear 仍需 GPU 图像基线。
+  partial damage、224 次离屏 pass 溢出恢复、resize/MSAA reset；当前 Windows Debug 全量
+  `3284 / 3284`。
+- UI 目标的 point/linear sampling 纳入 pool 精确键；保留四参 framebuffer 入口并增加五参重载，
+  避免增量对象 ABI 断裂。Layer 改用 coverage-correct alpha 与 premultiplied composite，gradient clip
+  按原 bounds 重映射颜色。
+- Auto 与显式 D3D11 在 1.0×/1.5× 下完成 10 场景真实纹理矩阵：immediate 30、full Layer 31、
+  clean Layer 1、partial Layer 11 draw calls；语义差异最多 1 LSB，clean reuse 字节精确。
+  D3D12/OpenGL/Vulkan 及 Preserve/resize/device-reset 图像基线仍待完成。
 
 ### 2026-08-28 — GBuffer v3 冻结，进入 LightingPass 审核
 

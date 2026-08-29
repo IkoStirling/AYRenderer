@@ -768,10 +768,24 @@ uint64_t blendStateBits(ayt::ui::BlendMode mode)
         break;
     case ayt::ui::BlendMode::Normal:
     default:
-        bits |= BGFX_STATE_BLEND_ALPHA;
+        // Straight-alpha source-over. RGB matches BGFX_STATE_BLEND_ALPHA,
+        // but alpha must accumulate coverage as As + Ad*(1-As), not
+        // As*As + Ad*(1-As). The distinction is essential when the result
+        // is retained in a transparent Layer and sampled again later.
+        bits |= BGFX_STATE_BLEND_FUNC_SEPARATE(
+            BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
         break;
     }
     return bits;
+}
+
+uint64_t premultipliedOverStateBits()
+{
+    return BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
+        | BGFX_STATE_BLEND_FUNC_SEPARATE(
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA,
+            BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 }
 
 // P3: one live UI texture in the registry. textureIdx is the bgfx handle
@@ -1044,7 +1058,7 @@ UIRenderBackend::RenderTargetHandle UIRenderBackend::createRenderTarget(
     }
     const detail::RenderTargetKey key{
         static_cast<uint16_t>(desc.width), static_cast<uint16_t>(desc.height),
-        bgfx::TextureFormat::RGBA8, true, 1};
+        bgfx::TextureFormat::RGBA8, true, 1, true};
     const detail::PooledRenderTargetHandle pooled = _targetPool->acquire(key);
     if (!pooled.isValid()) return {-1};
 
@@ -1066,7 +1080,7 @@ bool UIRenderBackend::ensureRenderTarget(int targetId)
     RenderTargetRef& ref = it->second;
     const detail::RenderTargetKey key{
         static_cast<uint16_t>(ref.desc.width), static_cast<uint16_t>(ref.desc.height),
-        bgfx::TextureFormat::RGBA8, true, 1};
+        bgfx::TextureFormat::RGBA8, true, 1, true};
     if (_targetPool->matches(ref.pooled, key)) {
         const bgfx::TextureHandle texture = _targetPool->texture(ref.pooled);
         if (detail::BGFXAdapter::isValid(texture)) return true;
@@ -1101,7 +1115,7 @@ bool UIRenderBackend::resizeRenderTarget(RenderTargetHandle target,
 
     const detail::RenderTargetKey key{
         static_cast<uint16_t>(desc.width), static_cast<uint16_t>(desc.height),
-        bgfx::TextureFormat::RGBA8, true, 1};
+        bgfx::TextureFormat::RGBA8, true, 1, true};
     const detail::PooledRenderTargetHandle replacement = _targetPool->acquire(key);
     if (!replacement.isValid()) return false;
     _targetPool->release(ref.pooled);
@@ -1370,9 +1384,14 @@ void UIRenderBackend::compositeLayer(LayerHandle layer,
         it->second.dirty = true;
         return;
     }
+    const float alpha = std::clamp(opacity, 0.0f, 1.0f);
+    // Normal Layer paint stores premultiplied RGB plus source-over coverage
+    // alpha. Opacity therefore scales both sampled RGB and alpha, and the
+    // composite uses ONE/INV_SRC_ALPHA instead of applying alpha twice.
     emitClippedTexturedQuad(destBounds, texture.idx,
         ayt::math::FRectangle(0, 0, 1, 1),
-        ayt::math::FVector4(1, 1, 1, std::clamp(opacity, 0.0f, 1.0f)));
+        ayt::math::FVector4(alpha, alpha, alpha, alpha),
+        premultipliedOverStateBits());
 }
 
 void UIRenderBackend::invalidateLayer(LayerHandle layer,
@@ -1982,6 +2001,30 @@ void UIRenderBackend::drawGradientRect(const ayt::math::FRectangle& bounds,
 
     // P1: a Flat item with per-corner colors — the existing shader
     // interpolates v_color0 across the quad, so gradients are free.
+    // When clipping crops the quad, remap its corner colors against the
+    // original bounds as well. Reusing the authored corner colors on the
+    // smaller clipped quad would restart/stretch the gradient inside a
+    // damage rect instead of revealing the matching part of the original.
+    const float width = bounds.maxX - bounds.minX;
+    const float height = bounds.maxY - bounds.minY;
+    if (width <= 1.0e-5f || height <= 1.0e-5f) return;
+    const float left = std::clamp((clipped.minX - bounds.minX) / width, 0.0f, 1.0f);
+    const float right = std::clamp((clipped.maxX - bounds.minX) / width, 0.0f, 1.0f);
+    const float top = std::clamp((clipped.minY - bounds.minY) / height, 0.0f, 1.0f);
+    const float bottom = std::clamp((clipped.maxY - bounds.minY) / height, 0.0f, 1.0f);
+    const auto lerpColor = [](const ayt::math::FVector4& a,
+                              const ayt::math::FVector4& b, float t) {
+        return ayt::math::FVector4(
+            a.x + (b.x - a.x) * t,
+            a.y + (b.y - a.y) * t,
+            a.z + (b.z - a.z) * t,
+            a.w + (b.w - a.w) * t);
+    };
+    const auto sampleColor = [&](float x, float y) {
+        return lerpColor(lerpColor(topLeft, topRight, x),
+                         lerpColor(bottomLeft, bottomRight, x), y);
+    };
+
     // Corner order matches flushFlatRun: TL TR BR BL.
     UiItem item;
     item.textureIdx = (_gpu != nullptr) ? _gpu->whiteTextureIdx()
@@ -1992,7 +2035,10 @@ void UIRenderBackend::drawGradientRect(const ayt::math::FRectangle& bounds,
     item.maxX = clipped.maxX;
     item.maxY = clipped.maxY;
     // PR-anim: gradient corners fade with the tree.
-    ayt::math::FVector4 tl = topLeft, tr = topRight, bl = bottomLeft, br = bottomRight;
+    ayt::math::FVector4 tl = sampleColor(left, top);
+    ayt::math::FVector4 tr = sampleColor(right, top);
+    ayt::math::FVector4 bl = sampleColor(left, bottom);
+    ayt::math::FVector4 br = sampleColor(right, bottom);
     const float op = _frame->opacityStack.back();
     tl.w *= op; tr.w *= op; bl.w *= op; br.w *= op;
     item.abgr[0] = toAbgr(tl);
@@ -2406,7 +2452,8 @@ void UIRenderBackend::drawWithAlpha(const ayt::math::FRectangle& bounds, void* t
 void UIRenderBackend::emitClippedTexturedQuad(const ayt::math::FRectangle& bounds,
                                               uint16_t textureIdx,
                                               const ayt::math::FRectangle& uv,
-                                              const ayt::math::FVector4& tint)
+                                              const ayt::math::FVector4& tint,
+                                              uint64_t stateOverride)
 {
     if (_frame == nullptr) {
         _frame = std::make_unique<FrameState>();
@@ -2442,7 +2489,8 @@ void UIRenderBackend::emitClippedTexturedQuad(const ayt::math::FRectangle& bound
         tint.x, tint.y, tint.z, tint.w * _frame->opacityStack.back()));
     UiItem item;
     item.textureIdx = textureIdx;
-    item.state      = blendStateBits(_frame->currentBlend);
+    item.state      = stateOverride != 0
+        ? stateOverride : blendStateBits(_frame->currentBlend);
     item.minX       = clipped.minX;
     item.minY       = clipped.minY;
     item.maxX       = clipped.maxX;

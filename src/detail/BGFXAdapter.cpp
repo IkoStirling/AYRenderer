@@ -499,6 +499,15 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
                                                       bgfx::TextureFormat::Enum colorFormat,
                                                       bool withDepth)
 {
+    return createFrameBuffer(width, height, colorFormat, withDepth,
+                             /*pointSampled=*/false);
+}
+
+bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t height,
+                                                      bgfx::TextureFormat::Enum colorFormat,
+                                                      bool withDepth,
+                                                      bool pointSampled)
+{
     // R5+ (Phase PostProcess, 2026-07-20) — single-FBO create path.
     // Bypasses creation when the adapter isn't initialized so the
     // headless Noop-backend test path stays alive (returns invalid
@@ -509,7 +518,10 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
         return BGFX_INVALID_HANDLE;
     }
     const uint64_t textureFlags = BGFX_TEXTURE_RT
-                                | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
+                                | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
+                                | (pointSampled
+                                    ? BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT
+                                    : 0u);
     if (!bgfx::isTextureValid(0, false, 1, colorFormat, textureFlags)) {
         return BGFX_INVALID_HANDLE;
     }
@@ -526,7 +538,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
     if (withDepth) {
         bgfx::destroy(color);
         return createColorDepthFrameBuffer(width, height, colorFormat,
-                                           /*pointSampled=*/false);
+                                           pointSampled);
     }
     bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
         /*num=*/1, &color, /*destroyTextures=*/true);

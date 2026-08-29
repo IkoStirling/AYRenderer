@@ -47,7 +47,7 @@ PooledRenderTargetHandle RenderTargetPool::acquire(const RenderTargetKey& key)
     }
 
     bgfx::FrameBufferHandle framebuffer = _adapter->createFrameBuffer(
-        key.width, key.height, key.colorFormat, key.withDepth);
+        key.width, key.height, key.colorFormat, key.withDepth, key.pointSampled);
     if (!BGFXAdapter::isValid(framebuffer)) {
         return {};
     }
