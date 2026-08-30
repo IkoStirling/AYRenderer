@@ -29,10 +29,10 @@ TEST_CASE(shutdown_releases_every_pass_owned_gpu_resource_before_adapter)
     CHECK(shutdown != std::string::npos);
     CHECK(adapterShutdown != std::string::npos);
 
-    constexpr std::array<const char*, 11> passNames = {
+    constexpr std::array<const char*, 14> passNames = {
         "Transparent", "Shadow", "GBuffer", "Lighting", "Skybox",
         "BloomExtract", "BloomBlur", "DepthHaze", "GBufferDebug",
-        "PostProcess", "SSAO",
+        "PostProcess", "FXAA", "ColorGrading", "Present", "SSAO",
     };
     for (const char* passName : passNames) {
         const std::string lookupText =
@@ -121,9 +121,10 @@ TEST_CASE(fullscreen_buffer_creation_is_transactional_and_shared_by_all_passes)
               != std::string::npos);
     }
 
-    // FinalPP and Present use the typed wrapper so the triangle data, view
-    // setup and destruction contract live in one place. The wrapper itself
-    // must still delegate allocation to the transactional helper above.
+    // FinalPP, FXAA, ColorGrading and Present use the typed wrapper so the
+    // triangle data, view setup and destruction contract live in one place.
+    // The wrapper itself must still delegate allocation to the transactional
+    // helper above.
     const std::string geometry =
         readRendererSource("src/detail/FullscreenPassGeometry.cpp");
     CHECK(geometry.find("ensureFullscreenTriangleBuffers(")
@@ -133,9 +134,17 @@ TEST_CASE(fullscreen_buffer_creation_is_transactional_and_shared_by_all_passes)
         readRendererSource("src/detail/PostProcessPass.cpp");
     const std::string present =
         readRendererSource("src/detail/PresentPass.cpp");
+    const std::string fxaa =
+        readRendererSource("src/detail/FXAAPass.cpp");
+    const std::string colorGrading =
+        readRendererSource("src/detail/ColorGradingPass.cpp");
     CHECK(postProcess.find("_fullscreen.ensure(adapter)")
           != std::string::npos);
     CHECK(present.find("_geometry.ensure(adapter)")
+          != std::string::npos);
+    CHECK(fxaa.find("_geometry.ensure(adapter)")
+          != std::string::npos);
+    CHECK(colorGrading.find("_geometry.ensure(adapter)")
           != std::string::npos);
 }
 

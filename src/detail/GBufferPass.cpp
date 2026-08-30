@@ -416,7 +416,6 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     ctx.adapter.setStateOpaque();
 
     uint32_t drawCount = 0;
-    uint32_t skippedOutline = 0;
     uint32_t skippedInvalidHandle = 0;
     uint32_t skippedMissingResource = 0;
     uint32_t skippedInvalidBuffer = 0;
@@ -425,10 +424,6 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     uint32_t skippedEmptyRange = 0;
     uint32_t alphaCutoutCount = 0;
     for (const DrawItem& item : ctx.scene.items()) {
-        if (item.outlineHull) {
-            ++skippedOutline;
-            continue;
-        }
         if (!item.mesh.isValid() || !item.material.isValid()) {
             ++skippedInvalidHandle;
             continue;
@@ -757,10 +752,10 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     if (s_routeLogFrame < 8) {
         std::fprintf(stderr,
                      "[GBufferRoute] frame=%u items=%zu draws=%u cutout=%u "
-                     "skip(outline=%u invalidHandle=%u missing=%u buffer=%u "
+                     "skip(invalidHandle=%u missing=%u buffer=%u "
                      "shader=%u transparent=%u range=%u)\n",
                      s_routeLogFrame, ctx.scene.items().size(), drawCount,
-                     alphaCutoutCount, skippedOutline, skippedInvalidHandle,
+                     alphaCutoutCount, skippedInvalidHandle,
                      skippedMissingResource, skippedInvalidBuffer,
                      skippedInvalidShader, skippedTransparent,
                      skippedEmptyRange);

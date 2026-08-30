@@ -281,9 +281,6 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     uint32_t drawCount = 0;
 
     for (const DrawItem& item : scene.items()) {
-        if (item.outlineHull) {
-            continue;
-        }
         // CM-1 (2026-08-11) — 2D lane discriminator: items carrying a
         // DrawPayload2D belong to Forward2DOpaquePass. Drawing them
         // here with 3D state (depth write, no blend) would double-draw

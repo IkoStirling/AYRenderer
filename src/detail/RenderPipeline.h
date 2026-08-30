@@ -12,15 +12,15 @@ namespace ayt::render::detail
 // U1+ — owns the ordered list of RenderPass subclasses and dispatches
 // them via executeAll(). Renderer::render iterates pipeline.passes()
 // and calls execute() on each enabled pass. Today the default
-// pipeline (built by RenderPipelineDesc::makeDefault) holds 5 passes
-// with Shadow *enabled* at slot 0 (E5 §5.4, 2026-07-22):
-// [Shadow, ForwardOpaque, Transparent, PostProcess, UI]. See
+// pipeline (built by RenderPipelineDesc::makeDefault) mounts the Forward
+// scene chain followed by PostProcess, FXAA, ColorGrading, Present and UI,
+// with Shadow
+// enabled at slot 0. See
 // `docs/execution-plan.md` §1.1 + §附录 B + 附录 A row E5. The E4
 // "canonical default ⇒ Shadow disabled" override is removed.
 // §5.3 still forbids default-on Shadow *combined with* a Light
 // struct or FrameContext shadow writeback — both DIAG flags remain
-// OFF, so neither ship-path is live. GBufferPass / LightingPass
-// do not exist yet.
+// OFF, so neither forbidden combination is live.
 //
 // Non-ownership semantics: passes are owned via unique_ptr. The
 // pipeline outlives every render() call so dispatch is safe to

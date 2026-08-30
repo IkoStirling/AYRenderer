@@ -7,8 +7,10 @@
 #include "detail/FgResource.h"
 #include "detail/FrameContext.h"
 #include "detail/GBufferPass.h"
+#include "detail/LightingPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
+#include "detail/SSAOPipeline.h"
 
 #include <cstdio>
 #include <string>
@@ -45,6 +47,27 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
     shader::ShaderResourcePool& pool = ctx.pool;
     const FrameContext& frame = ctx.frame;
 
+    // The slot is mounted in every deferred pipeline, while the per-frame
+    // feature gate may intentionally omit SSAOTexture. Match the complete
+    // central graph gate before resolving its output so every inactive chain
+    // (disabled/zero parameters, missing or disabled producer/consumer, or a
+    // zero viewport) is a quiet zero-allocation path rather than a false
+    // allocation-failure diagnostic.
+    if (!selectSsaoStage(
+            frame.ssaoEnabled,
+            frame.ssaoStrength,
+            frame.ssaoRadius,
+            /*passPresent=*/true,
+            /*passEnabled=*/isEnabled(),
+            ctx.gbufferPass != nullptr,
+            ctx.gbufferPass != nullptr && ctx.gbufferPass->isEnabled(),
+            ctx.lightingPass != nullptr,
+            ctx.lightingPass != nullptr && ctx.lightingPass->isEnabled(),
+            ctx.viewportWidth,
+            ctx.viewportHeight)) {
+        return 0;
+    }
+
     if (!adapter.isInitialized()) {
         rateLimitedEarlyReturn("SSAOPass", "adapter not initialized");
         return 0;
@@ -60,10 +83,6 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
 
     const uint16_t viewportWidth = ctx.viewportWidth;
     const uint16_t viewportHeight = ctx.viewportHeight;
-    if (viewportWidth == 0 || viewportHeight == 0) {
-        rateLimitedEarlyReturn("SSAOPass", "viewport==0");
-        return 0;
-    }
 
     const bgfx::FrameBufferHandle target =
         ctx.frameGraph->resolve(FgResourceId::SSAOTexture);

@@ -1,9 +1,11 @@
 #pragma once
 
 #include "detail/PassExecContext.h"
+#include "detail/FullscreenPassGeometry.h"
 #include "detail/RenderPass.h"
 #include "detail/SceneLighting.h"
 #include "AYRenderer/RenderTypes.h"  // ayt::render::BlendMode
+#include "AYShader/ShaderResource.h"
 
 #include <cstdint>
 #include <string_view>
@@ -39,23 +41,28 @@ uint64_t transparentDrawState(BlendMode blendMode,
                               bool doubleSided,
                               bool reverseWinding) noexcept;
 
-// Selection is rendered while the scene color and depth attachments are
-// still bound.  The original surface first seeds depth when necessary, then
-// an expanded back-face hull draws only where it is nearer than scene depth.
-uint64_t selectionDepthState(bool doubleSided,
-                             bool reverseWinding) noexcept;
-uint64_t selectionHullState(bool reverseWinding) noexcept;
-ayt::math::Float4x4 makeSelectionHullWorld(
-    const DrawItem& item,
-    float expansion = 1.025f) noexcept;
+// Selection mask alpha stores the full silhouette while RGB stores its
+// depth-visible coverage. Screen-space dilation uses alpha for the original
+// projected border and RGB only to suppress occluded segments. The border is
+// fixed-width without outlining unrelated foreground occluders.
+uint64_t selectionMaskState(bool doubleSided,
+                            bool reverseWinding) noexcept;
+uint64_t selectionVisibleMaskState(bool doubleSided,
+                                   bool reverseWinding) noexcept;
+uint64_t selectionCompositeState() noexcept;
+const char* selectionOutlinePhoskiaSourceForTests() noexcept;
 
 // Forward path composites into sceneFbo after ForwardOpaque. Deferred path
 // uses a dedicated view and a cached FBO that borrows LightingOutput color and
-// GBuffer depth. Normal transparent surfaces never write depth; a selected
-// surface uses a local depth prepass before its inverted hull. SceneLights and
-// shadow-atlas arrays share the same CPU packing contract as LightingPass.
+// GBuffer depth. Selection borrows that depth for the RGB visibility channel
+// while alpha remains the complete silhouette, then composites a fixed-width
+// outer edge before Bloom/PostProcess. SceneLights
+// and shadow-atlas arrays share the same CPU packing contract as LightingPass.
 class TransparentPass : public RenderPass {
 public:
+    static constexpr uint8_t kSelectionMaskViewId = 253;
+    static constexpr uint8_t kSelectionCompositeViewId = 254;
+
     std::string_view name() const override { return "Transparent"; }
 
     uint32_t execute(PassExecContext& ctx) override;
@@ -64,8 +71,7 @@ public:
 private:
     enum class SubmitMode : uint8_t {
         TransparentSurface,
-        SelectionDepth,
-        SelectionHull,
+        SelectionMask,
     };
 
     struct SubmitResult {
@@ -87,6 +93,10 @@ private:
         BGFXAdapter& adapter,
         bgfx::TextureHandle color,
         bgfx::TextureHandle depth);
+    bool ensureSelectionResources(PassExecContext& ctx,
+                                  bgfx::TextureHandle sceneDepth);
+    void destroySelectionTarget(BGFXAdapter& adapter) noexcept;
+    void ensureSelectionCompositeProgram(shader::ShaderResourcePool& pool);
 
     bgfx::FrameBufferHandle _deferredCompositeFbo =
         bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
@@ -94,6 +104,23 @@ private:
         bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     bgfx::TextureHandle _deferredDepth =
         bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+
+    bgfx::FrameBufferHandle _selectionMaskFbo =
+        bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle _selectionMaskTexture =
+        bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle _selectionSceneDepth =
+        bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    uint16_t _selectionWidth = 0;
+    uint16_t _selectionHeight = 0;
+
+    FullscreenPassGeometry _selectionCompositeGeometry;
+    ayt::shader::ShaderResource _selectionCompositeProgram;
+    ayt::shader::BindingId _selectionMaskBinding =
+        ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _selectionTexelSizeBinding =
+        ayt::shader::InvalidBinding;
+    uint16_t _selectionProgramRetryFrames = 0;
 };
 
 } // namespace ayt::render::detail

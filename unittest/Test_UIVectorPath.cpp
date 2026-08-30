@@ -101,6 +101,29 @@ TEST_CASE(vector_path_curves_use_adaptive_segments_and_mixed_contours) {
     CHECK(info.bounds.maxY > 220.0f);
 }
 
+TEST_CASE(vector_path_contour_preserves_round_cap_and_join_geometry) {
+    UIRenderBackend backend;
+    const auto path = backend.createPath();
+    const FVector2 polyline[] = {
+        {10.0f, 20.0f}, {40.0f, 20.0f}, {40.0f, 50.0f}
+    };
+    backend.addPathContour(path, polyline, 3, false);
+    backend.setPathStrokeWidth(path, 4.0f);
+    backend.setPathStrokeStyle(path, PathStrokeCap::Round,
+                               PathStrokeJoin::Round, 4.0f);
+
+    UIRenderBackend::PathDebugInfo info;
+    CHECK(backend.getPathDebugInfo(path, info));
+    CHECK(info.contourCount == 1u);
+    CHECK(info.openContourCount == 1u);
+    CHECK(info.fillTriangleCount == 0u);
+    CHECK(info.strokeTriangleCount > 8u);
+    // Round caps are tessellated into a finite fan, so the sampled extrema
+    // approach (rather than land exactly on) the analytical radius.
+    CHECK_FLOAT_EQ(info.bounds.minX, 8.0f, 2e-2f);
+    CHECK_FLOAT_EQ(info.bounds.maxY, 52.0f, 2e-2f);
+}
+
 TEST_CASE(vector_path_clockwise_hole_and_nested_clip_emit_ordering_barriers) {
     UIRenderBackend backend;
     backend.setFramebufferSize(640, 480);

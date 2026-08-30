@@ -107,6 +107,7 @@ private:
 
     const Entry* find(PooledRenderTargetHandle handle) const noexcept;
     Entry* find(PooledRenderTargetHandle handle) noexcept;
+    bool evictOldestIdle();
     void trimToBudget();
     void trimToBytes(size_t bytes);
     void destroyEntry(Entry& entry);

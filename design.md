@@ -1,7 +1,7 @@
 # AYRenderer Design
 
 > **文档状态**：2026-08-30 已对齐当前代码；R0–R5 主管线已落地。
-> **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、Present、UI 和 GBufferDebug 已接入 Pass 调度。PostProcess 已改为 FrameGraph `FinalLdrColor` 生产者，Present 成为唯一 backbuffer 边界；Lighting、Transparent、Bloom、DepthHaze、SSAO 与 PostProcess 的静态审核/修复已完成，等待真实 GPU capture 验收。
+> **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、FXAA、ColorGrading、Present、UI 和 GBufferDebug 已接入 Pass 调度。PostProcess 产出 FrameGraph `FinalLdrColor`，FXAA 与 ColorGrading 依次作为可选 LDR 节点提升 `PresentSource`，Present 保持唯一 backbuffer 边界；静态审核/修复已完成，等待真实 GPU capture 验收。
 > **活动执行计划**：[`docs/execution-plan.md`](execution-plan.md)（P0–P6 队列、§5 segfault 约束、§5.4 隔离实验、附录 B/C/D 索引）。本文件是目标架构，与代码不一致时以代码与 execution-plan 为准。
 > **关联文档**：[`docs/gbuffer-current.md`](docs/gbuffer-current.md)（当前 MRT/数据契约）、[`AYShader/design.md` §8.5](../AYShader/design.md)（opaque handle contract）、[`AYShader/README.md`](../AYShader/README.md)。
 
@@ -462,7 +462,7 @@ public:
 | BloomExtract / BloomBlur | 已完成第二轮收敛：完整链门控、当前帧产出契约、RGBA16F、Karis 降采样、5-fetch/axis blur、曝光一致合成 |
 | DepthHaze | 已完成第二轮收敛：全分辨率 HDR HazeColor、Coverage 背景语义、逐帧 fail-close、透明 PBR 雾化与显式 view 顺序；SSAO 已在 Lighting 环境光阶段完成，不在 Haze 内重复合成 |
 | SSAO | 已完成审核与按序修复：RT3 coverage、TBN 旋转核、view-Z 比较、完整链门控、生命周期闭合，且只影响 Lighting 环境光 |
-| PostProcess / Present / UI | PostProcess 写 FrameGraph RGBA8 FinalLdrColor；Present 单独写 backbuffer；UI 最后合成 |
+| PostProcess / FXAA / ColorGrading / Present / UI | PostProcess 写 RGBA8 FinalLdrColor；FXAA 默认开启并可切换；ColorGrading 默认关闭，以 32³ 2D strip LUT 提供 Neutral/Warm/Cool/Cinematic；每个成功节点依次提升 PresentSource，Present 单独写 backbuffer，UI 最后合成 |
 | GBufferDebug | Deferred-only，view 250，默认关闭 |
 
 当前 Forward 默认顺序：
@@ -470,7 +470,8 @@ public:
 ```text
 Shadow → ForwardOpaque → Forward2DOpaque → DepthHaze(no-op)
        → Transparent → BloomExtract → BloomBlur
-       → PostProcess(FinalLdrColor) → Present → UI
+       → PostProcess(FinalLdrColor) → FXAA(FxaaColor)
+       → ColorGrading(ColorGradedColor) → Present → UI
 ```
 
 当前 Deferred opt-in 顺序：
@@ -478,7 +479,8 @@ Shadow → ForwardOpaque → Forward2DOpaque → DepthHaze(no-op)
 ```text
 Shadow → Skybox → GBuffer → SSAO → Lighting → DepthHaze
        → Transparent → BloomExtract → BloomBlur
-       → PostProcess(FinalLdrColor) → Present → UI → GBufferDebug
+       → PostProcess(FinalLdrColor) → FXAA(FxaaColor)
+       → ColorGrading(ColorGradedColor) → Present → UI → GBufferDebug
 ```
 
 ### 8.4 UI 合批与绘制顺序
@@ -786,7 +788,7 @@ include/AYRenderer/
 
 ### Phase R5+ — Deferred 与高级 Pass
 
-- [x] Shadow / GBuffer / Lighting / Transparent / PostProcess / Present
+- [x] Shadow / GBuffer / Lighting / Transparent / PostProcess / FXAA / ColorGrading / Present
 - [x] Bloom / DepthHaze / SSAO / Skybox / GBufferDebug
 - [x] GBuffer v3：帧有效性、资源所有权、逆转置法线、StandardLit/Unlit、AO/Model/Coverage 分离
 - [ ] 真实 D3D11/12 GPU capture：MRT 值、Unlit/Cutout/Skinning/非均匀缩放与带宽
@@ -879,12 +881,21 @@ include/AYRenderer/
 
 ## 16. 变更记录
 
+### 2026-08-30 — FXAA LDR Pass
+
+- 新增 append-only `RenderPassSlot::FXAA=16`、`FgResourceId::FxaaColor=7` 与 `FXAAPass`。默认、Deferred 和两条 Editor 管线固定为 PostProcess → FXAA → Present；旧 custom descriptor 不会被强制加入 FXAA，但显式包含 FXAA 且缺少 Present 时会把 Present 补在 FXAA 后。
+- FXAA 使用稳定 view 17，`RenderViewOrder` 显式将它排在 PostProcess view 15 与 Present view 16 之间，并与 Shadow atlas 18–25、UI Layer 26–249、GBufferDebug 250、Editor 251–254 隔离。
+- 输入是 display-referred RGBA8 FinalLdrColor；shader 实现 FXAA 3.11 风格 luma 方向滤波，所有邻域 UV 显式 clamp，并按当前 viewport 上传 inverse texel size。
+- `PresentSource` 每帧先回退到 FinalLdrColor。FXAA 只有在 geometry/program/binding/FBO/attachment 全部有效并成功 submit 后才标记 FxaaColor 和提升 semantic；任何失败都由 Present 显示原 FinalLdrColor。
+- 新增 `Renderer::setFxaaEnabled/fxaaEnabled`，默认开启且跨 pipeline rebuild 保持。关闭时 FrameGraph 不声明 FxaaColor，不分配目标，也不执行 FXAA draw。
+- `AYRenderer_FXAA` 37/37 通过，覆盖 ABI、四条产品管线顺序、view order、runtime toggle、custom descriptor 兼容、production latch、Noop 与真实 Phoskia/shaderc 编译反射；全量 `AYRenderer_Test` 3525/3525 通过。
+
 ### 2026-08-30 — FinalLdrColor / Present 边界与后处理扩展基线
 
 - PostProcess 从“最终 backbuffer blit”改为 FrameGraph `FinalLdrColor` 生产者：view 15 在 viewport-local RGBA8 目标完成 bloom、exposure、tone-map 与 gamma，并仅在真实 submit 后发布 current-frame production latch。
 - 新增 append-only `RenderPassSlot::Present=15`、`FgResourceId::FinalLdrColor=6` 与 `FgSemantic::PresentSource=4`。旧 custom descriptor 若含 PostProcess 但没有 Present，会在配置时补入兼容边界。
 - PresentPass 使用 view 16，只负责把本帧有效的 PresentSource 拷贝到默认 backbuffer 的 Game View rect。PostProcess 与 Present 共用 `FullscreenPassGeometry` 实现，资源仍由各 Pass 独立拥有和销毁。
-- 默认/Deferred/Editor 管线均固定为 PostProcess → Present；EditorOverlay 位于 Present 后、UI 前。为避开 Shadow 18–25、UI Layer 26–249 与 GBufferDebug 250，Editor orientation axis/selection outline 固定到 view 251/252，并由显式 view order 排在 GBufferDebug 后、UI 前。
+- 默认/Deferred/Editor 管线均固定为 PostProcess → FXAA → Present；EditorOverlay 位于 Present 后、UI 前并仅负责 view 251 的方向轴。选中轮廓在 Transparent 阶段使用 view 253/254：遮罩 Alpha 保存完整投影、RGB 保存场景深度可见覆盖，固定两像素外膨胀只从 Alpha 求边界并以 RGB 抑制遮挡段，避免大型地面产生内部伪轮廓或外框穿透前景。view 252 保留兼容用途。显式 view order 同时避开 FXAA 17、Shadow 18–25、UI Layer 26–249 与 GBufferDebug 250。
 - FrameGraph 新增通用 `markProduced/producedThisFrame` latch 与 semantic 级查询，`beginFrame` 与 shutdown 清零，防止复用物理 handle 时 Present 读取上一帧目标。测试覆盖 ABI、管线顺序、view 区间、Noop、latch reset 和生产 Present shader 编译。
 - MSVC Debug 定向重编后 `AYRenderer_Test` 为 3429/3429；`AYEditorShell_Demo` 完成重新链接。为规避历史 stale `.obj` 问题，本轮只清理了 `AYRenderer_Test` 对象目录，没有执行全引擎 clean。
 - 该边界为 FXAA、ColorGrading 等后 tone-map Pass 提供稳定插入点；TAA/MotionBlur/DOF 仍需先完成 motion/history/depth 契约，不在本刀混入。
@@ -987,6 +998,7 @@ include/AYRenderer/
 - 参数入口和逐帧广播统一清洗：strength 限制到 `[0,1]`，radius/bias 拒绝负值与 NaN/Inf，逐帧 bias 再限制到 radius。完整 gate 要求 SSAO/GBuffer/Lighting 三个 Pass 均存在且启用、后端与 viewport 有效、strength/radius 非零；否则不声明 SSAOTexture。
 - 合成所有权收敛到 Lighting：coverage-aware 五点过滤后，AO 只乘 StandardLit ambient/IBL；direct、emissive 与 Unlit 保持不变。DepthHaze/PostProcess 删除 SSAO sampler、uniform 与重复滤波，避免整屏乘暗和有雾/无雾路径不一致。
 - `producedThisFrame` 在每帧和每次 execute 起始清零，仅真实 submit 后置位。管线重配 `pipeline.clear()` 前和 Renderer shutdown/adapter teardown 前都显式销毁 SSAO 全屏 VB/IB 与 program/binding，关闭重启后的 stale handle/ABI 断言窗口。
+- D3D11 复核发现关闭 SSAO 时，中央 FrameGraph gate 会正确省略 `SSAOTexture`，但 Deferred 管线仍会调度已挂载的 SSAOPass，旧实现先 resolve 目标再检查完整链状态，从而持续误报 `SSAOTexture resolve invalid`。现由 FrameGraph 与 Pass 共享完整 `selectSsaoStage()`：关闭/零强度/零半径、GBuffer/Lighting 缺失或禁用、零视口均在 resolve 前静默返回；开启后日志已确认 `SSAOPass first dispatch`，目标分配本身正常。
 - 测试改为直接消费生产 shader：覆盖参数非有限值、完整链 truth table、RT3 coverage、TBN、view-Z、ambient-only 所有权、Haze/PP 无重复 SSAO、cache key、latch 与 teardown 顺序，并实际执行 Phoskia + Linux GLSL 430 编译；不再用 `CHECK(true)` 或测试内复制 gate 形成假绿。
 - 修改 `PostProcessPass` 私有布局后的增量产物曾在 `FinalPPPass_S1c` 触发 `Stack around the variable 'pass' was corrupted`；同一配置完整 clean rebuild 后该套件 46/46 正常退出，确认是新旧 `.obj` 混用导致的 ABI 污染，不是 SSAO shader 越界。随后 SSAO 161/161、Lighting 32/32、DepthHaze 64/64 定向回归通过，最终 MSVC Debug 全量 `AYRenderer_Test` 为 3095/3095，未再出现断言窗或异常退出。
 - 暂不实施的可选优化：half-resolution + depth/normal-aware bilateral upsample、`R8` 单通道目标、由 depth 重建 view position、蓝噪声/temporal accumulation 与 GTAO。先用 D3D11/12 capture 测量 SSAO 带宽、边缘 halo、噪声和参数尺度，再按收益选择，避免在无 GPU 基线时同时改变格式、分辨率和算法。
@@ -1003,6 +1015,18 @@ include/AYRenderer/
 - 测试不再维护 PostProcess Shader 的本地镜像或用故意编译失败代替生产编译；主/回退源码直接从运行时代码导出，覆盖 binding、cache key、参数边界、共享路由、bounded retry、teardown 顺序与 Forward touch。
 - PostProcess 定向回归全部通过：R51 Smoke 2/2、R51 62/62、FinalPP S1c 54/54、P0 13/13、F5 27/27、R5Plus 19/19、B6 SourceFbo 9/9，并通过相关 Bloom、DepthHaze、SSAO 与 AuditP5 回归。最初 3 个 UI Layer 容量断言把“每帧 224 个 offscreen pass”误写成“同时持有 225 个共享 framebuffer”；改为在同一有效 Layer 上隔离验证 view 分配并锁定 26/249/224 常量后，MSVC Debug 全量为 `3211 / 3211`。
 - 暂不加入 dithering、精确 sRGB OETF、HDR swapchain 输出、额外 tone-map 算法或多级 bloom；先完成 D3D11/12 真机 Shader 编译与 RenderDoc capture，再按 banding、色彩管理和性能数据决定。
+
+### 2026-08-30 — LUT ColorGrading Pass
+
+- 新增 append-only `RenderPassSlot::ColorGrading=17` 与 `FgResourceId::ColorGradedColor=8`，固定在 `PostProcess → FXAA → ColorGrading → Present`。复用已释放的 legacy view 4，并通过显式 `RenderViewOrder` 排在 view 17 与 view 16 之间，不侵占 UI 26–255 区间。
+- LUT 使用 portable `texture2d`：32³ RGB cube 按 blue slice 横向展开为 `1024×32 RGBA8`，R/G 由硬件双线性过滤，B 在 shader 中对相邻 slice 显式插值。内置 Neutral/Warm/Cool/Cinematic 四种程序化预设；Renderer 默认关闭、Warm、0.75，强度和非法枚举均在公开入口清洗。
+- FrameGraph 只在 enabled、非 Neutral 且强度大于零时声明 ColorGradedColor。Pass 读取当前 `PresentSource`，因此 FXAA 关闭/失败会自然回退 FinalLdrColor；仅在 LUT、程序、binding、geometry 与 submit 全部成功后标记本帧产物并提升 semantic。
+- LUT 仅在预设变化时重建；fullscreen geometry、LUT texture、program/binding 在管线重建和 shutdown 的 adapter teardown 前显式销毁，shader 获取失败使用 120 帧有界重试。当前未提供外部 `.cube`/图片 LUT 资源导入。
+- 视觉验证修复将 Neutral 明确标为 bypass；Editor 从 Neutral 开启时自动提升到 Warm，并迁移历史 `enabled + Neutral` 偏好。Pass 增加首次成功 dispatch 记录，并把 PresentSource 与 ColorGradedColor resolve 失败拆成独立诊断。
+- 真实 D3D11 日志曾显示 SSAOTexture 与 ColorGradedColor 同时 resolve 失败。共享 RenderTargetPool 现于底层 framebuffer 创建失败时，只淘汰一个已越过两帧 quarantine 的 LRU 空闲目标并重试一次；不会回收 active lease，也不会破坏 in-flight 安全边界。定向重编 stale `FgResource.cpp.obj` 与 `RenderPipeline.cpp.obj` 后 ColorGradedColor 分配恢复；SSAO 报告随后确认是关闭状态的调度误报，开启时目标可正常分配和 dispatch。
+- D3D11 随后暴露出 Linux/GLSL 门禁未覆盖的 shader 错误：Phoskia HLSL emitter 将 `clamp(vec3, vec3, vec3)` 结果错误推断成标量，使 `scaled.z` 在 `s_5_0` 编译失败。LUT 坐标现拆为 `scaledX/Y/Z` 标量，cache key 提升为 `color_grading_lut2d_32_v2`，并新增 Windows `s_5_0` 实编译回归。
+- `Test_ColorGrading` 覆盖 ABI、产品管线/view 顺序、参数持久化与清洗、自定义管线兼容、LUT 布局、semantic 成功后提升、Noop/双重销毁、GLSL 与 D3D `s_5_0` 生产 Phoskia 编译及 binding 反射；定向 55/55，MSVC Debug `AYRenderer_Test` 全量 3623/3623。
+- 增量构建先后捕获到 `AYRenderer.cpp.obj`、`FgResource.cpp.obj` 与 `RenderPipeline.cpp.obj` 早于对应私有头，旧对象混用还会触发测试栈损坏。最终只清理并重建 `AYRenderer` 库及 `AYRenderer_Test` 对象目录，未清全引擎；全量回归不再出现内存写入断言。新 Demo 运行日志已确认 `[ColorGradingPass] first dispatch ... preset=3 strength=0.74`。
 
 ### 2026-07 — 引擎闭环（R4 + Engine）
 
@@ -1032,4 +1056,4 @@ include/AYRenderer/
 
 ### 下一步
 
-FinalLdrColor/Present 边界验证通过后，先接入一个低风险后 tone-map Pass（建议 FXAA 或 LUT ColorGrading）验证可扩展链路；并行保留 GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess 与 Present 的 D3D11/12 GPU capture 门禁。历史类效果在 motion/history 契约完成后再进入。
+LUT ColorGrading 已接入 `PostProcess → FXAA → ColorGrading → Present` 扩展链路；下一步建议先建立 Motion Vector、相机 jitter 与 history 失效契约，再选择 TAA 或 Motion Blur。并行保留 GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、FXAA、ColorGrading 与 Present 的 D3D11/12 GPU capture 门禁。

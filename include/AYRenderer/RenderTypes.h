@@ -307,12 +307,12 @@ enum class RenderPassSlot : uint8_t {
     // Default OFF; append-only ABI value 12 must not be reordered.
     GBufferDebug = 12,
 
-    // Editor selection overlay (2026-07-25) — append-only ABI value 13.
-    // Inverted-hull selection rim drawn AFTER Present (stable color,
-    // no bloom/tonemap) and BEFORE UI. Omitted from makeDefault() /
-    // makeDeferred(); editor hosts opt in via makeEditorForward() /
-    // makeEditorDeferred(). Views 251/252 (Present=16,
-    // GBufferDebug=250, UI=255).
+    // Editor overlay (2026-07-25) — append-only ABI value 13. It owns the
+    // orientation widget on view 251 after Present. Mesh selection itself is
+    // generated earlier by TransparentPass as a private silhouette mask plus
+    // screen-space dilation on views 253/254, so scale/distance cannot
+    // fragment the rim. Omitted from makeDefault() / makeDeferred(); editor
+    // hosts opt in via makeEditorForward() / makeEditorDeferred().
     EditorOverlay = 13,
 
     // 2D opaque lane (2026-08-11, CM-1) — append-only ABI value 14.
@@ -333,6 +333,23 @@ enum class RenderPassSlot : uint8_t {
     // using view 16. Cheap post-tonemap effects can now be inserted between
     // these slots without reopening FinalPP's backbuffer contract.
     Present = 15,
+
+    // Display-referred fast approximate anti-aliasing between PostProcess and
+    // Present. Append-only ABI value 16; stable bgfx view id 17 is explicitly
+    // ordered before Present view 16.
+    FXAA = 16,
+
+    // Display-referred 2D LUT color grading after FXAA and before Present.
+    // Append-only ABI value 17; renderer defaults disabled so existing hosts
+    // do not allocate its target or procedural LUT until explicitly enabled.
+    ColorGrading = 17,
+};
+
+enum class ColorGradingPreset : uint8_t {
+    Neutral   = 0,
+    Warm      = 1,
+    Cool      = 2,
+    Cinematic = 3,
 };
 
 // §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was

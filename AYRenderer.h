@@ -317,6 +317,22 @@ public:
     };
     void setPostProcessTonemapMode(TonemapMode mode);
 
+    // Display-referred FXAA between final tone-map/gamma and presentation.
+    // Enabled by default; disabling keeps PresentSource on FinalLdrColor and
+    // avoids both the transient target and fullscreen draw.
+    void setFxaaEnabled(bool enabled);
+    bool fxaaEnabled() const noexcept;
+
+    // Display-referred 32^3 LUT grading after FXAA. The LUT is represented as
+    // a portable 2D strip so D3D11/D3D12 share one shader/resource path.
+    // Defaults disabled, strength 0.75, preset Warm.
+    void setColorGradingEnabled(bool enabled);
+    bool colorGradingEnabled() const noexcept;
+    void setColorGradingStrength(float strength);
+    float colorGradingStrength() const noexcept;
+    void setColorGradingPreset(ColorGradingPreset preset);
+    ColorGradingPreset colorGradingPreset() const noexcept;
+
     // §S4d — Depth-aware haze knobs → FrameContext each frame.
     // Renderer defaults: enabled=false, strength=0 (K3 zero-behavior).
     // Editor may enable with density≈0.04 and fogColor≈(0.7,0.75,0.8).

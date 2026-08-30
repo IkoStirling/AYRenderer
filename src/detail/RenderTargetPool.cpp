@@ -62,6 +62,16 @@ PooledRenderTargetHandle RenderTargetPool::acquire(const RenderTargetKey& key,
 
     bgfx::FrameBufferHandle framebuffer = _adapter->createFrameBuffer(
         key.width, key.height, key.colorFormat, key.withDepth, key.pointSampled);
+    // A shared pool can be below its byte budget and still exhaust bgfx's
+    // finite framebuffer/texture handle tables after several viewport or UI
+    // layer resizes. Exact-key lookup cannot reuse differently shaped idle
+    // targets, so reclaim one target whose in-flight quarantine has expired
+    // and retry once before degrading the requesting pass.
+    if (!BGFXAdapter::isValid(framebuffer) && evictOldestIdle()) {
+        framebuffer = _adapter->createFrameBuffer(
+            key.width, key.height, key.colorFormat, key.withDepth,
+            key.pointSampled);
+    }
     if (!BGFXAdapter::isValid(framebuffer)) {
         return {};
     }
@@ -211,21 +221,25 @@ void RenderTargetPool::trimToBudget()
 
 void RenderTargetPool::trimToBytes(size_t bytes)
 {
-    while (_allocatedBytes > bytes) {
-        Entry* victim = nullptr;
-        for (Entry& entry : _entries) {
-            if (entry.leased || entry.reusableAfterFrame > _frameIndex
-                || !BGFXAdapter::isValid(entry.framebuffer)) {
-                continue;
-            }
-            if (victim == nullptr || entry.lastUsedFrame < victim->lastUsedFrame) {
-                victim = &entry;
-            }
+    while (_allocatedBytes > bytes && evictOldestIdle()) {}
+}
+
+bool RenderTargetPool::evictOldestIdle()
+{
+    Entry* victim = nullptr;
+    for (Entry& entry : _entries) {
+        if (entry.leased || entry.reusableAfterFrame > _frameIndex
+            || !BGFXAdapter::isValid(entry.framebuffer)) {
+            continue;
         }
-        if (victim == nullptr) break;
-        destroyEntry(*victim);
-        ++_evictions;
+        if (victim == nullptr || entry.lastUsedFrame < victim->lastUsedFrame) {
+            victim = &entry;
+        }
     }
+    if (victim == nullptr) return false;
+    destroyEntry(*victim);
+    ++_evictions;
+    return true;
 }
 
 void RenderTargetPool::destroyEntry(Entry& entry)

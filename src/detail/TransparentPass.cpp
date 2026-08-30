@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ayt::render::detail
@@ -93,37 +94,79 @@ uint64_t transparentDrawState(BlendMode blendMode,
     return state;
 }
 
-uint64_t selectionDepthState(bool doubleSided,
-                             bool reverseWinding) noexcept
+uint64_t selectionMaskState(bool doubleSided,
+                            bool reverseWinding) noexcept
 {
-    uint64_t state = BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LEQUAL;
+    uint64_t state = BGFX_STATE_WRITE_A
+                   | BGFX_STATE_DEPTH_TEST_ALWAYS;
     if (!doubleSided) {
         state |= reverseWinding ? kCullFrontFaces : kCullBackFaces;
     }
     return state;
 }
 
-uint64_t selectionHullState(bool reverseWinding) noexcept
+uint64_t selectionVisibleMaskState(bool doubleSided,
+                                   bool reverseWinding) noexcept
+{
+    uint64_t state = BGFX_STATE_WRITE_RGB
+                   | BGFX_STATE_DEPTH_TEST_LEQUAL;
+    if (!doubleSided) {
+        state |= reverseWinding ? kCullFrontFaces : kCullBackFaces;
+    }
+    return state;
+}
+
+uint64_t selectionCompositeState() noexcept
 {
     return BGFX_STATE_WRITE_RGB
          | BGFX_STATE_WRITE_A
-         | BGFX_STATE_DEPTH_TEST_LESS
-         | (reverseWinding ? kCullBackFaces : kCullFrontFaces);
+         | BGFX_STATE_BLEND_ALPHA
+         | BGFX_STATE_DEPTH_TEST_ALWAYS;
 }
 
-ayt::math::Float4x4 makeSelectionHullWorld(const DrawItem& item,
-                                           float expansion) noexcept
-{
-    // Older hosts may already provide a padded world plus the original world
-    // in outlineDepthWorld. Newer editor selection never mutates Transform;
-    // expand locally around the mesh origin instead.
-    if (item.hasOutlineDepthWorld) {
-        return item.world;
+namespace {
+
+constexpr const char* kSelectionOutlinePhoskiaSource = R"(
+material EditorSelectionOutline {
+    texture2d selectionMask
+    uniform vec4 selectionTexelSize
+    vertex {
+        in  pos : position
+        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
+        return vec4(pos.x, pos.y, 0.0, 1.0)
     }
-    const float safeExpansion = std::isfinite(expansion)
-        ? std::max(1.0f, expansion) : 1.0f;
-    return item.world * ayt::math::Float4x4::scaling(
-        ayt::math::FVector3(safeExpansion, safeExpansion, safeExpansion));
+    fragment {
+        in  vUv : texcoord
+        let uv = vec2(vUv.x, 1.0 - vUv.y)
+        let texel = selectionTexelSize.xy * 2.0
+        let center = sample(selectionMask, uv).w
+        let s0 = sample(selectionMask, uv + vec2( texel.x, 0.0))
+        let s1 = sample(selectionMask, uv + vec2(-texel.x, 0.0))
+        let s2 = sample(selectionMask, uv + vec2(0.0,  texel.y))
+        let s3 = sample(selectionMask, uv + vec2(0.0, -texel.y))
+        let s4 = sample(selectionMask, uv + vec2( texel.x,  texel.y))
+        let s5 = sample(selectionMask, uv + vec2(-texel.x,  texel.y))
+        let s6 = sample(selectionMask, uv + vec2( texel.x, -texel.y))
+        let s7 = sample(selectionMask, uv + vec2(-texel.x, -texel.y))
+        let neighbor = max(max(max(s0.w, s1.w), max(s2.w, s3.w)),
+                           max(max(s4.w, s5.w), max(s6.w, s7.w)))
+        let visibleNeighbor = max(max(max(s0.x, s1.x), max(s2.x, s3.x)),
+                                  max(max(s4.x, s5.x), max(s6.x, s7.x)))
+        let edge = clamp(neighbor - center, 0.0, 1.0)
+                 * clamp(visibleNeighbor, 0.0, 1.0)
+        return vec4(1.0, 0.55, 0.12, edge)
+    }
+}
+)";
+
+constexpr const char* kSelectionOutlineCacheKey =
+    "editor_selection_mask_dilate_2px_v2_visible_gate";
+
+} // namespace
+
+const char* selectionOutlinePhoskiaSourceForTests() noexcept
+{
+    return kSelectionOutlinePhoskiaSource;
 }
 
 namespace {
@@ -297,18 +340,16 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
         }
     }
 
-    if (mode == SubmitMode::SelectionHull) {
-        // Override both common texture paths and the material tint after its
-        // own slots were uploaded. This keeps the rim readable and prevents a
-        // selected material from turning the complete object white/red/black.
+    if (mode == SubmitMode::SelectionMask) {
+        // Produce an opaque white visibility mask regardless of the selected
+        // material's albedo/opacity. The mask is never shown directly; a
+        // fullscreen dilation pass turns only its outer edge orange.
         tryBindWhiteTexture(material.shader, adapter, "baseColorTexture", false);
         tryBindWhiteTexture(material.shader, adapter, "albedoMap", false);
         tryBindWhiteTexture(material.shader, adapter, "opacityTexture", false);
         if (material.colorBinding != shader::InvalidBinding
             && material.shader.hasUniformBinding(material.colorBinding)) {
-            constexpr float selectionColor[4] = {
-                1.0f, 0.55f, 0.12f, 1.0f
-            };
+            constexpr float selectionColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
             material.shader.setUniform(material.colorBinding,
                                        selectionColor,
                                        sizeof(selectionColor));
@@ -384,8 +425,115 @@ bgfx::FrameBufferHandle TransparentPass::ensureDeferredCompositeFbo(
     return _deferredCompositeFbo;
 }
 
+void TransparentPass::destroySelectionTarget(BGFXAdapter& adapter) noexcept
+{
+    if (BGFXAdapter::isValid(_selectionMaskFbo)) {
+        adapter.destroy(_selectionMaskFbo);
+    }
+    if (BGFXAdapter::isValid(_selectionMaskTexture)) {
+        adapter.destroy(_selectionMaskTexture);
+    }
+    _selectionMaskFbo = BGFX_INVALID_HANDLE;
+    _selectionMaskTexture = BGFX_INVALID_HANDLE;
+    _selectionSceneDepth = BGFX_INVALID_HANDLE;
+    _selectionWidth = 0;
+    _selectionHeight = 0;
+}
+
+void TransparentPass::ensureSelectionCompositeProgram(
+    shader::ShaderResourcePool& pool)
+{
+    if (_selectionCompositeProgram.isValid()) {
+        return;
+    }
+    if (_selectionProgramRetryFrames > 0) {
+        --_selectionProgramRetryFrames;
+        return;
+    }
+
+    shader::ShaderResource program = pool.acquire(
+        kSelectionOutlinePhoskiaSource, kSelectionOutlineCacheKey);
+    const shader::BindingId maskBinding = program.isValid()
+        ? program.getTextureBinding("selectionMask")
+        : shader::InvalidBinding;
+    const shader::BindingId texelBinding = program.isValid()
+        ? program.getUniformBinding("selectionTexelSize")
+        : shader::InvalidBinding;
+    if (!program.isValid()
+        || maskBinding == shader::InvalidBinding
+        || texelBinding == shader::InvalidBinding) {
+        _selectionProgramRetryFrames = 120;
+        std::fprintf(stderr,
+                     "[TransparentPass] selection-mask composite shader "
+                     "unavailable; retrying in 120 frames.\n");
+        for (const std::string& error : pool.lastCompileErrors()) {
+            std::fprintf(stderr, "[TransparentPass]   %s\n", error.c_str());
+        }
+        return;
+    }
+
+    _selectionCompositeProgram = std::move(program);
+    _selectionMaskBinding = maskBinding;
+    _selectionTexelSizeBinding = texelBinding;
+    _selectionProgramRetryFrames = 0;
+}
+
+bool TransparentPass::ensureSelectionResources(
+    PassExecContext& ctx,
+    bgfx::TextureHandle sceneDepth)
+{
+    BGFXAdapter& adapter = ctx.adapter;
+    if (!BGFXAdapter::isValid(sceneDepth)
+        || ctx.viewportWidth == 0 || ctx.viewportHeight == 0) {
+        return false;
+    }
+
+    const bool targetChanged = _selectionWidth != ctx.viewportWidth
+        || _selectionHeight != ctx.viewportHeight
+        || !BGFXAdapter::isValid(_selectionSceneDepth)
+        || _selectionSceneDepth.idx != sceneDepth.idx;
+    if (targetChanged) {
+        destroySelectionTarget(adapter);
+    }
+
+    if (!BGFXAdapter::isValid(_selectionMaskTexture)) {
+        const uint64_t flags = BGFX_TEXTURE_RT
+            | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
+            | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+        _selectionMaskTexture = adapter.createDynamicTexture2D(
+            ctx.viewportWidth, ctx.viewportHeight, flags);
+        if (BGFXAdapter::isValid(_selectionMaskTexture)) {
+            _selectionMaskFbo = adapter.createBorrowedColorDepthFrameBuffer(
+                _selectionMaskTexture, sceneDepth);
+        }
+        if (!BGFXAdapter::isValid(_selectionMaskTexture)
+            || !BGFXAdapter::isValid(_selectionMaskFbo)) {
+            destroySelectionTarget(adapter);
+            return false;
+        }
+        _selectionSceneDepth = sceneDepth;
+        _selectionWidth = ctx.viewportWidth;
+        _selectionHeight = ctx.viewportHeight;
+    }
+
+    if (!_selectionCompositeGeometry.ensure(adapter)) {
+        return false;
+    }
+    ensureSelectionCompositeProgram(ctx.pool);
+    return _selectionCompositeProgram.isValid()
+        && _selectionMaskBinding != shader::InvalidBinding
+        && _selectionTexelSizeBinding != shader::InvalidBinding;
+}
+
 void TransparentPass::destroyResources(BGFXAdapter& adapter) noexcept
 {
+    destroySelectionTarget(adapter);
+    _selectionCompositeGeometry.destroy(adapter);
+    _selectionCompositeProgram.reset();
+    _selectionMaskBinding = shader::InvalidBinding;
+    _selectionTexelSizeBinding = shader::InvalidBinding;
+    _selectionProgramRetryFrames = 0;
+
     if (BGFXAdapter::isValid(_deferredCompositeFbo)) {
         adapter.destroy(_deferredCompositeFbo);
     }
@@ -432,8 +580,8 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     const bool outlineEnabled = outlineEnv.empty() || outlineEnv != "0";
 
     // Filter Alpha-only before sorting, but never remove a selected Alpha
-    // surface from its normal draw. Selection is an additional depth-aware
-    // hull below, not a replacement material pass.
+    // surface from its normal draw. Selection is an additional silhouette
+    // mask, not a replacement material pass.
     std::vector<TransparentSortEntry> sortedItems;
     std::vector<const DrawItem*> outlineItems;
     sortedItems.reserve(items.size());
@@ -540,40 +688,84 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         }
     }
 
-    // Draw selection before PostProcess/Present while this view still owns
-    // both the scene color and its depth attachment. Transparent selections
-    // need the first depth-only submission because their normal surface does
-    // not write Z; opaque selections harmlessly refresh the existing depth.
-    for (const DrawItem* pItem : outlineItems) {
-        const auto matIt = ctx.materials.find(pItem->material.id);
-        if (matIt == ctx.materials.end()) {
-            continue;
-        }
-        const GpuMaterial& material = matIt->second;
-        const PackedShadowAtlas& packedShadows =
-            receivesShadow(pItem->shadowFlags)
-                ? receiverShadows
-                : litFallbackShadows;
+    // Alpha stores the selected mesh's complete projected silhouette. RGB then
+    // stores only the portion that passes the live scene depth test. The
+    // composite derives its edge exclusively from alpha and uses RGB only as
+    // a visibility gate. Foreground objects therefore neither punch false
+    // internal borders nor allow the selected border to show through them.
+    // Screen-space dilation remains continuous and scale-independent.
+    uint32_t selectionMaskDraws = 0;
+    uint32_t selectionVisibleMaskDraws = 0;
+    const bgfx::TextureHandle sceneDepth = BGFXAdapter::isValid(compositeFbo)
+        ? adapter.getFboAttachment(compositeFbo, 1)
+        : bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    if (!outlineItems.empty()
+        && ensureSelectionResources(ctx, sceneDepth)) {
+        constexpr uint8_t maskViewId = kSelectionMaskViewId;
+        adapter.setViewFrameBuffer(maskViewId, _selectionMaskFbo);
+        adapter.setViewRect(maskViewId, 0, 0, viewportWidth, viewportHeight);
+        adapter.setViewTransform(maskViewId, frame.view, frame.projection);
+        adapter.setViewMode(maskViewId, bgfx::ViewMode::Sequential);
+        adapter.setViewClearRaw(maskViewId, BGFX_CLEAR_COLOR,
+                                0x00000000u, 1.0f, 0);
+        adapter.touch(maskViewId);
 
-        DrawItem depthItem = *pItem;
-        depthItem.world = pItem->hasOutlineDepthWorld
-            ? pItem->outlineDepthWorld : pItem->world;
-        adapter.setState(selectionDepthState(
-            material.doubleSided, reversesWinding(depthItem.world)));
-        const SubmitResult depthResult = submitItem(
-            adapter, ctx, frame, depthItem, viewId,
-            packedLights, packedShadows, SubmitMode::SelectionDepth);
-        if (depthResult.accepted) {
-            ++drawCount;
+        for (const DrawItem* pItem : outlineItems) {
+            const auto matIt = ctx.materials.find(pItem->material.id);
+            if (matIt == ctx.materials.end()) {
+                continue;
+            }
+            const GpuMaterial& material = matIt->second;
+            const PackedShadowAtlas& packedShadows =
+                receivesShadow(pItem->shadowFlags)
+                    ? receiverShadows
+                    : litFallbackShadows;
+
+            DrawItem maskItem = *pItem;
+            maskItem.world = pItem->hasOutlineDepthWorld
+                ? pItem->outlineDepthWorld : pItem->world;
+            adapter.setState(selectionMaskState(
+                material.doubleSided, reversesWinding(maskItem.world)));
+            const SubmitResult maskResult = submitItem(
+                adapter, ctx, frame, maskItem, maskViewId,
+                packedLights, packedShadows, SubmitMode::SelectionMask);
+            if (maskResult.accepted) {
+                ++selectionMaskDraws;
+                ++drawCount;
+            }
+
+            adapter.setState(selectionVisibleMaskState(
+                material.doubleSided, reversesWinding(maskItem.world)));
+            const SubmitResult visibleMaskResult = submitItem(
+                adapter, ctx, frame, maskItem, maskViewId,
+                packedLights, packedShadows, SubmitMode::SelectionMask);
+            if (visibleMaskResult.accepted) {
+                ++selectionVisibleMaskDraws;
+                ++drawCount;
+            }
         }
 
-        DrawItem hullItem = *pItem;
-        hullItem.world = makeSelectionHullWorld(*pItem);
-        adapter.setState(selectionHullState(reversesWinding(hullItem.world)));
-        const SubmitResult hullResult = submitItem(
-            adapter, ctx, frame, hullItem, viewId,
-            packedLights, packedShadows, SubmitMode::SelectionHull);
-        if (hullResult.accepted) {
+        if (selectionMaskDraws != 0 && selectionVisibleMaskDraws != 0) {
+            configureFullscreenPassView(
+                adapter, kSelectionCompositeViewId, compositeFbo,
+                0, 0, viewportWidth, viewportHeight);
+            _selectionCompositeGeometry.bind(adapter);
+            _selectionCompositeProgram.setTexture(
+                0, _selectionMaskBinding,
+                toShaderTexture(_selectionMaskTexture));
+            const float texelSize[4] = {
+                1.0f / static_cast<float>(viewportWidth),
+                1.0f / static_cast<float>(viewportHeight),
+                0.0f, 0.0f
+            };
+            _selectionCompositeProgram.setUniform(
+                _selectionTexelSizeBinding, texelSize, sizeof(texelSize));
+            adapter.setState(selectionCompositeState());
+
+            ayt::shader::DrawCallContext compositeDraw;
+            compositeDraw.viewId = kSelectionCompositeViewId;
+            compositeDraw.state = 0;
+            _selectionCompositeProgram.submit(compositeDraw);
             ++drawCount;
         }
     }
@@ -582,8 +774,10 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     if (s_routeLogFrame < 8) {
         std::fprintf(stderr,
                      "[TransparentRoute] frame=%u items=%zu candidates=%zu "
-                     "draws=%u deferred=%d borrowedDepth=%d\n",
+                     "draws=%u maskDraws=%u visibleMaskDraws=%u "
+                     "deferred=%d borrowedDepth=%d\n",
                      s_routeLogFrame, items.size(), sortedItems.size(), drawCount,
+                     selectionMaskDraws, selectionVisibleMaskDraws,
                      deferredLitComposite ? 1 : 0,
                      borrowedDepth ? 1 : 0);
         ++s_routeLogFrame;

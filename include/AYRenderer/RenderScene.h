@@ -42,11 +42,11 @@ struct DrawItem {
     uint32_t                   jointCount   = 0;
     int32_t                    sortKey      = 0;
     ShadowFlags                shadowFlags  = kShadowCastAndReceive;
-    // When true, TransparentPass draws a depth-aware inverted hull before
-    // PostProcess while scene color and depth are still paired.
+    // When true, TransparentPass draws the mesh's projected silhouette and
+    // composites a fixed-width screen-space outer border before PostProcess.
     bool                       outlineHull  = false;
-    // Unexpanded mesh world for outline depth prepass. Required when
-    // the selected surface never wrote depth (transparent objects).
+    // Original mesh world retained for hosts that still pass a legacy padded
+    // selection world. New editor hosts leave this disabled.
     bool                       hasOutlineDepthWorld = false;
     ayt::math::Float4x4        outlineDepthWorld = ayt::math::Float4x4::identity();
     // CM-1 (2026-08-11) — per-instance 2D data. Append-only borrowed

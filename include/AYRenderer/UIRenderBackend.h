@@ -53,9 +53,11 @@ public:
     //  13 = DepthHaze, 14 = SSAO (ordered before Lighting)
     //  15 = PostProcess → FrameGraph FinalLdrColor
     //  16 = Present → backbuffer panel (Forward + Deferred)
+    //  17 = FXAA offscreen LDR filter (ordered before Present)
     //  18–25 = Shadow atlas slots
     //  26–249 = retained UI Layer / generic offscreen paint targets
-    //  250 = GBufferDebug, 251/252 = EditorOverlay axis/selection
+    //  250 = GBufferDebug, 251/252 = EditorOverlay axis/compatibility
+    //  253/254 = selection visibility mask / screen-space composite
     //  255 = UI chrome / menus (fixed high slot — insert Post passes
     //        without reshuffling UI; must stay after presentation overlays)
     static constexpr uint8_t kViewId = 255;
@@ -231,9 +233,15 @@ public:
     void addPathPolygon(PathHandle path, const ayt::math::FVector2* points,
                         int count,
                         PathWinding winding = PathWinding::CounterClockwise) override;
+    void addPathContour(PathHandle path, const ayt::math::FVector2* points,
+                        int count, bool closed,
+                        PathWinding winding = PathWinding::CounterClockwise) override;
     void setPathFillColor(PathHandle path, const ayt::math::FVector4& color) override;
     void setPathStrokeColor(PathHandle path, const ayt::math::FVector4& color) override;
     void setPathStrokeWidth(PathHandle path, float width) override;
+    void setPathStrokeStyle(PathHandle path, PathStrokeCap cap,
+                            PathStrokeJoin join,
+                            float miterLimit = 4.0f) override;
     void drawPath(PathHandle path,
                   PathFillMode mode = PathFillMode::Fill) override;
     void pushPathClip(PathHandle path) override;

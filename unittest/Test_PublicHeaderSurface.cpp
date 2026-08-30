@@ -51,6 +51,20 @@ TEST_CASE(public_renderer_lighting_enabled_getter_resolves)
     CHECK((renderer.*fn)() == true);   // after Deferred config: Lighting slot mounted
 }
 
+TEST_CASE(public_renderer_fxaa_toggle_symbols_resolve)
+{
+    using Setter = void (ayt::render::Renderer::*)(bool);
+    using Getter = bool (ayt::render::Renderer::*)() const noexcept;
+    Setter setter = &ayt::render::Renderer::setFxaaEnabled;
+    Getter getter = &ayt::render::Renderer::fxaaEnabled;
+    CHECK(setter != nullptr);
+    CHECK(getter != nullptr);
+    ayt::render::Renderer renderer;
+    CHECK((renderer.*getter)());
+    (renderer.*setter)(false);
+    CHECK_FALSE((renderer.*getter)());
+}
+
 // §P5.5 C (2026-07-23) — Light POD size budget guard. Widened from
 // ≤96 to ≤128 with the addition of castShadow + shadowBias fields
 // (~80B actual). The static_assert in AYRenderer/RenderScene.h:256 is the

@@ -80,7 +80,8 @@ TEST_CASE(f1_fgresource_id_enum_unique_and_count) {
     // without bumping the sentinel would fail loudly.
     CHECK(static_cast<uint8_t>(FgResourceId::SSAOTexture) == 5);
     CHECK(static_cast<uint8_t>(FgResourceId::FinalLdrColor) == 6);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count)       == 7);
+    CHECK(static_cast<uint8_t>(FgResourceId::FxaaColor)   == 7);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count)       == 9);
 }
 
 TEST_CASE(f1_fgsemantic_enum_values_locked) {

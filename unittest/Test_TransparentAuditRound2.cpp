@@ -2,16 +2,24 @@
 
 #include "AYRenderer/PbrShaderSources.h"
 #include "AYRenderer/RenderScene.h"
+#include "AYShader/BGFXConverter.h"
+#include "AYShader/Phoskia.h"
 
 #include "detail/FrameContext.h"
+#include "detail/RenderViewOrder.h"
 #include "detail/SceneLighting.h"
 #include "detail/TransparentPass.h"
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include <string>
 #include <vector>
+
+#ifndef AY_SHADER_SHADERC_HINT
+#  define AY_SHADER_SHADERC_HINT ""
+#endif
 
 TEST_SUITE(AYRenderer_TransparentAuditRound2)
 
@@ -81,35 +89,105 @@ TEST_CASE(alpha_state_reads_depth_never_writes_it_and_uses_correct_over_alpha)
     CHECK((state & BGFX_STATE_DEPTH_TEST_ALWAYS) == 0u);
 }
 
-TEST_CASE(selection_hull_uses_scene_depth_and_preserves_object_translation)
+TEST_CASE(selection_mask_uses_full_silhouette_and_screen_space_composite)
 {
-    using ayt::render::DrawItem;
-    using ayt::render::detail::selectionDepthState;
-    using ayt::render::detail::selectionHullState;
-    using ayt::render::detail::makeSelectionHullWorld;
+    using ayt::render::detail::selectionMaskState;
+    using ayt::render::detail::selectionVisibleMaskState;
+    using ayt::render::detail::selectionCompositeState;
+    using ayt::render::detail::selectionOutlinePhoskiaSourceForTests;
 
-    const uint64_t depthState = selectionDepthState(false, false);
-    CHECK((depthState & BGFX_STATE_WRITE_Z) != 0u);
-    CHECK((depthState & BGFX_STATE_WRITE_RGB) == 0u);
-    CHECK((depthState & BGFX_STATE_DEPTH_TEST_LEQUAL) != 0u);
+    const uint64_t maskState = selectionMaskState(false, false);
+    CHECK((maskState & BGFX_STATE_WRITE_RGB) == 0u);
+    CHECK((maskState & BGFX_STATE_WRITE_A) != 0u);
+    CHECK((maskState & BGFX_STATE_WRITE_Z) == 0u);
+    CHECK((maskState & BGFX_STATE_DEPTH_TEST_ALWAYS) != 0u);
+    CHECK((maskState & BGFX_STATE_BLEND_MASK) == 0u);
 
-    const uint64_t hullState = selectionHullState(false);
-    CHECK((hullState & BGFX_STATE_WRITE_Z) == 0u);
-    CHECK((hullState & BGFX_STATE_DEPTH_TEST_LESS) != 0u);
-    CHECK((hullState & BGFX_STATE_DEPTH_TEST_ALWAYS) == 0u);
-    CHECK((hullState & BGFX_STATE_BLEND_MASK) == 0u);
+    const uint64_t visibleMaskState = selectionVisibleMaskState(false, false);
+    CHECK((visibleMaskState & BGFX_STATE_WRITE_RGB) != 0u);
+    CHECK((visibleMaskState & BGFX_STATE_WRITE_A) == 0u);
+    CHECK((visibleMaskState & BGFX_STATE_WRITE_Z) == 0u);
+    CHECK((visibleMaskState & BGFX_STATE_DEPTH_TEST_LEQUAL) != 0u);
 
-    DrawItem item;
-    item.world = ayt::math::Float4x4::fromTRS(
-        {4.0f, 5.0f, 6.0f}, ayt::math::FQuaternion::identity(),
-        {2.0f, 3.0f, 4.0f});
-    const ayt::math::Float4x4 hull = makeSelectionHullWorld(item, 1.025f);
-    CHECK(hull(0, 3) == 4.0f);
-    CHECK(hull(1, 3) == 5.0f);
-    CHECK(hull(2, 3) == 6.0f);
-    CHECK(hull(0, 0) > item.world(0, 0));
-    CHECK(hull(1, 1) > item.world(1, 1));
-    CHECK(hull(2, 2) > item.world(2, 2));
+    const uint64_t compositeState = selectionCompositeState();
+    CHECK((compositeState & BGFX_STATE_WRITE_Z) == 0u);
+    CHECK((compositeState & BGFX_STATE_DEPTH_TEST_ALWAYS) != 0u);
+    CHECK((compositeState & BGFX_STATE_BLEND_MASK) != 0u);
+
+    const std::string source(selectionOutlinePhoskiaSourceForTests());
+    CHECK(source.find("selectionTexelSize.xy * 2.0") != std::string::npos);
+    CHECK(source.find("neighbor - center") != std::string::npos);
+    CHECK(source.find("visibleNeighbor") != std::string::npos);
+    CHECK(source.find("vec4(1.0, 0.55, 0.12, edge)") != std::string::npos);
+
+    ayt::shader::phoskia::Compiler compiler;
+    ayt::shader::phoskia::CompileResult compileResult{};
+    compiler.compile(source, compileResult);
+    CHECK(compileResult.success);
+    CHECK(compileResult.errors.empty());
+
+    ayt::shader::phoskia::CompileOptions frontend;
+    ayt::shader::BGFXCompileOptions backend;
+    backend.shadercPath = AY_SHADER_SHADERC_HINT;
+    backend.platform = "linux";
+    backend.profile = "430";
+#ifdef AY_SHADER_BGFX_COMMON_HINT
+    backend.includeDirs.emplace_back(AY_SHADER_BGFX_COMMON_HINT);
+#endif
+#ifdef AY_SHADER_BGFX_SRC_HINT
+    backend.includeDirs.emplace_back(AY_SHADER_BGFX_SRC_HINT);
+#endif
+    ayt::shader::CompiledShaderProgram program;
+    compiler.compileToProgram(source, frontend, backend, program);
+    if (!program.success) {
+        for (const std::string& error : program.errors) {
+            std::cerr << "[SelectionOutline test] " << error << '\n';
+        }
+    }
+    CHECK(program.success);
+    CHECK(std::any_of(program.textures.begin(), program.textures.end(),
+        [](const ayt::shader::BGFXTexture& texture) {
+            return texture.name == "selectionMask";
+        }));
+    CHECK(std::any_of(program.uniforms.begin(), program.uniforms.end(),
+        [](const ayt::shader::BGFXUniform& uniform) {
+            return uniform.name == "selectionTexelSize";
+        }));
+}
+
+TEST_CASE(selection_views_have_unique_effective_ranks_before_post_process)
+{
+    using ayt::render::detail::kRenderViewRemap;
+    using ayt::render::detail::kRenderViewCapacity;
+    using ayt::render::detail::TransparentPass;
+
+    std::array<bool, kRenderViewCapacity> seen{};
+    bool validPermutation = true;
+    for (const bgfx::ViewId viewId : kRenderViewRemap) {
+        const size_t index = static_cast<size_t>(viewId);
+        if (index >= seen.size() || seen[index]) {
+            validPermutation = false;
+        } else {
+            seen[index] = true;
+        }
+    }
+    CHECK(validPermutation);
+    CHECK(std::all_of(seen.begin(), seen.end(), [](bool value) {
+        return value;
+    }));
+
+    const auto rankOf = [](bgfx::ViewId viewId) {
+        return std::find(kRenderViewRemap.begin(), kRenderViewRemap.end(),
+                         viewId) - kRenderViewRemap.begin();
+    };
+    CHECK(rankOf(ayt::render::kTransparentDeferredViewId)
+          < rankOf(TransparentPass::kSelectionMaskViewId));
+    CHECK(rankOf(TransparentPass::kSelectionMaskViewId)
+          < rankOf(TransparentPass::kSelectionCompositeViewId));
+    CHECK(rankOf(TransparentPass::kSelectionCompositeViewId)
+          < rankOf(bgfx::ViewId{10}));
+    CHECK(rankOf(TransparentPass::kSelectionCompositeViewId)
+          < rankOf(bgfx::ViewId{16}));
 }
 
 TEST_CASE(scene_light_pack_matches_shadow_caster_first_order)

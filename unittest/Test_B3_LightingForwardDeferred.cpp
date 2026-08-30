@@ -270,7 +270,7 @@ TEST_CASE(b3_full_deferred_pipeline_noop_dispatch_with_lighting_pointer_wired) {
     // BloomBlur and PostProcess), no GBuffer, no Lighting.
     const RenderPipelineDesc def = RenderPipelineDesc::makeDefault();
     CHECK(def.path == RenderPath::Forward);
-    CHECK(def.passes.size() == 10u);
+    CHECK(def.passes.size() == 12u);
     CHECK(def.contains(RenderPassSlot::Shadow));
     CHECK(def.contains(RenderPassSlot::ForwardOpaque));
     CHECK(def.contains(RenderPassSlot::Transparent));
@@ -292,7 +292,7 @@ TEST_CASE(b3_full_deferred_pipeline_noop_dispatch_with_lighting_pointer_wired) {
     // ForwardOpaque OMITTED.
     const RenderPipelineDesc deferred = RenderPipelineDesc::makeDeferred();
     CHECK(deferred.path == RenderPath::Deferred);
-    CHECK(deferred.passes.size() == 13u);
+    CHECK(deferred.passes.size() == 15u);
     CHECK(deferred.contains(RenderPassSlot::Shadow));
     CHECK(deferred.contains(RenderPassSlot::Skybox));    // §Skybox0: in Deferred
     CHECK(deferred.contains(RenderPassSlot::GBuffer));   // B3: in Deferred

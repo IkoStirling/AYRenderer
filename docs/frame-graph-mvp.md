@@ -182,7 +182,7 @@ pre-mixed haze RT，S4c 现状；v2 raw-before-haze 需要开新 cutsheet
 
 | # | Invariant 主题 | 主守位置 | 次守位置 |
 |---|---|---|---|
-| 1 | ssaoEnabled=false / strength=0 / gbufferPtr=null ⇒ 0 alloc | render() 7 条件 gate | SSAOPass::execute resolve(SSAOTexture) invalid |
+| 1 | ssaoEnabled=false / strength=0 / gbufferPtr=null ⇒ 0 alloc | render() 与 SSAOPass 共享完整 `selectSsaoStage()` gate | SSAOPass 在 resolve(SSAOTexture) 前静默返回 |
 | 2 | worldPos.w==0（天空）跳过 occ | SSAOPass FS `step(0.0001, w)` | ── |
 | 3 | composite `clamp(1-x, 0, 1)` 而非 `saturate` | PostProcessPass FS | Test pin 字符串 |
 

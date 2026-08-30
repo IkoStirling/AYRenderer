@@ -102,6 +102,15 @@ TEST_CASE(a3_complete_chain_gate_fails_closed)
                                 true, true, true, true, true, true, 0, 720));
 }
 
+TEST_CASE(a3_pass_parameter_gate_matches_frame_graph_allocation_gate)
+{
+    using ayt::render::detail::ssaoParametersActive;
+    CHECK(ssaoParametersActive(true, 0.45f, 0.4f));
+    CHECK_FALSE(ssaoParametersActive(false, 0.45f, 0.4f));
+    CHECK_FALSE(ssaoParametersActive(true, 0.0f, 0.4f));
+    CHECK_FALSE(ssaoParametersActive(true, 0.45f, 0.0f));
+}
+
 TEST_CASE(a3_production_shader_uses_rt3_coverage_tbn_and_view_depth)
 {
     const std::string source(ayt::render::kSsaoPhoskiaSource);

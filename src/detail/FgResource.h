@@ -72,11 +72,18 @@ enum class FgResourceId : uint8_t {
     //   static_cast<uint8_t>(FgResourceId::SSAOTexture) == 5
     SSAOTexture  = 5,
     // Display-referred RGBA8 output of PostProcess. PresentPass consumes this
-    // current-frame result; future FXAA / grading nodes may read and replace
+    // current-frame result; FXAA / grading nodes may read and replace
     // the presentation source without writing the backbuffer directly.
     FinalLdrColor = 6,
+    // Display-referred RGBA8 output of FXAAPass. The pass promotes
+    // PresentSource to this resource only after a successful current-frame
+    // submit; otherwise presentation remains on FinalLdrColor.
+    FxaaColor     = 7,
+    // Display-referred RGBA8 output of ColorGradingPass. The pass samples a
+    // 2D strip LUT and promotes PresentSource transactionally after submit.
+    ColorGradedColor = 8,
     // Sentinel ── 测试和实现都靠它做数组大小 / 上界判断。
-    Count        = 7,
+    Count        = 9,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。

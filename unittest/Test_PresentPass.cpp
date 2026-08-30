@@ -12,6 +12,7 @@
 #include "detail/EditorOverlayPass.h"
 #include "detail/FgResource.h"
 #include "detail/FrameContext.h"
+#include "detail/FXAAPass.h"
 #include "detail/GBufferDebugPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
@@ -38,6 +39,7 @@ using ayt::render::detail::FgSemantic;
 using ayt::render::detail::FgTextureScale;
 using ayt::render::detail::FrameContext;
 using ayt::render::detail::FrameGraph;
+using ayt::render::detail::FXAAPass;
 using ayt::render::detail::GpuMaterial;
 using ayt::render::detail::GpuMesh;
 using ayt::render::detail::GpuTexture;
@@ -71,8 +73,10 @@ TEST_SUITE(AYRenderer_PresentPass)
 TEST_CASE(present_append_only_abi_values_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::Present) == 15u);
+    CHECK(static_cast<uint8_t>(RenderPassSlot::FXAA) == 16u);
     CHECK(static_cast<uint8_t>(FgResourceId::FinalLdrColor) == 6u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 7u);
+    CHECK(static_cast<uint8_t>(FgResourceId::FxaaColor) == 7u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 9u);
     CHECK(static_cast<uint8_t>(FgSemantic::PresentSource) == 4u);
     CHECK(static_cast<uint8_t>(FgSemantic::Count) == 5u);
 }
@@ -81,6 +85,7 @@ TEST_CASE(present_view_map_has_no_shadow_ui_or_debug_collision)
 {
     CHECK(PostProcessPass::kBlitViewId == 15u);
     CHECK(PresentPass::kPresentViewId == 16u);
+    CHECK(FXAAPass::kFxaaViewId == 17u);
     CHECK(ayt::render::detail::ShadowPass::kShadowAtlasFirstViewId == 18u);
     CHECK(ayt::render::UIRenderBackend::kFirstLayerViewId == 26u);
     CHECK(ayt::render::UIRenderBackend::kLastLayerViewId == 249u);
@@ -96,11 +101,17 @@ TEST_CASE(present_is_mandatory_between_postprocess_and_ui)
              RenderPipelineDesc::makeDefault(),
              RenderPipelineDesc::makeDeferred()}) {
         const std::size_t post = passIndex(desc, RenderPassSlot::PostProcess);
+        const std::size_t fxaa = passIndex(desc, RenderPassSlot::FXAA);
+        const std::size_t grading = passIndex(desc, RenderPassSlot::ColorGrading);
         const std::size_t present = passIndex(desc, RenderPassSlot::Present);
         const std::size_t ui = passIndex(desc, RenderPassSlot::UI);
-        CHECK(post < present);
+        CHECK(post < fxaa);
+        CHECK(fxaa < grading);
+        CHECK(grading < present);
         CHECK(present < ui);
-        CHECK(present == post + 1u);
+        CHECK(fxaa == post + 1u);
+        CHECK(grading == fxaa + 1u);
+        CHECK(present == grading + 1u);
     }
 }
 

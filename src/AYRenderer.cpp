@@ -4,6 +4,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/CameraMath.h"
+#include "detail/ColorGradingPass.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
 #include "detail/BloomPipeline.h"
@@ -12,6 +13,7 @@
 #include "detail/DebugOverlay.h"
 #include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
 #include "detail/ForwardOpaquePass.h"
+#include "detail/FXAAPass.h"
 #include "detail/GBufferDebugPass.h"
 #include "detail/GBufferPass.h"
 #include "detail/FrameContext.h"
@@ -48,6 +50,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <cstdio>
 #include <cstdlib>
@@ -88,6 +91,8 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
+        RenderPassSlot::FXAA,
+        RenderPassSlot::ColorGrading,
         RenderPassSlot::Present,
         RenderPassSlot::UI,
     }};
@@ -111,7 +116,18 @@ void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
     const auto presentIt = std::find(desc.passes.begin(), desc.passes.end(),
                                      RenderPassSlot::Present);
     if (ppIt != desc.passes.end() && presentIt == desc.passes.end()) {
-        desc.passes.insert(ppIt + 1, RenderPassSlot::Present);
+        auto insertAfter = ppIt;
+        const auto fxaaIt = std::find(desc.passes.begin(), desc.passes.end(),
+                                      RenderPassSlot::FXAA);
+        if (fxaaIt != desc.passes.end() && fxaaIt > insertAfter) {
+            insertAfter = fxaaIt;
+        }
+        const auto gradingIt = std::find(desc.passes.begin(), desc.passes.end(),
+                                         RenderPassSlot::ColorGrading);
+        if (gradingIt != desc.passes.end() && gradingIt > insertAfter) {
+            insertAfter = gradingIt;
+        }
+        desc.passes.insert(insertAfter + 1, RenderPassSlot::Present);
     }
 }
 
@@ -173,6 +189,8 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
+        RenderPassSlot::FXAA,
+        RenderPassSlot::ColorGrading,
         RenderPassSlot::Present,
         RenderPassSlot::UI,
         // Fullscreen attachment overlay on view 250. It is mounted only in
@@ -204,6 +222,10 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::TransparentPass>();
     case RenderPassSlot::PostProcess:
         return std::make_unique<detail::PostProcessPass>();
+    case RenderPassSlot::FXAA:
+        return std::make_unique<detail::FXAAPass>();
+    case RenderPassSlot::ColorGrading:
+        return std::make_unique<detail::ColorGradingPass>();
     case RenderPassSlot::Present:
         return std::make_unique<detail::PresentPass>();
     case RenderPassSlot::EditorOverlay:
@@ -427,11 +449,38 @@ struct Renderer::Impl {
     // preserve the host's toggle even though the pass object is recreated.
     bool                           viewportOrientationAxisEnabled = false;
 
+    // Display-referred anti-aliasing is enabled by default. The state lives on
+    // Impl so pipeline rebuilds preserve the host's runtime choice.
+    bool                           fxaaEnabled = true;
+
+    // Optional display-referred LUT grading. Disabled by default so all
+    // pre-grading hosts retain a zero-allocation, byte-identical path.
+    bool                           colorGradingEnabled = false;
+    float                          colorGradingStrength = 0.75f;
+    ColorGradingPreset             colorGradingPreset = ColorGradingPreset::Warm;
+
     void applyEditorOverlayKnobs()
     {
         if (detail::RenderPass* overlay = pipeline.findPass("EditorOverlay")) {
             static_cast<detail::EditorOverlayPass*>(overlay)
                 ->setOrientationAxisEnabled(viewportOrientationAxisEnabled);
+        }
+    }
+
+    void applyFxaaKnob()
+    {
+        if (detail::RenderPass* fxaa = pipeline.findPass("FXAA")) {
+            fxaa->setEnabled(fxaaEnabled);
+        }
+    }
+
+    void applyColorGradingKnobs()
+    {
+        if (detail::RenderPass* grading = pipeline.findPass("ColorGrading")) {
+            grading->setEnabled(colorGradingEnabled);
+            auto* pass = static_cast<detail::ColorGradingPass*>(grading);
+            pass->setStrength(colorGradingStrength);
+            pass->setPreset(colorGradingPreset);
         }
     }
 
@@ -661,6 +710,20 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
+    if (detail::RenderPass* fxaaPass = pipeline.findPass("FXAA")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::FXAAPass*>(fxaaPass)
+                ->destroyResources(adapter);
+        }
+    }
+
+    if (detail::RenderPass* gradingPass = pipeline.findPass("ColorGrading")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::ColorGradingPass*>(gradingPass)
+                ->destroyResources(adapter);
+        }
+    }
+
     if (detail::RenderPass* presentPass = pipeline.findPass("Present")) {
         if (adapter.isInitialized()) {
             static_cast<detail::PresentPass*>(presentPass)
@@ -700,6 +763,8 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     }
 
     applyShadowQualityKnobs();
+    applyFxaaKnob();
+    applyColorGradingKnobs();
     applyEditorOverlayKnobs();
 }
 
@@ -904,6 +969,22 @@ void Renderer::shutdown()
         }
     }
 
+    if (detail::RenderPass* fxaaPass =
+            _impl->pipeline.findPass("FXAA")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::FXAAPass*>(fxaaPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+
+    if (detail::RenderPass* gradingPass =
+            _impl->pipeline.findPass("ColorGrading")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::ColorGradingPass*>(gradingPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+
     if (detail::RenderPass* presentPass =
             _impl->pipeline.findPass("Present")) {
         if (_impl->adapter.isInitialized()) {
@@ -1078,7 +1159,7 @@ void Renderer::render(const RenderScene& scene)
 
     _impl->lastDrawCalls = 0;
 
-    // Scene FBO for FO/Transparent → PostProcess FinalLdrColor → Present.
+    // Scene FBO for FO/Transparent → PostProcess FinalLdrColor → FXAA → Present.
     // Editor composite uses the same panel-sized offscreen scene path:
     // PostProcess writes viewport-local FinalLdrColor on view 15, then
     // Present applies (vx,vy,w,h) to the default backbuffer on view 16.
@@ -1230,6 +1311,17 @@ void Renderer::render(const RenderScene& scene)
         postProcessPassPtr =
             static_cast<detail::PostProcessPass*>(postProcessSlot);
     }
+    detail::FXAAPass* fxaaPassPtr = nullptr;
+    if (detail::RenderPass* fxaaSlot =
+            _impl->pipeline.findPass("FXAA")) {
+        fxaaPassPtr = static_cast<detail::FXAAPass*>(fxaaSlot);
+    }
+    detail::ColorGradingPass* colorGradingPassPtr = nullptr;
+    if (detail::RenderPass* gradingSlot =
+            _impl->pipeline.findPass("ColorGrading")) {
+        colorGradingPassPtr =
+            static_cast<detail::ColorGradingPass*>(gradingSlot);
+    }
     detail::PresentPass* presentPassPtr = nullptr;
     if (detail::RenderPass* presentSlot =
             _impl->pipeline.findPass("Present")) {
@@ -1379,10 +1471,10 @@ void Renderer::render(const RenderScene& scene)
     fg.setResolvedSemantic(detail::FgSemantic::FinalColorSource,
                            detail::FgResourceId::SceneColor);
 
-    // FinalPP is now an offscreen producer. Present is its mandatory consumer
-    // and the sole owner of the default-backbuffer boundary. Keeping the LDR
-    // target in FrameGraph allows future FXAA / grading passes to replace
-    // PresentSource without changing either endpoint.
+    // FinalPP is an offscreen producer and Present is the sole owner of the
+    // default-backbuffer boundary. PresentSource starts at FinalLdrColor each
+    // frame; FXAA and ColorGrading promote it transactionally only after
+    // their successful submits.
     const bool finalLdrStageEnabled = backendReady
         && fgW != 0 && fgH != 0
         && postProcessPassPtr != nullptr
@@ -1399,8 +1491,42 @@ void Renderer::render(const RenderScene& scene)
                     {hdrSceneSource},
                     {detail::FgResourceId::FinalLdrColor},
                     /*enabled=*/true});
+        const bool fxaaStageEnabled = fxaaPassPtr != nullptr
+            && fxaaPassPtr->isEnabled();
+        if (fxaaStageEnabled) {
+            fg.addResource(detail::FgResourceId::FxaaColor,
+                           {bgfx::TextureFormat::RGBA8,
+                            detail::FgTextureScale::Full,
+                            /*transient=*/true,
+                            /*withDepth=*/false});
+            fg.addPass({"FXAA",
+                        {detail::FgResourceId::FinalLdrColor},
+                        {detail::FgResourceId::FxaaColor},
+                        /*enabled=*/true});
+        }
+        const bool colorGradingStageEnabled = colorGradingPassPtr != nullptr
+            && colorGradingPassPtr->isEnabled()
+            && colorGradingPassPtr->strength() > 0.0f
+            && colorGradingPassPtr->preset() != ColorGradingPreset::Neutral;
+        if (colorGradingStageEnabled) {
+            fg.addResource(detail::FgResourceId::ColorGradedColor,
+                           {bgfx::TextureFormat::RGBA8,
+                            detail::FgTextureScale::Full,
+                            /*transient=*/true,
+                            /*withDepth=*/false});
+            fg.addPass({"ColorGrading",
+                        {fxaaStageEnabled
+                             ? detail::FgResourceId::FxaaColor
+                             : detail::FgResourceId::FinalLdrColor},
+                        {detail::FgResourceId::ColorGradedColor},
+                        /*enabled=*/true});
+        }
         fg.addPass({"Present",
-                    {detail::FgResourceId::FinalLdrColor},
+                    {colorGradingStageEnabled
+                         ? detail::FgResourceId::ColorGradedColor
+                         : (fxaaStageEnabled
+                                ? detail::FgResourceId::FxaaColor
+                                : detail::FgResourceId::FinalLdrColor)},
                     {},
                     /*enabled=*/true});
         fg.setResolvedSemantic(detail::FgSemantic::PresentSource,
@@ -1492,12 +1618,14 @@ void Renderer::render(const RenderScene& scene)
     }
 
     // Dispatched via RenderPipeline::executeAll in registration order
-    // [ForwardOpaque, Transparent, PostProcess, Present, UI]. ForwardOpaquePass
+    // [ForwardOpaque, Transparent, PostProcess, FXAA, Present, UI].
+    // ForwardOpaquePass
     // writes the depth buffer first; TransparentPass reuses that depth
     // with DEPTH_TEST_LEQUAL but does not WRITE_Z. Transparent submission is
     // stable back-to-front: explicit DrawItem::sortKey first, camera distance
     // second, with Sequential view mode preserving that CPU order.
-    // PostProcessPass writes FrameGraph FinalLdrColor; PresentPass samples it
+    // PostProcessPass writes FrameGraph FinalLdrColor; FXAA may promote
+    // PresentSource to FxaaColor, then PresentPass samples the current source
     // into the Game View backbuffer rect. UIPass ignores the viewId arg and
     // delegates to its injected UIRenderBackend (see UIPass.h for the
     // chrome lifecycle contract — execute() DOES call flushBatches;
@@ -2310,6 +2438,68 @@ void Renderer::setPostProcessTonemapMode(TonemapMode mode)
         _impl->postProcessTonemapMode = detail::FrameContext::TonemapMode::ACES;
         break;
     }
+}
+
+void Renderer::setFxaaEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->fxaaEnabled = enabled;
+    _impl->applyFxaaKnob();
+}
+
+bool Renderer::fxaaEnabled() const noexcept
+{
+    return _impl != nullptr && _impl->fxaaEnabled;
+}
+
+void Renderer::setColorGradingEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->colorGradingEnabled = enabled;
+    _impl->applyColorGradingKnobs();
+}
+
+bool Renderer::colorGradingEnabled() const noexcept
+{
+    return _impl != nullptr && _impl->colorGradingEnabled;
+}
+
+void Renderer::setColorGradingStrength(float strength)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->colorGradingStrength = std::isfinite(strength)
+        ? std::clamp(strength, 0.0f, 1.0f)
+        : 0.0f;
+    _impl->applyColorGradingKnobs();
+}
+
+float Renderer::colorGradingStrength() const noexcept
+{
+    return _impl ? _impl->colorGradingStrength : 0.0f;
+}
+
+void Renderer::setColorGradingPreset(ColorGradingPreset preset)
+{
+    if (!_impl) {
+        return;
+    }
+    if (static_cast<uint8_t>(preset)
+        > static_cast<uint8_t>(ColorGradingPreset::Cinematic)) {
+        preset = ColorGradingPreset::Neutral;
+    }
+    _impl->colorGradingPreset = preset;
+    _impl->applyColorGradingKnobs();
+}
+
+ColorGradingPreset Renderer::colorGradingPreset() const noexcept
+{
+    return _impl ? _impl->colorGradingPreset : ColorGradingPreset::Neutral;
 }
 
 void Renderer::setDepthHazeEnabled(bool enabled)

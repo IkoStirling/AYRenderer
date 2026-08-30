@@ -81,6 +81,9 @@ struct UiPathData {
     ayt::math::FVector4 fillColor{1.0f, 1.0f, 1.0f, 1.0f};
     ayt::math::FVector4 strokeColor{1.0f, 1.0f, 1.0f, 1.0f};
     float strokeWidth = 1.0f;
+    ayt::ui::PathStrokeCap strokeCap = ayt::ui::PathStrokeCap::Butt;
+    ayt::ui::PathStrokeJoin strokeJoin = ayt::ui::PathStrokeJoin::Miter;
+    float miterLimit = 4.0f;
 };
 
 struct UiPathFillContour {
@@ -639,12 +642,122 @@ void appendMesh(UiTriangleMesh& destination, const UiTriangleMesh& source)
     for (uint32_t index : source.indices) destination.indices.push_back(base + index);
 }
 
+void appendStrokeTriangle(UiTriangleMesh& mesh,
+                          const ayt::math::FVector2& a,
+                          const ayt::math::FVector2& b,
+                          const ayt::math::FVector2& c)
+{
+    const uint32_t base = static_cast<uint32_t>(mesh.positions.size());
+    mesh.positions.insert(mesh.positions.end(), {a, b, c});
+    mesh.indices.insert(mesh.indices.end(), {base, base + 1u, base + 2u});
+}
+
+void appendStrokeQuad(UiTriangleMesh& mesh,
+                      const ayt::math::FVector2& a,
+                      const ayt::math::FVector2& b,
+                      const ayt::math::FVector2& c,
+                      const ayt::math::FVector2& d)
+{
+    const uint32_t base = static_cast<uint32_t>(mesh.positions.size());
+    mesh.positions.insert(mesh.positions.end(), {a, b, c, d});
+    mesh.indices.insert(mesh.indices.end(), {
+        base, base + 1u, base + 2u,
+        base, base + 2u, base + 3u
+    });
+}
+
+void appendStrokeSector(UiTriangleMesh& mesh,
+                        const ayt::math::FVector2& center,
+                        float radius, float startAngle, float sweep)
+{
+    if (radius <= kPathEpsilon || std::fabs(sweep) <= kPathEpsilon) return;
+    const float density = std::max(2.0f, std::sqrt(std::max(radius, 0.5f) * 8.0f));
+    const int segments = std::clamp(
+        static_cast<int>(std::ceil(std::fabs(sweep) * density)), 1, 64);
+    const uint32_t base = static_cast<uint32_t>(mesh.positions.size());
+    mesh.positions.push_back(center);
+    for (int i = 0; i <= segments; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(segments);
+        const float angle = startAngle + sweep * t;
+        mesh.positions.emplace_back(center.x + std::cos(angle) * radius,
+                                    center.y + std::sin(angle) * radius);
+    }
+    for (int i = 0; i < segments; ++i) {
+        mesh.indices.insert(mesh.indices.end(), {
+            base, base + 1u + static_cast<uint32_t>(i),
+            base + 2u + static_cast<uint32_t>(i)
+        });
+    }
+}
+
 UiTriangleMesh tessellateStroke(const std::vector<UiPathContour>& contours,
-                                float width)
+                                float width, ayt::ui::PathStrokeCap cap,
+                                ayt::ui::PathStrokeJoin join, float miterLimit)
 {
     UiTriangleMesh output;
     const float halfWidth = std::max(0.0f, width) * 0.5f;
     if (halfWidth <= 0.0f) return output;
+    miterLimit = std::max(1.0f, miterLimit);
+
+    // Preserve the established compact strip for the legacy default.  The
+    // contour-aware tessellator below is selected when authored SVG stroke
+    // semantics require round/bevel joins or non-butt caps.
+    if (cap == ayt::ui::PathStrokeCap::Butt
+        && join == ayt::ui::PathStrokeJoin::Miter) {
+        for (const UiPathContour& contour : contours) {
+            const auto points = sanitizeContour(contour.points);
+            const size_t count = points.size();
+            if (count < 2u) continue;
+            const bool closed = contour.closed && count > 2u;
+            const size_t segmentCount = closed ? count : count - 1u;
+            const uint32_t base = static_cast<uint32_t>(output.positions.size());
+            output.positions.reserve(output.positions.size() + count * 2u);
+            for (size_t i = 0; i < count; ++i) {
+                const size_t previous = i == 0u ? (closed ? count - 1u : 0u) : i - 1u;
+                const size_t next = i + 1u < count ? i + 1u : (closed ? 0u : count - 1u);
+                float previousDx = points[i].x - points[previous].x;
+                float previousDy = points[i].y - points[previous].y;
+                float nextDx = points[next].x - points[i].x;
+                float nextDy = points[next].y - points[i].y;
+                if (!closed && i == 0u) { previousDx = nextDx; previousDy = nextDy; }
+                if (!closed && i + 1u == count) { nextDx = previousDx; nextDy = previousDy; }
+                const float previousLength = std::max(
+                    pathLength(previousDx, previousDy), kPathEpsilon);
+                const float nextLength = std::max(pathLength(nextDx, nextDy), kPathEpsilon);
+                const float previousNx = -previousDy / previousLength;
+                const float previousNy = previousDx / previousLength;
+                const float nextNx = -nextDy / nextLength;
+                const float nextNy = nextDx / nextLength;
+                float miterX = previousNx + nextNx;
+                float miterY = previousNy + nextNy;
+                const float miterLength = pathLength(miterX, miterY);
+                if (miterLength <= kPathEpsilon) {
+                    miterX = nextNx;
+                    miterY = nextNy;
+                } else {
+                    miterX /= miterLength;
+                    miterY /= miterLength;
+                }
+                const float denominator = std::max(0.25f,
+                    std::fabs(miterX * nextNx + miterY * nextNy));
+                const float extent = std::min(halfWidth / denominator,
+                                              halfWidth * miterLimit);
+                output.positions.emplace_back(points[i].x + miterX * extent,
+                                              points[i].y + miterY * extent);
+                output.positions.emplace_back(points[i].x - miterX * extent,
+                                              points[i].y - miterY * extent);
+            }
+            for (size_t i = 0; i < segmentCount; ++i) {
+                const size_t next = (i + 1u) % count;
+                const uint32_t a = base + static_cast<uint32_t>(i * 2u);
+                const uint32_t b = base + static_cast<uint32_t>(next * 2u);
+                output.indices.insert(output.indices.end(), {
+                    a, b, b + 1u, a, b + 1u, a + 1u
+                });
+            }
+        }
+        return output;
+    }
 
     for (const UiPathContour& contour : contours) {
         const auto points = sanitizeContour(contour.points);
@@ -652,50 +765,119 @@ UiTriangleMesh tessellateStroke(const std::vector<UiPathContour>& contours,
         if (count < 2u) continue;
         const bool closed = contour.closed && count > 2u;
         const size_t segmentCount = closed ? count : count - 1u;
-        const uint32_t base = static_cast<uint32_t>(output.positions.size());
-        output.positions.reserve(output.positions.size() + count * 2u);
-
-        for (size_t i = 0; i < count; ++i) {
-            size_t prevIndex = i == 0u ? (closed ? count - 1u : 0u) : i - 1u;
-            size_t nextIndex = i + 1u < count ? i + 1u : (closed ? 0u : count - 1u);
-            float prevDx = points[i].x - points[prevIndex].x;
-            float prevDy = points[i].y - points[prevIndex].y;
-            float nextDx = points[nextIndex].x - points[i].x;
-            float nextDy = points[nextIndex].y - points[i].y;
-            if (!closed && i == 0u) { prevDx = nextDx; prevDy = nextDy; }
-            if (!closed && i + 1u == count) { nextDx = prevDx; nextDy = prevDy; }
-            const float prevLen = std::max(pathLength(prevDx, prevDy), kPathEpsilon);
-            const float nextLen = std::max(pathLength(nextDx, nextDy), kPathEpsilon);
-            const float prevNx = -prevDy / prevLen;
-            const float prevNy = prevDx / prevLen;
-            const float nextNx = -nextDy / nextLen;
-            const float nextNy = nextDx / nextLen;
-            float miterX = prevNx + nextNx;
-            float miterY = prevNy + nextNy;
-            const float miterLen = pathLength(miterX, miterY);
-            if (miterLen <= kPathEpsilon) {
-                miterX = nextNx;
-                miterY = nextNy;
-            } else {
-                miterX /= miterLen;
-                miterY /= miterLen;
-            }
-            const float denom = std::max(0.25f,
-                std::fabs(miterX * nextNx + miterY * nextNy));
-            const float extent = std::min(halfWidth / denom, halfWidth * 4.0f);
-            output.positions.emplace_back(points[i].x + miterX * extent,
-                                          points[i].y + miterY * extent);
-            output.positions.emplace_back(points[i].x - miterX * extent,
-                                          points[i].y - miterY * extent);
-        }
-
+        std::vector<ayt::math::FVector2> directions(segmentCount);
+        std::vector<ayt::math::FVector2> normals(segmentCount);
         for (size_t i = 0; i < segmentCount; ++i) {
             const size_t next = (i + 1u) % count;
-            const uint32_t a = base + static_cast<uint32_t>(i * 2u);
-            const uint32_t b = base + static_cast<uint32_t>(next * 2u);
-            output.indices.insert(output.indices.end(), {
-                a, b, b + 1u, a, b + 1u, a + 1u
-            });
+            float dx = points[next].x - points[i].x;
+            float dy = points[next].y - points[i].y;
+            const float length = std::max(pathLength(dx, dy), kPathEpsilon);
+            dx /= length;
+            dy /= length;
+            directions[i] = {dx, dy};
+            normals[i] = {-dy, dx};
+
+            ayt::math::FVector2 start = points[i];
+            ayt::math::FVector2 end = points[next];
+            if (!closed && cap == ayt::ui::PathStrokeCap::Square) {
+                if (i == 0u) {
+                    start.x -= dx * halfWidth;
+                    start.y -= dy * halfWidth;
+                }
+                if (i + 1u == segmentCount) {
+                    end.x += dx * halfWidth;
+                    end.y += dy * halfWidth;
+                }
+            }
+            const ayt::math::FVector2 offset(normals[i].x * halfWidth,
+                                             normals[i].y * halfWidth);
+            appendStrokeQuad(output,
+                {start.x + offset.x, start.y + offset.y},
+                {end.x + offset.x, end.y + offset.y},
+                {end.x - offset.x, end.y - offset.y},
+                {start.x - offset.x, start.y - offset.y});
+        }
+
+        const size_t joinCount = closed ? count : count - 2u;
+        for (size_t joinOffset = 0; joinOffset < joinCount; ++joinOffset) {
+            const size_t pointIndex = closed ? joinOffset : joinOffset + 1u;
+            const size_t previousSegment = (pointIndex + segmentCount - 1u) % segmentCount;
+            const size_t nextSegment = pointIndex % segmentCount;
+            const auto& d0 = directions[previousSegment];
+            const auto& d1 = directions[nextSegment];
+            const auto& n0 = normals[previousSegment];
+            const auto& n1 = normals[nextSegment];
+            const float turn = d0.x * d1.y - d0.y * d1.x;
+            const float alignment = d0.x * d1.x + d0.y * d1.y;
+            if (std::fabs(turn) <= kPathEpsilon && alignment > 0.0f) continue;
+
+            const auto& center = points[pointIndex];
+            if (std::fabs(turn) <= kPathEpsilon) {
+                if (join == ayt::ui::PathStrokeJoin::Round) {
+                    appendStrokeSector(output, center, halfWidth, 0.0f, kPi * 2.0f);
+                }
+                continue;
+            }
+
+            const float outerSign = turn > 0.0f ? -1.0f : 1.0f;
+            const ayt::math::FVector2 outer0(n0.x * outerSign, n0.y * outerSign);
+            const ayt::math::FVector2 outer1(n1.x * outerSign, n1.y * outerSign);
+            const ayt::math::FVector2 inner0(-outer0.x, -outer0.y);
+            const ayt::math::FVector2 inner1(-outer1.x, -outer1.y);
+            const ayt::math::FVector2 outerPoint0(
+                center.x + outer0.x * halfWidth,
+                center.y + outer0.y * halfWidth);
+            const ayt::math::FVector2 outerPoint1(
+                center.x + outer1.x * halfWidth,
+                center.y + outer1.y * halfWidth);
+
+            appendStrokeTriangle(output, center,
+                {center.x + inner0.x * halfWidth,
+                 center.y + inner0.y * halfWidth},
+                {center.x + inner1.x * halfWidth,
+                 center.y + inner1.y * halfWidth});
+
+            if (join == ayt::ui::PathStrokeJoin::Round) {
+                const float start = std::atan2(outer0.y, outer0.x);
+                float sweep = std::atan2(
+                    outer0.x * outer1.y - outer0.y * outer1.x,
+                    outer0.x * outer1.x + outer0.y * outer1.y);
+                if (turn > 0.0f && sweep < 0.0f) sweep += kPi * 2.0f;
+                if (turn < 0.0f && sweep > 0.0f) sweep -= kPi * 2.0f;
+                appendStrokeSector(output, center, halfWidth, start, sweep);
+                continue;
+            }
+
+            appendStrokeTriangle(output, center, outerPoint0, outerPoint1);
+            if (join == ayt::ui::PathStrokeJoin::Miter) {
+                float bisectorX = outer0.x + outer1.x;
+                float bisectorY = outer0.y + outer1.y;
+                const float bisectorLength = pathLength(bisectorX, bisectorY);
+                if (bisectorLength > kPathEpsilon) {
+                    bisectorX /= bisectorLength;
+                    bisectorY /= bisectorLength;
+                    const float denominator = std::fabs(
+                        bisectorX * outer1.x + bisectorY * outer1.y);
+                    if (denominator > kPathEpsilon) {
+                        const float extent = halfWidth / denominator;
+                        if (extent <= halfWidth * miterLimit) {
+                            appendStrokeTriangle(output, outerPoint0,
+                                {center.x + bisectorX * extent,
+                                 center.y + bisectorY * extent},
+                                outerPoint1);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!closed && cap == ayt::ui::PathStrokeCap::Round) {
+            const auto& firstNormal = normals.front();
+            appendStrokeSector(output, points.front(), halfWidth,
+                std::atan2(firstNormal.y, firstNormal.x), kPi);
+            const auto& lastNormal = normals.back();
+            appendStrokeSector(output, points.back(), halfWidth,
+                std::atan2(-lastNormal.y, -lastNormal.x), kPi);
         }
     }
     return output;
@@ -728,7 +910,8 @@ std::shared_ptr<UiPathSnapshot> snapshotPath(
         snapshot->fillContours.push_back({std::move(mesh), contour.winding});
     }
     snapshot->strokeMesh = clipMeshToRect(
-        tessellateStroke(path.contours, path.strokeWidth), clip);
+        tessellateStroke(path.contours, path.strokeWidth, path.strokeCap,
+                         path.strokeJoin, path.miterLimit), clip);
     includeMeshBounds(*snapshot, snapshot->strokeMesh);
     return snapshot;
 }
@@ -1906,6 +2089,18 @@ void UIRenderBackend::addPathPolygon(PathHandle path,
     it->second.contours.push_back({std::move(copy), winding, true});
 }
 
+void UIRenderBackend::addPathContour(PathHandle path,
+                                     const ayt::math::FVector2* points,
+                                     int count, bool closed,
+                                     PathWinding winding)
+{
+    if (_frame == nullptr || points == nullptr || count < 2) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+    std::vector<ayt::math::FVector2> copy(points, points + count);
+    it->second.contours.push_back({std::move(copy), winding, closed && count >= 3});
+}
+
 void UIRenderBackend::setPathFillColor(PathHandle path,
                                        const ayt::math::FVector4& color)
 {
@@ -1927,6 +2122,17 @@ void UIRenderBackend::setPathStrokeWidth(PathHandle path, float width)
     if (_frame == nullptr) return;
     auto it = _frame->paths.find(path.id);
     if (it != _frame->paths.end()) it->second.strokeWidth = std::max(0.0f, width);
+}
+
+void UIRenderBackend::setPathStrokeStyle(PathHandle path, PathStrokeCap cap,
+                                         PathStrokeJoin join, float miterLimit)
+{
+    if (_frame == nullptr) return;
+    auto it = _frame->paths.find(path.id);
+    if (it == _frame->paths.end()) return;
+    it->second.strokeCap = cap;
+    it->second.strokeJoin = join;
+    it->second.miterLimit = std::max(1.0f, miterLimit);
 }
 
 void UIRenderBackend::drawPath(PathHandle path, PathFillMode mode)

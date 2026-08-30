@@ -23,7 +23,7 @@ namespace ayt::render::detail
 //             corner (no texture; rotation-only camera view).
 //   view 252 — reserved compatibility id; selection no longer draws here.
 //
-// 17 is intentionally left unused and 18..25 belong to the shadow atlas.
+// 17 belongs to FXAA and 18..25 belong to the shadow atlas.
 // 26..249 belong to UI offscreen layers, 250 to GBufferDebug, and 255 to UI.
 class EditorOverlayPass : public RenderPass {
 public:

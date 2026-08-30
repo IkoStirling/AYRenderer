@@ -22,6 +22,15 @@ inline float sanitizeSsaoBias(float value) noexcept
     return std::isfinite(value) ? std::max(value, 0.0f) : 0.0f;
 }
 
+inline bool ssaoParametersActive(bool enabled,
+                                 float strength,
+                                 float radius) noexcept
+{
+    return enabled
+        && sanitizeSsaoStrength(strength) > 0.0f
+        && sanitizeSsaoRadius(radius) > 0.0f;
+}
+
 inline bool selectSsaoStage(bool enabled,
                             float strength,
                             float radius,
@@ -34,9 +43,7 @@ inline bool selectSsaoStage(bool enabled,
                             uint16_t viewportWidth,
                             uint16_t viewportHeight) noexcept
 {
-    return enabled
-        && sanitizeSsaoStrength(strength) > 0.0f
-        && sanitizeSsaoRadius(radius) > 0.0f
+    return ssaoParametersActive(enabled, strength, radius)
         && passPresent
         && passEnabled
         && gbufferPresent
