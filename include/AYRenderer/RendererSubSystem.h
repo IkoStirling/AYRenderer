@@ -79,7 +79,13 @@ public:
     void setClientSize(uint32_t width, uint32_t height);
     void setViewportRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
 
+    // Legacy/global builders remain active regardless of the current ECS
+    // World (standalone demos use this path). World-owned builders must use
+    // addSceneBuilderForOwner so a World can detach every callback before its
+    // systems are destroyed.
     void setSceneBuilder(SceneBuildCallback callback);
+    void addSceneBuilderForOwner(const void* owner, SceneBuildCallback callback);
+    void clearSceneBuildersForOwner(const void* owner);
     Renderer& renderer();
     RenderScene& renderScene();
 

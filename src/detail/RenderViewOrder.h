@@ -11,12 +11,12 @@ namespace ayt::render::detail
 // actual data dependencies. SSAO consumes GBuffer and completes before
 // Lighting, which applies AO only to ambient/IBL. Opaque haze then completes
 // before transparent composition, and Bloom consumes the resulting HDR color.
-inline constexpr std::array<bgfx::ViewId, 26> kRenderViewOrder = {
+inline constexpr std::array<bgfx::ViewId, 28> kRenderViewOrder = {
     1, 18, 19, 20, 21, 22, 23, 24, 25,
     2, 0,
     3, 4, 5, 6, 7, 14,
     8, 13, 9, 10, 11, 12,
-    15, 16, 17
+    15, 16, 250, 251, 252
 };
 
 inline void configureRenderViewOrder(BGFXAdapter& adapter)

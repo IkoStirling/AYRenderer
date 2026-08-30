@@ -70,6 +70,7 @@ void FrameGraph::beginFrame(uint16_t width, uint16_t height)
     for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
         _resources[i].declared   = false;
         _resources[i].live       = false;
+        _resources[i].producedThisFrame = false;
         _resources[i].aliasGroup = -1;
         _resources[i].physicalW  = 0;
         _resources[i].physicalH  = 0;
@@ -276,6 +277,32 @@ bgfx::FrameBufferHandle FrameGraph::resolveSemantic(FgSemantic sem) const
     return resolve(s.logical);
 }
 
+void FrameGraph::markProduced(FgResourceId id) noexcept
+{
+    if (static_cast<size_t>(id) >= static_cast<size_t>(FgResourceId::Count)) {
+        return;
+    }
+    ResourceEntry& resource = _resources[static_cast<size_t>(id)];
+    resource.producedThisFrame = resource.declared && resource.live;
+}
+
+bool FrameGraph::producedThisFrame(FgResourceId id) const noexcept
+{
+    if (static_cast<size_t>(id) >= static_cast<size_t>(FgResourceId::Count)) {
+        return false;
+    }
+    return _resources[static_cast<size_t>(id)].producedThisFrame;
+}
+
+bool FrameGraph::semanticProducedThisFrame(FgSemantic sem) const noexcept
+{
+    if (static_cast<size_t>(sem) >= static_cast<size_t>(FgSemantic::Count)) {
+        return false;
+    }
+    const SemanticEntry& semantic = _semantics[static_cast<size_t>(sem)];
+    return semantic.hasLogical && producedThisFrame(semantic.logical);
+}
+
 // ─── 生命周期 ─────────────────────────────────────────────────
 
 void FrameGraph::resize(uint16_t width, uint16_t height)
@@ -317,6 +344,7 @@ void FrameGraph::shutdown()
         r.physicalH  = 0;
         r.declared   = false;
         r.live       = false;
+        r.producedThisFrame = false;
         r.isExternal = false;
         r.aliasGroup = -1;
     }

@@ -19,26 +19,6 @@ namespace ayt::render::detail
 
 namespace {
 
-// R5+ — fullscreen-triangle vertex data. 3 verts in NDC: a single
-// oversize triangle covers the entire screen, no index buffer needed
-// past 3 indices. Using a triangle (vs. a 4-vert quad) avoids the
-// diagonal seam across adjacent pixels — bgfx's fullscreen-quad
-// examples use the same pattern (see bgfx/examples/00-helloworld).
-struct alignas(16) FullscreenVertex {
-    float x;
-    float y;
-    float u;
-    float v;
-};
-
-constexpr FullscreenVertex kFullscreenTriangle[3] = {
-    { -1.0f, -1.0f, 0.0f, 1.0f },
-    {  3.0f, -1.0f, 2.0f, 1.0f },
-    { -1.0f,  3.0f, 0.0f, -1.0f },
-};
-
-constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
-
 // Post-process: sample sceneColor and the FrameGraph BloomSource, apply
 // exposure to both scene-linear inputs, then tonemap (None / Reinhard /
 // ACES) and display gamma. Bloom is accepted only when BloomBlur reports
@@ -200,9 +180,6 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    const uint16_t viewportX = ctx.viewportX;
-    const uint16_t viewportY = ctx.viewportY;
-
     const bgfx::FrameBufferHandle sourceFbo =
         selectSceneColorSourceFbo(ctx);
     if (!BGFXAdapter::isValid(sourceFbo)) {
@@ -216,9 +193,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    ensureFullscreenQuad(adapter);
-    if (!BGFXAdapter::isValid(_fullscreenVB)
-        || !BGFXAdapter::isValid(_fullscreenIB)) {
+    if (!_fullscreen.ensure(adapter)) {
         // §P5 M3 (2026-08-24) — rate-limited log; fullscreen-quad
         // VB/IB create-fail is rare but should leave a trail.
         rateLimitedEarlyReturn("PostProcessPass",
@@ -248,19 +223,25 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // Single blit: sample source color → default backbuffer.
+    if (ctx.frameGraph == nullptr) {
+        rateLimitedEarlyReturn("PostProcessPass", "frameGraph missing");
+        return 0;
+    }
+    const bgfx::FrameBufferHandle finalLdr =
+        ctx.frameGraph->resolve(FgResourceId::FinalLdrColor);
+    if (!BGFXAdapter::isValid(finalLdr)) {
+        rateLimitedEarlyReturn("PostProcessPass", "FinalLdrColor invalid");
+        return 0;
+    }
+
+    // Single composite: sample HDR source color → display-referred RGBA8.
     // Do NOT bind sourceFbo as the draw target while sampling it
     // (same-FBO feedback clears/blacks the Editor viewport).
     //
-    // View rect uses the editor panel offset (vx,vy) so the blit
-    // lands in the Game View hole, not at the window origin.
-    // Identity view/proj: the fullscreen triangle is already in NDC;
-    // leaving the camera matrices from FO would warp it off-screen.
-    const ayt::math::Float4x4 identity = ayt::math::Float4x4::identity();
-    adapter.setViewFrameBuffer(viewId, BGFX_INVALID_HANDLE);
-    adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
-    adapter.setViewTransform(viewId, identity, identity);
-    adapter.setViewClearRaw(viewId, BGFX_CLEAR_NONE, 0, 1.0f, 0);
+    // The target is viewport-local; PresentPass applies the editor panel
+    // offset when it copies this texture to the default backbuffer.
+    configureFullscreenPassView(adapter, viewId, finalLdr,
+                                0, 0, viewportWidth, viewportHeight);
 
     if (!programReady) {
         // §P5 M1 (2026-08-24) — kept the always-loud first-time
@@ -273,8 +254,9 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         static bool s_loggedMissing = false;
         if (!s_loggedMissing) {
             std::fprintf(stderr,
-                "[PostProcessPass] FATAL: no blit program — scene stays in FBO "
-                "(Game View may be black). Check Phoskia acquire errors above.\n");
+                "[PostProcessPass] FATAL: no composite program — "
+                "FinalLdrColor was not produced. "
+                "Check Phoskia acquire errors above.\n");
             s_loggedMissing = true;
         }
         rateLimitedEarlyReturn("PostProcessPass",
@@ -323,9 +305,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     const float gammaPad[4] = {
         sanitizePostProcessGamma(frame.gamma), 0.0f, 0.0f, 0.0f
     };
-    adapter.setTransformIdentity();
-    adapter.setVertexBuffer(_fullscreenVB, 0, UINT32_MAX);
-    adapter.setIndexBuffer(_fullscreenIB, 0, 3);
+    _fullscreen.bind(adapter);
     // Bind by recorded SAMPLER2D slots (pass stage=0 so setTexture does
     // not override compile-time units — see AYShader/ShaderResource.h).
     _program.setTexture(0, _tSceneColor, texHandle);
@@ -346,6 +326,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     // combination identical.
     adapter.setStateDepthTestAlways();
     _program.submit(sub);
+    ctx.frameGraph->markProduced(FgResourceId::FinalLdrColor);
 
     static bool s_loggedSubmit = false;
     if (!s_loggedSubmit) {
@@ -353,12 +334,10 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
             BGFXAdapter::isValid(bloomSourceFbo)
             && (bloomTexHandle.id != texHandle.id);
         std::fprintf(stderr,
-            "[PostProcessPass] blit ok view=%u rect=(%u,%u,%u,%u) "
+            "[PostProcessPass] FinalLdrColor ok view=%u size=(%u,%u) "
             "gamma=%.1f exposure=%.2f tonemap=%.0f bloom=%.2f "
             "bloomSrc=%s variant=%s\n",
             static_cast<unsigned>(viewId),
-            static_cast<unsigned>(viewportX),
-            static_cast<unsigned>(viewportY),
             static_cast<unsigned>(viewportWidth),
             static_cast<unsigned>(viewportHeight),
             gammaPad[0],
@@ -373,33 +352,6 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     // detailed one-shot message above and leave periodic diagnostics for
     // actual failure paths.
     return 1;
-}
-
-void PostProcessPass::ensureFullscreenQuad(BGFXAdapter& adapter)
-{
-    if (BGFXAdapter::isValid(_fullscreenVB)
-        && BGFXAdapter::isValid(_fullscreenIB)) {
-        return;
-    }
-
-    // R5+ (Pass-side backfill) — funnel the VB/IB creation through
-    // BGFXAdapter. Layout MUST match FullscreenVertex {x,y,u,v}:
-    // an empty `bgfx::VertexLayout{}` is invalid (stride 0) and
-    // triggers bgfx::fatal / debugBreak under Debug builds the first
-    // time PostProcess runs on a real GPU backend. TexCoord0 is
-    // packed for stride alignment; the Phoskia VS currently rebuilds
-    // UV from pos.xy (see kPostProcessPhoskiaSource).
-    //
-    // P6.5 (2026-07-22) — layout construction now goes through
-    // BGFXAdapter::vertexLayoutPosUv() instead of inlining
-    // bgfx::VertexLayout::begin().add(...).end() here. The
-    // returned layout has the same byte shape (Position 2 floats +
-    // TexCoord0 2 floats).
-    const bgfx::VertexLayout layout = adapter.vertexLayoutPosUv();
-    (void)ensureFullscreenTriangleBuffers(
-        adapter, _fullscreenVB, _fullscreenIB,
-        kFullscreenTriangle, sizeof(kFullscreenTriangle), layout,
-        kFullscreenIndices, sizeof(kFullscreenIndices));
 }
 
 void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
@@ -501,14 +453,7 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
 
 void PostProcessPass::destroyResources(BGFXAdapter& adapter)
 {
-    if (BGFXAdapter::isValid(_fullscreenVB)) {
-        adapter.destroy(_fullscreenVB);
-        _fullscreenVB = BGFX_INVALID_HANDLE;
-    }
-    if (BGFXAdapter::isValid(_fullscreenIB)) {
-        adapter.destroy(_fullscreenIB);
-        _fullscreenIB = BGFX_INVALID_HANDLE;
-    }
+    _fullscreen.destroy(adapter);
     if (_program.isValid()) {
         // R5.1 — release the ShaderResource. ShaderResource doesn't
         // carry a back-pointer to its pool; the pool reference is

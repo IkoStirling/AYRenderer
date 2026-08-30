@@ -42,7 +42,7 @@ public:
         OrderedRuns
     };
 
-    // Composite view map (ascending bgfx order):
+    // Composite view map (dependency order is explicitly remapped):
     //   0 = full-window clear
     //   1 = ShadowPass caster → shadow FBO
     //   2 = ShadowPass resolve blit (color RT → sampleable tex)
@@ -50,12 +50,14 @@ public:
     //   6 = Skybox, 7 = GBuffer, 8 = Lighting, 9 = Transparent (Deferred)
     //  10 = BloomExtract (half-res bright)
     //  11 = BloomBlur horizontal, 12 = BloomBlur vertical
-    //  13 = DepthHaze (half-res fog; before Final so same-frame sample)
-    //  14 = PostProcess blit → backbuffer panel (Forward + Deferred)
+    //  13 = DepthHaze, 14 = SSAO (ordered before Lighting)
+    //  15 = PostProcess → FrameGraph FinalLdrColor
+    //  16 = Present → backbuffer panel (Forward + Deferred)
+    //  18–25 = Shadow atlas slots
     //  26–249 = retained UI Layer / generic offscreen paint targets
-    //            (250 is reserved by GBufferDebug)
+    //  250 = GBufferDebug, 251/252 = EditorOverlay axis/selection
     //  255 = UI chrome / menus (fixed high slot — insert Post passes
-    //        without reshuffling UI; must stay > Final PP)
+    //        without reshuffling UI; must stay after presentation overlays)
     static constexpr uint8_t kViewId = 255;
     static constexpr uint8_t kFirstLayerViewId = 26;
     static constexpr uint8_t kLastLayerViewId = 249;

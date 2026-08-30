@@ -10,10 +10,12 @@
 
 #include "AYRenderer/RenderTypes.h"
 #include "AYShader/ShaderResource.h"
+#include <AYIO/Env.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace ayt::render::detail
@@ -91,6 +93,39 @@ uint64_t transparentDrawState(BlendMode blendMode,
     return state;
 }
 
+uint64_t selectionDepthState(bool doubleSided,
+                             bool reverseWinding) noexcept
+{
+    uint64_t state = BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LEQUAL;
+    if (!doubleSided) {
+        state |= reverseWinding ? kCullFrontFaces : kCullBackFaces;
+    }
+    return state;
+}
+
+uint64_t selectionHullState(bool reverseWinding) noexcept
+{
+    return BGFX_STATE_WRITE_RGB
+         | BGFX_STATE_WRITE_A
+         | BGFX_STATE_DEPTH_TEST_LESS
+         | (reverseWinding ? kCullBackFaces : kCullFrontFaces);
+}
+
+ayt::math::Float4x4 makeSelectionHullWorld(const DrawItem& item,
+                                           float expansion) noexcept
+{
+    // Older hosts may already provide a padded world plus the original world
+    // in outlineDepthWorld. Newer editor selection never mutates Transform;
+    // expand locally around the mesh origin instead.
+    if (item.hasOutlineDepthWorld) {
+        return item.world;
+    }
+    const float safeExpansion = std::isfinite(expansion)
+        ? std::max(1.0f, expansion) : 1.0f;
+    return item.world * ayt::math::Float4x4::scaling(
+        ayt::math::FVector3(safeExpansion, safeExpansion, safeExpansion));
+}
+
 namespace {
 
 void bindTransparentEnvironment(shader::ShaderResource& shader,
@@ -131,7 +166,8 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
     const DrawItem& item,
     uint8_t viewId,
     const PackedSceneLighting& lights,
-    const PackedShadowAtlas& shadows)
+    const PackedShadowAtlas& shadows,
+    SubmitMode mode)
 {
     SubmitResult result;
     const auto& meshes   = ctx.meshes;
@@ -171,7 +207,8 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
         return result;
     }
 
-    if (!ayt::render::isTransparentBlendMode(material.blendMode)) {
+    if (mode == SubmitMode::TransparentSurface
+        && !ayt::render::isTransparentBlendMode(material.blendMode)) {
         result.skip = true;
         return result;
     }
@@ -257,6 +294,24 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
             material.shader.getUniformBinding(slot.name);
         if (binding != shader::InvalidBinding) {
             material.shader.setUniform(binding, slot.data, slot.size);
+        }
+    }
+
+    if (mode == SubmitMode::SelectionHull) {
+        // Override both common texture paths and the material tint after its
+        // own slots were uploaded. This keeps the rim readable and prevents a
+        // selected material from turning the complete object white/red/black.
+        tryBindWhiteTexture(material.shader, adapter, "baseColorTexture", false);
+        tryBindWhiteTexture(material.shader, adapter, "albedoMap", false);
+        tryBindWhiteTexture(material.shader, adapter, "opacityTexture", false);
+        if (material.colorBinding != shader::InvalidBinding
+            && material.shader.hasUniformBinding(material.colorBinding)) {
+            constexpr float selectionColor[4] = {
+                1.0f, 0.55f, 0.12f, 1.0f
+            };
+            material.shader.setUniform(material.colorBinding,
+                                       selectionColor,
+                                       sizeof(selectionColor));
         }
     }
 
@@ -372,14 +427,20 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         : ctx.viewId;
 
     const auto& items = scene.items();
-    // §P2 M4 (2026-08-24) — filter to Alpha-only BEFORE sorting. The
-    // prior code sorted every non-outlineHull item, then submitItem
-    // filtered by blendMode — opaque items paid sort cost for nothing.
+    const std::string outlineEnv =
+        ayt::io::env::get("AY_EDITOR_OUTLINE").value_or("");
+    const bool outlineEnabled = outlineEnv.empty() || outlineEnv != "0";
+
+    // Filter Alpha-only before sorting, but never remove a selected Alpha
+    // surface from its normal draw. Selection is an additional depth-aware
+    // hull below, not a replacement material pass.
     std::vector<TransparentSortEntry> sortedItems;
+    std::vector<const DrawItem*> outlineItems;
     sortedItems.reserve(items.size());
+    outlineItems.reserve(items.size());
     for (const DrawItem& item : items) {
-        if (item.outlineHull) {
-            continue;
+        if (outlineEnabled && item.outlineHull) {
+            outlineItems.push_back(&item);
         }
         const auto matIt = ctx.materials.find(item.material.id);
         if (matIt == ctx.materials.end()) {
@@ -392,7 +453,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
             &item, transparentDistanceSquared(item, frame.cameraPosition)
         });
     }
-    if (sortedItems.empty()) {
+    if (sortedItems.empty() && outlineItems.empty()) {
         return 0;
     }
     std::stable_sort(sortedItems.begin(), sortedItems.end(),
@@ -472,8 +533,47 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 
         const SubmitResult res = submitItem(
             adapter, ctx, frame, *pItem, viewId,
-            packedLights, packedShadows);
+            packedLights, packedShadows,
+            SubmitMode::TransparentSurface);
         if (res.accepted) {
+            ++drawCount;
+        }
+    }
+
+    // Draw selection before PostProcess/Present while this view still owns
+    // both the scene color and its depth attachment. Transparent selections
+    // need the first depth-only submission because their normal surface does
+    // not write Z; opaque selections harmlessly refresh the existing depth.
+    for (const DrawItem* pItem : outlineItems) {
+        const auto matIt = ctx.materials.find(pItem->material.id);
+        if (matIt == ctx.materials.end()) {
+            continue;
+        }
+        const GpuMaterial& material = matIt->second;
+        const PackedShadowAtlas& packedShadows =
+            receivesShadow(pItem->shadowFlags)
+                ? receiverShadows
+                : litFallbackShadows;
+
+        DrawItem depthItem = *pItem;
+        depthItem.world = pItem->hasOutlineDepthWorld
+            ? pItem->outlineDepthWorld : pItem->world;
+        adapter.setState(selectionDepthState(
+            material.doubleSided, reversesWinding(depthItem.world)));
+        const SubmitResult depthResult = submitItem(
+            adapter, ctx, frame, depthItem, viewId,
+            packedLights, packedShadows, SubmitMode::SelectionDepth);
+        if (depthResult.accepted) {
+            ++drawCount;
+        }
+
+        DrawItem hullItem = *pItem;
+        hullItem.world = makeSelectionHullWorld(*pItem);
+        adapter.setState(selectionHullState(reversesWinding(hullItem.world)));
+        const SubmitResult hullResult = submitItem(
+            adapter, ctx, frame, hullItem, viewId,
+            packedLights, packedShadows, SubmitMode::SelectionHull);
+        if (hullResult.accepted) {
             ++drawCount;
         }
     }

@@ -42,8 +42,8 @@ struct DrawItem {
     uint32_t                   jointCount   = 0;
     int32_t                    sortKey      = 0;
     ShadowFlags                shadowFlags  = kShadowCastAndReceive;
-    // When true, EditorOverlayPass draws with inverted-hull state
-    // (front-face cull) for selection outline (after PostProcess).
+    // When true, TransparentPass draws a depth-aware inverted hull before
+    // PostProcess while scene color and depth are still paired.
     bool                       outlineHull  = false;
     // Unexpanded mesh world for outline depth prepass. Required when
     // the selected surface never wrote depth (transparent objects).

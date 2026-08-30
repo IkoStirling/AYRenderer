@@ -98,8 +98,8 @@ TEST_CASE(pipeline_default_three_passes_dispatch_without_crash) {
     // and pushes [ForwardOpaque, Transparent, UI]. An empty-scene
     // render() routes through pipeline.executeAll which iterates
     // every pass; if pipeline ctor crashed, Renderer construction
-    // itself would have crashed. With no scene, render() returns
-    // early at the `scene.empty()` guard — but the pipeline is
+    // itself would have crashed. With no scene, geometry passes no-op
+    // locally while clear/fullscreen/UI passes still execute through the
     // already constructed, so this test verifies the ctor chain.
     Renderer r;
     InitDesc desc{};

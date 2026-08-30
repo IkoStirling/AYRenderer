@@ -137,4 +137,38 @@ TEST_CASE(debug_overlay_reports_draw_count)
     renderer.shutdown();
 }
 
+TEST_CASE(empty_scene_still_dispatches_deferred_screen_passes)
+{
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend            = ayt::render::Backend::Noop;
+    desc.width              = 640;
+    desc.height             = 480;
+    desc.enableDebugOverlay = true;
+    CHECK(renderer.initialize(desc));
+    renderer.configurePipeline(ayt::render::RenderPipelineDesc::makeDeferred());
+
+    const ayt::render::RenderScene emptyScene;
+    renderer.beginFrame({});
+    renderer.render(emptyScene);
+    renderer.endFrame();
+
+    const ayt::render::RenderFrameStats& stats = renderer.getFrameStats();
+    CHECK(stats.sceneItems == 0u);
+    CHECK(!stats.passes.empty());
+
+    const auto dispatched = [&stats](const char* name) {
+        return std::any_of(stats.passes.begin(), stats.passes.end(),
+                           [name](const ayt::render::RenderPassFrameStats& pass) {
+                               return pass.name == name;
+                           });
+    };
+    CHECK(dispatched("GBuffer"));
+    CHECK(dispatched("Lighting"));
+    CHECK(dispatched("PostProcess"));
+    CHECK(dispatched("UI"));
+
+    renderer.shutdown();
+}
+
 TEST_SUITE_END

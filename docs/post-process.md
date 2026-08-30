@@ -1,131 +1,137 @@
-# PostProcess（Final + 显示 Gamma + 真 Bloom 合成）
+# PostProcess 与 Present 边界
 
-> 与 [`renderer-pass-roadmap.md`](renderer-pass-roadmap.md) · [`frame-graph-mvp.md`](frame-graph-mvp.md) · [`pass-lessons-from-shadow.md`](pass-lessons-from-shadow.md) 配套。
-> 日期：2026-07-23 · 当前 cache key：`postprocess_tonemap_aces_v3_bloom_composite_fs`
-> 短期计划：见 [`short-term-plan.md`](short-term-plan.md) §S1。
+> 状态：2026-08-30 已按当前代码更新。PostProcess 不再直接写默认 backbuffer；Present 是唯一的最终呈现边界。
+> 关联：[`frame-graph-mvp.md`](frame-graph-mvp.md)、[`renderer-pass-roadmap.md`](renderer-pass-roadmap.md)、[`pass-lessons-from-shadow.md`](pass-lessons-from-shadow.md)。
 
 ## 1. 管线位置
 
+Forward：
+
+```text
+Shadow → ForwardOpaque → Forward2DOpaque → DepthHaze(no-op)
+       → Transparent → BloomExtract → BloomBlur
+       → PostProcess(view 15, FinalLdrColor)
+       → Present(view 16, backbuffer) → UI(view 255)
 ```
-Shadow → [Skybox → GBuffer → Lighting → Transparent] → BloomExtract → BloomBlur → **PostProcess(Final)** → UI
+
+Deferred：
+
+```text
+Shadow → Skybox → GBuffer → SSAO → Lighting → DepthHaze
+       → Transparent → BloomExtract → BloomBlur
+       → PostProcess(view 15, FinalLdrColor)
+       → Present(view 16, backbuffer) → UI(view 255)
 ```
 
-PostProcess 是整支管线的**最后一个 blit**(到默认 backbuffer 或 Editor panel hole)。源 FBO 由 `PostProcessPass::selectSourceFbo()` 选：
+Editor 管线在 Present 后、UI 前插入 EditorOverlay。GBufferDebug 使用 view 250，EditorOverlay 使用 view 251/252，因此最终 GPU 顺序为 Present → GBufferDebug（若启用）→ EditorOverlay → UI。
 
-1. `ctx.lightingPass->lightingOutputFbo()`（Deferred 路径，已挂 LightingPass 且 FBO ensure 过）
-2. `ctx.sceneFbo`（Forward / 默认路径）
-3. 都不 valid → execute() 早返回 0（no-op）
+## 2. 数据流与所有权
 
-## 2. 现在的合成契约（S1c, 2026-07-23）
+```text
+Forward sceneFbo / Deferred LightingOutput / current-frame HazeColor
+                              │
+                              ▼
+                    SceneColorPipeline
+                              │ HDR RGBA16F
+                 ┌────────────┴────────────┐
+                 ▼                         ▼
+          BloomExtract/Blur          PostProcess
+                 │                         │
+                 └──── bloom HDR ──────────┤
+                                           ▼
+                              FrameGraph FinalLdrColor
+                                      RGBA8, view 15
+                                           │
+                               PresentSource semantic
+                                           │
+                                           ▼
+                                  Present, view 16
+                                           │
+                                           ▼
+                              default backbuffer viewport rect
+```
 
-**单一 Final FS, 两个 sampler, 四个标量 vec4**：
+- FrameGraph 拥有 `FinalLdrColor` 的物理 RenderTarget lease；PostProcess 和 Present 都不拥有私有 FBO。
+- PostProcess 只使用 viewport-local 的 `(0,0,width,height)` 写 FinalLdrColor。
+- Present 才应用 Editor Game View 的 `(viewportX, viewportY)` 偏移并写默认 backbuffer。
+- `FrameGraph::markProduced(FinalLdrColor)` 只在 PostProcess 成功 submit 后置位；`beginFrame()` 会清零。Present 不会把跨帧复用的有效 handle 误认为本帧产物。
+- `FgSemantic::PresentSource` 当前指向 `FinalLdrColor`。后续 FXAA、ColorGrading 等节点可产出新的 LDR 资源并提升该 semantic，而无需改 PostProcess 或 Present 的端点职责。
 
-| Sampler / uniform | 用途 |
+## 3. PostProcess 合成契约
+
+主程序 cache key：`postprocess_tonemap_aces_v12_sanitized_params_fs`。
+
+| 输入 | 作用 |
 |---|---|
-| `sceneColor` (slot 0) | LightingOutput / scene FBO RT0 |
-| `bloomTexture` (slot 1) | `ctx.bloomBlurPass->pongFbo()` RT0（真 bloom 半分辨率高斯模糊） |
-| `bloomStrength` (vec4 .x) | 0 = 关闭 bloom；Editor 默认 0.2~0.4 |
-| `exposure` (vec4 .x) | 标量乘 sceneColor |
-| `tonemapMode` (vec4 .x) | 0=None / 1=Reinhard / 2=ACES（branchless `mix(mix(none,rein,step(.5,m)),aces,step(1.5,m))`） |
-| `gammaParams` (vec4 .x) | display gamma（`encoded = pow(max(mapped,0), 1/γ)`） |
-| `uTime` (vec4 .x) | 保留（诊断） |
+| `sceneColor` | SceneColorPipeline 选出的 HDR 主场景色 |
+| `bloomTexture` | 仅在 BloomBlur 本帧真实产出且 attachment 有效时使用 |
+| `bloomStrength` | 清洗后的 bloom 强度；输入无效时强制为 0 |
+| `exposure` | `[0,64]` 内的曝光倍数，非有限值回退 1 |
+| `tonemapMode` | None / Reinhard / ACES |
+| `gammaParams` | `[0.1,8]` 内的显示 gamma，非有限值回退 2.2 |
 
-**核心公式**（post-process.cpp:76-77 锚点）：
+核心顺序：HDR 场景与 HDR bloom 按同一曝光域合成，再 tone-map，最后 gamma encode，输出 display-referred RGBA8。独立 fallback 程序只声明 `sceneColor`，主程序恢复采用有界重试，避免 shader 获取失败时逐帧编译。
 
-```
-raw        = sampled.xyz * exposure.x
-withBloom  = raw + bloomSample.xyz * bloomStrength.x
-cx,cy,cz   = max(withBloom.{x,y,z}, 0)
-{selX, selY, selZ} = branchless tonemap mix(...) on {cx,cy,cz}
-encoded    = vec3(pow(max(selX,0), 1/γ), pow(max(selY,0), 1/γ), pow(max(selZ,0), 1/γ))
-return     = vec4(encoded, sampled.w)
-```
+## 4. Present 契约
 
-UV 在 FS 里手动 y-flip（`uv = vec2(vUv.x, 1.0 - vUv.y)`）：Phoskia vertex block 当前禁止 `let` 在 `out` 之前；同 Shadow 路径 D3D RT 与 backbuffer 约定。
+Present cache key：`present_final_ldr_blit_v1`。
 
-### 2.1 K3 不变量（短路 / producer-absent 守）
+Present 是最小的一纹理 fullscreen copy：
 
-| 情况 | 结果 |
-|---|---|
-| `bloomTexture` sampler 未绑（`ctx.bloomBlurPass == nullptr` 或 `pongFbo()` invalid） | bind `sceneColor` 到 bloom slot → FS `bloomSample == sampled` → `withBloom = raw * (1 + bloomStrength)`；若 `bloomStrength=0` ⇒ 与关 Bloom **字节一致** |
-| `bloomStrength=0` | `withBloom = raw` ⇒ 与关 Bloom **字节一致** |
-| TonemapMode=None + gamma=1.0 | 线性直通；对比更"灰/洗" |
+- 输入只来自 `FgSemantic::PresentSource`；
+- 要求 `PresentSource` 当前指向的 logical resource 本帧 production latch 为真；
+- 输出固定为默认 backbuffer；
+- 不做曝光、tone-map、gamma、调色或 UI 合成；
+- adapter 未初始化、Noop backend、零 viewport、semantic/attachment 无效时返回 0；
+- program、binding 或 fullscreen geometry 不可用时 fail-close 并保留诊断日志。
 
-> 这三条保证：未挂 BloomExtract/BloomBlur 的 host（custom desc 省略它们）走 PostProcess 零视觉差异 ⇒ pre-S1 验收锁不破。
+PostProcess 与 Present 共用 `FullscreenPassGeometry` 的超大三角形创建、绑定、销毁及 view 配置逻辑，但各 Pass 仍独立拥有自己的 GPU buffer handle，生命周期不会隐式耦合。
 
-## 3. 配套 Pass 族（§S1 短期链）
+## 5. View ID 保留表
 
-### 3.1 BloomExtractPass（§S1a）
+| View | Owner |
+|---:|---|
+| 15 | PostProcess → FinalLdrColor |
+| 16 | Present → backbuffer |
+| 17 | 当前保留 |
+| 18–25 | Shadow atlas slots |
+| 26–249 | UI offscreen layer/RenderTarget |
+| 250 | GBufferDebug |
+| 251 | Editor orientation axis |
+| 252 | Editor selection outline |
+| 255 | UI main composite |
 
-- 管线位置：Transparent 之后，PostProcess 之前
-- 输入：`sceneColor` (full-res)
-- 输出：half-res RGBA8 FBO `_fboColor`，仅含高亮（threshold + soft knee，留在短期后续 polish 时再细调；S1a MVP 用 `max(color - 1.0, 0)` 简化版）
-- ViewId：`kBloomExtractViewId=10`
-- Cache key bump：每次改 shader 必 bump
+`RenderViewOrder` 显式保证生产依赖顺序；新增 Pass 不得仅依据数字大小猜测执行次序，也不得复用上述区间。
 
-### 3.2 BloomBlurPass（§S1b）
+## 6. 后续 Pass 的接入方式
 
-- 输入：`BloomExtractPass::_fboColor`
-- 输出：横纵 5-tap Karplus-Strong-ish Gaussian 半分辨率 ping-pong
-  - view 12：horizontal `_pingFbo → _pongFbo`
-  - view 13：vertical   `_pongFbo → _pingFbo`
-- Weights：`[0.227, 0.194, 0.121, 0.054, 0.016]`
-- Final 半分辨率产物在 `_pingFbo` RT0（vertical pass 后）
-- PassExecContext 暴露：`bloomExtractPass` / `bloomBlurPass` 两个 borrowed ptr
+后 tone-map、低动态范围效果应插在 PostProcess 与 Present 之间：
 
-### 3.3 PostProcess 合成（§S1c） ← 本文件核心
-
-见 §2。
-
-### 3.4 Editor 调（§S1d）
-
-```cpp
-renderer.setPostProcessBloomStrength(0.2f ~ 0.4f);  // 默认略开
-// 0 = 关；Editor Play 启动时由 AYEditorPlayRuntime::applyEditorRenderPipeline() 设置
+```text
+FinalLdrColor → FXAA/ColorGrading/... → NewLdrColor
+                                      └→ PresentSource
 ```
 
-## 4. API
+每个节点需要：
 
-```cpp
-renderer.setPostProcessGamma(2.2f);
-renderer.setPostProcessExposure(1.0f);
-renderer.setPostProcessTonemapMode(Renderer::TonemapMode::ACES);
-renderer.setPostProcessBloomStrength(0.0f);  // 0 = 关；§S1d Editor 默认略开
-```
+1. append-only 新增 `FgResourceId` 与需要的 semantic；
+2. 在 FrameGraph 声明 read/write 和目标格式；
+3. 成功 submit 后发布 current-frame production latch；
+4. 仅在完整生产链有效时提升 `PresentSource`；
+5. 把 `RenderPassSlot` append 到 ABI 尾部，并在默认/Deferred 管线中明确位置；
+6. 增加生产 shader 编译、view 唯一性、Noop、resize、teardown 与 stale-handle 测试。
 
-Editor 入口：`AYEditorPlayRuntime::applyEditorRenderPipeline()` 在配置管线后统一设置默认值。
+TAA、运动模糊等历史类效果还需要稳定 motion vector、jitter、history ping-pong 和相机切换失效规则，不能按普通单帧 fullscreen Pass 直接接入。
 
-## 5. Shader ABI 契约（vec4 + bgfx Vec4 slot）
+## 7. 验收
 
-| 通道 | 类型 | 说明 |
-|------|------|------|
-| `sceneColor` | `texture2d` slot 0 | 场景色 |
-| `bloomTexture` | `texture2d` slot 1 | 真 bloom 半分辨率结果 |
-| `bloomStrength` | `uniform vec4` | `.x` = 强度 |
-| `exposure` | `uniform vec4` | `.x` = 标量 |
-| `tonemapMode` | `uniform vec4` | `.x` = 0/1/2 |
-| `uTime` | `uniform vec4` | `.x` = 秒（保留） |
-| `gammaParams` | `uniform vec4` | `.x` = display gamma |
+- `Test_PresentPass`：ABI、管线顺序、view 区间、current-frame latch、Noop、运行时 shader 编译。
+- `Test_FinalPP_S1c`、`Test_PostProcess_F5`、Bloom/DepthHaze/SSAO 套件：上游合成与来源选择回归。
+- D3D11/D3D12 真机：确认画面方向、Editor viewport rect、resize、Bloom 开关、Debug/EditorOverlay/UI 遮挡顺序。
 
-bgfx 一律 Vec4 slot；Phoskia 侧声明 `vec4` 再 `.x` swizzle。详见 Shadow lessons §3.1。
+## 8. 当前未实现
 
-Cache key 历次 bump：
-- `v1_aces_yflip_fs` — 初版 y-flip 修
-- `v2_yflip_fs` — 命名规范化
-- **`v3_bloom_composite_fs`（当前）** — §S1c 加 `bloomTexture` 第二 sampler + 真合成
-
-## 6. 验收（Editor Play）
-
-1. `[PostProcessPass] blit ok view=4 rect=(...) gamma=2.2 ... tonemap=2 bloom=0.20 bloomSrc=pong` —— bloomSrc=pong 表示真合成路径生效。
-2. `bloomSrc=fallback(scene)`：bloomStrength=0 或 producer-absent；与关 Bloom **字节一致**。
-3. cacheKey 含 `v3_bloom_composite`。
-4. 关 Bloom（`bloomStrength=0`）：Deferred 验收日志仍全绿（参考 [`deferred-acceptance.md`](deferred-acceptance.md)）。
-5. 单测：`AYRenderer_Test` 内 `Test_FinalPP_S1c` + `Test_PostProcess_R51` + `Test_BloomBlur_S1b`。
-
-## 7. 已知简化（短期不做）
-
-- 完整 sRGB 分段曲线（仍是 `pow(1/γ)` 简化）
-- Bloom threshold soft-knee 精细调（S1a MVP 用 `max(color - 1.0, 0)`）
-- 双 Kawase blur / Karis filter / radius knob（S1b 当前 5-tap Karplus-Strong-ish Gaussian）
-- Bloom 强度自适应（曝光感知）
-- 多效果链（SSAO / TAA / DOF）— 等中期 FrameGraph MVP
+- 精确 sRGB OETF、dithering 与 HDR swapchain 输出；
+- LUT ColorGrading、FXAA/SMAA；
+- DOF、MotionBlur、TAA 等历史/深度类效果；
+- 基于 GPU capture 的带宽与 RenderTarget alias 优化。

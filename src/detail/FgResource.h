@@ -71,8 +71,12 @@ enum class FgResourceId : uint8_t {
     // existing values. Test pin:
     //   static_cast<uint8_t>(FgResourceId::SSAOTexture) == 5
     SSAOTexture  = 5,
+    // Display-referred RGBA8 output of PostProcess. PresentPass consumes this
+    // current-frame result; future FXAA / grading nodes may read and replace
+    // the presentation source without writing the backbuffer directly.
+    FinalLdrColor = 6,
     // Sentinel ── 测试和实现都靠它做数组大小 / 上界判断。
-    Count        = 6,
+    Count        = 7,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。
@@ -124,7 +128,10 @@ enum class FgSemantic : uint8_t {
     // GBuffer fallback and uploads zero strength.
     // Never reorder or repurpose existing values.
     SSAOSource       = 3,
-    Count            = 4,
+    // Current display-referred source consumed by PresentPass. Initially
+    // FinalLdrColor; later post-tonemap nodes may promote this semantic.
+    PresentSource    = 4,
+    Count            = 5,
 };
 
 // `physicalTargets` 是 compile 期预计的 owned 物理 FBO 数
@@ -215,6 +222,13 @@ public:
     // Pass 已 resolve 创建 RT 后，同帧 Final 才能采到有效 handle。
     bgfx::FrameBufferHandle resolveSemantic(FgSemantic sem) const;
 
+    // Current-frame production latch shared by every effect node. Physical
+    // handles persist across frames for reuse, so consumers must not treat a
+    // valid handle as proof that its producer submitted this frame.
+    void markProduced(FgResourceId id) noexcept;
+    bool producedThisFrame(FgResourceId id) const noexcept;
+    bool semanticProducedThisFrame(FgSemantic sem) const noexcept;
+
     // ─── 生命周期 / 统计 ───────────────────────────────────────
     // 释放 FG-owned pool leases(external 不动)。尺寸变化时 owned RT
     // 在下次 resolve 时按新 key 获取；logical 资源声明保留。
@@ -246,6 +260,7 @@ private:
         bool                      declared    = false;
         bool                      isExternal  = false;
         bool                      live        = false;
+        bool                      producedThisFrame = false;
         // `mutable` 因为 resolve() 是 const 成员,但 lazy
         // create-on-first-resolve 路径必须能写 physical。
         mutable bgfx::FrameBufferHandle physical =

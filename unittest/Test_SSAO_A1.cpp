@@ -111,7 +111,7 @@ TEST_CASE(a1_make_default_does_not_include_ssao) {
     // real wire path; A1 just guarantees the slot-table ABI is
     // not pollution'd into the Forward path.
     const auto desc = ayt::render::RenderPipelineDesc::makeDefault();
-    CHECK(desc.passes.size() == 9);
+    CHECK(desc.passes.size() == 10);
     bool found = false;
     for (const auto s : desc.passes) {
         if (s == RenderPassSlot::SSAO) {
@@ -136,7 +136,8 @@ TEST_CASE(a1_fg_resource_id_ssao_texture_is_5) {
     CHECK(static_cast<uint8_t>(FgResourceId::BloomBlurB) == 3u);
     CHECK(static_cast<uint8_t>(FgResourceId::HazeHalf) == 4u);
     // Sentinel must bump to 6 (post-A1).
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 6u);
+    CHECK(static_cast<uint8_t>(FgResourceId::FinalLdrColor) == 6u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 7u);
 }
 
 TEST_CASE(a1_fg_semantic_ssao_source_is_3) {
@@ -146,7 +147,8 @@ TEST_CASE(a1_fg_semantic_ssao_source_is_3) {
     CHECK(static_cast<uint8_t>(FgSemantic::FinalColorSource) == 0u);
     CHECK(static_cast<uint8_t>(FgSemantic::BloomSource) == 1u);
     CHECK(static_cast<uint8_t>(FgSemantic::HazeSource) == 2u);
-    CHECK(static_cast<uint8_t>(FgSemantic::Count) == 4u);
+    CHECK(static_cast<uint8_t>(FgSemantic::PresentSource) == 4u);
+    CHECK(static_cast<uint8_t>(FgSemantic::Count) == 5u);
 }
 
 // ─── C. View id reservation lock ────────────────────────────────────

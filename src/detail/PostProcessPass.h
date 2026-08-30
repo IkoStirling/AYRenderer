@@ -2,6 +2,7 @@
 
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
+#include "detail/FullscreenPassGeometry.h"
 
 #include "AYShader/ShaderResource.h"
 
@@ -16,11 +17,13 @@ namespace ayt::render::detail
 // Final fullscreen composite. It consumes the shared current-frame scene-color
 // route (Forward sceneFbo, Deferred LightingOutput, or produced HazeColor),
 // combines optional produced BloomSource, applies exposure + tone mapping +
-// display gamma, and writes the default backbuffer before UI view 255.
+// display gamma, and writes FrameGraph FinalLdrColor. PresentPass owns the
+// later default-backbuffer boundary.
 //
-// PostProcess owns no render target. It owns only fullscreen geometry and one
-// ShaderResource. An independent one-texture blit is retained as a compile
-// fallback, while the primary program is retried at a bounded cadence.
+// PostProcess owns no render target. FrameGraph owns FinalLdrColor; this pass
+// owns only reusable fullscreen geometry and one ShaderResource. An
+// independent one-texture blit is retained as a compile fallback, while the
+// primary program is retried at a bounded cadence.
 class PostProcessPass final : public RenderPass {
 public:
     // Stable final-composite view. Deferred ordering is SSAO(14) →
@@ -47,8 +50,7 @@ public:
 
     bool isReady() const noexcept {
         return _program.isValid()
-            && bgfx::isValid(_fullscreenVB)
-            && bgfx::isValid(_fullscreenIB);
+            && _fullscreen.isReady();
     }
 
     // Must run while the adapter and shader pool are alive. Renderer invokes
@@ -56,8 +58,7 @@ public:
     void destroyResources(BGFXAdapter& adapter);
 
 private:
-    bgfx::VertexBufferHandle   _fullscreenVB = BGFX_INVALID_HANDLE;
-    bgfx::IndexBufferHandle    _fullscreenIB = BGFX_INVALID_HANDLE;
+    FullscreenPassGeometry _fullscreen;
 
     // Lazily acquired primary or minimal fallback program.
     ayt::shader::ShaderResource _program;
@@ -90,7 +91,6 @@ private:
 
     // Helpers are no-ops on the Noop backend (BGFXAdapter
     // gates on isInitialized()), so the headless test path runs clean.
-    void ensureFullscreenQuad(BGFXAdapter& adapter);
     void ensureProgram(shader::ShaderResourcePool& pool);
 };
 

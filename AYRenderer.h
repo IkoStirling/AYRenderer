@@ -385,6 +385,12 @@ public:
     // is not initialized or no matching materials are loaded yet.
     uint32_t reloadMaterialsForShaderFile(const std::string& shaderPath);
 
+    // Editor-only camera orientation widget. It is rendered procedurally in
+    // the lower-left of the active scene viewport after FinalPP and before UI.
+    // Generic renderer instances default off; editor hosts opt in explicitly.
+    void setViewportOrientationAxisEnabled(bool enabled);
+    bool viewportOrientationAxisEnabled() const noexcept;
+
     void setDebugOverlayEnabled(bool enabled);
     bool isDebugOverlayEnabled() const noexcept;
     void setDebugOverlaySuppressed(bool suppressed);

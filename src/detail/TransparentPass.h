@@ -39,10 +39,21 @@ uint64_t transparentDrawState(BlendMode blendMode,
                               bool doubleSided,
                               bool reverseWinding) noexcept;
 
+// Selection is rendered while the scene color and depth attachments are
+// still bound.  The original surface first seeds depth when necessary, then
+// an expanded back-face hull draws only where it is nearer than scene depth.
+uint64_t selectionDepthState(bool doubleSided,
+                             bool reverseWinding) noexcept;
+uint64_t selectionHullState(bool reverseWinding) noexcept;
+ayt::math::Float4x4 makeSelectionHullWorld(
+    const DrawItem& item,
+    float expansion = 1.025f) noexcept;
+
 // Forward path composites into sceneFbo after ForwardOpaque. Deferred path
 // uses a dedicated view and a cached FBO that borrows LightingOutput color and
-// GBuffer depth. The pass never writes depth. SceneLights and shadow-atlas
-// arrays share the same CPU packing contract as LightingPass.
+// GBuffer depth. Normal transparent surfaces never write depth; a selected
+// surface uses a local depth prepass before its inverted hull. SceneLights and
+// shadow-atlas arrays share the same CPU packing contract as LightingPass.
 class TransparentPass : public RenderPass {
 public:
     std::string_view name() const override { return "Transparent"; }
@@ -51,6 +62,12 @@ public:
     void destroyResources(BGFXAdapter& adapter) noexcept;
 
 private:
+    enum class SubmitMode : uint8_t {
+        TransparentSurface,
+        SelectionDepth,
+        SelectionHull,
+    };
+
     struct SubmitResult {
         bool accepted = false;
         bool skip = false;
@@ -63,7 +80,8 @@ private:
                                    const DrawItem& item,
                                    uint8_t viewId,
                                    const PackedSceneLighting& lights,
-                                   const PackedShadowAtlas& shadows);
+                                   const PackedShadowAtlas& shadows,
+                                   SubmitMode mode);
 
     bgfx::FrameBufferHandle ensureDeferredCompositeFbo(
         BGFXAdapter& adapter,

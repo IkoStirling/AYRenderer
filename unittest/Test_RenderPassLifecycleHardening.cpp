@@ -106,7 +106,7 @@ TEST_CASE(fullscreen_buffer_creation_is_transactional_and_shared_by_all_passes)
     CHECK(publishVertex != std::string::npos);
     CHECK(publishIndex != std::string::npos);
 
-    constexpr std::array<const char*, 8> passFiles = {
+    constexpr std::array<const char*, 7> directHelperPassFiles = {
         "src/detail/LightingPass.cpp",
         "src/detail/SkyboxPass.cpp",
         "src/detail/BloomExtractPass.cpp",
@@ -114,13 +114,29 @@ TEST_CASE(fullscreen_buffer_creation_is_transactional_and_shared_by_all_passes)
         "src/detail/DepthHazePass.cpp",
         "src/detail/SSAOPass.cpp",
         "src/detail/GBufferDebugPass.cpp",
-        "src/detail/PostProcessPass.cpp",
     };
-    for (const char* passFile : passFiles) {
+    for (const char* passFile : directHelperPassFiles) {
         const std::string source = readRendererSource(passFile);
         CHECK(source.find("ensureFullscreenTriangleBuffers(")
               != std::string::npos);
     }
+
+    // FinalPP and Present use the typed wrapper so the triangle data, view
+    // setup and destruction contract live in one place. The wrapper itself
+    // must still delegate allocation to the transactional helper above.
+    const std::string geometry =
+        readRendererSource("src/detail/FullscreenPassGeometry.cpp");
+    CHECK(geometry.find("ensureFullscreenTriangleBuffers(")
+          != std::string::npos);
+
+    const std::string postProcess =
+        readRendererSource("src/detail/PostProcessPass.cpp");
+    const std::string present =
+        readRendererSource("src/detail/PresentPass.cpp");
+    CHECK(postProcess.find("_fullscreen.ensure(adapter)")
+          != std::string::npos);
+    CHECK(present.find("_geometry.ensure(adapter)")
+          != std::string::npos);
 }
 
 TEST_SUITE_END

@@ -81,6 +81,37 @@ TEST_CASE(alpha_state_reads_depth_never_writes_it_and_uses_correct_over_alpha)
     CHECK((state & BGFX_STATE_DEPTH_TEST_ALWAYS) == 0u);
 }
 
+TEST_CASE(selection_hull_uses_scene_depth_and_preserves_object_translation)
+{
+    using ayt::render::DrawItem;
+    using ayt::render::detail::selectionDepthState;
+    using ayt::render::detail::selectionHullState;
+    using ayt::render::detail::makeSelectionHullWorld;
+
+    const uint64_t depthState = selectionDepthState(false, false);
+    CHECK((depthState & BGFX_STATE_WRITE_Z) != 0u);
+    CHECK((depthState & BGFX_STATE_WRITE_RGB) == 0u);
+    CHECK((depthState & BGFX_STATE_DEPTH_TEST_LEQUAL) != 0u);
+
+    const uint64_t hullState = selectionHullState(false);
+    CHECK((hullState & BGFX_STATE_WRITE_Z) == 0u);
+    CHECK((hullState & BGFX_STATE_DEPTH_TEST_LESS) != 0u);
+    CHECK((hullState & BGFX_STATE_DEPTH_TEST_ALWAYS) == 0u);
+    CHECK((hullState & BGFX_STATE_BLEND_MASK) == 0u);
+
+    DrawItem item;
+    item.world = ayt::math::Float4x4::fromTRS(
+        {4.0f, 5.0f, 6.0f}, ayt::math::FQuaternion::identity(),
+        {2.0f, 3.0f, 4.0f});
+    const ayt::math::Float4x4 hull = makeSelectionHullWorld(item, 1.025f);
+    CHECK(hull(0, 3) == 4.0f);
+    CHECK(hull(1, 3) == 5.0f);
+    CHECK(hull(2, 3) == 6.0f);
+    CHECK(hull(0, 0) > item.world(0, 0));
+    CHECK(hull(1, 1) > item.world(1, 1));
+    CHECK(hull(2, 2) > item.world(2, 2));
+}
+
 TEST_CASE(scene_light_pack_matches_shadow_caster_first_order)
 {
     using ayt::render::Light;

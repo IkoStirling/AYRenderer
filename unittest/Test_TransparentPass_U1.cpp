@@ -137,8 +137,8 @@ TEST_CASE(transparent_pass_dispatch_updates_last_draw_calls) {
     r.render(scene);
     r.endFrame();
 
-    // Bonus: render() with empty scene — must not enter either pass
-    // (the `if (scene.empty()) return;` at the top of Renderer::render).
+    // Bonus: render() with an empty scene still dispatches the pipeline so
+    // clear/fullscreen/UI passes remain active; geometry passes no-op locally.
     RenderScene empty;
     r.beginFrame({});
     r.render(empty);

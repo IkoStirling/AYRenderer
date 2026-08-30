@@ -92,7 +92,7 @@ TEST_CASE(e5_fresh_renderer_default_shadow_enabled)
     CHECK(renderer.shadowsEnabled() == false);
     renderer.setShadowsEnabled(true);
     CHECK(renderer.shadowsEnabled() == true);
-    CHECK(renderer.pipelineDesc().passes.size() == 9u);   // S1a (2026-07-23): BloomExtract added; S1b: +1 BloomBlur; S4b: +1 DepthHaze
+    CHECK(renderer.pipelineDesc().passes.size() == 10u);
     CHECK(renderer.pipelineDesc().passes[0] == RenderPassSlot::Shadow);
 }
 
@@ -124,7 +124,7 @@ TEST_CASE(e5_empty_desc_fallback_shadow_enabled)
     Renderer renderer;
     renderer.configurePipeline(RenderPipelineDesc{});
     CHECK(renderer.shadowsEnabled() == true);
-    CHECK(renderer.pipelineDesc().passes.size() == 9u);   // S1a (2026-07-23): BloomExtract added; S1b: +1 BloomBlur; S4b: +1 DepthHaze
+    CHECK(renderer.pipelineDesc().passes.size() == 10u);
     CHECK(renderer.pipelineDesc().contains(RenderPassSlot::Shadow));
 }
 

@@ -308,10 +308,11 @@ enum class RenderPassSlot : uint8_t {
     GBufferDebug = 12,
 
     // Editor selection overlay (2026-07-25) — append-only ABI value 13.
-    // Inverted-hull selection rim drawn AFTER PostProcess (stable color,
+    // Inverted-hull selection rim drawn AFTER Present (stable color,
     // no bloom/tonemap) and BEFORE UI. Omitted from makeDefault() /
     // makeDeferred(); editor hosts opt in via makeEditorForward() /
-    // makeEditorDeferred(). View 16 (PostProcess=15, UI=255).
+    // makeEditorDeferred(). Views 251/252 (Present=16,
+    // GBufferDebug=250, UI=255).
     EditorOverlay = 13,
 
     // 2D opaque lane (2026-08-11, CM-1) — append-only ABI value 14.
@@ -325,6 +326,13 @@ enum class RenderPassSlot : uint8_t {
     // — makeDeferred() does NOT include this slot (cutsheet §S2
     // hard-line style: "omit slot = opt out").
     Forward2DOpaque = 14,
+
+    // Mandatory final presentation stage — append-only ABI value 15.
+    // PostProcess writes FrameGraph FinalLdrColor on view 15; Present samples
+    // it and writes the editor/game viewport rect on the default backbuffer
+    // using view 16. Cheap post-tonemap effects can now be inserted between
+    // these slots without reopening FinalPP's backbuffer contract.
+    Present = 15,
 };
 
 // §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was
@@ -362,7 +370,7 @@ struct RenderPipelineDesc {
     // GPU resources).
     static RenderPipelineDesc makeDeferred();
     // Editor pipelines — same as makeForwardWithShadows() / makeDeferred()
-    // but insert RenderPassSlot::EditorOverlay immediately after PostProcess
+    // but insert RenderPassSlot::EditorOverlay immediately after Present
     // (selection rim on backbuffer; stable color, no bloom/tonemap).
     static RenderPipelineDesc makeEditorForward();
     static RenderPipelineDesc makeEditorDeferred();

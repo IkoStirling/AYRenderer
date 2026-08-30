@@ -872,17 +872,25 @@ void BGFXAdapter::setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding)
     bgfx::setState(state);
 }
 
+void BGFXAdapter::setStateOverlayDepthWrite()
+{
+    bgfx::setState(BGFX_STATE_WRITE_RGB
+                 | BGFX_STATE_WRITE_A
+                 | BGFX_STATE_WRITE_Z
+                 | BGFX_STATE_DEPTH_TEST_LESS);
+}
+
 void BGFXAdapter::setStateOutlineHull()
 {
     // Cull front faces — mirror the normal kCullBackFaces state.
     // Inverted hull: only expanded back faces contribute.
     //
-    // Forward opaque uses DEPTH_TEST_LESS (setStateOpaque). Inverted hull
-    // uses the opposite compare so only the expanded shell beyond the
-    // stored scene depth passes (works for both D3D ndc01 and GL).
+    // With the standard near=0/far=1 depth convention, expanded back faces
+    // are farther than the selected surface in its interior (fail LESS) but
+    // nearer than background around the silhouette (pass LESS).
     bgfx::setState(BGFX_STATE_WRITE_RGB
                  | BGFX_STATE_WRITE_A
-                 | BGFX_STATE_DEPTH_TEST_GREATER
+                 | BGFX_STATE_DEPTH_TEST_LESS
                  | kCullFrontFaces);
 }
 
@@ -926,6 +934,27 @@ bgfx::VertexLayout BGFXAdapter::vertexLayoutPosUv()
     layout.begin()
         .add(bgfx::Attrib::Position,  2, bgfx::AttribType::Float)
         .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+        .end();
+    return layout;
+}
+
+bgfx::VertexLayout BGFXAdapter::vertexLayoutPosColor()
+{
+    bgfx::VertexLayout layout;
+    layout.begin()
+        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+        .end();
+    return layout;
+}
+
+bgfx::VertexLayout BGFXAdapter::vertexLayoutPosScreenOffsetColor()
+{
+    bgfx::VertexLayout layout;
+    layout.begin()
+        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
         .end();
     return layout;
 }

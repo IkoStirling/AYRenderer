@@ -98,7 +98,9 @@ TEST_CASE(depth_haze_production_shader_uses_coverage_without_reapplying_ssao) {
     const std::string source(
         ayt::render::detail::depthHazePhoskiaSourceForTests());
     CHECK(source.find("texture2d geometryCoverage") != std::string::npos);
-    CHECK(source.find("mix(1.0, surfaceFog, coverage)") != std::string::npos);
+    CHECK(source.find("surfaceFog * coverage * hazeStrength.x")
+          != std::string::npos);
+    CHECK(source.find("mix(1.0, surfaceFog, coverage)") == std::string::npos);
     CHECK(source.find("ssaoTexture") == std::string::npos);
     CHECK(source.find("ssaoStrength") == std::string::npos);
     CHECK(source.find("mix(raw.xyz, hazeColor.xyz, fogFactor)")
@@ -118,7 +120,7 @@ TEST_CASE(depth_haze_and_postprocess_production_shaders_compile) {
 
 TEST_CASE(depth_haze_cache_key_and_resource_id_are_stable) {
     CHECK(std::string(ayt::render::detail::kDepthHazeCacheKeyCStr)
-          == "depthhaze_v4_fullres_coverage_fs");
+          == "depthhaze_v5_preserve_sky_coverage_fs");
     CHECK(static_cast<unsigned>(FgResourceId::HazeColor) == 4u);
     CHECK(static_cast<unsigned>(FgResourceId::HazeHalf) == 4u);
 }
@@ -150,7 +152,7 @@ TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {
 
 TEST_CASE(deferred_pipeline_matches_data_dependencies) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
-    CHECK(desc.passes.size() == 12u);
+    CHECK(desc.passes.size() == 13u);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
     CHECK(desc.passes[3] == RenderPassSlot::SSAO);
     CHECK(desc.passes[4] == RenderPassSlot::Lighting);
@@ -163,7 +165,7 @@ TEST_CASE(deferred_pipeline_matches_data_dependencies) {
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 26u);
+    CHECK(order.size() == 28u);
     CHECK(order[16] == 14u);  // SSAO
     CHECK(order[17] == 8u);   // Lighting
     CHECK(order[18] == 13u);  // DepthHaze
@@ -172,11 +174,15 @@ TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     CHECK(order[21] == 11u);  // BloomBlurH
     CHECK(order[22] == 12u);  // BloomBlurV
     CHECK(order[23] == 15u);  // PostProcess
+    CHECK(order[24] == 16u);  // Present
+    CHECK(order[25] == 250u); // GBufferDebug
+    CHECK(order[26] == 251u); // Editor orientation axis
+    CHECK(order[27] == 252u); // Editor selection outline
 }
 
 TEST_CASE(forward_pipeline_keeps_haze_as_safe_noop_before_transparent) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
-    CHECK(desc.passes.size() == 9u);
+    CHECK(desc.passes.size() == 10u);
     CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
     CHECK(desc.passes[4] == RenderPassSlot::Transparent);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);

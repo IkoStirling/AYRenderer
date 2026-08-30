@@ -34,6 +34,8 @@ constexpr uint16_t kFullscreenIndices[3] = {0, 1, 2};
 
 } // namespace
 
+// Keep this implementation unit tied to the v5 sky-preservation contract.
+// Test mirrors catch stale objects or accidental cache-key drift immediately.
 const char* const kDepthHazeCacheKeyCStr = ayt::render::kDepthHazeCacheKey;
 
 std::string_view depthHazePhoskiaSourceForTests() noexcept

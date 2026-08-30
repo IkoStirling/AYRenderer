@@ -227,6 +227,10 @@ public:
     void setStateDepthTestAlways();
     void setStateDepthOnlyWrite();
     void setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding = false);
+    // Small editor orientation widget: depth-clear is scoped to its own
+    // sub-rect, then this state gives the procedural arrows correct
+    // self-occlusion without sampling or modifying the scene depth target.
+    void setStateOverlayDepthWrite();
     // Selection inverted-hull: cull front faces (CW), depth LESS,
     // no blend — rim stays outside the already-drawn mesh.
     void setStateOutlineHull();
@@ -250,6 +254,11 @@ public:
     // call; PostProcessPass caches it locally. Stride must match the
     // FullscreenVertex POD (16 bytes alignas(16)).
     bgfx::VertexLayout vertexLayoutPosUv();
+    // Editor orientation-axis mesh: Position 3 floats + normalized ABGR8.
+    bgfx::VertexLayout vertexLayoutPosColor();
+    // Editor orientation-axis mesh with screen-facing X/Y/Z labels:
+    // Position 3 floats + clip-space offset 2 floats + normalized ABGR8.
+    bgfx::VertexLayout vertexLayoutPosScreenOffsetColor();
 
     // P6.5 — bgfx::touch(viewId) wrapper. ShadowPass calls this to
     // ensure the depth-only FBO view is included in bgfx's frame

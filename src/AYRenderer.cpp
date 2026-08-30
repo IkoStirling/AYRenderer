@@ -19,6 +19,7 @@
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/PostProcessPipeline.h"
+#include "detail/PresentPass.h"
 #include "detail/EditorOverlayPass.h"
 #include "detail/Forward2DOpaquePass.h"  // CM-1 (2026-08-11) — 2D lane pass factory.
 #include "detail/RenderPipeline.h"
@@ -87,6 +88,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
+        RenderPassSlot::Present,
         RenderPassSlot::UI,
     }};
 }
@@ -102,12 +104,23 @@ RenderPipelineDesc RenderPipelineDesc::makeForwardWithShadows()
 
 namespace {
 
-void insertEditorOverlayAfterPostProcess(RenderPipelineDesc& desc)
+void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
 {
     auto ppIt = std::find(desc.passes.begin(), desc.passes.end(),
                           RenderPassSlot::PostProcess);
-    if (ppIt != desc.passes.end()) {
-        desc.passes.insert(ppIt + 1, RenderPassSlot::EditorOverlay);
+    const auto presentIt = std::find(desc.passes.begin(), desc.passes.end(),
+                                     RenderPassSlot::Present);
+    if (ppIt != desc.passes.end() && presentIt == desc.passes.end()) {
+        desc.passes.insert(ppIt + 1, RenderPassSlot::Present);
+    }
+}
+
+void insertEditorOverlayAfterPresent(RenderPipelineDesc& desc)
+{
+    auto presentIt = std::find(desc.passes.begin(), desc.passes.end(),
+                               RenderPassSlot::Present);
+    if (presentIt != desc.passes.end()) {
+        desc.passes.insert(presentIt + 1, RenderPassSlot::EditorOverlay);
     } else {
         desc.passes.push_back(RenderPassSlot::EditorOverlay);
     }
@@ -118,14 +131,14 @@ void insertEditorOverlayAfterPostProcess(RenderPipelineDesc& desc)
 RenderPipelineDesc RenderPipelineDesc::makeEditorForward()
 {
     RenderPipelineDesc desc = makeForwardWithShadows();
-    insertEditorOverlayAfterPostProcess(desc);
+    insertEditorOverlayAfterPresent(desc);
     return desc;
 }
 
 RenderPipelineDesc RenderPipelineDesc::makeEditorDeferred()
 {
     RenderPipelineDesc desc = makeDeferred();
-    insertEditorOverlayAfterPostProcess(desc);
+    insertEditorOverlayAfterPresent(desc);
     return desc;
 }
 
@@ -160,6 +173,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
+        RenderPassSlot::Present,
         RenderPassSlot::UI,
         // Fullscreen attachment overlay on view 250. It is mounted only in
         // Deferred, defaults off, and executes before editor UI (view 255).
@@ -190,6 +204,8 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::TransparentPass>();
     case RenderPassSlot::PostProcess:
         return std::make_unique<detail::PostProcessPass>();
+    case RenderPassSlot::Present:
+        return std::make_unique<detail::PresentPass>();
     case RenderPassSlot::EditorOverlay:
         return std::make_unique<detail::EditorOverlayPass>();
     case RenderPassSlot::UI:
@@ -407,6 +423,18 @@ struct Renderer::Impl {
     bool                           gbufferDebugEnabled  = false;
     uint8_t                        gbufferDebugChannel  = 0;
 
+    // EditorOverlay orientation widget. Stored on Impl so pipeline rebuilds
+    // preserve the host's toggle even though the pass object is recreated.
+    bool                           viewportOrientationAxisEnabled = false;
+
+    void applyEditorOverlayKnobs()
+    {
+        if (detail::RenderPass* overlay = pipeline.findPass("EditorOverlay")) {
+            static_cast<detail::EditorOverlayPass*>(overlay)
+                ->setOrientationAxisEnabled(viewportOrientationAxisEnabled);
+        }
+    }
+
     // P4.2 (§P4, 2026-07-22) — global shadow receiver bias in ndc01
     // units. Mirrored into FrameContext::shadowBias each render so
     // tryBindShadowSampler() (ForwardOpaquePass + TransparentPass
@@ -515,6 +543,10 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     RenderPipelineDesc resolved = desc.passes.empty()
                                       ? RenderPipelineDesc::makeDefault()
                                       : desc;
+    // Presentation is a mandatory boundary for any pipeline containing
+    // PostProcess. Auto-insert it for source compatibility with custom
+    // descriptors created before RenderPassSlot::Present was appended.
+    ensurePresentAfterPostProcess(resolved);
 
     UIRenderBackend* retainedUi = nullptr;
     if (detail::RenderPass* uiPass = pipeline.findPass("UI")) {
@@ -629,6 +661,21 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
+    if (detail::RenderPass* presentPass = pipeline.findPass("Present")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::PresentPass*>(presentPass)
+                ->destroyResources(adapter);
+        }
+    }
+
+    if (detail::RenderPass* editorOverlayPass =
+            pipeline.findPass("EditorOverlay")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::EditorOverlayPass*>(editorOverlayPass)
+                ->destroyResources(adapter);
+        }
+    }
+
     pipeline.clear();
     // E5 (§5.4, 2026-07-22): default pipeline now mounts EVERY slot
     // at its RenderPass base default (_enabled == true), Shadow
@@ -653,6 +700,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     }
 
     applyShadowQualityKnobs();
+    applyEditorOverlayKnobs();
 }
 
 Renderer::Renderer() : _impl(std::make_unique<Impl>())
@@ -856,6 +904,22 @@ void Renderer::shutdown()
         }
     }
 
+    if (detail::RenderPass* presentPass =
+            _impl->pipeline.findPass("Present")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::PresentPass*>(presentPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+
+    if (detail::RenderPass* editorOverlayPass =
+            _impl->pipeline.findPass("EditorOverlay")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::EditorOverlayPass*>(editorOverlayPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+
     // SSAO keeps raw fullscreen geometry handles in the pass instance. Reset
     // them before adapter shutdown so initialize() on the same Renderer never
     // mistakes stale numeric handles for live resources.
@@ -944,10 +1008,6 @@ void Renderer::render(const RenderScene& scene)
     _impl->lastSceneItems = static_cast<uint32_t>(scene.items().size());
     _impl->lastDrawCalls  = 0;
 
-    if (scene.empty()) {
-        return;
-    }
-
     detail::FrameContext frame;
     frame.view             = _impl->mainView;
     frame.projection       = _impl->mainProjection;
@@ -1018,12 +1078,10 @@ void Renderer::render(const RenderScene& scene)
 
     _impl->lastDrawCalls = 0;
 
-    // Scene FBO for FO/Transparent → PostProcess sample → backbuffer blit.
-    // Editor composite also uses this path: FO draws into a panel-sized
-    // offscreen RT (rect 0,0,w,h); PostProcessPass blits to the Game View
-    // hole (vx,vy,w,h) on view 4. Previously composite forced INVALID
-    // FBO (3D direct to backbuffer) which made PostProcess early-out —
-    // so Editor never saw any post filter (ripple included).
+    // Scene FBO for FO/Transparent → PostProcess FinalLdrColor → Present.
+    // Editor composite uses the same panel-sized offscreen scene path:
+    // PostProcess writes viewport-local FinalLdrColor on view 15, then
+    // Present applies (vx,vy,w,h) to the default backbuffer on view 16.
     const bgfx::FrameBufferHandle sceneFbo = _impl->ensureSceneFbo();
 
     // §P5 B4b (2026-07-22) — broadcast viewport size to GBufferPass
@@ -1164,6 +1222,18 @@ void Renderer::render(const RenderScene& scene)
     if (detail::RenderPass* ssaoSlot = _impl->pipeline.findPass("SSAO")) {
         ssaoPassPtr = static_cast<detail::SSAOPass*>(ssaoSlot);
         ssaoPassPtr->resetFrameState();
+    }
+
+    detail::PostProcessPass* postProcessPassPtr = nullptr;
+    if (detail::RenderPass* postProcessSlot =
+            _impl->pipeline.findPass("PostProcess")) {
+        postProcessPassPtr =
+            static_cast<detail::PostProcessPass*>(postProcessSlot);
+    }
+    detail::PresentPass* presentPassPtr = nullptr;
+    if (detail::RenderPass* presentSlot =
+            _impl->pipeline.findPass("Present")) {
+        presentPassPtr = static_cast<detail::PresentPass*>(presentSlot);
     }
 
     // §P5.5 C (2026-07-23) — wire the per-frame SceneLights ref
@@ -1309,6 +1379,34 @@ void Renderer::render(const RenderScene& scene)
     fg.setResolvedSemantic(detail::FgSemantic::FinalColorSource,
                            detail::FgResourceId::SceneColor);
 
+    // FinalPP is now an offscreen producer. Present is its mandatory consumer
+    // and the sole owner of the default-backbuffer boundary. Keeping the LDR
+    // target in FrameGraph allows future FXAA / grading passes to replace
+    // PresentSource without changing either endpoint.
+    const bool finalLdrStageEnabled = backendReady
+        && fgW != 0 && fgH != 0
+        && postProcessPassPtr != nullptr
+        && postProcessPassPtr->isEnabled()
+        && presentPassPtr != nullptr
+        && presentPassPtr->isEnabled();
+    if (finalLdrStageEnabled) {
+        fg.addResource(detail::FgResourceId::FinalLdrColor,
+                       {bgfx::TextureFormat::RGBA8,
+                        detail::FgTextureScale::Full,
+                        /*transient=*/true,
+                        /*withDepth=*/false});
+        fg.addPass({"PostProcess",
+                    {hdrSceneSource},
+                    {detail::FgResourceId::FinalLdrColor},
+                    /*enabled=*/true});
+        fg.addPass({"Present",
+                    {detail::FgResourceId::FinalLdrColor},
+                    {},
+                    /*enabled=*/true});
+        fg.setResolvedSemantic(detail::FgSemantic::PresentSource,
+                               detail::FgResourceId::FinalLdrColor);
+    }
+
     // GBufferDebug now overlays the selected attachment directly into the
     // game viewport on view 250. No hidden host-owned FBO is allocated; UI
     // view 255 still renders afterwards, so Editor chrome remains intact.
@@ -1394,13 +1492,13 @@ void Renderer::render(const RenderScene& scene)
     }
 
     // Dispatched via RenderPipeline::executeAll in registration order
-    // [ForwardOpaque, Transparent, PostProcess, UI]. ForwardOpaquePass
+    // [ForwardOpaque, Transparent, PostProcess, Present, UI]. ForwardOpaquePass
     // writes the depth buffer first; TransparentPass reuses that depth
     // with DEPTH_TEST_LEQUAL but does not WRITE_Z. Transparent submission is
     // stable back-to-front: explicit DrawItem::sortKey first, camera distance
     // second, with Sequential view mode preserving that CPU order.
-    // PostProcessPass samples its own FBO today (scene-RT closure is
-    // docs/execution-plan.md P2). UIPass ignores the viewId arg and
+    // PostProcessPass writes FrameGraph FinalLdrColor; PresentPass samples it
+    // into the Game View backbuffer rect. UIPass ignores the viewId arg and
     // delegates to its injected UIRenderBackend (see UIPass.h for the
     // chrome lifecycle contract — execute() DOES call flushBatches;
     // beginFrame/endFrame stay on the host's UIManager::render lambda).
@@ -2461,6 +2559,20 @@ uint32_t Renderer::reloadMaterialsForShaderFile(const std::string& shaderPath)
         return 0;
     }
     return _impl->resources.reloadMaterialsForShaderFile(shaderPath);
+}
+
+void Renderer::setViewportOrientationAxisEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->viewportOrientationAxisEnabled = enabled;
+    _impl->applyEditorOverlayKnobs();
+}
+
+bool Renderer::viewportOrientationAxisEnabled() const noexcept
+{
+    return _impl && _impl->viewportOrientationAxisEnabled;
 }
 
 void Renderer::setDebugOverlayEnabled(bool enabled)

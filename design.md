@@ -1,7 +1,7 @@
 # AYRenderer Design
 
-> **文档状态**：2026-08-29 已对齐当前代码；R0–R5 主管线已落地。
-> **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、UI 和 GBufferDebug 已接入 Pass 调度。GBuffer 已冻结 `material-contract-v3-model-coverage-split`；Lighting、Transparent、Bloom、DepthHaze 与 SSAO 第二轮按序修复已完成，等待真实 GPU capture 验收。
+> **文档状态**：2026-08-30 已对齐当前代码；R0–R5 主管线已落地。
+> **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、Present、UI 和 GBufferDebug 已接入 Pass 调度。PostProcess 已改为 FrameGraph `FinalLdrColor` 生产者，Present 成为唯一 backbuffer 边界；Lighting、Transparent、Bloom、DepthHaze、SSAO 与 PostProcess 的静态审核/修复已完成，等待真实 GPU capture 验收。
 > **活动执行计划**：[`docs/execution-plan.md`](execution-plan.md)（P0–P6 队列、§5 segfault 约束、§5.4 隔离实验、附录 B/C/D 索引）。本文件是目标架构，与代码不一致时以代码与 execution-plan 为准。
 > **关联文档**：[`docs/gbuffer-current.md`](docs/gbuffer-current.md)（当前 MRT/数据契约）、[`AYShader/design.md` §8.5](../AYShader/design.md)（opaque handle contract）、[`AYShader/README.md`](../AYShader/README.md)。
 
@@ -462,14 +462,15 @@ public:
 | BloomExtract / BloomBlur | 已完成第二轮收敛：完整链门控、当前帧产出契约、RGBA16F、Karis 降采样、5-fetch/axis blur、曝光一致合成 |
 | DepthHaze | 已完成第二轮收敛：全分辨率 HDR HazeColor、Coverage 背景语义、逐帧 fail-close、透明 PBR 雾化与显式 view 顺序；SSAO 已在 Lighting 环境光阶段完成，不在 Haze 内重复合成 |
 | SSAO | 已完成审核与按序修复：RT3 coverage、TBN 旋转核、view-Z 比较、完整链门控、生命周期闭合，且只影响 Lighting 环境光 |
-| PostProcess / UI | 已接入 |
+| PostProcess / Present / UI | PostProcess 写 FrameGraph RGBA8 FinalLdrColor；Present 单独写 backbuffer；UI 最后合成 |
 | GBufferDebug | Deferred-only，view 250，默认关闭 |
 
 当前 Forward 默认顺序：
 
 ```text
 Shadow → ForwardOpaque → Forward2DOpaque → DepthHaze(no-op)
-       → Transparent → BloomExtract → BloomBlur → PostProcess → UI
+       → Transparent → BloomExtract → BloomBlur
+       → PostProcess(FinalLdrColor) → Present → UI
 ```
 
 当前 Deferred opt-in 顺序：
@@ -477,7 +478,7 @@ Shadow → ForwardOpaque → Forward2DOpaque → DepthHaze(no-op)
 ```text
 Shadow → Skybox → GBuffer → SSAO → Lighting → DepthHaze
        → Transparent → BloomExtract → BloomBlur
-       → PostProcess → UI → GBufferDebug
+       → PostProcess(FinalLdrColor) → Present → UI → GBufferDebug
 ```
 
 ### 8.4 UI 合批与绘制顺序
@@ -785,7 +786,7 @@ include/AYRenderer/
 
 ### Phase R5+ — Deferred 与高级 Pass
 
-- [x] Shadow / GBuffer / Lighting / Transparent / PostProcess
+- [x] Shadow / GBuffer / Lighting / Transparent / PostProcess / Present
 - [x] Bloom / DepthHaze / SSAO / Skybox / GBufferDebug
 - [x] GBuffer v3：帧有效性、资源所有权、逆转置法线、StandardLit/Unlit、AO/Model/Coverage 分离
 - [ ] 真实 D3D11/12 GPU capture：MRT 值、Unlit/Cutout/Skinning/非均匀缩放与带宽
@@ -877,6 +878,16 @@ include/AYRenderer/
 ---
 
 ## 16. 变更记录
+
+### 2026-08-30 — FinalLdrColor / Present 边界与后处理扩展基线
+
+- PostProcess 从“最终 backbuffer blit”改为 FrameGraph `FinalLdrColor` 生产者：view 15 在 viewport-local RGBA8 目标完成 bloom、exposure、tone-map 与 gamma，并仅在真实 submit 后发布 current-frame production latch。
+- 新增 append-only `RenderPassSlot::Present=15`、`FgResourceId::FinalLdrColor=6` 与 `FgSemantic::PresentSource=4`。旧 custom descriptor 若含 PostProcess 但没有 Present，会在配置时补入兼容边界。
+- PresentPass 使用 view 16，只负责把本帧有效的 PresentSource 拷贝到默认 backbuffer 的 Game View rect。PostProcess 与 Present 共用 `FullscreenPassGeometry` 实现，资源仍由各 Pass 独立拥有和销毁。
+- 默认/Deferred/Editor 管线均固定为 PostProcess → Present；EditorOverlay 位于 Present 后、UI 前。为避开 Shadow 18–25、UI Layer 26–249 与 GBufferDebug 250，Editor orientation axis/selection outline 固定到 view 251/252，并由显式 view order 排在 GBufferDebug 后、UI 前。
+- FrameGraph 新增通用 `markProduced/producedThisFrame` latch 与 semantic 级查询，`beginFrame` 与 shutdown 清零，防止复用物理 handle 时 Present 读取上一帧目标。测试覆盖 ABI、管线顺序、view 区间、Noop、latch reset 和生产 Present shader 编译。
+- MSVC Debug 定向重编后 `AYRenderer_Test` 为 3429/3429；`AYEditorShell_Demo` 完成重新链接。为规避历史 stale `.obj` 问题，本轮只清理了 `AYRenderer_Test` 对象目录，没有执行全引擎 clean。
+- 该边界为 FXAA、ColorGrading 等后 tone-map Pass 提供稳定插入点；TAA/MotionBlur/DOF 仍需先完成 motion/history/depth 契约，不在本刀混入。
 
 ### 2026-08-29 — Production UI Layer 与共享 RenderTargetPool
 
@@ -982,7 +993,7 @@ include/AYRenderer/
 
 ### 2026-08-29 — PostProcessPass 审核与正确性收敛
 
-- PostProcess 固定为最终全屏 composite，不再拥有私有 FBO：输入由共享 `SceneColorPipeline` 选择 Forward `sceneFbo`、Deferred `LightingOutput` 或本帧有效的 `HazeColor`，输出直接写默认 backbuffer，随后由 UI view 255 合成。
+- 截至该轮，PostProcess 已固定为最终全屏 composite 且不拥有私有 FBO：输入由共享 `SceneColorPipeline` 选择 Forward `sceneFbo`、Deferred `LightingOutput` 或本帧有效的 `HazeColor`。当时输出仍直接写默认 backbuffer；该输出边界已在 2026-08-30 被上方 FinalLdrColor/Present 架构取代。
 - `SceneColorPipeline` 成为 Haze、Transparent、Bloom 与 PostProcess 的共同路由所有者；`PostProcessPass::selectSourceFbo` 只保留兼容转发，避免其它 Pass 依赖最终合成类的私有策略。
 - Pass 本地生命周期仅包含 fullscreen VB/IB、ShaderResource 与 binding。Renderer 在 `applyPipelineDesc()` 的 `pipeline.clear()` 前以及 shutdown 的 shader pool/adapter teardown 前显式调用 `destroyResources()`，关闭重配和 shutdown→initialize 的 stale numeric handle 路径。
 - 主 Shader 删除未消费的 `uTime` ABI。Exposure 在 `[0,64]`、Gamma 在 `[0.1,8]` 内清洗；NaN/Inf 使用中性默认值，并在公开 setter、FrameContext 广播和 Pass 上传三层 fail-safe。
@@ -1021,4 +1032,4 @@ include/AYRenderer/
 
 ### 下一步
 
-PostProcess 正确性修复完成后，按 Pass 顺序进入 UIPass/最终合成边界审核；并行保留 GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO 与 PostProcess 的真实 GPU capture 门禁。之后继续推进 Point/Spot 高级阴影、Command Queue 与 DrawListBuilder。
+FinalLdrColor/Present 边界验证通过后，先接入一个低风险后 tone-map Pass（建议 FXAA 或 LUT ColorGrading）验证可扩展链路；并行保留 GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess 与 Present 的 D3D11/12 GPU capture 门禁。历史类效果在 motion/history 契约完成后再进入。

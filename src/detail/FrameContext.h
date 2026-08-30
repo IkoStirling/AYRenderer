@@ -56,20 +56,14 @@ struct FrameContext {
     // §S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — DepthHaze
     // knobs (exponential `1 - exp(-density * dist)` distance fog).
     //
-    // K3 invariants (must survive §S4c PostProcessPass haze sampler
-    // wire + §S4d Editor default-knob polish):
+    // Current FrameGraph invariants:
     //   1. hazeEnabled == false OR hazeStrength <= 0 ⇒ DepthHazePass
-    //      early-returns 0 (no FBO ensure, no fullscreen blit, no
-    //      HalfRes allocation); PostProcessPass falls back to bind
-    //      sceneColor on the haze slot; FS branchless composite
-    //      collapses to `raw * (1 + 0) = raw` — byte-equivalent to
-    //      pre-S4 renders.
-    //   2. hazeEnabled == true ⇒ DepthHazePass ensureFbo at
-    //      (W+1)/2 × (H+1)/2 (mirror BloomExtractPass) + Phoskia
-    //      exponential fog blit on view 13 (before Final PP=14).
-    //   3. depth source — Deferred samples GBuffer RT2 worldPos via
-    //      ctx.gbufferPass->gbufferWorldPositionRt(); Forward / missing
-    //      gbuffer ⇒ DepthHazePass returns 0 (safe no-haze).
+    //      early-returns 0 and FrameGraph does not declare HazeColor;
+    //      downstream source routing stays on the underlying scene.
+    //   2. hazeEnabled == true ⇒ DepthHazePass writes full-resolution
+    //      RGBA16F HazeColor on view 13, before PostProcess view 15.
+    //   3. Deferred samples GBuffer RT2 world position and RT3 geometry
+    //      coverage. Forward / missing GBuffer returns 0 (safe no-haze).
     //
     // Default = haze OFF (hazeEnabled=false, hazeStrength=0) so
     // FrameContext's brace-init default keeps the pre-S4 byte-

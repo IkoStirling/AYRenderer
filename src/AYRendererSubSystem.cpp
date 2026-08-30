@@ -5,8 +5,13 @@
 
 #include <AYGameLoop/SubSystemRegistry.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
+#include <mutex>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 
 
@@ -41,6 +46,59 @@ std::string g_bootstrapShaderCacheDir;
 Backend g_bootstrapBackend = Backend::Auto;
 
 WindowProvider g_windowProvider;
+
+struct OwnedSceneBuilder {
+    std::uint64_t registrationId = 0;
+    const void* owner = nullptr;
+    SceneBuildCallback callback;
+};
+
+std::mutex g_sceneBuilderMutex;
+std::uint64_t g_nextSceneBuilderRegistrationId = 1;
+std::unordered_map<RendererSubSystem*, std::vector<OwnedSceneBuilder>>
+    g_sceneBuilders;
+
+bool sceneBuilderIsRegistered(RendererSubSystem* renderer,
+                              std::uint64_t registrationId)
+{
+    std::lock_guard<std::mutex> lock(g_sceneBuilderMutex);
+    const auto rendererIt = g_sceneBuilders.find(renderer);
+    if (rendererIt == g_sceneBuilders.end()) return false;
+    return std::any_of(rendererIt->second.begin(), rendererIt->second.end(),
+                       [registrationId](const OwnedSceneBuilder& entry) {
+                           return entry.registrationId == registrationId;
+                       });
+}
+
+void dispatchSceneBuilders(RendererSubSystem* renderer, RenderScene& scene)
+{
+    // Snapshot under the lock and invoke outside it. Revalidate each stable
+    // registration id immediately before invocation: an earlier callback may
+    // trigger a scene transition and unregister a World whose later callbacks
+    // are already present in this snapshot.
+    std::vector<OwnedSceneBuilder> callbacks;
+    {
+        std::lock_guard<std::mutex> lock(g_sceneBuilderMutex);
+        const auto it = g_sceneBuilders.find(renderer);
+        if (it == g_sceneBuilders.end()) return;
+        callbacks.reserve(it->second.size());
+        for (const OwnedSceneBuilder& entry : it->second) {
+            if (entry.callback) callbacks.push_back(entry);
+        }
+    }
+    for (const OwnedSceneBuilder& entry : callbacks) {
+        if (!sceneBuilderIsRegistered(renderer, entry.registrationId)) {
+            continue;
+        }
+        entry.callback(scene);
+    }
+}
+
+void clearAllSceneBuilders(RendererSubSystem* renderer)
+{
+    std::lock_guard<std::mutex> lock(g_sceneBuilderMutex);
+    g_sceneBuilders.erase(renderer);
+}
 
 
 
@@ -353,6 +411,8 @@ void RendererSubSystem::shutdown()
 
 {
 
+    clearAllSceneBuilders(this);
+
     if (_ready) {
 
         auto& loop = ayt::game::GameLoop::instance();
@@ -422,21 +482,45 @@ void RendererSubSystem::setViewportRect(uint16_t x, uint16_t y, uint16_t width, 
 
 void RendererSubSystem::setSceneBuilder(SceneBuildCallback callback)
 {
-    // Phase 1 SC-01: scene builders form an ordered chain. The first
-    // registered callback runs first; subsequent ones are appended.
-    // This lets multiple ECS systems (RenderSystem + SkinnedMeshRenderSystem)
-    // share the same per-frame scene buffer without one overwriting
-    // the other. Order of registration = order of execution.
     if (!callback) return;
     _scenePacketValid.store(false, std::memory_order_release);
-    if (_sceneBuilder) {
-        SceneBuildCallback previous = _sceneBuilder;
-        _sceneBuilder = [previous, callback](RenderScene& scene) {
-            previous(scene);
-            callback(scene);
-        };
-    } else {
-        _sceneBuilder = std::move(callback);
+    {
+        std::lock_guard<std::mutex> lock(g_sceneBuilderMutex);
+        g_sceneBuilders[this].push_back(
+            {g_nextSceneBuilderRegistrationId++, nullptr, std::move(callback)});
+    }
+    _sceneBuilder = [this](RenderScene& scene) {
+        dispatchSceneBuilders(this, scene);
+    };
+}
+
+void RendererSubSystem::addSceneBuilderForOwner(
+    const void* owner, SceneBuildCallback callback)
+{
+    if (owner == nullptr || !callback) return;
+    _scenePacketValid.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(g_sceneBuilderMutex);
+        g_sceneBuilders[this].push_back(
+            {g_nextSceneBuilderRegistrationId++, owner, std::move(callback)});
+    }
+    _sceneBuilder = [this](RenderScene& scene) {
+        dispatchSceneBuilders(this, scene);
+    };
+}
+
+void RendererSubSystem::clearSceneBuildersForOwner(const void* owner)
+{
+    if (owner == nullptr) return;
+    _scenePacketValid.store(false, std::memory_order_release);
+    std::lock_guard<std::mutex> lock(g_sceneBuilderMutex);
+    auto it = g_sceneBuilders.find(this);
+    if (it == g_sceneBuilders.end()) return;
+    std::erase_if(it->second, [owner](const OwnedSceneBuilder& entry) {
+        return entry.owner == owner;
+    });
+    if (it->second.empty()) {
+        g_sceneBuilders.erase(it);
     }
 }
 
@@ -681,4 +765,3 @@ std::size_t RendererSubSystem::diagSizeofFrameContext()
 // retired in E4.
 
 } // namespace ayt::render
-

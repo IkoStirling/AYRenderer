@@ -98,7 +98,7 @@ TEST_CASE(s4b_depth_haze_cache_key_extern_addressable) {
     // DepthHazePass.h must bind to the file-scope literal in
     // DepthHazePass.cpp. Drift between the two is now a compile-time
     // link error instead of a runtime self-compare.
-    const char* const mirror = "depthhaze_v4_fullres_coverage_fs";
+    const char* const mirror = "depthhaze_v5_preserve_sky_coverage_fs";
     CHECK(std::string(ayt::render::detail::kDepthHazeCacheKeyCStr)
           == std::string(mirror));
 }

@@ -4,12 +4,13 @@ namespace ayt::render
 {
 
 inline constexpr const char kDepthHazeCacheKey[] =
-    "depthhaze_v4_fullres_coverage_fs";
+    "depthhaze_v5_preserve_sky_coverage_fs";
 
 // Produces a full-resolution, scene-linear opaque result. Geometry coverage
-// makes the background policy explicit: uncovered pixels represent infinity
-// and therefore receive the full requested haze amount. SSAO is already folded
-// into Lighting's ambient term, so this pass only performs haze composition.
+// makes the background policy explicit: uncovered pixels belong to the sky
+// backdrop and remain unchanged; only covered scene geometry receives
+// distance-based haze. SSAO is already folded into Lighting's ambient term,
+// so this pass only performs haze composition.
 inline constexpr const char kDepthHazePhoskiaSource[] = R"PHOSKIA(
 material DepthHaze {
     texture2d sceneColor
@@ -33,9 +34,7 @@ material DepthHaze {
         let dist = length(worldPos - camPos.xyz)
         let surfaceFog = clamp(1.0 - exp(-hazeDensity.x * dist), 0.0, 1.0)
         let fogFactor = clamp(
-            mix(1.0, surfaceFog, coverage) * hazeStrength.x,
-            0.0,
-            1.0)
+            surfaceFog * coverage * hazeStrength.x, 0.0, 1.0)
         let mixed = mix(raw.xyz, hazeColor.xyz, fogFactor)
         return vec4(mixed, raw.w)
     }

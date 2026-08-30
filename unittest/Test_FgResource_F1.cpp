@@ -79,7 +79,8 @@ TEST_CASE(f1_fgresource_id_enum_unique_and_count) {
     // ⇒ Count sentinel bumps to 6. pinned here so future appends
     // without bumping the sentinel would fail loudly.
     CHECK(static_cast<uint8_t>(FgResourceId::SSAOTexture) == 5);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count)       == 6);
+    CHECK(static_cast<uint8_t>(FgResourceId::FinalLdrColor) == 6);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count)       == 7);
 }
 
 TEST_CASE(f1_fgsemantic_enum_values_locked) {
@@ -91,7 +92,8 @@ TEST_CASE(f1_fgsemantic_enum_values_locked) {
     CHECK(static_cast<uint8_t>(FgSemantic::BloomSource)      == 1);
     CHECK(static_cast<uint8_t>(FgSemantic::HazeSource)       == 2);
     CHECK(static_cast<uint8_t>(FgSemantic::SSAOSource)       == 3);
-    CHECK(static_cast<uint8_t>(FgSemantic::Count)            == 4);
+    CHECK(static_cast<uint8_t>(FgSemantic::PresentSource)    == 4);
+    CHECK(static_cast<uint8_t>(FgSemantic::Count)            == 5);
 }
 
 // ─── B. external import + resolve 借用语义 ─────────────────────────
