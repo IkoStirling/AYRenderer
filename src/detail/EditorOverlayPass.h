@@ -21,7 +21,8 @@ namespace ayt::render::detail
 //   view 251 — procedural camera-orientation axis, muted negative-axis tails,
 //             and screen-facing X/Y/Z labels in the viewport's lower-left
 //             corner (no texture; rotation-only camera view).
-//   view 252 — reserved compatibility id; selection no longer draws here.
+//   view 252 — selected-object transform gizmo (axis arrows, plane handles,
+//             rotation rings and scale handles), drawn procedurally.
 //
 // 17 belongs to FXAA and 18..25 belong to the shadow atlas.
 // 26..249 belong to UI offscreen layers, 250 to GBufferDebug, and 255 to UI.
@@ -32,6 +33,7 @@ public:
     // the former reserved-mask name.
     static constexpr uint8_t kMaskViewId  = kAxisViewId;
     static constexpr uint8_t kBlitViewId  = 252;
+    static constexpr uint8_t kGizmoViewId = kBlitViewId;
 
     ~EditorOverlayPass() override = default;
 
@@ -44,6 +46,13 @@ public:
     }
     bool orientationAxisEnabled() const noexcept {
         return _orientationAxisEnabled;
+    }
+    void setTransformGizmoState(
+        const EditorTransformGizmoState& state) noexcept {
+        _transformGizmo = state;
+    }
+    const EditorTransformGizmoState& transformGizmoState() const noexcept {
+        return _transformGizmo;
     }
 
     // Exposed as pure math for contract tests. Scene-camera translation is
@@ -61,6 +70,10 @@ private:
     uint32_t submitOrientationAxis(PassExecContext& ctx,
                                    const FrameContext& frame);
     bool ensureOrientationAxisResources(PassExecContext& ctx);
+    uint32_t submitTransformGizmo(PassExecContext& ctx,
+                                  const FrameContext& frame);
+    bool ensureTransformGizmoResources(PassExecContext& ctx);
+    void destroyTransformGizmoGeometry(BGFXAdapter& adapter);
 
     bool _orientationAxisEnabled = false;
     bool _axisProgramAcquireFailed = false;
@@ -70,6 +83,16 @@ private:
     uint32_t _axisLabelIndexStart = 0;
     uint32_t _axisLabelIndexCount = 0;
     ayt::shader::ShaderResource _axisProgram;
+
+    EditorTransformGizmoState _transformGizmo{};
+    EditorTransformGizmoMode _builtGizmoMode =
+        EditorTransformGizmoMode::Hidden;
+    uint8_t _builtGizmoHighlight = 0xffu;
+    uint16_t _builtGizmoDisabledHandleMask = 0xffffu;
+    bgfx::VertexBufferHandle _gizmoVertexBuffer = BGFX_INVALID_HANDLE;
+    bgfx::IndexBufferHandle _gizmoIndexBuffer = BGFX_INVALID_HANDLE;
+    uint32_t _gizmoPrimaryIndexCount = 0;
+    uint32_t _gizmoIndexCount = 0;
 };
 
 } // namespace ayt::render::detail

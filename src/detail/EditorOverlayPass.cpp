@@ -64,6 +64,33 @@ void main()
 constexpr const char* kAxisShaderCacheKey =
     "editor_orientation_axis_labeled_v2";
 
+constexpr uint32_t kGizmoX = 0xff4f4fe8u;
+constexpr uint32_t kGizmoY = 0xff67c956u;
+constexpr uint32_t kGizmoZ = 0xffff8d4du;
+constexpr uint32_t kGizmoXY = 0xff4fa6c7u;
+constexpr uint32_t kGizmoYZ = 0xffadad55u;
+constexpr uint32_t kGizmoZX = 0xffa05ba9u;
+constexpr uint32_t kGizmoUniform = 0xffd7d7d7u;
+constexpr uint32_t kGizmoHighlight = 0xff4fe8ffu;
+
+uint32_t gizmoColor(uint32_t normal,
+                    uint8_t handle,
+                    uint8_t highlighted,
+                    uint16_t disabledHandles) noexcept
+{
+    if ((disabledHandles & static_cast<uint16_t>(1u << handle)) != 0u) {
+        // Overlay rendering is opaque, so dim RGB rather than alpha. Keeping
+        // the hue makes the unavailable direction legible without suggesting
+        // that it can currently be dragged.
+        constexpr uint32_t scale = 36u;
+        const uint32_t r = ((normal      ) & 0xffu) * scale / 100u;
+        const uint32_t g = ((normal >>  8) & 0xffu) * scale / 100u;
+        const uint32_t b = ((normal >> 16) & 0xffu) * scale / 100u;
+        return (normal & 0xff000000u) | (b << 16) | (g << 8) | r;
+    }
+    return handle == highlighted ? kGizmoHighlight : normal;
+}
+
 uint16_t appendVertex(std::vector<AxisVertex>& vertices,
                       const ayt::math::FVector3& p,
                       uint32_t abgr,
@@ -148,16 +175,18 @@ void appendArrow(std::vector<AxisVertex>& vertices,
                  const ayt::math::FVector3& direction,
                  const ayt::math::FVector3& sideU,
                  const ayt::math::FVector3& sideV,
-                 uint32_t abgr)
+                 uint32_t abgr,
+                 bool transformGizmo = false)
 {
-    // Keep the widget light and readable: long narrow shafts with compact
-    // heads leave more negative space between the three projected axes.
-    constexpr float shaftStart = 0.045f;
-    constexpr float shaftEnd = 0.755f;
-    constexpr float shaftRadius = 0.016f;
-    constexpr float headBase = 0.705f;
-    constexpr float headRadius = 0.058f;
-    constexpr float headTip = 0.985f;
+    // The corner orientation widget keeps its long arrows. Transform Gizmo
+    // translation occupies only the outer radial band: a much thinner, short
+    // arrow separated from the inner scale cube by visible negative space.
+    const float shaftStart = transformGizmo ? 0.50f : 0.045f;
+    const float shaftEnd = transformGizmo ? 0.81f : 0.755f;
+    const float shaftRadius = transformGizmo ? 0.008f : 0.016f;
+    const float headBase = transformGizmo ? 0.78f : 0.705f;
+    const float headRadius = transformGizmo ? 0.040f : 0.058f;
+    const float headTip = transformGizmo ? 0.95f : 0.985f;
 
     const ayt::math::FVector3 p0 = direction * shaftStart;
     const ayt::math::FVector3 p1 = direction * shaftEnd;
@@ -232,6 +261,143 @@ void appendNegativeAxis(std::vector<AxisVertex>& vertices,
     };
     for (const uint16_t index : shaftIndices) {
         indices.push_back(static_cast<uint16_t>(base + index));
+    }
+}
+
+void appendBox(std::vector<AxisVertex>& vertices,
+               std::vector<uint16_t>& indices,
+               const ayt::math::FVector3& center,
+               const ayt::math::FVector3& halfExtent,
+               uint32_t abgr)
+{
+    const uint16_t base = static_cast<uint16_t>(vertices.size());
+    const ayt::math::FVector3 corners[8] = {
+        center + ayt::math::FVector3(-halfExtent.x, -halfExtent.y, -halfExtent.z),
+        center + ayt::math::FVector3( halfExtent.x, -halfExtent.y, -halfExtent.z),
+        center + ayt::math::FVector3( halfExtent.x,  halfExtent.y, -halfExtent.z),
+        center + ayt::math::FVector3(-halfExtent.x,  halfExtent.y, -halfExtent.z),
+        center + ayt::math::FVector3(-halfExtent.x, -halfExtent.y,  halfExtent.z),
+        center + ayt::math::FVector3( halfExtent.x, -halfExtent.y,  halfExtent.z),
+        center + ayt::math::FVector3( halfExtent.x,  halfExtent.y,  halfExtent.z),
+        center + ayt::math::FVector3(-halfExtent.x,  halfExtent.y,  halfExtent.z),
+    };
+    for (const auto& corner : corners) appendVertex(vertices, corner, abgr);
+    constexpr uint16_t boxIndices[] = {
+        0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
+        0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5,
+        2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7,
+    };
+    for (uint16_t index : boxIndices) {
+        indices.push_back(static_cast<uint16_t>(base + index));
+    }
+}
+
+void appendScaleAxis(std::vector<AxisVertex>& vertices,
+                     std::vector<uint16_t>& indices,
+                     int axis,
+                     uint32_t abgr)
+{
+    ayt::math::FVector3 shaftCenter{};
+    ayt::math::FVector3 shaftHalf(0.010f, 0.010f, 0.010f);
+    ayt::math::FVector3 headCenter{};
+    ayt::math::FVector3 headHalf(0.045f, 0.045f, 0.045f);
+    shaftCenter[axis] = 0.47f;
+    shaftHalf[axis] = 0.37f;
+    headCenter[axis] = 0.88f;
+    appendBox(vertices, indices, shaftCenter, shaftHalf, abgr);
+    appendBox(vertices, indices, headCenter, headHalf, abgr);
+}
+
+void appendUniversalScaleHandle(std::vector<AxisVertex>& vertices,
+                                std::vector<uint16_t>& indices,
+                                int axis,
+                                uint32_t abgr)
+{
+    // Inner thin stem + compact cube reads as scale, while translation has a
+    // detached outer arrow. The gap between them is intentionally empty.
+    ayt::math::FVector3 stemCenter{};
+    ayt::math::FVector3 stemHalf(0.0075f, 0.0075f, 0.0075f);
+    stemCenter[axis] = 0.20f;
+    stemHalf[axis] = 0.11f;
+    appendBox(vertices, indices, stemCenter, stemHalf, abgr);
+
+    ayt::math::FVector3 center{};
+    center[axis] = 0.35f;
+    appendBox(vertices, indices, center, {0.032f, 0.032f, 0.032f}, abgr);
+}
+
+void appendPlaneHandle(std::vector<AxisVertex>& vertices,
+                       std::vector<uint16_t>& indices,
+                       int firstAxis,
+                       int secondAxis,
+                       uint32_t abgr)
+{
+    constexpr float minValue = 0.18f;
+    constexpr float maxValue = 0.32f;
+    constexpr float halfWidth = 0.010f;
+    auto appendEdge = [&](float first0, float second0,
+                          float first1, float second1) {
+        const float dx = first1 - first0;
+        const float dy = second1 - second0;
+        const float length = std::max(0.0001f, std::sqrt(dx * dx + dy * dy));
+        const float px = -dy / length * halfWidth;
+        const float py =  dx / length * halfWidth;
+        ayt::math::FVector3 points[4]{};
+        points[0][firstAxis] = first0 + px;
+        points[0][secondAxis] = second0 + py;
+        points[1][firstAxis] = first0 - px;
+        points[1][secondAxis] = second0 - py;
+        points[2][firstAxis] = first1 - px;
+        points[2][secondAxis] = second1 - py;
+        points[3][firstAxis] = first1 + px;
+        points[3][secondAxis] = second1 + py;
+        const uint16_t base = static_cast<uint16_t>(vertices.size());
+        for (const auto& point : points) appendVertex(vertices, point, abgr);
+        constexpr uint16_t quad[] = {0, 1, 2, 0, 2, 3};
+        for (uint16_t index : quad) {
+            indices.push_back(static_cast<uint16_t>(base + index));
+        }
+    };
+    appendEdge(minValue, minValue, maxValue, minValue);
+    appendEdge(maxValue, minValue, maxValue, maxValue);
+    appendEdge(maxValue, maxValue, minValue, maxValue);
+    appendEdge(minValue, maxValue, minValue, minValue);
+}
+
+void appendRing(std::vector<AxisVertex>& vertices,
+                 std::vector<uint16_t>& indices,
+                 int normalAxis,
+                 uint32_t abgr,
+                 float radius)
+{
+    constexpr int segments = 64;
+    constexpr float halfWidth = 0.010f;
+    constexpr float twoPi = 6.28318530717958647692f;
+    int firstAxis = 0;
+    int secondAxis = 1;
+    if (normalAxis == 0) { firstAxis = 1; secondAxis = 2; }
+    else if (normalAxis == 1) { firstAxis = 2; secondAxis = 0; }
+
+    for (int segment = 0; segment < segments; ++segment) {
+        const float a0 = twoPi * static_cast<float>(segment)
+                       / static_cast<float>(segments);
+        const float a1 = twoPi * static_cast<float>(segment + 1)
+                       / static_cast<float>(segments);
+        ayt::math::FVector3 points[4]{};
+        points[0][firstAxis] = std::cos(a0) * (radius - halfWidth);
+        points[0][secondAxis] = std::sin(a0) * (radius - halfWidth);
+        points[1][firstAxis] = std::cos(a0) * (radius + halfWidth);
+        points[1][secondAxis] = std::sin(a0) * (radius + halfWidth);
+        points[2][firstAxis] = std::cos(a1) * (radius + halfWidth);
+        points[2][secondAxis] = std::sin(a1) * (radius + halfWidth);
+        points[3][firstAxis] = std::cos(a1) * (radius - halfWidth);
+        points[3][secondAxis] = std::sin(a1) * (radius - halfWidth);
+        const uint16_t base = static_cast<uint16_t>(vertices.size());
+        for (const auto& point : points) appendVertex(vertices, point, abgr);
+        constexpr uint16_t quad[] = {0, 1, 2, 0, 2, 3};
+        for (uint16_t index : quad) {
+            indices.push_back(static_cast<uint16_t>(base + index));
+        }
     }
 }
 
@@ -424,8 +590,192 @@ uint32_t EditorOverlayPass::submitOrientationAxis(PassExecContext& ctx,
     return 2;
 }
 
+void EditorOverlayPass::destroyTransformGizmoGeometry(BGFXAdapter& adapter)
+{
+    if (BGFXAdapter::isValid(_gizmoVertexBuffer)) {
+        adapter.destroy(_gizmoVertexBuffer);
+        _gizmoVertexBuffer = BGFX_INVALID_HANDLE;
+    }
+    if (BGFXAdapter::isValid(_gizmoIndexBuffer)) {
+        adapter.destroy(_gizmoIndexBuffer);
+        _gizmoIndexBuffer = BGFX_INVALID_HANDLE;
+    }
+    _gizmoPrimaryIndexCount = 0;
+    _gizmoIndexCount = 0;
+    _builtGizmoMode = EditorTransformGizmoMode::Hidden;
+    _builtGizmoHighlight = 0xffu;
+    _builtGizmoDisabledHandleMask = 0xffffu;
+}
+
+bool EditorOverlayPass::ensureTransformGizmoResources(PassExecContext& ctx)
+{
+    if (!_transformGizmo.visible
+        || _transformGizmo.mode == EditorTransformGizmoMode::Hidden) {
+        return false;
+    }
+    if (!ensureOrientationAxisResources(ctx)) return false;
+    if (BGFXAdapter::isValid(_gizmoVertexBuffer)
+        && BGFXAdapter::isValid(_gizmoIndexBuffer)
+        && _gizmoIndexCount != 0
+        && _builtGizmoMode == _transformGizmo.mode
+        && _builtGizmoHighlight == _transformGizmo.activeHandle
+        && _builtGizmoDisabledHandleMask
+            == _transformGizmo.disabledHandleMask) {
+        return true;
+    }
+
+    destroyTransformGizmoGeometry(ctx.adapter);
+    std::vector<AxisVertex> vertices;
+    std::vector<uint16_t> indices;
+    vertices.reserve(1536);
+    indices.reserve(3072);
+    const uint8_t highlight = _transformGizmo.activeHandle;
+    const uint16_t disabledHandles = _transformGizmo.disabledHandleMask;
+    const auto color = [highlight, disabledHandles](
+                           uint32_t normal, uint8_t handle) noexcept {
+        return gizmoColor(normal, handle, highlight, disabledHandles);
+    };
+
+    if (_transformGizmo.mode == EditorTransformGizmoMode::Translate
+        || _transformGizmo.mode == EditorTransformGizmoMode::Universal) {
+        appendArrow(vertices, indices,
+                    {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+                    {0.0f, 0.0f, 1.0f},
+                    color(kGizmoX, 1u), true);
+        appendArrow(vertices, indices,
+                    {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f},
+                    {0.0f, 0.0f, 1.0f},
+                    color(kGizmoY, 2u), true);
+        appendArrow(vertices, indices,
+                    {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f},
+                    {0.0f, 1.0f, 0.0f},
+                    color(kGizmoZ, 3u), true);
+        appendPlaneHandle(vertices, indices, 0, 1,
+                          color(kGizmoXY, 4u));
+        appendPlaneHandle(vertices, indices, 1, 2,
+                          color(kGizmoYZ, 5u));
+        appendPlaneHandle(vertices, indices, 2, 0,
+                          color(kGizmoZX, 6u));
+    }
+    if (_transformGizmo.mode == EditorTransformGizmoMode::Rotate
+        || _transformGizmo.mode == EditorTransformGizmoMode::Universal) {
+        const float ringRadius =
+            _transformGizmo.mode == EditorTransformGizmoMode::Universal
+                ? 1.03f : 0.82f;
+        appendRing(vertices, indices, 0,
+                   color(kGizmoX, 7u), ringRadius);
+        appendRing(vertices, indices, 1,
+                   color(kGizmoY, 8u), ringRadius);
+        appendRing(vertices, indices, 2,
+                   color(kGizmoZ, 9u), ringRadius);
+    }
+    if (_transformGizmo.mode == EditorTransformGizmoMode::Universal) {
+        // Translation/rotation can use World basis while component scale must
+        // remain in Local basis. Keep one buffer but split it into two draw
+        // ranges so submitTransformGizmo can apply the correct transforms.
+        _gizmoPrimaryIndexCount = static_cast<uint32_t>(indices.size());
+        appendUniversalScaleHandle(vertices, indices, 0,
+                        color(kGizmoX, 10u));
+        appendUniversalScaleHandle(vertices, indices, 1,
+                        color(kGizmoY, 11u));
+        appendUniversalScaleHandle(vertices, indices, 2,
+                        color(kGizmoZ, 12u));
+        appendBox(vertices, indices, {}, {0.055f, 0.055f, 0.055f},
+                  color(kGizmoUniform, 13u));
+    } else if (_transformGizmo.mode == EditorTransformGizmoMode::Scale) {
+        appendScaleAxis(vertices, indices, 0,
+                        color(kGizmoX, 10u));
+        appendScaleAxis(vertices, indices, 1,
+                        color(kGizmoY, 11u));
+        appendScaleAxis(vertices, indices, 2,
+                        color(kGizmoZ, 12u));
+        appendBox(vertices, indices, {}, {0.055f, 0.055f, 0.055f},
+                  color(kGizmoUniform, 13u));
+    }
+
+    if (vertices.empty() || indices.empty()) return false;
+    if (_gizmoPrimaryIndexCount == 0) {
+        _gizmoPrimaryIndexCount = static_cast<uint32_t>(indices.size());
+    }
+    const bgfx::VertexLayout layout =
+        ctx.adapter.vertexLayoutPosScreenOffsetColor();
+    _gizmoVertexBuffer = ctx.adapter.createVertexBuffer(
+        vertices.data(),
+        static_cast<uint32_t>(vertices.size() * sizeof(AxisVertex)),
+        layout);
+    _gizmoIndexBuffer = ctx.adapter.createIndexBuffer(
+        indices.data(),
+        static_cast<uint32_t>(indices.size() * sizeof(uint16_t)));
+    if (!BGFXAdapter::isValid(_gizmoVertexBuffer)
+        || !BGFXAdapter::isValid(_gizmoIndexBuffer)) {
+        destroyTransformGizmoGeometry(ctx.adapter);
+        return false;
+    }
+    _gizmoIndexCount = static_cast<uint32_t>(indices.size());
+    _builtGizmoMode = _transformGizmo.mode;
+    _builtGizmoHighlight = highlight;
+    _builtGizmoDisabledHandleMask = disabledHandles;
+    return true;
+}
+
+uint32_t EditorOverlayPass::submitTransformGizmo(
+    PassExecContext& ctx,
+    const FrameContext& frame)
+{
+    if (!ensureTransformGizmoResources(ctx)) return 0;
+    const auto& state = _transformGizmo;
+    const float distance = (state.position - frame.cameraPosition).length();
+    if (!std::isfinite(distance)) return 0;
+    const float scale = std::clamp(
+        distance * kEditorTransformGizmoScalePerDistance, 0.12f, 1000.0f);
+    ctx.adapter.setViewFrameBuffer(kGizmoViewId, BGFX_INVALID_HANDLE);
+    ctx.adapter.setViewRect(kGizmoViewId, ctx.viewportX, ctx.viewportY,
+                            ctx.viewportWidth, ctx.viewportHeight);
+    ctx.adapter.setViewTransform(kGizmoViewId, frame.view, frame.projection);
+    // Present has already written color. Clear only depth so the gizmo is
+    // always reachable while retaining correct self-occlusion.
+    ctx.adapter.setViewClearRaw(kGizmoViewId, BGFX_CLEAR_DEPTH, 0, 1.0f, 0);
+    ayt::shader::DrawCallContext draw;
+    draw.viewId = kGizmoViewId;
+    draw.state = 0;
+
+    auto submitRange = [&](const ayt::math::FQuaternion& rotation,
+                           uint32_t firstIndex,
+                           uint32_t indexCount) {
+        if (indexCount == 0) return 0u;
+        const ayt::math::Float4x4 world = ayt::math::Float4x4::fromTRS(
+            state.position, rotation, {scale, scale, scale});
+        ctx.adapter.setTransform(world);
+        ctx.adapter.setVertexBuffer(_gizmoVertexBuffer);
+        ctx.adapter.setIndexBuffer(
+            _gizmoIndexBuffer, firstIndex, indexCount);
+        ctx.adapter.setStateOverlayDepthWrite();
+        _axisProgram.submit(draw);
+        return 1u;
+    };
+
+    if (state.mode == EditorTransformGizmoMode::Universal
+        && !state.localSpace) {
+        const uint32_t primaryCount = std::min(
+            _gizmoPrimaryIndexCount, _gizmoIndexCount);
+        return submitRange(ayt::math::FQuaternion::identity(),
+                           0, primaryCount)
+             + submitRange(state.rotation, primaryCount,
+                           _gizmoIndexCount - primaryCount);
+    }
+
+    const bool useLocalBasis = state.localSpace
+        || state.mode == EditorTransformGizmoMode::Scale
+        || state.mode == EditorTransformGizmoMode::Universal;
+    return submitRange(useLocalBasis
+                           ? state.rotation
+                           : ayt::math::FQuaternion::identity(),
+                       0, _gizmoIndexCount);
+}
+
 void EditorOverlayPass::destroyResources(BGFXAdapter& adapter)
 {
+    destroyTransformGizmoGeometry(adapter);
     if (BGFXAdapter::isValid(_axisVertexBuffer)) {
         adapter.destroy(_axisVertexBuffer);
         _axisVertexBuffer = BGFX_INVALID_HANDLE;
@@ -455,7 +805,8 @@ uint32_t EditorOverlayPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    return submitOrientationAxis(ctx, frame);
+    return submitOrientationAxis(ctx, frame)
+         + submitTransformGizmo(ctx, frame);
 }
 
 } // namespace ayt::render::detail

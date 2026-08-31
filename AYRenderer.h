@@ -407,6 +407,11 @@ public:
     void setViewportOrientationAxisEnabled(bool enabled);
     bool viewportOrientationAxisEnabled() const noexcept;
 
+    // Editor-only object transform manipulator. Generic/game renderers keep
+    // the default hidden state; editor hosts publish the selected transform.
+    void setEditorTransformGizmoState(const EditorTransformGizmoState& state);
+    EditorTransformGizmoState editorTransformGizmoState() const noexcept;
+
     void setDebugOverlayEnabled(bool enabled);
     bool isDebugOverlayEnabled() const noexcept;
     void setDebugOverlaySuppressed(bool suppressed);

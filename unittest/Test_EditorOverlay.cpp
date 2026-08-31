@@ -20,6 +20,9 @@
 
 using ayt::render::RenderPassSlot;
 using ayt::render::RenderPipelineDesc;
+using ayt::render::Renderer;
+using ayt::render::EditorTransformGizmoMode;
+using ayt::render::EditorTransformGizmoState;
 
 namespace {
 
@@ -58,6 +61,49 @@ TEST_CASE(editoroverlay_orientation_axis_is_explicit_editor_opt_in) {
     CHECK(renderer.viewportOrientationAxisEnabled());
     renderer.configurePipeline(RenderPipelineDesc::makeEditorDeferred());
     CHECK(renderer.viewportOrientationAxisEnabled());
+}
+
+TEST_CASE(editoroverlay_transform_gizmo_is_explicit_state_and_uses_view_252) {
+    ayt::render::detail::EditorOverlayPass pass;
+    CHECK_FALSE(pass.transformGizmoState().visible);
+    CHECK(pass.transformGizmoState().mode
+          == EditorTransformGizmoMode::Hidden);
+    CHECK(static_cast<uint8_t>(EditorTransformGizmoMode::Universal) == 4u);
+    CHECK(ayt::render::detail::EditorOverlayPass::kGizmoViewId == 252u);
+
+    EditorTransformGizmoState state;
+    state.visible = true;
+    state.localSpace = true;
+    state.mode = EditorTransformGizmoMode::Universal;
+    state.activeHandle = 8u;
+    state.disabledHandleMask = static_cast<uint16_t>((1u << 3) | (1u << 12));
+    state.position = {1.0f, 2.0f, 3.0f};
+    pass.setTransformGizmoState(state);
+    CHECK(pass.transformGizmoState().visible);
+    CHECK(pass.transformGizmoState().localSpace);
+    CHECK(pass.transformGizmoState().activeHandle == 8u);
+    CHECK(pass.transformGizmoState().disabledHandleMask
+          == state.disabledHandleMask);
+    CHECK(pass.transformGizmoState().position.y == 2.0f);
+}
+
+TEST_CASE(renderer_transform_gizmo_state_survives_pipeline_rebuild) {
+    Renderer renderer;
+    EditorTransformGizmoState state;
+    state.visible = true;
+    state.mode = EditorTransformGizmoMode::Universal;
+    state.activeHandle = 4u;
+    state.disabledHandleMask = static_cast<uint16_t>(1u << 2);
+    state.position = {3.0f, 4.0f, 5.0f};
+    renderer.setEditorTransformGizmoState(state);
+    renderer.configurePipeline(RenderPipelineDesc::makeEditorDeferred());
+    const EditorTransformGizmoState restored =
+        renderer.editorTransformGizmoState();
+    CHECK(restored.visible);
+    CHECK(restored.mode == EditorTransformGizmoMode::Universal);
+    CHECK(restored.activeHandle == 4u);
+    CHECK(restored.disabledHandleMask == state.disabledHandleMask);
+    CHECK(restored.position.z == 5.0f);
 }
 
 TEST_CASE(editoroverlay_orientation_axis_view_keeps_rotation_not_translation) {

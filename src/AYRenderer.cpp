@@ -448,6 +448,7 @@ struct Renderer::Impl {
     // EditorOverlay orientation widget. Stored on Impl so pipeline rebuilds
     // preserve the host's toggle even though the pass object is recreated.
     bool                           viewportOrientationAxisEnabled = false;
+    EditorTransformGizmoState      editorTransformGizmo{};
 
     // Display-referred anti-aliasing is enabled by default. The state lives on
     // Impl so pipeline rebuilds preserve the host's runtime choice.
@@ -462,8 +463,11 @@ struct Renderer::Impl {
     void applyEditorOverlayKnobs()
     {
         if (detail::RenderPass* overlay = pipeline.findPass("EditorOverlay")) {
-            static_cast<detail::EditorOverlayPass*>(overlay)
-                ->setOrientationAxisEnabled(viewportOrientationAxisEnabled);
+            auto* editorOverlay =
+                static_cast<detail::EditorOverlayPass*>(overlay);
+            editorOverlay->setOrientationAxisEnabled(
+                viewportOrientationAxisEnabled);
+            editorOverlay->setTransformGizmoState(editorTransformGizmo);
         }
     }
 
@@ -2763,6 +2767,20 @@ void Renderer::setViewportOrientationAxisEnabled(bool enabled)
 bool Renderer::viewportOrientationAxisEnabled() const noexcept
 {
     return _impl && _impl->viewportOrientationAxisEnabled;
+}
+
+void Renderer::setEditorTransformGizmoState(
+    const EditorTransformGizmoState& state)
+{
+    if (!_impl) return;
+    _impl->editorTransformGizmo = state;
+    _impl->applyEditorOverlayKnobs();
+}
+
+EditorTransformGizmoState Renderer::editorTransformGizmoState() const noexcept
+{
+    return _impl ? _impl->editorTransformGizmo
+                 : EditorTransformGizmoState{};
 }
 
 void Renderer::setDebugOverlayEnabled(bool enabled)

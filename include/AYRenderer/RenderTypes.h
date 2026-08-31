@@ -352,6 +352,33 @@ enum class ColorGradingPreset : uint8_t {
     Cinematic = 3,
 };
 
+// Editor-only transform manipulator. Handle ids are intentionally opaque to
+// the renderer: AYEditor owns hit testing and drag semantics, while the
+// EditorOverlay pass uses activeHandle only to highlight matching geometry.
+enum class EditorTransformGizmoMode : uint8_t {
+    Hidden = 0,
+    Translate,
+    Rotate,
+    Scale,
+    Universal,
+};
+
+struct EditorTransformGizmoState {
+    bool visible = false;
+    bool localSpace = false;
+    EditorTransformGizmoMode mode = EditorTransformGizmoMode::Hidden;
+    uint8_t activeHandle = 0;
+    // Bit N disables handle id N. Disabled handles remain as muted visual
+    // orientation cues but AYEditor excludes them from CPU hit testing.
+    uint16_t disabledHandleMask = 0;
+    ayt::math::FVector3 position{};
+    ayt::math::FQuaternion rotation = ayt::math::FQuaternion::identity();
+};
+
+// AYEditor compile-time checks this value against its CPU hit geometry so the
+// gizmo keeps an approximately constant screen size as the camera dollies.
+inline constexpr float kEditorTransformGizmoScalePerDistance = 0.18f;
+
 // §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was
 // plumbing only: `RenderPipelineDesc::path` field (default Forward)
 // + `makeDeferred()` stub returning the same 5-slot Forward list.

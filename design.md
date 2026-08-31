@@ -881,6 +881,15 @@ include/AYRenderer/
 
 ## 16. 变更记录
 
+### 2026-08-31 — Editor Transform Gizmo Overlay
+
+- `EditorOverlayPass` 在原方向轴 view 251 之外启用 view 252，绘制选中实体的程序化 Universal Transform Gizmo；三轴平移箭头、三个平面方片、三轴旋转圆环、三轴缩放方块与中心统一缩放方块同时显示，不依赖贴图或模型资源。
+- AYEditor 通过 `Renderer::setEditorTransformGizmoState` 只传输可见性、模式、Local/World、活动 handle、投影退化禁用位掩码、位置和旋转；Renderer 在 pipeline rebuild 后恢复该状态，编辑器交互与 GPU 几何所有权保持分离。
+- Gizmo 尺寸按相机距离缩放以保持近似稳定的屏幕占比；Universal World 模式把平移/旋转与局部缩放拆为两个 index range/draw，前者使用单位旋转、后者使用实体旋转，Local 模式可合并为一次 draw。handle hover/drag 使用稳定数值 ID，并将命中部分高亮为黄色。
+- Universal 的几何按径向分层：缩放使用约 `0.09–0.38` 的短细杆和内侧小方块，平移只绘制为约 `0.50–0.95` 的长外段细箭头，旋转环位于半径 `1.03` 的最外圈；平面手柄由实心方片改为细边框。X/Y/Z 色相仍统一表示坐标轴，操作类型由方块/箭头/圆环形状及所在层级区分。
+- view 252 在 Present 后、UI 前只清 depth、不清 color，Gizmo 始终可操作且内部保持深度遮挡；动态 VB/IB 只在 Gizmo 模式、高亮 handle 或禁用位掩码变化时重建，位置/旋转变化仅更新 model transform。禁用 handle 使用保留原轴色相的 36% RGB 暗色，不依赖 alpha blending。
+- CPU 拾取、投影退化判定和 Transform 约束属于 AYEditor 的 `EditorTransformGizmo`，Renderer 只消费同一禁用位掩码并给出视觉反馈，不反向参与输入。`AYRenderer_EditorOverlay` 覆盖公开状态、view 252 和 pipeline rebuild 持久化；Renderer 全量回归为 3648/3648。
+
 ### 2026-08-30 — FXAA LDR Pass
 
 - 新增 append-only `RenderPassSlot::FXAA=16`、`FgResourceId::FxaaColor=7` 与 `FXAAPass`。默认、Deferred 和两条 Editor 管线固定为 PostProcess → FXAA → Present；旧 custom descriptor 不会被强制加入 FXAA，但显式包含 FXAA 且缺少 Present 时会把 Present 补在 FXAA 后。
@@ -895,7 +904,7 @@ include/AYRenderer/
 - PostProcess 从“最终 backbuffer blit”改为 FrameGraph `FinalLdrColor` 生产者：view 15 在 viewport-local RGBA8 目标完成 bloom、exposure、tone-map 与 gamma，并仅在真实 submit 后发布 current-frame production latch。
 - 新增 append-only `RenderPassSlot::Present=15`、`FgResourceId::FinalLdrColor=6` 与 `FgSemantic::PresentSource=4`。旧 custom descriptor 若含 PostProcess 但没有 Present，会在配置时补入兼容边界。
 - PresentPass 使用 view 16，只负责把本帧有效的 PresentSource 拷贝到默认 backbuffer 的 Game View rect。PostProcess 与 Present 共用 `FullscreenPassGeometry` 实现，资源仍由各 Pass 独立拥有和销毁。
-- 默认/Deferred/Editor 管线均固定为 PostProcess → FXAA → Present；EditorOverlay 位于 Present 后、UI 前并仅负责 view 251 的方向轴。选中轮廓在 Transparent 阶段使用 view 253/254：遮罩 Alpha 保存完整投影、RGB 保存场景深度可见覆盖，固定两像素外膨胀只从 Alpha 求边界并以 RGB 抑制遮挡段，避免大型地面产生内部伪轮廓或外框穿透前景。view 252 保留兼容用途。显式 view order 同时避开 FXAA 17、Shadow 18–25、UI Layer 26–249 与 GBufferDebug 250。
+- 默认/Deferred/Editor 管线均固定为 PostProcess → FXAA → Present；EditorOverlay 位于 Present 后、UI 前，view 251 负责方向轴，view 252 后续启用为 Transform Gizmo。选中轮廓在 Transparent 阶段使用 view 253/254：遮罩 Alpha 保存完整投影、RGB 保存场景深度可见覆盖，固定两像素外膨胀只从 Alpha 求边界并以 RGB 抑制遮挡段，避免大型地面产生内部伪轮廓或外框穿透前景。显式 view order 同时避开 FXAA 17、Shadow 18–25、UI Layer 26–249 与 GBufferDebug 250。
 - FrameGraph 新增通用 `markProduced/producedThisFrame` latch 与 semantic 级查询，`beginFrame` 与 shutdown 清零，防止复用物理 handle 时 Present 读取上一帧目标。测试覆盖 ABI、管线顺序、view 区间、Noop、latch reset 和生产 Present shader 编译。
 - MSVC Debug 定向重编后 `AYRenderer_Test` 为 3429/3429；`AYEditorShell_Demo` 完成重新链接。为规避历史 stale `.obj` 问题，本轮只清理了 `AYRenderer_Test` 对象目录，没有执行全引擎 clean。
 - 该边界为 FXAA、ColorGrading 等后 tone-map Pass 提供稳定插入点；TAA/MotionBlur/DOF 仍需先完成 motion/history/depth 契约，不在本刀混入。
