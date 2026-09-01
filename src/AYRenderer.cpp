@@ -14,6 +14,7 @@
 #include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FXAAPass.h"
+#include "detail/SMAAPass.h"
 #include "detail/GBufferDebugPass.h"
 #include "detail/GBufferPass.h"
 #include "detail/FrameContext.h"
@@ -92,6 +93,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
         RenderPassSlot::FXAA,
+        RenderPassSlot::SMAA,
         RenderPassSlot::ColorGrading,
         RenderPassSlot::Present,
         RenderPassSlot::UI,
@@ -126,6 +128,11 @@ void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
                                          RenderPassSlot::ColorGrading);
         if (gradingIt != desc.passes.end() && gradingIt > insertAfter) {
             insertAfter = gradingIt;
+        }
+        const auto smaaIt = std::find(desc.passes.begin(), desc.passes.end(),
+                                      RenderPassSlot::SMAA);
+        if (smaaIt != desc.passes.end() && smaaIt > insertAfter) {
+            insertAfter = smaaIt;
         }
         desc.passes.insert(insertAfter + 1, RenderPassSlot::Present);
     }
@@ -190,6 +197,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
         RenderPassSlot::FXAA,
+        RenderPassSlot::SMAA,
         RenderPassSlot::ColorGrading,
         RenderPassSlot::Present,
         RenderPassSlot::UI,
@@ -224,6 +232,8 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::PostProcessPass>();
     case RenderPassSlot::FXAA:
         return std::make_unique<detail::FXAAPass>();
+    case RenderPassSlot::SMAA:
+        return std::make_unique<detail::SMAAPass>();
     case RenderPassSlot::ColorGrading:
         return std::make_unique<detail::ColorGradingPass>();
     case RenderPassSlot::Present:
@@ -453,6 +463,7 @@ struct Renderer::Impl {
     // Display-referred anti-aliasing is enabled by default. The state lives on
     // Impl so pipeline rebuilds preserve the host's runtime choice.
     bool                           fxaaEnabled = true;
+    bool                           smaaEnabled = false;
 
     // Optional display-referred LUT grading. Disabled by default so all
     // pre-grading hosts retain a zero-allocation, byte-identical path.
@@ -471,10 +482,13 @@ struct Renderer::Impl {
         }
     }
 
-    void applyFxaaKnob()
+    void applyAntiAliasingKnobs()
     {
         if (detail::RenderPass* fxaa = pipeline.findPass("FXAA")) {
             fxaa->setEnabled(fxaaEnabled);
+        }
+        if (detail::RenderPass* smaa = pipeline.findPass("SMAA")) {
+            smaa->setEnabled(smaaEnabled);
         }
     }
 
@@ -721,6 +735,13 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
+    if (detail::RenderPass* smaaPass = pipeline.findPass("SMAA")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::SMAAPass*>(smaaPass)
+                ->destroyResources(adapter);
+        }
+    }
+
     if (detail::RenderPass* gradingPass = pipeline.findPass("ColorGrading")) {
         if (adapter.isInitialized()) {
             static_cast<detail::ColorGradingPass*>(gradingPass)
@@ -767,7 +788,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     }
 
     applyShadowQualityKnobs();
-    applyFxaaKnob();
+    applyAntiAliasingKnobs();
     applyColorGradingKnobs();
     applyEditorOverlayKnobs();
 }
@@ -977,6 +998,14 @@ void Renderer::shutdown()
             _impl->pipeline.findPass("FXAA")) {
         if (_impl->adapter.isInitialized()) {
             static_cast<detail::FXAAPass*>(fxaaPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+
+    if (detail::RenderPass* smaaPass =
+            _impl->pipeline.findPass("SMAA")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::SMAAPass*>(smaaPass)
                 ->destroyResources(_impl->adapter);
         }
     }
@@ -1320,6 +1349,11 @@ void Renderer::render(const RenderScene& scene)
             _impl->pipeline.findPass("FXAA")) {
         fxaaPassPtr = static_cast<detail::FXAAPass*>(fxaaSlot);
     }
+    detail::SMAAPass* smaaPassPtr = nullptr;
+    if (detail::RenderPass* smaaSlot =
+            _impl->pipeline.findPass("SMAA")) {
+        smaaPassPtr = static_cast<detail::SMAAPass*>(smaaSlot);
+    }
     detail::ColorGradingPass* colorGradingPassPtr = nullptr;
     if (detail::RenderPass* gradingSlot =
             _impl->pipeline.findPass("ColorGrading")) {
@@ -1508,6 +1542,35 @@ void Renderer::render(const RenderScene& scene)
                         {detail::FgResourceId::FxaaColor},
                         /*enabled=*/true});
         }
+        const bool smaaStageEnabled = smaaPassPtr != nullptr
+            && smaaPassPtr->isEnabled();
+        if (smaaStageEnabled) {
+            fg.addResource(detail::FgResourceId::SmaaEdges,
+                           {bgfx::TextureFormat::RGBA8,
+                            detail::FgTextureScale::Full,
+                            /*transient=*/true,
+                            /*withDepth=*/false,
+                            detail::SMAAPass::kIntermediatePointSampled});
+            fg.addResource(detail::FgResourceId::SmaaBlendWeights,
+                           {bgfx::TextureFormat::RGBA8,
+                            detail::FgTextureScale::Full,
+                            /*transient=*/true,
+                            /*withDepth=*/false,
+                            detail::SMAAPass::kIntermediatePointSampled});
+            fg.addResource(detail::FgResourceId::SmaaColor,
+                           {bgfx::TextureFormat::RGBA8,
+                            detail::FgTextureScale::Full,
+                            /*transient=*/true,
+                            /*withDepth=*/false});
+            fg.addPass({"SMAA",
+                        {fxaaStageEnabled
+                             ? detail::FgResourceId::FxaaColor
+                             : detail::FgResourceId::FinalLdrColor},
+                        {detail::FgResourceId::SmaaEdges,
+                         detail::FgResourceId::SmaaBlendWeights,
+                         detail::FgResourceId::SmaaColor},
+                        /*enabled=*/true});
+        }
         const bool colorGradingStageEnabled = colorGradingPassPtr != nullptr
             && colorGradingPassPtr->isEnabled()
             && colorGradingPassPtr->strength() > 0.0f
@@ -1519,18 +1582,22 @@ void Renderer::render(const RenderScene& scene)
                             /*transient=*/true,
                             /*withDepth=*/false});
             fg.addPass({"ColorGrading",
-                        {fxaaStageEnabled
-                             ? detail::FgResourceId::FxaaColor
-                             : detail::FgResourceId::FinalLdrColor},
+                        {smaaStageEnabled
+                             ? detail::FgResourceId::SmaaColor
+                             : (fxaaStageEnabled
+                                    ? detail::FgResourceId::FxaaColor
+                                    : detail::FgResourceId::FinalLdrColor)},
                         {detail::FgResourceId::ColorGradedColor},
                         /*enabled=*/true});
         }
         fg.addPass({"Present",
                     {colorGradingStageEnabled
                          ? detail::FgResourceId::ColorGradedColor
-                         : (fxaaStageEnabled
-                                ? detail::FgResourceId::FxaaColor
-                                : detail::FgResourceId::FinalLdrColor)},
+                         : (smaaStageEnabled
+                                ? detail::FgResourceId::SmaaColor
+                                : (fxaaStageEnabled
+                                       ? detail::FgResourceId::FxaaColor
+                                       : detail::FgResourceId::FinalLdrColor))},
                     {},
                     /*enabled=*/true});
         fg.setResolvedSemantic(detail::FgSemantic::PresentSource,
@@ -2450,12 +2517,32 @@ void Renderer::setFxaaEnabled(bool enabled)
         return;
     }
     _impl->fxaaEnabled = enabled;
-    _impl->applyFxaaKnob();
+    if (enabled) {
+        _impl->smaaEnabled = false;
+    }
+    _impl->applyAntiAliasingKnobs();
 }
 
 bool Renderer::fxaaEnabled() const noexcept
 {
     return _impl != nullptr && _impl->fxaaEnabled;
+}
+
+void Renderer::setSmaaEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->smaaEnabled = enabled;
+    if (enabled) {
+        _impl->fxaaEnabled = false;
+    }
+    _impl->applyAntiAliasingKnobs();
+}
+
+bool Renderer::smaaEnabled() const noexcept
+{
+    return _impl != nullptr && _impl->smaaEnabled;
 }
 
 void Renderer::setColorGradingEnabled(bool enabled)

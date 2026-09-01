@@ -343,6 +343,11 @@ enum class RenderPassSlot : uint8_t {
     // Append-only ABI value 17; renderer defaults disabled so existing hosts
     // do not allocate its target or procedural LUT until explicitly enabled.
     ColorGrading = 17,
+
+    // Three-stage display-referred SMAA 1x. Append-only ABI value 18; mounted
+    // after FXAA and before ColorGrading, but runtime AA knobs keep FXAA and
+    // SMAA mutually exclusive.
+    SMAA = 18,
 };
 
 enum class ColorGradingPreset : uint8_t {

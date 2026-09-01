@@ -35,8 +35,8 @@ TEST_CASE(UIRenderBackend_LayerHandlesComplexPaintReuseAndDeviceReset)
     ui.setUiScale(1.5f);
     CHECK_TRUE(ui.supportsRenderTargets());
     CHECK(UIRenderBackend::kFirstLayerViewId == 26);
-    CHECK(UIRenderBackend::kLastLayerViewId == 249);
-    CHECK(UIRenderBackend::kMaxOffscreenPaintsPerFrame == 224);
+    CHECK(UIRenderBackend::kLastLayerViewId == 246);
+    CHECK(UIRenderBackend::kMaxOffscreenPaintsPerFrame == 221);
     CHECK(UIRenderBackend::kFirstLayerViewId < UIRenderBackend::kLastLayerViewId);
     CHECK(UIRenderBackend::kLastLayerViewId < UIRenderBackend::kViewId);
 
@@ -148,7 +148,7 @@ TEST_CASE(UIRenderBackend_LayerHandlesComplexPaintReuseAndDeviceReset)
     CHECK_FALSE(ui.isLayerDirty(layer));
 
     // The production range uses every currently unreserved bgfx view from
-    // 26 through 249. This is a per-frame pass capacity, not a promise that
+    // 26 through 246. This is a per-frame pass capacity, not a promise that
     // the shared RenderTargetPool can reserve the same number of framebuffer
     // handles exclusively for UI. Repaint one valid target repeatedly to
     // isolate view allocation from the renderer-wide framebuffer budget.

@@ -241,7 +241,8 @@ bgfx::FrameBufferHandle FrameGraph::resolve(FgResourceId id) const
         r.physicalW = w;
         r.physicalH = h;
     }
-    const RenderTargetKey key{w, h, r.desc.format, r.desc.withDepth, 1};
+    const RenderTargetKey key{w, h, r.desc.format, r.desc.withDepth, 1,
+                              r.desc.pointSampled};
     if (r.pooled.isValid() && !_targetPool->matches(r.pooled, key)) {
         _targetPool->release(r.pooled);
         r.pooled = {};

@@ -152,7 +152,7 @@ TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {
 
 TEST_CASE(deferred_pipeline_matches_data_dependencies) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
-    CHECK(desc.passes.size() == 15u);
+    CHECK(desc.passes.size() == 16u);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
     CHECK(desc.passes[3] == RenderPassSlot::SSAO);
     CHECK(desc.passes[4] == RenderPassSlot::Lighting);
@@ -165,7 +165,7 @@ TEST_CASE(deferred_pipeline_matches_data_dependencies) {
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 31u);
+    CHECK(order.size() == 34u);
     CHECK(order[15] == 14u);  // SSAO
     CHECK(order[16] == 8u);   // Lighting
     CHECK(order[17] == 13u);  // DepthHaze
@@ -177,16 +177,19 @@ TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     CHECK(order[23] == 12u);  // BloomBlurV
     CHECK(order[24] == 15u);  // PostProcess
     CHECK(order[25] == 17u);  // FXAA
-    CHECK(order[26] == 4u);   // ColorGrading
-    CHECK(order[27] == 16u);  // Present
-    CHECK(order[28] == 250u); // GBufferDebug
-    CHECK(order[29] == 251u); // Editor orientation axis
-    CHECK(order[30] == 252u); // Reserved editor overlay compatibility
+    CHECK(order[26] == 247u); // SMAA edge detection
+    CHECK(order[27] == 248u); // SMAA blend weights
+    CHECK(order[28] == 249u); // SMAA neighborhood blend
+    CHECK(order[29] == 4u);   // ColorGrading
+    CHECK(order[30] == 16u);  // Present
+    CHECK(order[31] == 250u); // GBufferDebug
+    CHECK(order[32] == 251u); // Editor orientation axis
+    CHECK(order[33] == 252u); // Reserved editor overlay compatibility
 }
 
 TEST_CASE(forward_pipeline_keeps_haze_as_safe_noop_before_transparent) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
-    CHECK(desc.passes.size() == 12u);
+    CHECK(desc.passes.size() == 13u);
     CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
     CHECK(desc.passes[4] == RenderPassSlot::Transparent);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);

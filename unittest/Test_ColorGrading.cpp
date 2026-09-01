@@ -12,6 +12,7 @@
 #include "detail/FgResource.h"
 #include "detail/FrameContext.h"
 #include "detail/FXAAPass.h"
+#include "detail/SMAAPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/PresentPass.h"
@@ -72,12 +73,12 @@ TEST_CASE(color_grading_append_only_abi_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::ColorGrading) == 17u);
     CHECK(static_cast<uint8_t>(FgResourceId::ColorGradedColor) == 8u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 9u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 12u);
     CHECK(ayt::render::detail::ColorGradingPass::kColorGradingViewId == 4u);
     CHECK(std::is_final_v<ayt::render::detail::ColorGradingPass>);
 }
 
-TEST_CASE(product_pipelines_order_grading_between_fxaa_and_present)
+TEST_CASE(product_pipelines_order_grading_between_smaa_and_present)
 {
     for (const RenderPipelineDesc desc : {
              RenderPipelineDesc::makeDefault(),
@@ -85,20 +86,25 @@ TEST_CASE(product_pipelines_order_grading_between_fxaa_and_present)
              RenderPipelineDesc::makeEditorForward(),
              RenderPipelineDesc::makeEditorDeferred()}) {
         const std::size_t fxaa = gradingPassIndex(desc, RenderPassSlot::FXAA);
+        const std::size_t smaa = gradingPassIndex(desc, RenderPassSlot::SMAA);
         const std::size_t grading =
             gradingPassIndex(desc, RenderPassSlot::ColorGrading);
         const std::size_t present =
             gradingPassIndex(desc, RenderPassSlot::Present);
-        CHECK(grading == fxaa + 1u);
+        CHECK(smaa == fxaa + 1u);
+        CHECK(grading == smaa + 1u);
         CHECK(present == grading + 1u);
     }
 }
 
-TEST_CASE(color_grading_view_executes_after_fxaa_and_before_present)
+TEST_CASE(color_grading_view_executes_after_smaa_and_before_present)
 {
     const auto& order = ayt::render::detail::kRenderViewOrder;
     const auto fxaa = std::find(order.begin(), order.end(),
                                 ayt::render::detail::FXAAPass::kFxaaViewId);
+    const auto smaa = std::find(
+        order.begin(), order.end(),
+        ayt::render::detail::SMAAPass::kNeighborhoodViewId);
     const auto grading = std::find(
         order.begin(), order.end(),
         ayt::render::detail::ColorGradingPass::kColorGradingViewId);
@@ -106,7 +112,8 @@ TEST_CASE(color_grading_view_executes_after_fxaa_and_before_present)
         order.begin(), order.end(),
         ayt::render::detail::PresentPass::kPresentViewId);
     CHECK(fxaa != order.end());
-    CHECK(grading == fxaa + 1);
+    CHECK(smaa == fxaa + 3);
+    CHECK(grading == smaa + 1);
     CHECK(present == grading + 1);
 }
 

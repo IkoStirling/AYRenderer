@@ -1,5 +1,7 @@
 # AYRenderer Design
 
+> **2026-09-01 — SMAA 1x**：新增独立三阶段 LDR Pass，按 Edge Detection（view 247）→ Blend Weight（248）→ Neighborhood Blend（249）生产 `SmaaColor`，仅在完整提交后提升 `PresentSource`。Renderer 保持 FXAA 默认开启/SMAA 默认关闭，Editor 改为 SMAA 默认开启，两个开关互斥。正交 Area lookup 由参考算法程序化生成，不依赖 loose asset；当前边界为 16 像素正交搜索，尚未包含 high preset 的 diagonal detection。视觉复查后修正中间纹理为 linear/clamp，并在端点法向偏移 0.25 像素解码交叉边，解决典型斜向阶梯落入零权重图案、Pass 看似无效的问题；新增 45° 阶梯回归及 shaderc、FrameGraph、view、Noop、teardown 与互斥测试。
+
 > **2026-09-01 — 2D atlas sampling variants**: Forward2D accepts chunk meshes
 > with baked atlas UVs. The per-draw payload also carries atlas texel size, and
 > material creation selects Nearest, Linear, 4-tap, or 9-tap standard Phoskia
@@ -7,7 +9,7 @@
 > or shader file type. Sprites remain Linear by default.
 
 > **文档状态**：2026-08-30 已对齐当前代码；R0–R5 主管线已落地。
-> **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、FXAA、ColorGrading、Present、UI 和 GBufferDebug 已接入 Pass 调度。PostProcess 产出 FrameGraph `FinalLdrColor`，FXAA 与 ColorGrading 依次作为可选 LDR 节点提升 `PresentSource`，Present 保持唯一 backbuffer 边界；静态审核/修复已完成，等待真实 GPU capture 验收。
+> **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、FXAA、SMAA、ColorGrading、Present、UI 和 GBufferDebug 已接入 Pass 调度。PostProcess 产出 FrameGraph `FinalLdrColor`，FXAA/SMAA 与 ColorGrading 作为可选 LDR 节点提升 `PresentSource`，Present 保持唯一 backbuffer 边界；静态审核/修复已完成，等待真实 GPU capture 验收。
 > **活动执行计划**：[`docs/execution-plan.md`](execution-plan.md)（P0–P6 队列、§5 segfault 约束、§5.4 隔离实验、附录 B/C/D 索引）。本文件是目标架构，与代码不一致时以代码与 execution-plan 为准。
 > **关联文档**：[`docs/gbuffer-current.md`](docs/gbuffer-current.md)（当前 MRT/数据契约）、[`AYShader/design.md` §8.5](../AYShader/design.md)（opaque handle contract）、[`AYShader/README.md`](../AYShader/README.md)。
 
@@ -887,6 +889,14 @@ include/AYRenderer/
 
 ## 16. 变更记录
 
+### 2026-09-01 — FXAA Quality 修复
+
+- 原 `fxaa_311_luma_v1` 是无低对比度 early-out 的中心/四角方向滤波，视觉上会把高频细节变软，却仍难以处理长斜边阶梯。实现已替换为 `fxaa_quality_edge_search_v2`，FrameGraph、view 17、ABI、运行时开关和 `PresentSource` 事务提升契约均保持不变。
+- 新 shader 先以中心和 N/E/S/W 五点计算 `max(0.0312, lumaMax*0.125)` 边缘阈值；低对比度像素精确返回中心值。确认边缘后读取四角进行水平/垂直分类，再沿切线以 1/2/4/8 像素搜索端点，最终只沿法线做一次双线性偏移采样。
+- sub-pixel correction 固定为较克制的 0.50，端点完成阈值为主梯度的 0.25；质量参数通过 `fxaaQuality` 上传，保留后续接入 Render Settings 调参而无需生成 shader 变体的空间。
+- FXAA 改走既有 raw bgfx `.sc` 编译路径。原因是当前 Phoskia 虽接受 `IfStmt`，BGFX emitter 尚不生成控制流；raw 路径才能真正实现非边缘 early-out，并已由 shaderc `windows/s_5_0` 同时覆盖 D3D11/D3D12。
+- `AYRenderer_FXAA` 更新为 55/55，覆盖对比度门控、边缘方向、1/2/4/8 搜索上界、参数默认值、UV clamp 与 VS/FS 生产编译；完整 `AYRenderer_Test` 为 3661/3661。视觉 A/B 继续使用 Editor 现有 FXAA 勾选框，本刀未触碰存在并行修改的 AYEditor/AYUI。
+
 ### 2026-08-31 — Editor Transform Gizmo Overlay
 
 - `EditorOverlayPass` 在原方向轴 view 251 之外启用 view 252，绘制选中实体的程序化 Universal Transform Gizmo；三轴平移箭头、三个平面方片、三轴旋转圆环、三轴缩放方块与中心统一缩放方块同时显示，不依赖贴图或模型资源。
@@ -900,7 +910,7 @@ include/AYRenderer/
 
 - 新增 append-only `RenderPassSlot::FXAA=16`、`FgResourceId::FxaaColor=7` 与 `FXAAPass`。默认、Deferred 和两条 Editor 管线固定为 PostProcess → FXAA → Present；旧 custom descriptor 不会被强制加入 FXAA，但显式包含 FXAA 且缺少 Present 时会把 Present 补在 FXAA 后。
 - FXAA 使用稳定 view 17，`RenderViewOrder` 显式将它排在 PostProcess view 15 与 Present view 16 之间，并与 Shadow atlas 18–25、UI Layer 26–249、GBufferDebug 250、Editor 251–254 隔离。
-- 输入是 display-referred RGBA8 FinalLdrColor；shader 实现 FXAA 3.11 风格 luma 方向滤波，所有邻域 UV 显式 clamp，并按当前 viewport 上传 inverse texel size。
+- 输入是 display-referred RGBA8 FinalLdrColor；本节记录的初版 shader 使用 FXAA 3.11 风格 luma 方向滤波，已由 2026-09-01 的 Quality 修复取代。输入格式、UV clamp 与按 viewport 上传 inverse texel size 的契约继续保留。
 - `PresentSource` 每帧先回退到 FinalLdrColor。FXAA 只有在 geometry/program/binding/FBO/attachment 全部有效并成功 submit 后才标记 FxaaColor 和提升 semantic；任何失败都由 Present 显示原 FinalLdrColor。
 - 新增 `Renderer::setFxaaEnabled/fxaaEnabled`，默认开启且跨 pipeline rebuild 保持。关闭时 FrameGraph 不声明 FxaaColor，不分配目标，也不执行 FXAA draw。
 - `AYRenderer_FXAA` 37/37 通过，覆盖 ABI、四条产品管线顺序、view order、runtime toggle、custom descriptor 兼容、production latch、Noop 与真实 Phoskia/shaderc 编译反射；全量 `AYRenderer_Test` 3525/3525 通过。

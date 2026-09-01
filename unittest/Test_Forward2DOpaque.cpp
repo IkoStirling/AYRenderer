@@ -127,7 +127,7 @@ TEST_CASE(cm1_renderpassslot_forward2dopaque_value_is_14) {
 TEST_CASE(cm1_make_default_includes_forward2dopaque_between_fo_and_transparent) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 12);
+    CHECK(desc.passes.size() == 13);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::Forward2DOpaque);
@@ -137,9 +137,10 @@ TEST_CASE(cm1_make_default_includes_forward2dopaque_between_fo_and_transparent) 
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[8] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[9] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[10] == RenderPassSlot::Present);
-    CHECK(desc.passes[11] == RenderPassSlot::UI);
+    CHECK(desc.passes[9] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[10] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[11] == RenderPassSlot::Present);
+    CHECK(desc.passes[12] == RenderPassSlot::UI);
     CHECK(desc.contains(RenderPassSlot::Forward2DOpaque));
 }
 
@@ -148,7 +149,7 @@ TEST_CASE(cm1_make_deferred_omits_forward2dopaque) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
     CHECK(!desc.contains(RenderPassSlot::Forward2DOpaque));
-    CHECK(desc.passes.size() == 15);
+    CHECK(desc.passes.size() == 16);
 }
 
 // === 3. Payload default + round-trip ================================

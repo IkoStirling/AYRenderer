@@ -3,9 +3,8 @@
 #include "AYRenderer.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
-#include "AYShader/BGFXConverter.h"
-#include "AYShader/Phoskia.h"
 #include "AYShader/ShaderResourcePool.h"
+#include "AYShader/ShadercDriver.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/ColorGradingPass.h"
@@ -16,11 +15,13 @@
 #include "detail/PostProcessPass.h"
 #include "detail/PresentPass.h"
 #include "detail/RenderViewOrder.h"
+#include "detail/SMAAPass.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <sys/stat.h>
 #include <type_traits>
 #include <unordered_map>
 
@@ -43,22 +44,10 @@ std::size_t passIndex(const RenderPipelineDesc& desc, RenderPassSlot slot)
         : static_cast<std::size_t>(it - desc.passes.begin());
 }
 
-bool hasTexture(const ayt::shader::CompiledShaderProgram& program,
-                const char* name)
+bool fxaaFileExists(const std::string& path)
 {
-    return std::any_of(program.textures.begin(), program.textures.end(),
-        [name](const ayt::shader::BGFXTexture& texture) {
-            return texture.name == name;
-        });
-}
-
-bool hasUniform(const ayt::shader::CompiledShaderProgram& program,
-                const char* name)
-{
-    return std::any_of(program.uniforms.begin(), program.uniforms.end(),
-        [name](const ayt::shader::BGFXUniform& uniform) {
-            return uniform.name == name;
-        });
+    struct stat st;
+    return !path.empty() && ::stat(path.c_str(), &st) == 0;
 }
 
 } // namespace
@@ -69,7 +58,7 @@ TEST_CASE(fxaa_append_only_abi_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::FXAA) == 16u);
     CHECK(static_cast<uint8_t>(FgResourceId::FxaaColor) == 7u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 9u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 12u);
     CHECK(ayt::render::detail::FXAAPass::kFxaaViewId == 17u);
     CHECK(std::is_final_v<ayt::render::detail::FXAAPass>);
 }
@@ -83,10 +72,12 @@ TEST_CASE(default_deferred_and_editor_pipelines_order_fxaa_before_present)
              RenderPipelineDesc::makeEditorDeferred()}) {
         const std::size_t post = passIndex(desc, RenderPassSlot::PostProcess);
         const std::size_t fxaa = passIndex(desc, RenderPassSlot::FXAA);
+        const std::size_t smaa = passIndex(desc, RenderPassSlot::SMAA);
         const std::size_t grading = passIndex(desc, RenderPassSlot::ColorGrading);
         const std::size_t present = passIndex(desc, RenderPassSlot::Present);
         CHECK(fxaa == post + 1u);
-        CHECK(grading == fxaa + 1u);
+        CHECK(smaa == fxaa + 1u);
+        CHECK(grading == smaa + 1u);
         CHECK(present == grading + 1u);
     }
 }
@@ -100,11 +91,14 @@ TEST_CASE(fxaa_view_executes_after_postprocess_and_before_present)
                                 ayt::render::detail::FXAAPass::kFxaaViewId);
     const auto grading = std::find(order.begin(), order.end(),
                                    ayt::render::detail::ColorGradingPass::kColorGradingViewId);
+    const auto smaa = std::find(order.begin(), order.end(),
+                                ayt::render::detail::SMAAPass::kEdgeViewId);
     const auto present = std::find(order.begin(), order.end(),
                                    ayt::render::detail::PresentPass::kPresentViewId);
     CHECK(pp != order.end());
     CHECK(fxaa == pp + 1);
-    CHECK(grading == fxaa + 1);
+    CHECK(smaa == fxaa + 1);
+    CHECK(grading == smaa + 3);
     CHECK(present == grading + 1);
 }
 
@@ -187,38 +181,71 @@ TEST_CASE(fxaa_noop_backend_returns_zero)
     pass.destroyResources(adapter);
 }
 
-TEST_CASE(fxaa_shader_compiles_reflects_bindings_and_clamps_edges)
+TEST_CASE(fxaa_quality_shader_has_contrast_gate_and_bounded_edge_search)
 {
-    const std::string source =
-        ayt::render::detail::fxaaPhoskiaSourceForTests();
-    CHECK(source.find("clamp(uv +") != std::string::npos);
-    CHECK(source.find("dot(rgbNW, luma)") != std::string::npos);
-    CHECK(source.find("mix(rgbA, rgbB, useB)") != std::string::npos);
+    const std::string vertex = ayt::render::detail::fxaaVertexScForTests();
+    const std::string fragment = ayt::render::detail::fxaaFragmentScForTests();
+    const std::string varying = ayt::render::detail::fxaaVaryingScForTests();
 
-    ayt::shader::phoskia::Compiler compiler;
-    ayt::shader::phoskia::CompileOptions frontend;
-    ayt::shader::BGFXCompileOptions backend;
-    backend.shadercPath = AY_SHADER_SHADERC_HINT;
-    backend.platform = "linux";
-    backend.profile = "430";
+    CHECK(varying.find("v_texcoord0") != std::string::npos);
+    CHECK(vertex.find("v_texcoord0 = a_texcoord0") != std::string::npos);
+    CHECK(fragment.find("SAMPLER2D(inputColor, 0)") != std::string::npos);
+    CHECK(fragment.find("uniform vec4 inverseViewport") != std::string::npos);
+    CHECK(fragment.find("uniform vec4 fxaaQuality") != std::string::npos);
+    CHECK(fragment.find("lumaRange < edgeThreshold") != std::string::npos);
+    CHECK(fragment.find("gl_FragColor = colorM") != std::string::npos);
+    CHECK(fragment.find("edgeHorizontal") != std::string::npos);
+    CHECK(fragment.find("edgeVertical") != std::string::npos);
+    CHECK(fragment.find("distanceNegative = 8.0") != std::string::npos);
+    CHECK(fragment.find("distancePositive = 8.0") != std::string::npos);
+    CHECK(fragment.find("subpixelOffset") != std::string::npos);
+    CHECK(fragment.find("fxaaClampUv") != std::string::npos);
+
+    CHECK(ayt::render::detail::FXAAPass::kEdgeThreshold == 0.125f);
+    CHECK(ayt::render::detail::FXAAPass::kEdgeThresholdMin == 0.0312f);
+    CHECK(ayt::render::detail::FXAAPass::kSubpixelQuality == 0.50f);
+    CHECK(ayt::render::detail::FXAAPass::kSearchThreshold == 0.25f);
+    CHECK(std::string(ayt::render::detail::kFxaaCacheKeyCStr)
+          == "fxaa_quality_edge_search_v2");
+}
+
+TEST_CASE(fxaa_quality_shader_compiles_for_d3d11_and_d3d12)
+{
+    if (!fxaaFileExists(AY_SHADER_SHADERC_HINT)) {
+        std::cerr << "[FXAAPass test] SKIP: shaderc unavailable.\n";
+        return;
+    }
+
+    ayt::shader::AYShadercDriver driver(AY_SHADER_SHADERC_HINT);
+    auto compileStage = [&](const char* stage, const char* source) {
+        ayt::shader::ShaderCompileRequest request;
+        request.stage = stage;
+        request.scSource = source;
+        request.varyingdefSource =
+            ayt::render::detail::fxaaVaryingScForTests();
+        request.platform = "windows";
+        // bgfx D3D11 and D3D12 both consume shader model 5 binaries.
+        request.profile = "s_5_0";
+        request.outputName = std::string("fxaa_quality_") + stage;
+        request.timeoutMs = 30000;
 #ifdef AY_SHADER_BGFX_COMMON_HINT
-    backend.includeDirs.emplace_back(AY_SHADER_BGFX_COMMON_HINT);
+        request.includeDirs.emplace_back(AY_SHADER_BGFX_COMMON_HINT);
 #endif
 #ifdef AY_SHADER_BGFX_SRC_HINT
-    backend.includeDirs.emplace_back(AY_SHADER_BGFX_SRC_HINT);
+        request.includeDirs.emplace_back(AY_SHADER_BGFX_SRC_HINT);
 #endif
-    ayt::shader::CompiledShaderProgram program;
-    compiler.compileToProgram(source, frontend, backend, program);
-    if (!program.success) {
-        for (const std::string& error : program.errors) {
-            std::cerr << "[FXAAPass test] " << error << '\n';
+        const ayt::shader::ShaderCompileResult result = driver.compile(request);
+        if (!result.ok) {
+            std::cerr << "[FXAAPass test] shaderc " << stage
+                      << " failed: " << result.stderrText << '\n';
         }
-    }
-    CHECK(program.success);
-    CHECK(hasTexture(program, "inputColor"));
-    CHECK(hasUniform(program, "inverseViewport"));
-    CHECK(std::string(ayt::render::detail::kFxaaCacheKeyCStr)
-          == "fxaa_311_luma_v1");
+        return result.ok;
+    };
+
+    CHECK(compileStage(
+        "vertex", ayt::render::detail::fxaaVertexScForTests()));
+    CHECK(compileStage(
+        "fragment", ayt::render::detail::fxaaFragmentScForTests()));
 }
 
 TEST_SUITE_END

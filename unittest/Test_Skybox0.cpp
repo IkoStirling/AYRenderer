@@ -279,7 +279,7 @@ TEST_CASE(render_pass_slot_skybox_enum_index) {
     // We test the Skybox value directly; downstream tests verify
     // the relative order.
     CHECK(static_cast<uint8_t>(RenderPassSlot::Skybox) == 1u);
-    CHECK(RenderPipelineDesc::makeDeferred().passes.size() == 15u);
+    CHECK(RenderPipelineDesc::makeDeferred().passes.size() == 16u);
 }
 
 TEST_CASE(deferred_pipeline_skybox_slot_order) {
@@ -319,7 +319,7 @@ TEST_CASE(forward_default_pipeline_does_not_include_skybox) {
     // configurePipeline(makeDeferred()).
     auto desc = RenderPipelineDesc::makeDefault();
     CHECK(!desc.contains(RenderPassSlot::Skybox));
-    CHECK(desc.passes.size() == 12u);
+    CHECK(desc.passes.size() == 13u);
 }
 
 TEST_CASE(skybox_pass_name_and_initial_state) {

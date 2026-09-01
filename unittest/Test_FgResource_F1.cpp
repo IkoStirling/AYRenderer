@@ -81,7 +81,7 @@ TEST_CASE(f1_fgresource_id_enum_unique_and_count) {
     CHECK(static_cast<uint8_t>(FgResourceId::SSAOTexture) == 5);
     CHECK(static_cast<uint8_t>(FgResourceId::FinalLdrColor) == 6);
     CHECK(static_cast<uint8_t>(FgResourceId::FxaaColor)   == 7);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count)       == 9);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count)       == 12);
 }
 
 TEST_CASE(f1_fgsemantic_enum_values_locked) {

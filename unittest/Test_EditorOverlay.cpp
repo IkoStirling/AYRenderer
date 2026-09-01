@@ -184,15 +184,16 @@ TEST_CASE(make_default_omits_editoroverlay) {
 TEST_CASE(make_editor_forward_inserts_overlay_after_present) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeEditorForward();
     CHECK(desc.contains(RenderPassSlot::EditorOverlay));
-    CHECK(desc.passes.size() == 13u);
+    CHECK(desc.passes.size() == 14u);
     CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
     CHECK(desc.passes[4] == RenderPassSlot::Transparent);
     CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[8] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[9] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[10] == RenderPassSlot::Present);
-    CHECK(desc.passes[11] == RenderPassSlot::EditorOverlay);
-    CHECK(desc.passes[12] == RenderPassSlot::UI);
+    CHECK(desc.passes[9] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[10] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[11] == RenderPassSlot::Present);
+    CHECK(desc.passes[12] == RenderPassSlot::EditorOverlay);
+    CHECK(desc.passes[13] == RenderPassSlot::UI);
 }
 
 TEST_CASE(make_editor_deferred_inserts_overlay_after_present) {
@@ -204,11 +205,13 @@ TEST_CASE(make_editor_deferred_inserts_overlay_after_present) {
     CHECK(ppIt + 1 != desc.passes.end());
     CHECK(*(ppIt + 1) == RenderPassSlot::FXAA);
     CHECK(ppIt + 2 != desc.passes.end());
-    CHECK(*(ppIt + 2) == RenderPassSlot::ColorGrading);
+    CHECK(*(ppIt + 2) == RenderPassSlot::SMAA);
     CHECK(ppIt + 3 != desc.passes.end());
-    CHECK(*(ppIt + 3) == RenderPassSlot::Present);
+    CHECK(*(ppIt + 3) == RenderPassSlot::ColorGrading);
     CHECK(ppIt + 4 != desc.passes.end());
-    CHECK(*(ppIt + 4) == RenderPassSlot::EditorOverlay);
+    CHECK(*(ppIt + 4) == RenderPassSlot::Present);
+    CHECK(ppIt + 5 != desc.passes.end());
+    CHECK(*(ppIt + 5) == RenderPassSlot::EditorOverlay);
     CHECK(desc.contains(RenderPassSlot::GBufferDebug));
 }
 

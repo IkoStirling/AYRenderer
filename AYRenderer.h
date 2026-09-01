@@ -323,6 +323,12 @@ public:
     void setFxaaEnabled(bool enabled);
     bool fxaaEnabled() const noexcept;
 
+    // Three-stage SMAA 1x after tone-map/gamma and before color grading.
+    // Defaults disabled at the renderer level. Enabling it disables FXAA;
+    // enabling FXAA disables SMAA, preventing accidental double filtering.
+    void setSmaaEnabled(bool enabled);
+    bool smaaEnabled() const noexcept;
+
     // Display-referred 32^3 LUT grading after FXAA. The LUT is represented as
     // a portable 2D strip so D3D11/D3D12 share one shader/resource path.
     // Defaults disabled, strength 0.75, preset Warm.

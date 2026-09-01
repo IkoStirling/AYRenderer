@@ -82,8 +82,15 @@ enum class FgResourceId : uint8_t {
     // Display-referred RGBA8 output of ColorGradingPass. The pass samples a
     // 2D strip LUT and promotes PresentSource transactionally after submit.
     ColorGradedColor = 8,
+    // SMAA 1x private intermediates and final display-referred output. Edge
+    // and blend targets use linear/clamp sampling because endpoint-pattern
+    // decoding intentionally samples at quarter-pixel offsets. SmaaColor
+    // transactionally replaces PresentSource after all three stages submit.
+    SmaaEdges        = 9,
+    SmaaBlendWeights = 10,
+    SmaaColor        = 11,
     // Sentinel ── 测试和实现都靠它做数组大小 / 上界判断。
-    Count        = 9,
+    Count        = 12,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。
@@ -108,6 +115,8 @@ struct FgTextureDesc {
     FgTextureScale            scale    = FgTextureScale::Full;
     bool                      transient = true;
     bool                      withDepth = false;
+    // Edge/mask resources must not interpolate adjacent classifications.
+    bool                      pointSampled = false;
 };
 
 // Pass 声明 ── 描述一个 logical pass 读哪些资源、写哪些资源、
