@@ -1,5 +1,11 @@
 # AYRenderer Design
 
+> **2026-09-01 — 2D atlas sampling variants**: Forward2D accepts chunk meshes
+> with baked atlas UVs. The per-draw payload also carries atlas texel size, and
+> material creation selects Nearest, Linear, 4-tap, or 9-tap standard Phoskia
+> source. This reuses the existing compiler/material path; it is not a new pass
+> or shader file type. Sprites remain Linear by default.
+
 > **文档状态**：2026-08-30 已对齐当前代码；R0–R5 主管线已落地。
 > **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、FXAA、ColorGrading、Present、UI 和 GBufferDebug 已接入 Pass 调度。PostProcess 产出 FrameGraph `FinalLdrColor`，FXAA 与 ColorGrading 依次作为可选 LDR 节点提升 `PresentSource`，Present 保持唯一 backbuffer 边界；静态审核/修复已完成，等待真实 GPU capture 验收。
 > **活动执行计划**：[`docs/execution-plan.md`](execution-plan.md)（P0–P6 队列、§5 segfault 约束、§5.4 隔离实验、附录 B/C/D 索引）。本文件是目标架构，与代码不一致时以代码与 execution-plan 为准。

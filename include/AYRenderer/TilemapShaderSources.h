@@ -45,4 +45,115 @@ material Tilemap2D {
 }
 )";
 
+// Chunk-mesh variants sample baked atlas UVs directly. `atlasTexel.xy` is the
+// inverse atlas size uploaded per draw. The 4/9-tap variants are opt-in quality
+// filters for scaled/rotated presentation; Linear is the normal default.
+inline constexpr const char* kTilemapChunkNearestPhoskiaSource = R"(
+material TilemapChunkNearest {
+    texture2d albedoMap
+    uniform vec4 atlasTexel
+    property tint = vec4(1.0, 1.0, 1.0, 1.0)
+    vertex {
+        in pos : position
+        in uv : texcoord
+        out uvOut : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
+    }
+    fragment {
+        in uvOut : texcoord
+        let snapped = vec2((floor(uvOut.x / atlasTexel.x) + 0.5) * atlasTexel.x,
+                           (floor(uvOut.y / atlasTexel.y) + 0.5) * atlasTexel.y)
+        return sample(albedoMap, snapped) * tint
+    }
+}
+)";
+
+inline constexpr const char* kTilemapChunkLinearPhoskiaSource = R"(
+material TilemapChunkLinear {
+    texture2d albedoMap
+    uniform vec4 atlasTexel
+    property tint = vec4(1.0, 1.0, 1.0, 1.0)
+    vertex {
+        in pos : position
+        in uv : texcoord
+        out uvOut : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
+    }
+    fragment {
+        in uvOut : texcoord
+        return sample(albedoMap, uvOut) * tint
+    }
+}
+)";
+
+inline constexpr const char* kTilemapChunk4TapPhoskiaSource = R"(
+material TilemapChunk4Tap {
+    texture2d albedoMap
+    uniform vec4 atlasTexel
+    property tint = vec4(1.0, 1.0, 1.0, 1.0)
+    vertex {
+        in pos : position
+        in uv : texcoord
+        out uvOut : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
+    }
+    fragment {
+        in uvOut : texcoord
+        let d = atlasTexel.xy * 0.25
+        let c = sample(albedoMap, uvOut + vec2(-d.x, -d.y))
+              + sample(albedoMap, uvOut + vec2( d.x, -d.y))
+              + sample(albedoMap, uvOut + vec2(-d.x,  d.y))
+              + sample(albedoMap, uvOut + vec2( d.x,  d.y))
+        return c * 0.25 * tint
+    }
+}
+)";
+
+inline constexpr const char* kTilemapChunk9TapPhoskiaSource = R"(
+material TilemapChunk9Tap {
+    texture2d albedoMap
+    uniform vec4 atlasTexel
+    property tint = vec4(1.0, 1.0, 1.0, 1.0)
+    vertex {
+        in pos : position
+        in uv : texcoord
+        out uvOut : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
+    }
+    fragment {
+        in uvOut : texcoord
+        let d = atlasTexel.xy * 0.3333333
+        let c = sample(albedoMap, uvOut + vec2(-d.x, -d.y))
+              + sample(albedoMap, uvOut + vec2( 0.0, -d.y))
+              + sample(albedoMap, uvOut + vec2( d.x, -d.y))
+              + sample(albedoMap, uvOut + vec2(-d.x,  0.0))
+              + sample(albedoMap, uvOut)
+              + sample(albedoMap, uvOut + vec2( d.x,  0.0))
+              + sample(albedoMap, uvOut + vec2(-d.x,  d.y))
+              + sample(albedoMap, uvOut + vec2( 0.0,  d.y))
+              + sample(albedoMap, uvOut + vec2( d.x,  d.y))
+        return c * 0.1111111 * tint
+    }
+}
+)";
+
+enum class TilemapSamplingQuality : unsigned char {
+    Nearest = 0,
+    Linear = 1,
+    Tap4 = 2,
+    Tap9 = 3,
+};
+
+[[nodiscard]] inline constexpr const char* tilemapChunkShaderSource(
+    TilemapSamplingQuality quality) noexcept
+{
+    switch (quality) {
+    case TilemapSamplingQuality::Nearest: return kTilemapChunkNearestPhoskiaSource;
+    case TilemapSamplingQuality::Tap4: return kTilemapChunk4TapPhoskiaSource;
+    case TilemapSamplingQuality::Tap9: return kTilemapChunk9TapPhoskiaSource;
+    case TilemapSamplingQuality::Linear: break;
+    }
+    return kTilemapChunkLinearPhoskiaSource;
+}
+
 } // namespace ayt::render

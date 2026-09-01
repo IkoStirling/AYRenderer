@@ -28,6 +28,9 @@ void upload2DUniforms(shader::ShaderResource& shader, const DrawPayload2D& paylo
         static_cast<float>((payload.flip >> 1) & 0x01u),
         0.0f, 0.0f,
     };
+    const float atlasTexel[4] = {
+        payload.atlasTexelSize.x, payload.atlasTexelSize.y, 0.0f, 0.0f,
+    };
 
     const shader::BindingId srcRectBinding = shader.getUniformBinding("srcRect");
     if (srcRectBinding != shader::InvalidBinding) {
@@ -40,6 +43,11 @@ void upload2DUniforms(shader::ShaderResource& shader, const DrawPayload2D& paylo
     const shader::BindingId flipBinding = shader.getUniformBinding("flip");
     if (flipBinding != shader::InvalidBinding) {
         shader.setUniform(flipBinding, flip, sizeof(flip));
+    }
+    const shader::BindingId atlasTexelBinding =
+        shader.getUniformBinding("atlasTexel");
+    if (atlasTexelBinding != shader::InvalidBinding) {
+        shader.setUniform(atlasTexelBinding, atlasTexel, sizeof(atlasTexel));
     }
 }
 

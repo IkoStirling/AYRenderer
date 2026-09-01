@@ -29,6 +29,7 @@ struct DrawPayload2D {
     ayt::math::FVector2 sourceRectMin{0.0f, 0.0f};  // UV-space source rect (min corner)
     ayt::math::FVector2 sourceRectMax{1.0f, 1.0f};  // UV-space source rect (max corner)
     ayt::math::FVector4 tintRGBA{1.0f, 1.0f, 1.0f, 1.0f};
+    ayt::math::FVector2 atlasTexelSize{0.0f, 0.0f}; // inverse atlas dimensions
     uint8_t  flip = 0;          // 1 = horizontal, 2 = vertical (SpriteFlip bit semantics)
     uint8_t  reserved[3] = {};
     uint32_t packedSortKey = 0; // (layer << 24) | (sortingKey & 0x00FFFFFF)
