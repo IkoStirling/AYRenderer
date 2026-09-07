@@ -1,6 +1,16 @@
 # AYRenderer Design
 
-> **2026-09-01 — SMAA 1x**：新增独立三阶段 LDR Pass，按 Edge Detection（view 247）→ Blend Weight（248）→ Neighborhood Blend（249）生产 `SmaaColor`，仅在完整提交后提升 `PresentSource`。Renderer 保持 FXAA 默认开启/SMAA 默认关闭，Editor 改为 SMAA 默认开启，两个开关互斥。正交 Area lookup 由参考算法程序化生成，不依赖 loose asset；当前边界为 16 像素正交搜索，尚未包含 high preset 的 diagonal detection。视觉复查后修正中间纹理为 linear/clamp，并在端点法向偏移 0.25 像素解码交叉边，解决典型斜向阶梯落入零权重图案、Pass 看似无效的问题；新增 45° 阶梯回归及 shaderc、FrameGraph、view、Noop、teardown 与互斥测试。
+> **2026-09-02 — 后处理 Phoskia 边界收口**：MotionVector 的 rigid/skinned 与 alpha-cutout 程序、TAA resolve 均从 raw bgfx `.sc` 迁回标准 Phoskia `ShaderResourcePool::acquire` 路径，恢复源码缓存与磁盘二进制缓存。为此 Phoskia BGFX 后端补齐真实 `if/else` 输出，并新增 fragment-only `discard`；TAA 改为单一最终输出，未把 material `return` 错当成早退。FXAA 与 SMAA 暂保留为受控 raw `.sc` 兼容例外：前者依赖用户函数与真正早退，后者依赖用户函数、C 风格循环和复杂嵌套分支；两者都有 Windows `s_5_0` 生产编译测试，不再作为新 Pass 绕过 Phoskia 的先例。
+
+> **2026-09-01 — Deferred Motion Vector Pass**：新增 append-only `RenderPassSlot::MotionVector=20` 与 view 3，固定在 `GBuffer(view 7) → MotionVector(view 3) → SSAO(view 14) → Lighting(view 8)`。Pass 不扩展 GBuffer MRT：仅在 TAA 成功准备时分配独立全分辨率 `RG16F` velocity，并通过 non-owning FBO 借用 GBuffer depth，以 `LEQUAL` color-only 重放 opaque/cutout 几何。速度编码为 `currentUV - previousUV`；新对象、断帧或姿态布局变化写 `(2,2)` 哨兵拒绝旧 history。`DrawItem::motionObjectId` 负责稳定对象匹配，AYEntity 为刚体、分段蒙皮和回退路径提供混入 World/handle generation 的标识；Pass 按对象+mesh 保存上一帧 world 与完整骨骼姿态。TAA 优先消费速度，资源或 shader 不可用时保留 RT2 world-position 静态回退；透明物体仍不在本轮覆盖。
+
+> **2026-09-01 — TAA 抖动与选中框隔离**：Halton jitter spread 收敛到 0.75，静态/运动 history feedback 调整为 0.92/0.65，并让亮度 history rejection 扣除当前 3×3 邻域的正常边缘跨度，降低浅角斜边的覆盖闪烁。中间验证证明两种看似直接的处理不可采用：空间最短路径重排会破坏 Halton 前缀均匀性；未 jitter 选中遮罩借用 jitter 深度会使 `LEQUAL` 可见性整帧翻转。最终保留标准 Halton 顺序，view 253 的遮罩与场景深度保持同一 jitter 投影，view 254 在 Present 后反向对齐，并以八方向环形覆盖率重建软外边界；选中框不进入 Bloom/PostProcess/TAA history，方向轴与 Gizmo 继续使用稳定覆盖层路径。
+
+> **2026-09-01 — Deferred TAA 首版**：新增 append-only `RenderPassSlot::TAA=19`、`FgResourceId::TaaColor=12` 与 view 5，接入 `PostProcess → TAA → FXAA → SMAA → ColorGrading → Present`。TAA 使用 8 样本 Halton jitter、Pass-owned 双 `RGBA16F` history、GBuffer RT2 世界坐标重投影、RT3 coverage、稳定相机下的背景 jitter-delta 重投影、3×3 YCoCg 邻域限幅和运动/亮度自适应反馈；只有 shader、几何和 history 全部就绪才启用 jitter。TAA/FXAA/SMAA 在 Renderer 与 Editor Render Settings 中三选一，配置可持久化；Editor Gizmo 保持未 jitter 投影。首版只覆盖相机运动、静态 opaque 与静止背景轮廓；逐物体/骨骼限制已由上方 MotionVector 记录关闭，透明运动仍待后续契约。
+
+> **2026-09-01 — FXAA/SMAA 色度边缘修复**：Editor 实机复查确认两个 Pass 的 FrameGraph 调度、互斥开关和最终输出链路均正常，视觉近似失效的共同原因是边缘阶段只依赖亮度；验证场景的高饱和橙色与灰绿色表面存在明显的等亮异色边界。SMAA Edge 已切换为官方 color-edge 判定（RGB 最大通道差），FXAA 在保留亮度梯度、方向搜索和克制的 0.50 sub-pixel correction 基础上加入色度范围、色度二阶导数与端点判定。新 cache key 为 `smaa1x_color_edge_v2` 与 `fxaa_chroma_edge_search_v3`；D3D11 Editor A/B、D3D11/D3D12 生产 shader 编译、`AYRenderer_FXAA` 63/63、`AYRenderer_SMAA` 105/105 与全量 3818/3818 均通过。
+
+> **2026-09-01 — SMAA 1x High**：独立三阶段 LDR Pass 按 Edge Detection（view 247）→ Blend Weight（248）→ Neighborhood Blend（249）生产 `SmaaColor`，仅在完整提交后提升 `PresentSource`。Renderer 保持 FXAA 默认开启/SMAA 默认关闭，Editor 默认选择 SMAA，两个开关互斥。视觉复查先修正 linear/clamp 与 0.25 像素交叉边解码，随后升级到 High：16 步正交搜索、8 步 diagonal detection、SearchTex 长度校正和 25% 官方 corner detection。完整 `160×560 RG8` AreaTex 与 `64×16 R8` SearchTex 均按 MIT 参考算法程序化生成，不依赖 loose asset；新增官方 SearchTex 哈希、diagonal Area 抽样、45° 阶梯、shaderc、FrameGraph、view、Noop、teardown 与互斥回归。
 
 > **2026-09-01 — 2D atlas sampling variants**: Forward2D accepts chunk meshes
 > with baked atlas UVs. The per-draw payload also carries atlas texel size, and
@@ -9,7 +19,7 @@
 > or shader file type. Sprites remain Linear by default.
 
 > **文档状态**：2026-08-30 已对齐当前代码；R0–R5 主管线已落地。
-> **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、FXAA、SMAA、ColorGrading、Present、UI 和 GBufferDebug 已接入 Pass 调度。PostProcess 产出 FrameGraph `FinalLdrColor`，FXAA/SMAA 与 ColorGrading 作为可选 LDR 节点提升 `PresentSource`，Present 保持唯一 backbuffer 边界；静态审核/修复已完成，等待真实 GPU capture 验收。
+> **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、MotionVector、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、TAA、FXAA、SMAA、ColorGrading、Present、UI 和 GBufferDebug 已接入 Pass 调度。PostProcess 产出 FrameGraph `FinalLdrColor`，TAA/FXAA/SMAA 与 ColorGrading 作为可选 LDR 节点提升 `PresentSource`，Present 保持唯一 backbuffer 边界；静态审核/修复已完成，等待真实 GPU capture 验收。
 > **活动执行计划**：[`docs/execution-plan.md`](execution-plan.md)（P0–P6 队列、§5 segfault 约束、§5.4 隔离实验、附录 B/C/D 索引）。本文件是目标架构，与代码不一致时以代码与 execution-plan 为准。
 > **关联文档**：[`docs/gbuffer-current.md`](docs/gbuffer-current.md)（当前 MRT/数据契约）、[`AYShader/design.md` §8.5](../AYShader/design.md)（opaque handle contract）、[`AYShader/README.md`](../AYShader/README.md)。
 
@@ -891,10 +901,10 @@ include/AYRenderer/
 
 ### 2026-09-01 — FXAA Quality 修复
 
-- 原 `fxaa_311_luma_v1` 是无低对比度 early-out 的中心/四角方向滤波，视觉上会把高频细节变软，却仍难以处理长斜边阶梯。实现已替换为 `fxaa_quality_edge_search_v2`，FrameGraph、view 17、ABI、运行时开关和 `PresentSource` 事务提升契约均保持不变。
-- 新 shader 先以中心和 N/E/S/W 五点计算 `max(0.0312, lumaMax*0.125)` 边缘阈值；低对比度像素精确返回中心值。确认边缘后读取四角进行水平/垂直分类，再沿切线以 1/2/4/8 像素搜索端点，最终只沿法线做一次双线性偏移采样。
+- 原 `fxaa_311_luma_v1` 是无低对比度 early-out 的中心/四角方向滤波，视觉上会把高频细节变软，却仍难以处理长斜边阶梯。实现先替换为 `fxaa_quality_edge_search_v2`，随后由本日色度边缘修复升级为 `fxaa_chroma_edge_search_v3`；FrameGraph、view 17、ABI、运行时开关和 `PresentSource` 事务提升契约均保持不变。
+- 新 shader 先以中心和 N/E/S/W 五点共同计算亮度与 RGB 最大通道差，使用二者最大范围进行边缘门控；低对比度像素精确返回中心值。确认边缘后读取四角，以亮度/色度二阶导数共同完成水平/垂直分类，再沿切线以 1/2/4/8 像素搜索端点，最终只沿法线做一次双线性偏移采样。
 - sub-pixel correction 固定为较克制的 0.50，端点完成阈值为主梯度的 0.25；质量参数通过 `fxaaQuality` 上传，保留后续接入 Render Settings 调参而无需生成 shader 变体的空间。
-- FXAA 改走既有 raw bgfx `.sc` 编译路径。原因是当前 Phoskia 虽接受 `IfStmt`，BGFX emitter 尚不生成控制流；raw 路径才能真正实现非边缘 early-out，并已由 shaderc `windows/s_5_0` 同时覆盖 D3D11/D3D12。
+- FXAA 保留在既有 raw bgfx `.sc` 编译路径，作为受控兼容例外。Phoskia 已能生成 `if/else`，但仍缺少用户函数，且 material `return` 是输出槽赋值而非真正早退；直接迁移会改变非边缘 early-out 与端点搜索语义。该 raw 路径由 shaderc `windows/s_5_0` 同时覆盖 D3D11/D3D12。
 - `AYRenderer_FXAA` 更新为 55/55，覆盖对比度门控、边缘方向、1/2/4/8 搜索上界、参数默认值、UV clamp 与 VS/FS 生产编译；完整 `AYRenderer_Test` 为 3661/3661。视觉 A/B 继续使用 Editor 现有 FXAA 勾选框，本刀未触碰存在并行修改的 AYEditor/AYUI。
 
 ### 2026-08-31 — Editor Transform Gizmo Overlay
@@ -958,7 +968,7 @@ include/AYRenderer/
 - 增加 `producedThisFrame()` 消费契约，防止冷启动/缩放/失败帧误读旧附件。
 - StandardLit/Unlit 通过 RT2.a 与 AO 打包，RT3.a 独立保留 Geometry Coverage。
 - 保留 RT2 WorldPosition；在跨后端 GPU 验证前不启用 Depth 重建。
-- 暂不新增 Velocity RT；待 TAA/运动模糊成为真实消费者后再评估 32 bpp 增量。
+- 当时暂不新增 Velocity RT；该决策已由 2026-09-01 的独立、按需 `MotionVectorPass` 取代，但 GBuffer MRT 本身仍保持 160 bpp。
 
 ### 2026-08-28 — LightingPass 第一轮审核
 
@@ -1081,4 +1091,4 @@ include/AYRenderer/
 
 ### 下一步
 
-LUT ColorGrading 已接入 `PostProcess → FXAA → ColorGrading → Present` 扩展链路；下一步建议先建立 Motion Vector、相机 jitter 与 history 失效契约，再选择 TAA 或 Motion Blur。并行保留 GBuffer、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、FXAA、ColorGrading 与 Present 的 D3D11/12 GPU capture 门禁。
+TAA 已接入独立 RG16F MotionVector，覆盖 opaque 刚体、Transform 与骨骼动画，并保留静态 world-position 回退。下一步应在 D3D11 Editor 验证静止收敛、相机运动、动态角色、对象生成/删除、Edit/Play 切换、resize/camera-cut 与透明物体边界；再以 capture 数据决定是否增加速度膨胀、透明 velocity、reactive mask 或 Motion Blur。

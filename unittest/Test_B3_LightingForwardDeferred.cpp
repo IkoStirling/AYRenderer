@@ -292,10 +292,11 @@ TEST_CASE(b3_full_deferred_pipeline_noop_dispatch_with_lighting_pointer_wired) {
     // ForwardOpaque OMITTED.
     const RenderPipelineDesc deferred = RenderPipelineDesc::makeDeferred();
     CHECK(deferred.path == RenderPath::Deferred);
-    CHECK(deferred.passes.size() == 16u);
+    CHECK(deferred.passes.size() == 18u);
     CHECK(deferred.contains(RenderPassSlot::Shadow));
     CHECK(deferred.contains(RenderPassSlot::Skybox));    // §Skybox0: in Deferred
     CHECK(deferred.contains(RenderPassSlot::GBuffer));   // B3: in Deferred
+    CHECK(deferred.contains(RenderPassSlot::MotionVector));
     CHECK(deferred.contains(RenderPassSlot::Lighting));  // B3: in Deferred
     CHECK(deferred.contains(RenderPassSlot::Transparent));
     CHECK(deferred.contains(RenderPassSlot::BloomExtract));   // S1a (2026-07-23)

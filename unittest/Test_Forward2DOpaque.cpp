@@ -149,7 +149,7 @@ TEST_CASE(cm1_make_deferred_omits_forward2dopaque) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
     CHECK(!desc.contains(RenderPassSlot::Forward2DOpaque));
-    CHECK(desc.passes.size() == 16);
+    CHECK(desc.passes.size() == 18);
 }
 
 // === 3. Payload default + round-trip ================================

@@ -58,7 +58,7 @@ TEST_CASE(fxaa_append_only_abi_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::FXAA) == 16u);
     CHECK(static_cast<uint8_t>(FgResourceId::FxaaColor) == 7u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 12u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 13u);
     CHECK(ayt::render::detail::FXAAPass::kFxaaViewId == 17u);
     CHECK(std::is_final_v<ayt::render::detail::FXAAPass>);
 }
@@ -75,7 +75,8 @@ TEST_CASE(default_deferred_and_editor_pipelines_order_fxaa_before_present)
         const std::size_t smaa = passIndex(desc, RenderPassSlot::SMAA);
         const std::size_t grading = passIndex(desc, RenderPassSlot::ColorGrading);
         const std::size_t present = passIndex(desc, RenderPassSlot::Present);
-        CHECK(fxaa == post + 1u);
+        const bool deferred = desc.contains(RenderPassSlot::TAA);
+        CHECK(fxaa == post + (deferred ? 2u : 1u));
         CHECK(smaa == fxaa + 1u);
         CHECK(grading == smaa + 1u);
         CHECK(present == grading + 1u);
@@ -96,7 +97,7 @@ TEST_CASE(fxaa_view_executes_after_postprocess_and_before_present)
     const auto present = std::find(order.begin(), order.end(),
                                    ayt::render::detail::PresentPass::kPresentViewId);
     CHECK(pp != order.end());
-    CHECK(fxaa == pp + 1);
+    CHECK(fxaa == pp + 2);
     CHECK(smaa == fxaa + 1);
     CHECK(grading == smaa + 3);
     CHECK(present == grading + 1);
@@ -192,7 +193,10 @@ TEST_CASE(fxaa_quality_shader_has_contrast_gate_and_bounded_edge_search)
     CHECK(fragment.find("SAMPLER2D(inputColor, 0)") != std::string::npos);
     CHECK(fragment.find("uniform vec4 inverseViewport") != std::string::npos);
     CHECK(fragment.find("uniform vec4 fxaaQuality") != std::string::npos);
-    CHECK(fragment.find("lumaRange < edgeThreshold") != std::string::npos);
+    CHECK(fragment.find("fxaaColorDistance") != std::string::npos);
+    CHECK(fragment.find("fxaaSecondDerivative") != std::string::npos);
+    CHECK(fragment.find("edgeRange < edgeThreshold") != std::string::npos);
+    CHECK(fragment.find("chromaDominant") != std::string::npos);
     CHECK(fragment.find("gl_FragColor = colorM") != std::string::npos);
     CHECK(fragment.find("edgeHorizontal") != std::string::npos);
     CHECK(fragment.find("edgeVertical") != std::string::npos);
@@ -206,7 +210,7 @@ TEST_CASE(fxaa_quality_shader_has_contrast_gate_and_bounded_edge_search)
     CHECK(ayt::render::detail::FXAAPass::kSubpixelQuality == 0.50f);
     CHECK(ayt::render::detail::FXAAPass::kSearchThreshold == 0.25f);
     CHECK(std::string(ayt::render::detail::kFxaaCacheKeyCStr)
-          == "fxaa_quality_edge_search_v2");
+          == "fxaa_chroma_edge_search_v3");
 }
 
 TEST_CASE(fxaa_quality_shader_compiles_for_d3d11_and_d3d12)

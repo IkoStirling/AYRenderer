@@ -137,7 +137,7 @@ material EditorSelectionOutline {
     }
     fragment {
         in  vUv : texcoord
-        let uv = vec2(vUv.x, 1.0 - vUv.y)
+        let uv = vec2(vUv.x, 1.0 - vUv.y) + selectionTexelSize.zw
         let texel = selectionTexelSize.xy * 2.0
         let center = sample(selectionMask, uv).w
         let s0 = sample(selectionMask, uv + vec2( texel.x, 0.0))
@@ -148,19 +148,32 @@ material EditorSelectionOutline {
         let s5 = sample(selectionMask, uv + vec2(-texel.x,  texel.y))
         let s6 = sample(selectionMask, uv + vec2( texel.x, -texel.y))
         let s7 = sample(selectionMask, uv + vec2(-texel.x, -texel.y))
-        let neighbor = max(max(max(s0.w, s1.w), max(s2.w, s3.w)),
-                           max(max(s4.w, s5.w), max(s6.w, s7.w)))
-        let visibleNeighbor = max(max(max(s0.x, s1.x), max(s2.x, s3.x)),
-                                  max(max(s4.x, s5.x), max(s6.x, s7.x)))
-        let edge = clamp(neighbor - center, 0.0, 1.0)
-                 * clamp(visibleNeighbor, 0.0, 1.0)
+        let neighborPeak = max(max(max(s0.w, s1.w), max(s2.w, s3.w)),
+                               max(max(s4.w, s5.w), max(s6.w, s7.w)))
+        let neighborSum = s0.w + s1.w + s2.w + s3.w
+                        + s4.w + s5.w + s6.w + s7.w
+        let visiblePeak = max(max(max(s0.x, s1.x), max(s2.x, s3.x)),
+                              max(max(s4.x, s5.x), max(s6.x, s7.x)))
+        let visibleSum = s0.x + s1.x + s2.x + s3.x
+                       + s4.x + s5.x + s6.x + s7.x
+        // Reconstruct a soft two-pixel dilation from ring coverage instead of
+        // making a binary decision from one maximum sample. This preserves
+        // corners while suppressing the raster staircase changes that remain
+        // after the jitter-aligned linear lookup on shallow diagonal edges.
+        let outerCoverage = clamp(neighborSum * 0.32 + neighborPeak * 0.35,
+                                  0.0, 1.0)
+        let visibleCoverage = clamp(visibleSum * 0.32 + visiblePeak * 0.35,
+                                    0.0, 1.0)
+        let centerCoverage = smoothstep(0.05, 0.95, center)
+        let edge = outerCoverage * (1.0 - centerCoverage)
+                 * smoothstep(0.02, 0.65, visibleCoverage)
         return vec4(1.0, 0.55, 0.12, edge)
     }
 }
 )";
 
 constexpr const char* kSelectionOutlineCacheKey =
-    "editor_selection_mask_dilate_2px_v2_visible_gate";
+    "editor_selection_mask_dilate_2px_v5_jitter_matched_soft_coverage";
 
 } // namespace
 
@@ -498,8 +511,7 @@ bool TransparentPass::ensureSelectionResources(
 
     if (!BGFXAdapter::isValid(_selectionMaskTexture)) {
         const uint64_t flags = BGFX_TEXTURE_RT
-            | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
-            | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+            | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
         _selectionMaskTexture = adapter.createDynamicTexture2D(
             ctx.viewportWidth, ctx.viewportHeight, flags);
         if (BGFXAdapter::isValid(_selectionMaskTexture)) {
@@ -704,6 +716,9 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         constexpr uint8_t maskViewId = kSelectionMaskViewId;
         adapter.setViewFrameBuffer(maskViewId, _selectionMaskFbo);
         adapter.setViewRect(maskViewId, 0, 0, viewportWidth, viewportHeight);
+        // The mask and borrowed scene depth must use the exact same jittered
+        // projection. Mixing an unjittered mask with jittered depth makes the
+        // LEQUAL visibility channel alternate as subpixel samples move.
         adapter.setViewTransform(maskViewId, frame.view, frame.projection);
         adapter.setViewMode(maskViewId, bgfx::ViewMode::Sequential);
         adapter.setViewClearRaw(maskViewId, BGFX_CLEAR_COLOR,
@@ -747,8 +762,9 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 
         if (selectionMaskDraws != 0 && selectionVisibleMaskDraws != 0) {
             configureFullscreenPassView(
-                adapter, kSelectionCompositeViewId, compositeFbo,
-                0, 0, viewportWidth, viewportHeight);
+                adapter, kSelectionCompositeViewId,
+                bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE},
+                viewportX, viewportY, viewportWidth, viewportHeight);
             _selectionCompositeGeometry.bind(adapter);
             _selectionCompositeProgram.setTexture(
                 0, _selectionMaskBinding,
@@ -756,7 +772,8 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
             const float texelSize[4] = {
                 1.0f / static_cast<float>(viewportWidth),
                 1.0f / static_cast<float>(viewportHeight),
-                0.0f, 0.0f
+                _selectionJitterXPixels / static_cast<float>(viewportWidth),
+                _selectionJitterYPixels / static_cast<float>(viewportHeight)
             };
             _selectionCompositeProgram.setUniform(
                 _selectionTexelSizeBinding, texelSize, sizeof(texelSize));

@@ -19,7 +19,7 @@ Pass 有两层有效性：
 | RT1 | RGBA8 | 世界法线，编码至 `[0,1]` | Roughness | Lighting, SSAO, Debug |
 | RT2 | RGBA16F | World position | AO + MaterialModel 打包值 | Lighting, SSAO, DepthHaze, Debug |
 | RT3 | RGBA8 | Emissive | Geometry coverage | Lighting, Debug |
-| Depth | D24S8 | 不透明/剪切深度 | — | Debug，未来屏幕空间 Pass |
+| Depth | D24S8 | 不透明/剪切深度 | — | MotionVector（借用）、Debug |
 
 颜色 MRT 总带宽为 160 bpp，本轮没有增加附件或像素带宽。附件索引和 CPU 编解码集中在 `GBufferLayout`。
 
@@ -52,6 +52,8 @@ GBufferPass (view 7)
         │          ├──► SSAOPass
         │          ├──► DepthHazePass
         │          └──► GBufferDebugPass (view 250)
+        ├─ Depth ──► MotionVectorPass (view 3, color-only replay)
+                   └─ RG16F velocity ──► TAAPass
         └─ Depth ───────────────────────────► GBufferDebugPass
 ```
 
@@ -64,8 +66,8 @@ renderer.setMaterialModel(material, MaterialModel::Unlit);
 ## 4. 本轮未采用的改动
 
 - **删除 RT2 WorldPosition，从 Depth 重建**：当前 D3D 路径已有重建失败的回归记录，且 Lighting、SSAO、DepthHaze 与阴影都依赖世界坐标。在真实 GPU capture 和跨后端验证前保留 RT2。
-- **新增 Velocity RT**：当前没有 TAA/运动模糊消费者。新增 RG16F 会使颜色 MRT 从 160 bpp 增至 192 bpp（+20%），因此只保留上一帧矩阵管线，暂不分配速度附件。
+- **把 Velocity 作为第五张 GBuffer MRT**：未采用。当前由独立 `MotionVectorPass` 在 TAA 启用时按需分配全分辨率 `RG16F`（32 bpp）并借用 GBuffer depth；GBuffer 关闭 TAA 时仍保持 160 bpp、零 velocity 分配。代价是 TAA 路径多一次 opaque/cutout 几何重放，换取默认 Deferred 路径不永久增加 MRT 带宽，也为未来降分辨率/按需消费者保留独立演进空间。
 
 ## 5. 调试通道
 
-`GBufferDebugPass` 提供 Albedo、Normal、WorldPos、Material（metallic/roughness/AO）、Depth 和 MaterialModel 六个视图。MaterialModel 视图中 StandardLit 为绿色，Unlit 为红色。`Motion` 仅保留为源码兼容别名，当前没有 velocity 附件。
+`GBufferDebugPass` 提供 Albedo、Normal、WorldPos、Material（metallic/roughness/AO）、Depth 和 MaterialModel 六个视图。MaterialModel 视图中 StandardLit 为绿色，Unlit 为红色。`Motion` 仍是 GBufferDebug 的源码兼容别名；独立 MotionVector 纹理尚未接入该面板，后续应新增专门的 velocity 可视化，而不是把它伪装成 GBuffer 附件。

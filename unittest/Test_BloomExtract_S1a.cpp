@@ -299,22 +299,24 @@ TEST_CASE(s1a_make_deferred_includes_bloomextract_after_transparent) {
     // and PostProcess — PostProcess/UI shift by another +1.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 16);
+    CHECK(desc.passes.size() == 18);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
-    CHECK(desc.passes[3] == RenderPassSlot::SSAO);
-    CHECK(desc.passes[4] == RenderPassSlot::Lighting);
-    CHECK(desc.passes[5] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[6] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[7] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[8] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[9] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[10] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[11] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[12] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[13] == RenderPassSlot::Present);
-    CHECK(desc.passes[14] == RenderPassSlot::UI);
+    CHECK(desc.passes[3] == RenderPassSlot::MotionVector);
+    CHECK(desc.passes[4] == RenderPassSlot::SSAO);
+    CHECK(desc.passes[5] == RenderPassSlot::Lighting);
+    CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[7] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[8] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[9] == RenderPassSlot::BloomBlur);
+    CHECK(desc.passes[10] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[11] == RenderPassSlot::TAA);
+    CHECK(desc.passes[12] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[13] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[14] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[15] == RenderPassSlot::Present);
+    CHECK(desc.passes[16] == RenderPassSlot::UI);
 }
 
 // === C. Half-resolution size math =====================================

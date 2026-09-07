@@ -18,9 +18,9 @@ inline constexpr std::size_t kRenderViewCapacity = 256u;
 inline constexpr std::array<bgfx::ViewId, 34> kRenderViewOrder = {
     1, 18, 19, 20, 21, 22, 23, 24, 25,
     2, 0,
-    3, 5, 6, 7, 14,
-    8, 13, 9, 253, 254, 10, 11, 12,
-    15, 17, 247, 248, 249, 4, 16, 250, 251, 252
+    6, 7, 3, 14,
+    8, 13, 9, 253, 10, 11, 12,
+    15, 5, 17, 247, 248, 249, 4, 16, 250, 254, 251, 252
 };
 
 // bgfx::setViewOrder does not accept a sparse execution list. Its remap table

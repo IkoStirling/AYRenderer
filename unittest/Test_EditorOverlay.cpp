@@ -203,15 +203,17 @@ TEST_CASE(make_editor_deferred_inserts_overlay_after_present) {
                                 RenderPassSlot::PostProcess);
     CHECK(ppIt != desc.passes.end());
     CHECK(ppIt + 1 != desc.passes.end());
-    CHECK(*(ppIt + 1) == RenderPassSlot::FXAA);
+    CHECK(*(ppIt + 1) == RenderPassSlot::TAA);
     CHECK(ppIt + 2 != desc.passes.end());
-    CHECK(*(ppIt + 2) == RenderPassSlot::SMAA);
+    CHECK(*(ppIt + 2) == RenderPassSlot::FXAA);
     CHECK(ppIt + 3 != desc.passes.end());
-    CHECK(*(ppIt + 3) == RenderPassSlot::ColorGrading);
+    CHECK(*(ppIt + 3) == RenderPassSlot::SMAA);
     CHECK(ppIt + 4 != desc.passes.end());
-    CHECK(*(ppIt + 4) == RenderPassSlot::Present);
+    CHECK(*(ppIt + 4) == RenderPassSlot::ColorGrading);
     CHECK(ppIt + 5 != desc.passes.end());
-    CHECK(*(ppIt + 5) == RenderPassSlot::EditorOverlay);
+    CHECK(*(ppIt + 5) == RenderPassSlot::Present);
+    CHECK(ppIt + 6 != desc.passes.end());
+    CHECK(*(ppIt + 6) == RenderPassSlot::EditorOverlay);
     CHECK(desc.contains(RenderPassSlot::GBufferDebug));
 }
 

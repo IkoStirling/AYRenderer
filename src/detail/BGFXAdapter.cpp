@@ -428,6 +428,20 @@ bgfx::TextureHandle BGFXAdapter::createDynamicTexture2D(uint16_t width, uint16_t
                                  nullptr);
 }
 
+bgfx::TextureHandle BGFXAdapter::createRenderTargetTexture2D(
+    uint16_t width, uint16_t height,
+    bgfx::TextureFormat::Enum format,
+    uint64_t samplerFlags)
+{
+    if (!_initialized || width == 0 || height == 0
+        || format == bgfx::TextureFormat::Unknown) {
+        return BGFX_INVALID_HANDLE;
+    }
+    return bgfx::createTexture2D(
+        width, height, /*hasMips=*/false, /*numLayers=*/1, format,
+        BGFX_TEXTURE_RT | samplerFlags, nullptr);
+}
+
 void BGFXAdapter::updateTexture2D(bgfx::TextureHandle handle,
                                   uint16_t width, uint16_t height,
                                   const void* rgba8Data)
@@ -865,6 +879,17 @@ void BGFXAdapter::setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding)
     uint64_t state = BGFX_STATE_WRITE_RGB
                    | BGFX_STATE_WRITE_A
                    | BGFX_STATE_WRITE_Z
+                   | BGFX_STATE_DEPTH_TEST_LEQUAL;
+    if (!doubleSided) {
+        state |= reverseWinding ? kCullFrontFaces : kCullBackFaces;
+    }
+    bgfx::setState(state);
+}
+
+void BGFXAdapter::setStateColorLEQUAL(bool doubleSided, bool reverseWinding)
+{
+    uint64_t state = BGFX_STATE_WRITE_RGB
+                   | BGFX_STATE_WRITE_A
                    | BGFX_STATE_DEPTH_TEST_LEQUAL;
     if (!doubleSided) {
         state |= reverseWinding ? kCullFrontFaces : kCullBackFaces;

@@ -102,7 +102,7 @@ renderer.endFrame();
 // renderer.captureScreenshot("capture.png");
 ```
 
-公开头文件：`AYRenderer.h`、`AYRenderer/RenderScene.h`、`AYRenderer/RenderTypes.h`、`AYRenderer/RendererSubSystem.h`。**不含** `<bgfx/bgfx.h>`。
+公开头文件：`AYRenderer.h`、`AYRenderer/RenderScene.h`、`AYRenderer/RenderTypes.h`、`AYRenderer/RendererSubSystem.h`、`AYRenderer/RendererRuntimeModule.h`。**不含** `<bgfx/bgfx.h>`。
 
 ---
 
@@ -116,7 +116,7 @@ GameLoop::submitRenderCommands  →  RendererSubSystem::renderFrame  →  Render
 ```
 
 1. **Win32 窗口** — 启动前调用 `RendererSubSystem::setBootstrapWindow(hwnd, w, h)`。
-2. **子系统** — 链接 `AYEntity` + `AYRenderer` 后，`Entity` / `Renderer` 通过 `REGISTER_SUBSYSTEM` 自动注册；`RenderSystem` 把带 `Transform` + `MeshComponent` 的实体提交到 `RenderScene`。
+2. **子系统** — 默认 Host 通过 `EntityRuntimeModule` + `RendererRuntimeModule` 显式装配；不再依赖静态 `REGISTER_SUBSYSTEM`。独立 Demo 可继续调用 `bootstrapModule()` 与 `RendererSubSystem::registerSubSystem()`。`RenderSystem` 把带 `Transform` + `MeshComponent` 的实体提交到 `RenderScene`。
 3. **单线程渲染** — `RendererSubSystem::initialize` 会 `setRenderThreadEnabled(false)` 并在 `submitRenderCommands()` 中同步执行 render callback。
 
 ```cpp
@@ -131,7 +131,8 @@ ayt::render::RendererSubSystem::setBootstrapWindow(hwnd, 1280, 720);
 auto& loop = ayt::game::GameLoop::instance();
 loop.setRenderThreadEnabled(false);
 
-ayt::entity::bootstrapModule();   // 静态库：显式注册 Entity + RenderSystem
+ayt::entity::bootstrapModule();   // 兼容路径：Entity + presentation systems
+ayt::render::RendererSubSystem::registerSubSystem();
 
 loop.run();   // pump Win32 messages in onUpdate()
 loop.shutdown();

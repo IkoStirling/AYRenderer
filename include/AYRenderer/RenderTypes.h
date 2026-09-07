@@ -308,11 +308,12 @@ enum class RenderPassSlot : uint8_t {
     GBufferDebug = 12,
 
     // Editor overlay (2026-07-25) — append-only ABI value 13. It owns the
-    // orientation widget on view 251 after Present. Mesh selection itself is
-    // generated earlier by TransparentPass as a private silhouette mask plus
-    // screen-space dilation on views 253/254, so scale/distance cannot
-    // fragment the rim. Omitted from makeDefault() / makeDeferred(); editor
-    // hosts opt in via makeEditorForward() / makeEditorDeferred().
+    // orientation widget on view 251 after Present. TransparentPass generates
+    // the depth-aware selection mask earlier on view 253, then composites its
+    // screen-space dilation to the backbuffer on view 254 after Present. This
+    // keeps the fixed-width rim out of TAA/Bloom while preserving occlusion.
+    // Omitted from makeDefault() / makeDeferred(); editor hosts opt in via
+    // makeEditorForward() / makeEditorDeferred().
     EditorOverlay = 13,
 
     // 2D opaque lane (2026-08-11, CM-1) — append-only ABI value 14.
@@ -348,6 +349,17 @@ enum class RenderPassSlot : uint8_t {
     // after FXAA and before ColorGrading, but runtime AA knobs keep FXAA and
     // SMAA mutually exclusive.
     SMAA = 18,
+
+    // Deferred temporal anti-aliasing. Append-only ABI value 19. It executes
+    // after PostProcess and before the display-referred spatial AA slots;
+    // runtime AA knobs keep TAA/FXAA/SMAA mutually exclusive.
+    TAA = 19,
+
+    // Deferred-only RG16F screen-space velocity producer. Append-only ABI
+    // value 20. It replays opaque geometry after GBuffer while borrowing the
+    // GBuffer depth attachment, and is requested only by temporal consumers
+    // such as TAA.
+    MotionVector = 20,
 };
 
 enum class ColorGradingPreset : uint8_t {

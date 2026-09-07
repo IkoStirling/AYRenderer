@@ -86,6 +86,9 @@ class BloomBlurPass;
 // latch is set, never from a persistent but stale FG handle.
 class SSAOPass;
 
+// Deferred RG16F velocity producer consumed by TAA and future temporal passes.
+class MotionVectorPass;
+
 // DepthHaze publishes a current-frame latch for the FrameGraph-owned,
 // full-resolution HazeColor result. Transparent, Bloom and PostProcess use the
 // latch to reject persistent-but-stale handles.
@@ -360,6 +363,11 @@ struct PassExecContext {
 
     // Appended to preserve every existing aggregate initializer's mapping.
     const SSAOPass*      ssaoPass       = nullptr;
+
+    // Tail-appended borrowed producer pointer. MotionVectorPass executes
+    // immediately after GBuffer and publishes a current-frame latch; TAA must
+    // ignore the persistent texture whenever this pointer/latch is absent.
+    const MotionVectorPass* motionVectorPass = nullptr;
 
 };
 

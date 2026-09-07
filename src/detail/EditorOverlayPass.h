@@ -54,6 +54,11 @@ public:
     const EditorTransformGizmoState& transformGizmoState() const noexcept {
         return _transformGizmo;
     }
+    void setUnjitteredProjection(
+        const ayt::math::Float4x4& projection) noexcept {
+        _unjitteredProjection = projection;
+        _hasUnjitteredProjection = true;
+    }
 
     // Exposed as pure math for contract tests. Scene-camera translation is
     // intentionally removed; the widget lives at +3 in its private view.
@@ -93,6 +98,9 @@ private:
     bgfx::IndexBufferHandle _gizmoIndexBuffer = BGFX_INVALID_HANDLE;
     uint32_t _gizmoPrimaryIndexCount = 0;
     uint32_t _gizmoIndexCount = 0;
+    ayt::math::Float4x4 _unjitteredProjection =
+        ayt::math::Float4x4::identity();
+    bool _hasUnjitteredProjection = false;
 };
 
 } // namespace ayt::render::detail

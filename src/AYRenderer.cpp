@@ -15,10 +15,12 @@
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FXAAPass.h"
 #include "detail/SMAAPass.h"
+#include "detail/TAAPass.h"
 #include "detail/GBufferDebugPass.h"
 #include "detail/GBufferPass.h"
 #include "detail/FrameContext.h"
 #include "detail/LightingPass.h"
+#include "detail/MotionVectorPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/PostProcessPipeline.h"
@@ -134,6 +136,11 @@ void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
         if (smaaIt != desc.passes.end() && smaaIt > insertAfter) {
             insertAfter = smaaIt;
         }
+        const auto taaIt = std::find(desc.passes.begin(), desc.passes.end(),
+                                     RenderPassSlot::TAA);
+        if (taaIt != desc.passes.end() && taaIt > insertAfter) {
+            insertAfter = taaIt;
+        }
         desc.passes.insert(insertAfter + 1, RenderPassSlot::Present);
     }
 }
@@ -189,6 +196,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::Shadow,
         RenderPassSlot::Skybox,         // §Skybox0 (2026-07-23)
         RenderPassSlot::GBuffer,
+        RenderPassSlot::MotionVector,
         RenderPassSlot::SSAO,
         RenderPassSlot::Lighting,
         RenderPassSlot::DepthHaze,
@@ -196,6 +204,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
+        RenderPassSlot::TAA,
         RenderPassSlot::FXAA,
         RenderPassSlot::SMAA,
         RenderPassSlot::ColorGrading,
@@ -234,6 +243,10 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::FXAAPass>();
     case RenderPassSlot::SMAA:
         return std::make_unique<detail::SMAAPass>();
+    case RenderPassSlot::TAA:
+        return std::make_unique<detail::TAAPass>();
+    case RenderPassSlot::MotionVector:
+        return std::make_unique<detail::MotionVectorPass>();
     case RenderPassSlot::ColorGrading:
         return std::make_unique<detail::ColorGradingPass>();
     case RenderPassSlot::Present:
@@ -464,6 +477,7 @@ struct Renderer::Impl {
     // Impl so pipeline rebuilds preserve the host's runtime choice.
     bool                           fxaaEnabled = true;
     bool                           smaaEnabled = false;
+    bool                           taaEnabled = false;
 
     // Optional display-referred LUT grading. Disabled by default so all
     // pre-grading hosts retain a zero-allocation, byte-identical path.
@@ -489,6 +503,12 @@ struct Renderer::Impl {
         }
         if (detail::RenderPass* smaa = pipeline.findPass("SMAA")) {
             smaa->setEnabled(smaaEnabled);
+        }
+        if (detail::RenderPass* taa = pipeline.findPass("TAA")) {
+            taa->setEnabled(taaEnabled);
+            if (!taaEnabled) {
+                static_cast<detail::TAAPass*>(taa)->invalidateHistory();
+            }
         }
     }
 
@@ -629,6 +649,15 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
+    // MotionVector's FBO shell borrows GBuffer depth. Release the shell and
+    // its independently-owned RG16F texture before GBuffer rotates handles.
+    if (detail::RenderPass* motionPass = pipeline.findPass("MotionVector")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::MotionVectorPass*>(motionPass)
+                ->destroyResources(adapter);
+        }
+    }
+
     if (detail::RenderPass* shadowPass = pipeline.findPass("Shadow")) {
         if (adapter.isInitialized()) {
             static_cast<detail::ShadowPass*>(shadowPass)
@@ -738,6 +767,13 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     if (detail::RenderPass* smaaPass = pipeline.findPass("SMAA")) {
         if (adapter.isInitialized()) {
             static_cast<detail::SMAAPass*>(smaaPass)
+                ->destroyResources(adapter);
+        }
+    }
+
+    if (detail::RenderPass* taaPass = pipeline.findPass("TAA")) {
+        if (adapter.isInitialized()) {
+            static_cast<detail::TAAPass*>(taaPass)
                 ->destroyResources(adapter);
         }
     }
@@ -925,6 +961,13 @@ void Renderer::shutdown()
                 ->destroyResources(_impl->adapter);
         }
     }
+    if (detail::RenderPass* motionPass =
+            _impl->pipeline.findPass("MotionVector")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::MotionVectorPass*>(motionPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
 
     // Pipeline instances survive shutdown() so the same Renderer can be
     // initialized again. Reset every Pass-owned GPU handle before bgfx shuts
@@ -1006,6 +1049,14 @@ void Renderer::shutdown()
             _impl->pipeline.findPass("SMAA")) {
         if (_impl->adapter.isInitialized()) {
             static_cast<detail::SMAAPass*>(smaaPass)
+                ->destroyResources(_impl->adapter);
+        }
+    }
+
+    if (detail::RenderPass* taaPass =
+            _impl->pipeline.findPass("TAA")) {
+        if (_impl->adapter.isInitialized()) {
+            static_cast<detail::TAAPass*>(taaPass)
                 ->destroyResources(_impl->adapter);
         }
     }
@@ -1122,9 +1173,32 @@ void Renderer::render(const RenderScene& scene)
     _impl->lastSceneItems = static_cast<uint32_t>(scene.items().size());
     _impl->lastDrawCalls  = 0;
 
+    detail::TAAPass* taaPassPtr = nullptr;
+    bool taaPrepared = false;
+    if (detail::RenderPass* taaSlot = _impl->pipeline.findPass("TAA")) {
+        taaPassPtr = static_cast<detail::TAAPass*>(taaSlot);
+        // Current TAA reprojection requires the Deferred GBuffer. Forward
+        // pipelines intentionally keep their stable, unjittered path.
+        const bool deferredInputsMounted =
+            _impl->pipeline.findPass("GBuffer") != nullptr
+            && _impl->pipeline.findPass("Lighting") != nullptr;
+        if (deferredInputsMounted) {
+            taaPrepared = taaPassPtr->prepareFrame(
+                _impl->adapter,
+                _impl->shaderPool,
+                _impl->mainView,
+                _impl->mainProjection,
+                _impl->mainCameraPosition,
+                _impl->viewportW,
+                _impl->viewportH);
+        }
+    }
+
     detail::FrameContext frame;
     frame.view             = _impl->mainView;
-    frame.projection       = _impl->mainProjection;
+    frame.projection       = taaPrepared
+        ? taaPassPtr->jitteredProjection()
+        : _impl->mainProjection;
     frame.cameraPosition   = _impl->mainCameraPosition;
     frame.lightDirection   = _impl->directionalLightDir.normalize();
     frame.lightColor       = _impl->directionalLightColor;
@@ -1222,6 +1296,15 @@ void Renderer::render(const RenderScene& scene)
                                       _impl->prevMainProjection);
     }
 
+    if (detail::RenderPass* motionSlot =
+            _impl->pipeline.findPass("MotionVector")) {
+        auto* motion = static_cast<detail::MotionVectorPass*>(motionSlot);
+        motion->setOutputSize(_impl->viewportW, _impl->viewportH);
+        // Motion vectors are a temporal dependency, not an always-on fifth
+        // GBuffer MRT. Allocate/replay only when TAA resolved successfully.
+        motion->setRequestedThisFrame(taaPrepared);
+    }
+
     // §P5 B5 (2026-07-22) — broadcast viewport size to LightingPass
     // before dispatch so its execute() can ensure() the 1× RGBA16F
     // LightingOutput FBO at the correct W×H. Mirror the GBuffer
@@ -1283,6 +1366,14 @@ void Renderer::render(const RenderScene& scene)
     if (detail::RenderPass* gbufferSlot = _impl->pipeline.findPass("GBuffer")) {
         gbufferPassPtr = static_cast<detail::GBufferPass*>(gbufferSlot);
         gbufferPassPtr->resetFrameState();
+    }
+
+    detail::MotionVectorPass* motionVectorPassPtr = nullptr;
+    if (detail::RenderPass* motionSlot =
+            _impl->pipeline.findPass("MotionVector")) {
+        motionVectorPassPtr =
+            static_cast<detail::MotionVectorPass*>(motionSlot);
+        motionVectorPassPtr->resetFrameState();
     }
 
     // §P5 B3 (2026-07-22) — when Lighting is in the configured
@@ -1383,6 +1474,24 @@ void Renderer::render(const RenderScene& scene)
     if (detail::RenderPass* shadowSlot = _impl->pipeline.findPass("Shadow")) {
         static_cast<detail::ShadowPass*>(shadowSlot)->setSceneLightsRef(
             _impl->sceneLights);
+    }
+
+    // Scene projection may carry TAA jitter, but the post-Present editor
+    // gizmo must remain pixel-stable. Keep this pass-local instead of growing
+    // FrameContext, whose layout is an ODR/ABI diagnostic boundary.
+    if (detail::RenderPass* overlaySlot =
+            _impl->pipeline.findPass("EditorOverlay")) {
+        static_cast<detail::EditorOverlayPass*>(overlaySlot)
+            ->setUnjitteredProjection(_impl->mainProjection);
+    }
+    if (detail::RenderPass* transparentSlot =
+            _impl->pipeline.findPass("Transparent")) {
+        const detail::TaaJitter selectionJitter = taaPrepared
+            ? taaPassPtr->currentJitter()
+            : detail::TaaJitter{};
+        static_cast<detail::TransparentPass*>(transparentSlot)
+            ->setSelectionProjectionJitter(selectionJitter.x,
+                                           selectionJitter.y);
     }
 
     // Build the post-process graph before any pass resolves a target. Bloom is
@@ -1529,6 +1638,15 @@ void Renderer::render(const RenderScene& scene)
                     {hdrSceneSource},
                     {detail::FgResourceId::FinalLdrColor},
                     /*enabled=*/true});
+        const bool taaStageEnabled = taaPrepared && taaPassPtr != nullptr;
+        if (taaStageEnabled) {
+            fg.importExternal(detail::FgResourceId::TaaColor,
+                              taaPassPtr->writeHistoryFbo());
+            fg.addPass({"TAA",
+                        {detail::FgResourceId::FinalLdrColor},
+                        {detail::FgResourceId::TaaColor},
+                        /*enabled=*/true});
+        }
         const bool fxaaStageEnabled = fxaaPassPtr != nullptr
             && fxaaPassPtr->isEnabled();
         if (fxaaStageEnabled) {
@@ -1582,22 +1700,26 @@ void Renderer::render(const RenderScene& scene)
                             /*transient=*/true,
                             /*withDepth=*/false});
             fg.addPass({"ColorGrading",
-                        {smaaStageEnabled
+                        {taaStageEnabled
+                             ? detail::FgResourceId::TaaColor
+                             : (smaaStageEnabled
                              ? detail::FgResourceId::SmaaColor
                              : (fxaaStageEnabled
                                     ? detail::FgResourceId::FxaaColor
-                                    : detail::FgResourceId::FinalLdrColor)},
+                                    : detail::FgResourceId::FinalLdrColor))},
                         {detail::FgResourceId::ColorGradedColor},
                         /*enabled=*/true});
         }
         fg.addPass({"Present",
                     {colorGradingStageEnabled
                          ? detail::FgResourceId::ColorGradedColor
-                         : (smaaStageEnabled
+                         : (taaStageEnabled
+                                ? detail::FgResourceId::TaaColor
+                                : (smaaStageEnabled
                                 ? detail::FgResourceId::SmaaColor
                                 : (fxaaStageEnabled
                                        ? detail::FgResourceId::FxaaColor
-                                       : detail::FgResourceId::FinalLdrColor))},
+                                       : detail::FgResourceId::FinalLdrColor)))},
                     {},
                     /*enabled=*/true});
         fg.setResolvedSemantic(detail::FgSemantic::PresentSource,
@@ -1667,6 +1789,7 @@ void Renderer::render(const RenderScene& scene)
         detail::sanitizeBloomThreshold(_impl->postProcessBloomThreshold),
         detail::sanitizeBloomSoftKnee(_impl->postProcessBloomSoftKnee),
         ssaoPassPtr,
+        motionVectorPassPtr,
     };
 
     static uint32_t s_compositeLog = 0;
@@ -1751,6 +1874,11 @@ void Renderer::resize(uint32_t width, uint32_t height)
         static_cast<detail::TransparentPass*>(transparentPass)
             ->destroyResources(_impl->adapter);
     }
+    if (detail::RenderPass* motionPass =
+            _impl->pipeline.findPass("MotionVector")) {
+        static_cast<detail::MotionVectorPass*>(motionPass)
+            ->destroyResources(_impl->adapter);
+    }
     // Full destroyResources also drops Phoskia programs — fine on
     // rare window resize; MSAA change already does the same.
     if (detail::RenderPass* gbufferPass = _impl->pipeline.findPass("GBuffer")) {
@@ -1763,6 +1891,10 @@ void Renderer::resize(uint32_t width, uint32_t height)
     }
     if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
         static_cast<detail::ShadowPass*>(shadowPass)
+            ->destroyResources(_impl->adapter);
+    }
+    if (detail::RenderPass* taaPass = _impl->pipeline.findPass("TAA")) {
+        static_cast<detail::TAAPass*>(taaPass)
             ->destroyResources(_impl->adapter);
     }
     // §F6 (2026-07-24, mid-term FG MVP sub-cut 6) — PostProcessPass
@@ -2282,6 +2414,13 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
                     ->destroyResources(_impl->adapter);
             }
         }
+        if (detail::RenderPass* motionPass =
+                _impl->pipeline.findPass("MotionVector")) {
+            if (_impl->adapter.isInitialized()) {
+                static_cast<detail::MotionVectorPass*>(motionPass)
+                    ->destroyResources(_impl->adapter);
+            }
+        }
         if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
             if (_impl->adapter.isInitialized()) {
                 static_cast<detail::ShadowPass*>(shadowPass)
@@ -2519,6 +2658,7 @@ void Renderer::setFxaaEnabled(bool enabled)
     _impl->fxaaEnabled = enabled;
     if (enabled) {
         _impl->smaaEnabled = false;
+        _impl->taaEnabled = false;
     }
     _impl->applyAntiAliasingKnobs();
 }
@@ -2536,6 +2676,7 @@ void Renderer::setSmaaEnabled(bool enabled)
     _impl->smaaEnabled = enabled;
     if (enabled) {
         _impl->fxaaEnabled = false;
+        _impl->taaEnabled = false;
     }
     _impl->applyAntiAliasingKnobs();
 }
@@ -2543,6 +2684,31 @@ void Renderer::setSmaaEnabled(bool enabled)
 bool Renderer::smaaEnabled() const noexcept
 {
     return _impl != nullptr && _impl->smaaEnabled;
+}
+
+void Renderer::setTaaEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->taaEnabled = enabled;
+    if (enabled) {
+        _impl->fxaaEnabled = false;
+        _impl->smaaEnabled = false;
+    }
+    if (detail::RenderPass* taa = _impl->pipeline.findPass("TAA")) {
+        static_cast<detail::TAAPass*>(taa)->invalidateHistory();
+    }
+    if (detail::RenderPass* motion =
+            _impl->pipeline.findPass("MotionVector")) {
+        static_cast<detail::MotionVectorPass*>(motion)->invalidateHistory();
+    }
+    _impl->applyAntiAliasingKnobs();
+}
+
+bool Renderer::taaEnabled() const noexcept
+{
+    return _impl != nullptr && _impl->taaEnabled;
 }
 
 void Renderer::setColorGradingEnabled(bool enabled)

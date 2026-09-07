@@ -55,8 +55,10 @@ const char* selectionOutlinePhoskiaSourceForTests() noexcept;
 // Forward path composites into sceneFbo after ForwardOpaque. Deferred path
 // uses a dedicated view and a cached FBO that borrows LightingOutput color and
 // GBuffer depth. Selection borrows that depth for the RGB visibility channel
-// while alpha remains the complete silhouette, then composites a fixed-width
-// outer edge before Bloom/PostProcess. SceneLights
+// while alpha remains the complete silhouette. The mask projection exactly
+// matches the borrowed jittered depth; its UV is realigned and the fixed-width
+// outer edge is composited on the backbuffer after Present, so TAA never
+// accumulates editor chrome. SceneLights
 // and shadow-atlas arrays share the same CPU packing contract as LightingPass.
 class TransparentPass : public RenderPass {
 public:
@@ -67,6 +69,11 @@ public:
 
     uint32_t execute(PassExecContext& ctx) override;
     void destroyResources(BGFXAdapter& adapter) noexcept;
+    void setSelectionProjectionJitter(float xPixels,
+                                      float yPixels) noexcept {
+        _selectionJitterXPixels = xPixels;
+        _selectionJitterYPixels = yPixels;
+    }
 
 private:
     enum class SubmitMode : uint8_t {
@@ -121,6 +128,8 @@ private:
     ayt::shader::BindingId _selectionTexelSizeBinding =
         ayt::shader::InvalidBinding;
     uint16_t _selectionProgramRetryFrames = 0;
+    float _selectionJitterXPixels = 0.0f;
+    float _selectionJitterYPixels = 0.0f;
 };
 
 } // namespace ayt::render::detail

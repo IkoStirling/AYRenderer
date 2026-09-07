@@ -89,8 +89,11 @@ enum class FgResourceId : uint8_t {
     SmaaEdges        = 9,
     SmaaBlendWeights = 10,
     SmaaColor        = 11,
+    // Persistent display-referred TAA history/output. The physical FBO is
+    // imported from TAAPass because it must survive beginFrame/compile.
+    TaaColor         = 12,
     // Sentinel ── 测试和实现都靠它做数组大小 / 上界判断。
-    Count        = 12,
+    Count        = 13,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。

@@ -44,7 +44,7 @@ struct DrawItem {
     int32_t                    sortKey      = 0;
     ShadowFlags                shadowFlags  = kShadowCastAndReceive;
     // When true, TransparentPass draws the mesh's projected silhouette and
-    // composites a fixed-width screen-space outer border before PostProcess.
+    // composites a fixed-width screen-space outer border after Present.
     bool                       outlineHull  = false;
     // Original mesh world retained for hosts that still pass a legacy padded
     // selection world. New editor hosts leave this disabled.
@@ -79,8 +79,15 @@ struct DrawItem {
     const uint32_t*            boneRemap = nullptr;
     // Bounds for validating boneRemap. Required whenever boneRemap is set.
     uint32_t                   skeletonJointCount = 0;
+    // Stable host-side identity used only to match this draw with its
+    // previous rendered frame. Zero keeps the legacy/static fallback: camera
+    // motion is available, but rigid/skinned object motion cannot be tracked.
+    // Multiple submeshes of one object should share the same id.
+    uint64_t                   motionObjectId = 0;
 };
 
+// RenderScene crosses static-library boundaries. DrawItem is intentionally a
+// public value type, so every consumer must be rebuilt when its layout changes.
 class RenderScene {
 public:
     void clear() {

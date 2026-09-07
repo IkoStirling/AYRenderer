@@ -47,6 +47,7 @@ target_include_directories(AYRenderer PRIVATE
 )
 
 target_link_libraries(AYRenderer PUBLIC
+    AY::Module
     AYShader
     AYMath
     AYIO

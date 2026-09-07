@@ -2,8 +2,10 @@
 
 ## SMAA reference implementation
 
-The procedural Area lookup generation and the three-stage shader structure in
-`src/detail/SMAAPass.cpp` are adapted from the SMAA reference implementation:
+The procedural Area/Search lookup generation in
+`src/detail/SMAALookupTextures.cpp` and the three-stage High-preset shader
+structure in `src/detail/SMAAPass.cpp` are adapted from the SMAA reference
+implementation:
 
 Copyright (C) 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia,
 Fernando Navarro, and Diego Gutierrez.

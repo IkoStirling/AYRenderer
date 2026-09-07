@@ -116,8 +116,12 @@ TEST_CASE(selection_mask_uses_full_silhouette_and_screen_space_composite)
 
     const std::string source(selectionOutlinePhoskiaSourceForTests());
     CHECK(source.find("selectionTexelSize.xy * 2.0") != std::string::npos);
-    CHECK(source.find("neighbor - center") != std::string::npos);
-    CHECK(source.find("visibleNeighbor") != std::string::npos);
+    CHECK(source.find("+ selectionTexelSize.zw") != std::string::npos);
+    CHECK(source.find("neighborSum") != std::string::npos);
+    CHECK(source.find("outerCoverage") != std::string::npos);
+    CHECK(source.find("visibleCoverage") != std::string::npos);
+    CHECK(source.find("smoothstep(0.05, 0.95, center)")
+          != std::string::npos);
     CHECK(source.find("vec4(1.0, 0.55, 0.12, edge)") != std::string::npos);
 
     ayt::shader::phoskia::Compiler compiler;
@@ -155,7 +159,7 @@ TEST_CASE(selection_mask_uses_full_silhouette_and_screen_space_composite)
         }));
 }
 
-TEST_CASE(selection_views_have_unique_effective_ranks_before_post_process)
+TEST_CASE(selection_mask_precedes_postprocess_and_composite_follows_present)
 {
     using ayt::render::detail::kRenderViewRemap;
     using ayt::render::detail::kRenderViewCapacity;
@@ -183,11 +187,11 @@ TEST_CASE(selection_views_have_unique_effective_ranks_before_post_process)
     CHECK(rankOf(ayt::render::kTransparentDeferredViewId)
           < rankOf(TransparentPass::kSelectionMaskViewId));
     CHECK(rankOf(TransparentPass::kSelectionMaskViewId)
+          < rankOf(bgfx::ViewId{10}));
+    CHECK(rankOf(bgfx::ViewId{16})
           < rankOf(TransparentPass::kSelectionCompositeViewId));
     CHECK(rankOf(TransparentPass::kSelectionCompositeViewId)
-          < rankOf(bgfx::ViewId{10}));
-    CHECK(rankOf(TransparentPass::kSelectionCompositeViewId)
-          < rankOf(bgfx::ViewId{16}));
+          < rankOf(bgfx::ViewId{251}));
 }
 
 TEST_CASE(scene_light_pack_matches_shadow_caster_first_order)

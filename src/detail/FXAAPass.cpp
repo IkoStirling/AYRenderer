@@ -12,10 +12,13 @@ namespace ayt::render::detail
 
 namespace {
 
-// Phoskia currently lowers IfStmt into IR but the BGFX backend intentionally
-// omits control-flow emission. Quality FXAA needs a real early-out for flat
-// pixels and a bounded endpoint search, so this pass uses the engine's existing
-// raw bgfx .sc path (also used by alpha-cutout GBuffer and editor overlays).
+// Controlled raw-bgfx compatibility exception. Phoskia now emits `if`, but
+// this quality FXAA still depends on reusable helper functions and a real
+// early return for flat pixels. Material `return` currently assigns the bgfx
+// output slot instead of terminating control flow (required by shaderc's D3D
+// output wrapper), so translating this source today would change its meaning.
+// Keep the exception local until Phoskia has user functions and a portable
+// single-exit/control-flow lowering validated on both D3D backends.
 constexpr const char* kFxaaVaryingSc = R"(
 vec2 v_texcoord0 : TEXCOORD0 = vec2(0.0, 0.0);
 vec3 a_position  : POSITION;
@@ -50,6 +53,18 @@ float fxaaLuma(vec3 color)
     return dot(color, vec3(0.299, 0.587, 0.114));
 }
 
+float fxaaColorDistance(vec3 a, vec3 b)
+{
+    vec3 delta = abs(a - b);
+    return max(max(delta.r, delta.g), delta.b);
+}
+
+float fxaaSecondDerivative(vec3 center, vec3 a, vec3 b)
+{
+    vec3 delta = abs(-2.0 * center + a + b);
+    return max(max(delta.r, delta.g), delta.b);
+}
+
 vec2 fxaaClampUv(vec2 uv)
 {
     return clamp(uv, vec2(0.0, 0.0), vec2(1.0, 1.0));
@@ -66,16 +81,26 @@ void main()
     vec2 uvE = fxaaClampUv(uv + vec2(texel.x, 0.0));
     vec2 uvS = fxaaClampUv(uv + vec2(0.0, texel.y));
     vec2 uvW = fxaaClampUv(uv + vec2(-texel.x, 0.0));
-    float lumaN = fxaaLuma(texture2D(inputColor, uvN).rgb);
-    float lumaE = fxaaLuma(texture2D(inputColor, uvE).rgb);
-    float lumaS = fxaaLuma(texture2D(inputColor, uvS).rgb);
-    float lumaW = fxaaLuma(texture2D(inputColor, uvW).rgb);
+    vec3 colorN = texture2D(inputColor, uvN).rgb;
+    vec3 colorE = texture2D(inputColor, uvE).rgb;
+    vec3 colorS = texture2D(inputColor, uvS).rgb;
+    vec3 colorW = texture2D(inputColor, uvW).rgb;
+    float lumaN = fxaaLuma(colorN);
+    float lumaE = fxaaLuma(colorE);
+    float lumaS = fxaaLuma(colorS);
+    float lumaW = fxaaLuma(colorW);
 
     float lumaMin = min(lumaM, min(min(lumaN, lumaE), min(lumaS, lumaW)));
     float lumaMax = max(lumaM, max(max(lumaN, lumaE), max(lumaS, lumaW)));
     float lumaRange = lumaMax - lumaMin;
+    float colorRange = max(
+        max(fxaaColorDistance(colorM.rgb, colorN),
+            fxaaColorDistance(colorM.rgb, colorE)),
+        max(fxaaColorDistance(colorM.rgb, colorS),
+            fxaaColorDistance(colorM.rgb, colorW)));
+    float edgeRange = max(lumaRange, colorRange);
     float edgeThreshold = max(fxaaQuality.y, lumaMax * fxaaQuality.x);
-    if (lumaRange < edgeThreshold) {
+    if (edgeRange < edgeThreshold) {
         gl_FragColor = colorM;
         return;
     }
@@ -84,10 +109,14 @@ void main()
     vec2 uvNE = fxaaClampUv(uv + vec2( texel.x, -texel.y));
     vec2 uvSW = fxaaClampUv(uv + vec2(-texel.x,  texel.y));
     vec2 uvSE = fxaaClampUv(uv + vec2( texel.x,  texel.y));
-    float lumaNW = fxaaLuma(texture2D(inputColor, uvNW).rgb);
-    float lumaNE = fxaaLuma(texture2D(inputColor, uvNE).rgb);
-    float lumaSW = fxaaLuma(texture2D(inputColor, uvSW).rgb);
-    float lumaSE = fxaaLuma(texture2D(inputColor, uvSE).rgb);
+    vec3 colorNW = texture2D(inputColor, uvNW).rgb;
+    vec3 colorNE = texture2D(inputColor, uvNE).rgb;
+    vec3 colorSW = texture2D(inputColor, uvSW).rgb;
+    vec3 colorSE = texture2D(inputColor, uvSE).rgb;
+    float lumaNW = fxaaLuma(colorNW);
+    float lumaNE = fxaaLuma(colorNE);
+    float lumaSW = fxaaLuma(colorSW);
+    float lumaSE = fxaaLuma(colorSE);
 
     float edgeHorizontal =
           abs(-2.0 * lumaM + lumaN + lumaS) * 2.0
@@ -97,16 +126,33 @@ void main()
           abs(-2.0 * lumaM + lumaE + lumaW) * 2.0
         + abs(-2.0 * lumaN + lumaNE + lumaNW)
         + abs(-2.0 * lumaS + lumaSE + lumaSW);
+    // Preserve hue-only edges too. The luma terms retain canonical FXAA
+    // behavior; RGB derivatives only win when a saturated edge is otherwise
+    // close to isoluminant.
+    edgeHorizontal = max(edgeHorizontal,
+          fxaaSecondDerivative(colorM.rgb, colorN, colorS) * 2.0
+        + fxaaSecondDerivative(colorE, colorNE, colorSE)
+        + fxaaSecondDerivative(colorW, colorNW, colorSW));
+    edgeVertical = max(edgeVertical,
+          fxaaSecondDerivative(colorM.rgb, colorE, colorW) * 2.0
+        + fxaaSecondDerivative(colorN, colorNE, colorNW)
+        + fxaaSecondDerivative(colorS, colorSE, colorSW));
     bool isHorizontal = edgeHorizontal >= edgeVertical;
 
     float lumaNegative = isHorizontal ? lumaN : lumaW;
     float lumaPositive = isHorizontal ? lumaS : lumaE;
-    float gradientNegative = abs(lumaNegative - lumaM);
-    float gradientPositive = abs(lumaPositive - lumaM);
+    vec3 colorNegative = isHorizontal ? colorN : colorW;
+    vec3 colorPositive = isHorizontal ? colorS : colorE;
+    float gradientNegative = max(abs(lumaNegative - lumaM),
+        fxaaColorDistance(colorNegative, colorM.rgb));
+    float gradientPositive = max(abs(lumaPositive - lumaM),
+        fxaaColorDistance(colorPositive, colorM.rgb));
     bool useNegative = gradientNegative >= gradientPositive;
     float gradient = max(gradientNegative, gradientPositive);
     float lumaLocalAverage = 0.5 *
         (lumaM + (useNegative ? lumaNegative : lumaPositive));
+    vec3 colorLocalAverage = 0.5 *
+        (colorM.rgb + (useNegative ? colorNegative : colorPositive));
 
     vec2 normalStep = isHorizontal
         ? vec2(0.0, texel.y)
@@ -120,42 +166,60 @@ void main()
 
     vec2 uvNegative = fxaaClampUv(edgeUv - tangentStep);
     vec2 uvPositive = fxaaClampUv(edgeUv + tangentStep);
-    float deltaNegative =
-        fxaaLuma(texture2D(inputColor, uvNegative).rgb) - lumaLocalAverage;
-    float deltaPositive =
-        fxaaLuma(texture2D(inputColor, uvPositive).rgb) - lumaLocalAverage;
-    bool doneNegative = abs(deltaNegative) >= gradientThreshold;
-    bool donePositive = abs(deltaPositive) >= gradientThreshold;
+    vec3 endpointColorNegative = texture2D(inputColor, uvNegative).rgb;
+    vec3 endpointColorPositive = texture2D(inputColor, uvPositive).rgb;
+    float deltaNegative = fxaaLuma(endpointColorNegative) - lumaLocalAverage;
+    float deltaPositive = fxaaLuma(endpointColorPositive) - lumaLocalAverage;
+    float colorDeltaNegative = fxaaColorDistance(
+        endpointColorNegative, colorLocalAverage);
+    float colorDeltaPositive = fxaaColorDistance(
+        endpointColorPositive, colorLocalAverage);
+    bool doneNegative = max(abs(deltaNegative), colorDeltaNegative)
+        >= gradientThreshold;
+    bool donePositive = max(abs(deltaPositive), colorDeltaPositive)
+        >= gradientThreshold;
     float distanceNegative = 1.0;
     float distancePositive = 1.0;
 
     if (!doneNegative) {
         uvNegative = fxaaClampUv(uvNegative - tangentStep);
         distanceNegative = 2.0;
-        deltaNegative =
-            fxaaLuma(texture2D(inputColor, uvNegative).rgb) - lumaLocalAverage;
-        doneNegative = abs(deltaNegative) >= gradientThreshold;
+        endpointColorNegative = texture2D(inputColor, uvNegative).rgb;
+        deltaNegative = fxaaLuma(endpointColorNegative) - lumaLocalAverage;
+        colorDeltaNegative = fxaaColorDistance(
+            endpointColorNegative, colorLocalAverage);
+        doneNegative = max(abs(deltaNegative), colorDeltaNegative)
+            >= gradientThreshold;
     }
     if (!donePositive) {
         uvPositive = fxaaClampUv(uvPositive + tangentStep);
         distancePositive = 2.0;
-        deltaPositive =
-            fxaaLuma(texture2D(inputColor, uvPositive).rgb) - lumaLocalAverage;
-        donePositive = abs(deltaPositive) >= gradientThreshold;
+        endpointColorPositive = texture2D(inputColor, uvPositive).rgb;
+        deltaPositive = fxaaLuma(endpointColorPositive) - lumaLocalAverage;
+        colorDeltaPositive = fxaaColorDistance(
+            endpointColorPositive, colorLocalAverage);
+        donePositive = max(abs(deltaPositive), colorDeltaPositive)
+            >= gradientThreshold;
     }
     if (!doneNegative) {
         uvNegative = fxaaClampUv(uvNegative - tangentStep * 2.0);
         distanceNegative = 4.0;
-        deltaNegative =
-            fxaaLuma(texture2D(inputColor, uvNegative).rgb) - lumaLocalAverage;
-        doneNegative = abs(deltaNegative) >= gradientThreshold;
+        endpointColorNegative = texture2D(inputColor, uvNegative).rgb;
+        deltaNegative = fxaaLuma(endpointColorNegative) - lumaLocalAverage;
+        colorDeltaNegative = fxaaColorDistance(
+            endpointColorNegative, colorLocalAverage);
+        doneNegative = max(abs(deltaNegative), colorDeltaNegative)
+            >= gradientThreshold;
     }
     if (!donePositive) {
         uvPositive = fxaaClampUv(uvPositive + tangentStep * 2.0);
         distancePositive = 4.0;
-        deltaPositive =
-            fxaaLuma(texture2D(inputColor, uvPositive).rgb) - lumaLocalAverage;
-        donePositive = abs(deltaPositive) >= gradientThreshold;
+        endpointColorPositive = texture2D(inputColor, uvPositive).rgb;
+        deltaPositive = fxaaLuma(endpointColorPositive) - lumaLocalAverage;
+        colorDeltaPositive = fxaaColorDistance(
+            endpointColorPositive, colorLocalAverage);
+        donePositive = max(abs(deltaPositive), colorDeltaPositive)
+            >= gradientThreshold;
     }
     if (!doneNegative) {
         uvNegative = fxaaClampUv(uvNegative - tangentStep * 4.0);
@@ -174,7 +238,9 @@ void main()
     float endpointDelta = negativeNearest ? deltaNegative : deltaPositive;
     bool centerIsDarker = lumaM < lumaLocalAverage;
     bool endpointIsDarker = endpointDelta < 0.0;
-    bool correctVariation = endpointIsDarker != centerIsDarker;
+    bool chromaDominant = colorRange > lumaRange;
+    bool correctVariation = chromaDominant
+        || endpointIsDarker != centerIsDarker;
     float nearestDistance = min(distanceNegative, distancePositive);
     float edgeOffset = 0.5 - nearestDistance /
         max(distanceNegative + distancePositive, 0.0001);
@@ -184,8 +250,12 @@ void main()
 
     float lumaAverage = (2.0 * (lumaN + lumaE + lumaS + lumaW)
         + lumaNW + lumaNE + lumaSW + lumaSE) / 12.0;
-    float subpixel = clamp(abs(lumaAverage - lumaM) /
-        max(lumaRange, 0.0001), 0.0, 1.0);
+    vec3 colorAverage = (2.0 * (colorN + colorE + colorS + colorW)
+        + colorNW + colorNE + colorSW + colorSE) / 12.0;
+    float subpixelDelta = max(abs(lumaAverage - lumaM),
+        fxaaColorDistance(colorAverage, colorM.rgb));
+    float subpixel = clamp(subpixelDelta /
+        max(edgeRange, 0.0001), 0.0, 1.0);
     subpixel = smoothstep(0.0, 1.0, subpixel);
     float subpixelOffset = subpixel * subpixel * fxaaQuality.z;
 
@@ -196,7 +266,7 @@ void main()
 }
 )";
 
-constexpr const char* kFxaaCacheKey = "fxaa_quality_edge_search_v2";
+constexpr const char* kFxaaCacheKey = "fxaa_chroma_edge_search_v3";
 
 } // namespace
 

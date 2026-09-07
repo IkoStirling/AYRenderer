@@ -102,6 +102,13 @@ public:
     bgfx::TextureHandle createDynamicTexture2D(
         uint16_t width, uint16_t height,
         uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
+    // Standalone render-target texture. Unlike createDynamicTexture2D this
+    // preserves the caller-selected format and is intended to be borrowed by
+    // an FBO shell (for example RG16F motion vectors + GBuffer depth).
+    bgfx::TextureHandle createRenderTargetTexture2D(
+        uint16_t width, uint16_t height,
+        bgfx::TextureFormat::Enum format,
+        uint64_t samplerFlags = BGFX_SAMPLER_NONE);
     // CPU → GPU full-rect update. `rgba8Data` must be width*height*4 bytes.
     void updateTexture2D(bgfx::TextureHandle handle,
                          uint16_t width, uint16_t height,
@@ -227,6 +234,9 @@ public:
     void setStateDepthTestAlways();
     void setStateDepthOnlyWrite();
     void setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding = false);
+    // Color-only replay against an existing depth attachment. Used by the
+    // MotionVector pass: preserve GBuffer depth, write RG velocity only.
+    void setStateColorLEQUAL(bool doubleSided, bool reverseWinding = false);
     // Small editor orientation widget: depth-clear is scoped to its own
     // sub-rect, then this state gives the procedural arrows correct
     // self-occlusion without sampling or modifying the scene depth target.

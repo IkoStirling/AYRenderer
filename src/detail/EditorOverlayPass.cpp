@@ -731,7 +731,11 @@ uint32_t EditorOverlayPass::submitTransformGizmo(
     ctx.adapter.setViewFrameBuffer(kGizmoViewId, BGFX_INVALID_HANDLE);
     ctx.adapter.setViewRect(kGizmoViewId, ctx.viewportX, ctx.viewportY,
                             ctx.viewportWidth, ctx.viewportHeight);
-    ctx.adapter.setViewTransform(kGizmoViewId, frame.view, frame.projection);
+    const ayt::math::Float4x4& overlayProjection =
+        _hasUnjitteredProjection
+            ? _unjitteredProjection
+            : frame.projection;
+    ctx.adapter.setViewTransform(kGizmoViewId, frame.view, overlayProjection);
     // Present has already written color. Clear only depth so the gizmo is
     // always reachable while retaining correct self-occlusion.
     ctx.adapter.setViewClearRaw(kGizmoViewId, BGFX_CLEAR_DEPTH, 0, 1.0f, 0);

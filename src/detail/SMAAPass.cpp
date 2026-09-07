@@ -3,23 +3,24 @@
 #include "detail/FgResource.h"
 #include "detail/GpuResources.h"
 
-#include <algorithm>
-#include <array>
-#include <cmath>
 #include <cstdio>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace ayt::render::detail
 {
 
 namespace {
 
-// Shader structure and the procedural Area lookup are derived from the SMAA
-// reference implementation by Jorge Jimenez et al. (MIT). See
-// THIRD_PARTY_NOTICES.md. SearchTex is intentionally unnecessary here: the
-// weight shader performs exact one-pixel bounded searches rather than the
-// reference implementation's optimized two-pixel search plus correction LUT.
+// High-preset shader structure and Area/Search lookup contracts are adapted
+// from the SMAA reference implementation by Jorge Jimenez et al. (MIT). See
+// THIRD_PARTY_NOTICES.md. The lookup bytes remain programmatically generated.
+// This three-stage reference port is a controlled raw-bgfx compatibility
+// exception: it relies on many user helper functions, C-style bounded loops,
+// and nested branches that Phoskia cannot yet represent without a semantic
+// rewrite. Keep it on the tested .sc path until those language features and
+// cross-backend shaderc coverage are available.
 constexpr const char* kSmaaVaryingSc = R"(
 vec2 v_texcoord0 : TEXCOORD0 = vec2(0.0, 0.0);
 vec3 a_position  : POSITION;
@@ -49,40 +50,47 @@ vec2 smaaClampUv(vec2 uv)
     return clamp(uv, vec2(0.0, 0.0), vec2(1.0, 1.0));
 }
 
-float smaaLuma(vec3 color)
+float smaaColorDelta(vec3 a, vec3 b)
 {
-    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+    vec3 delta = abs(a - b);
+    return max(max(delta.r, delta.g), delta.b);
 }
 
 void main()
 {
     vec2 uv = smaaClampUv(v_texcoord0);
     vec2 texel = smaaMetrics.xy;
-    float center = smaaLuma(texture2D(inputColor, uv).rgb);
-    float left = smaaLuma(texture2D(inputColor,
-        smaaClampUv(uv - vec2(texel.x, 0.0))).rgb);
-    float top = smaaLuma(texture2D(inputColor,
-        smaaClampUv(uv - vec2(0.0, texel.y))).rgb);
+    vec3 center = texture2D(inputColor, uv).rgb;
+    vec3 left = texture2D(inputColor,
+        smaaClampUv(uv - vec2(texel.x, 0.0))).rgb;
+    vec3 top = texture2D(inputColor,
+        smaaClampUv(uv - vec2(0.0, texel.y))).rgb;
 
-    vec2 delta = abs(center - vec2(left, top));
+    // Official SMAA color-edge detection. A pure luma gate misses saturated
+    // material boundaries with similar luminance (orange against gray-green is
+    // common in the editor validation scene), making a running pass look inert.
+    vec2 delta = vec2(smaaColorDelta(center, left),
+                      smaaColorDelta(center, top));
     vec2 edges = step(vec2(smaaParams.x, smaaParams.x), delta);
     if (dot(edges, vec2(1.0, 1.0)) == 0.0) {
         gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
 
-    float right = smaaLuma(texture2D(inputColor,
-        smaaClampUv(uv + vec2(texel.x, 0.0))).rgb);
-    float bottom = smaaLuma(texture2D(inputColor,
-        smaaClampUv(uv + vec2(0.0, texel.y))).rgb);
-    vec2 oppositeDelta = abs(center - vec2(right, bottom));
+    vec3 right = texture2D(inputColor,
+        smaaClampUv(uv + vec2(texel.x, 0.0))).rgb;
+    vec3 bottom = texture2D(inputColor,
+        smaaClampUv(uv + vec2(0.0, texel.y))).rgb;
+    vec2 oppositeDelta = vec2(smaaColorDelta(center, right),
+                              smaaColorDelta(center, bottom));
     vec2 maxDelta = max(delta, oppositeDelta);
 
-    float leftLeft = smaaLuma(texture2D(inputColor,
-        smaaClampUv(uv - vec2(2.0 * texel.x, 0.0))).rgb);
-    float topTop = smaaLuma(texture2D(inputColor,
-        smaaClampUv(uv - vec2(0.0, 2.0 * texel.y))).rgb);
-    vec2 secondDelta = abs(vec2(left, top) - vec2(leftLeft, topTop));
+    vec3 leftLeft = texture2D(inputColor,
+        smaaClampUv(uv - vec2(2.0 * texel.x, 0.0))).rgb;
+    vec3 topTop = texture2D(inputColor,
+        smaaClampUv(uv - vec2(0.0, 2.0 * texel.y))).rgb;
+    vec2 secondDelta = vec2(smaaColorDelta(left, leftLeft),
+                            smaaColorDelta(top, topTop));
     maxDelta = max(maxDelta, secondDelta);
     float finalDelta = max(maxDelta.x, maxDelta.y);
 
@@ -98,6 +106,7 @@ $input v_texcoord0
 #include <bgfx_shader.sh>
 SAMPLER2D(edgesTex, 0);
 SAMPLER2D(areaTex, 1);
+SAMPLER2D(searchTex, 2);
 uniform vec4 smaaMetrics;
 
 vec2 smaaClampUv(vec2 uv)
@@ -110,101 +119,276 @@ vec2 smaaEdges(vec2 uv)
     return texture2D(edgesTex, smaaClampUv(uv)).rg;
 }
 
-vec2 smaaArea(vec2 distancePixels, float crossing0, float crossing1)
+vec2 smaaEdgesOffset(vec2 uv, vec2 offsetPixels)
 {
-    vec2 crossing = floor(4.0 * vec2(crossing0, crossing1) + 0.5);
-    vec2 texelCoord = 16.0 * crossing +
-        sqrt(clamp(distancePixels, vec2(0.0, 0.0), vec2(225.0, 225.0)));
-    vec2 uv = (texelCoord + vec2(0.5, 0.5)) / 80.0;
+    return smaaEdges(uv + offsetPixels * smaaMetrics.xy);
+}
+
+float smaaSearchLength(vec2 edge, float horizontalOffset)
+{
+    vec2 searchSize = vec2(66.0, 33.0);
+    vec2 packedSize = vec2(64.0, 16.0);
+    vec2 scale = searchSize * vec2(0.5, -1.0) + vec2(-1.0, 1.0);
+    vec2 bias = searchSize * vec2(horizontalOffset, 1.0)
+        + vec2(0.5, -0.5);
+    vec2 uv = (scale * edge + bias) / packedSize;
+    return texture2D(searchTex, smaaClampUv(uv)).r;
+}
+
+float smaaSearchXLeft(vec2 coord, float end)
+{
+    vec2 edge = vec2(0.0, 1.0);
+    for (int i = 0; i < 16; ++i) {
+        if (coord.x > end && edge.y > 0.8281 && edge.x == 0.0) {
+            edge = smaaEdges(coord);
+            coord -= vec2(2.0 * smaaMetrics.x, 0.0);
+        }
+    }
+    float correction = -(255.0 / 127.0)
+        * smaaSearchLength(edge, 0.0) + 3.25;
+    return coord.x + smaaMetrics.x * correction;
+}
+
+float smaaSearchXRight(vec2 coord, float end)
+{
+    vec2 edge = vec2(0.0, 1.0);
+    for (int i = 0; i < 16; ++i) {
+        if (coord.x < end && edge.y > 0.8281 && edge.x == 0.0) {
+            edge = smaaEdges(coord);
+            coord += vec2(2.0 * smaaMetrics.x, 0.0);
+        }
+    }
+    float correction = -(255.0 / 127.0)
+        * smaaSearchLength(edge, 0.5) + 3.25;
+    return coord.x - smaaMetrics.x * correction;
+}
+
+float smaaSearchYUp(vec2 coord, float end)
+{
+    vec2 edge = vec2(1.0, 0.0);
+    for (int i = 0; i < 16; ++i) {
+        if (coord.y > end && edge.x > 0.8281 && edge.y == 0.0) {
+            edge = smaaEdges(coord);
+            coord -= vec2(0.0, 2.0 * smaaMetrics.y);
+        }
+    }
+    float correction = -(255.0 / 127.0)
+        * smaaSearchLength(edge.yx, 0.0) + 3.25;
+    return coord.y + smaaMetrics.y * correction;
+}
+
+float smaaSearchYDown(vec2 coord, float end)
+{
+    vec2 edge = vec2(1.0, 0.0);
+    for (int i = 0; i < 16; ++i) {
+        if (coord.y < end && edge.x > 0.8281 && edge.y == 0.0) {
+            edge = smaaEdges(coord);
+            coord += vec2(0.0, 2.0 * smaaMetrics.y);
+        }
+    }
+    float correction = -(255.0 / 127.0)
+        * smaaSearchLength(edge.yx, 0.5) + 3.25;
+    return coord.y - smaaMetrics.y * correction;
+}
+
+vec2 smaaArea(vec2 distance, float crossing0, float crossing1)
+{
+    vec2 texelCoord = 16.0
+        * round(4.0 * vec2(crossing0, crossing1)) + distance;
+    vec2 uv = (texelCoord + vec2(0.5, 0.5)) / vec2(160.0, 560.0);
     return texture2D(areaTex, uv).rg;
+}
+
+vec2 smaaDecodeDiag(vec2 edge)
+{
+    edge.x = edge.x * abs(5.0 * edge.x - 3.75);
+    return round(edge);
+}
+
+vec4 smaaSearchDiag1(vec2 coord, vec2 direction)
+{
+    float distance = -1.0;
+    float continuation = 1.0;
+    vec2 edge = vec2(0.0, 0.0);
+    for (int i = 0; i < 8; ++i) {
+        if (distance < 7.0 && continuation > 0.9) {
+            coord += direction * smaaMetrics.xy;
+            distance += 1.0;
+            edge = smaaEdges(coord);
+            continuation = dot(edge, vec2(0.5, 0.5));
+        }
+    }
+    return vec4(distance, continuation, edge);
+}
+
+vec4 smaaSearchDiag2(vec2 coord, vec2 direction)
+{
+    float distance = -1.0;
+    float continuation = 1.0;
+    vec2 edge = vec2(0.0, 0.0);
+    coord.x += 0.25 * smaaMetrics.x;
+    for (int i = 0; i < 8; ++i) {
+        if (distance < 7.0 && continuation > 0.9) {
+            coord += direction * smaaMetrics.xy;
+            distance += 1.0;
+            edge = smaaDecodeDiag(smaaEdges(coord));
+            continuation = dot(edge, vec2(0.5, 0.5));
+        }
+    }
+    return vec4(distance, continuation, edge);
+}
+
+vec2 smaaAreaDiag(vec2 distance, vec2 crossing)
+{
+    vec2 texelCoord = 20.0 * crossing + distance;
+    vec2 uv = (texelCoord + vec2(0.5, 0.5)) / vec2(160.0, 560.0);
+    uv.x += 0.5;
+    return texture2D(areaTex, uv).rg;
+}
+
+vec2 smaaCalculateDiagWeights(vec2 uv, vec2 edge)
+{
+    vec2 weights = vec2(0.0, 0.0);
+    vec4 d = vec4(0.0, 0.0, 0.0, 0.0);
+    vec4 search;
+
+    if (edge.x > 0.0) {
+        search = smaaSearchDiag1(uv, vec2(-1.0, 1.0));
+        d.x = search.x + (search.w > 0.9 ? 1.0 : 0.0);
+        d.z = search.y;
+    }
+    search = smaaSearchDiag1(uv, vec2(1.0, -1.0));
+    d.y = search.x;
+    d.w = search.y;
+
+    if (d.x + d.y > 2.0) {
+        vec4 coords = vec4(-d.x + 0.25, d.x, d.y, -d.y - 0.25)
+            * smaaMetrics.xyxy + uv.xyxy;
+        vec4 crossing;
+        crossing.xy = smaaEdgesOffset(coords.xy, vec2(-1.0, 0.0));
+        crossing.zw = smaaEdgesOffset(coords.zw, vec2(1.0, 0.0));
+        vec4 decoded = round(vec4(
+            crossing.x * abs(5.0 * crossing.x - 3.75), crossing.y,
+            crossing.z * abs(5.0 * crossing.z - 3.75), crossing.w));
+        crossing = vec4(decoded.y, decoded.x, decoded.w, decoded.z);
+        vec2 merged = 2.0 * crossing.xz + crossing.yw;
+        merged *= vec2(1.0, 1.0) - step(vec2(0.9, 0.9), d.zw);
+        weights += smaaAreaDiag(d.xy, merged);
+    }
+
+    search = smaaSearchDiag2(uv, vec2(-1.0, -1.0));
+    d.x = search.x;
+    d.z = search.y;
+    if (smaaEdgesOffset(uv, vec2(1.0, 0.0)).x > 0.0) {
+        search = smaaSearchDiag2(uv, vec2(1.0, 1.0));
+        d.y = search.x + (search.w > 0.9 ? 1.0 : 0.0);
+        d.w = search.y;
+    } else {
+        d.y = 0.0;
+        d.w = 0.0;
+    }
+
+    if (d.x + d.y > 2.0) {
+        vec4 coords = vec4(-d.x, -d.x, d.y, d.y)
+            * smaaMetrics.xyxy + uv.xyxy;
+        vec4 crossing;
+        crossing.x = smaaEdgesOffset(coords.xy, vec2(-1.0, 0.0)).y;
+        crossing.y = smaaEdgesOffset(coords.xy, vec2(0.0, -1.0)).x;
+        vec2 farEdge = smaaEdgesOffset(coords.zw, vec2(1.0, 0.0));
+        crossing.z = farEdge.y;
+        crossing.w = farEdge.x;
+        vec2 merged = 2.0 * crossing.xz + crossing.yw;
+        merged *= vec2(1.0, 1.0) - step(vec2(0.9, 0.9), d.zw);
+        weights += smaaAreaDiag(d.xy, merged).yx;
+    }
+    return weights;
+}
+
+vec2 smaaHorizontalCorner(vec2 weights, vec4 coords, vec2 distance)
+{
+    vec2 leftRight = step(distance.xy, distance.yx);
+    vec2 rounding = 0.75 * leftRight
+        / max(leftRight.x + leftRight.y, 1.0);
+    vec2 factor = vec2(1.0, 1.0);
+    factor.x -= rounding.x
+        * smaaEdgesOffset(coords.xy, vec2(0.0, 1.0)).x;
+    factor.x -= rounding.y
+        * smaaEdgesOffset(coords.zw, vec2(1.0, 1.0)).x;
+    factor.y -= rounding.x
+        * smaaEdgesOffset(coords.xy, vec2(0.0, -2.0)).x;
+    factor.y -= rounding.y
+        * smaaEdgesOffset(coords.zw, vec2(1.0, -2.0)).x;
+    return weights * clamp(factor, vec2(0.0, 0.0), vec2(1.0, 1.0));
+}
+
+vec2 smaaVerticalCorner(vec2 weights, vec4 coords, vec2 distance)
+{
+    vec2 topBottom = step(distance.xy, distance.yx);
+    vec2 rounding = 0.75 * topBottom
+        / max(topBottom.x + topBottom.y, 1.0);
+    vec2 factor = vec2(1.0, 1.0);
+    factor.x -= rounding.x
+        * smaaEdgesOffset(coords.xy, vec2(1.0, 0.0)).y;
+    factor.x -= rounding.y
+        * smaaEdgesOffset(coords.zw, vec2(1.0, 1.0)).y;
+    factor.y -= rounding.x
+        * smaaEdgesOffset(coords.xy, vec2(-2.0, 0.0)).y;
+    factor.y -= rounding.y
+        * smaaEdgesOffset(coords.zw, vec2(-2.0, 1.0)).y;
+    return weights * clamp(factor, vec2(0.0, 0.0), vec2(1.0, 1.0));
 }
 
 void main()
 {
     vec2 uv = smaaClampUv(v_texcoord0);
     vec2 texel = smaaMetrics.xy;
+    vec2 pixelCoord = uv * smaaMetrics.zw;
+    vec4 offset0 = uv.xyxy
+        + texel.xyxy * vec4(-0.25, -0.125, 1.25, -0.125);
+    vec4 offset1 = uv.xyxy
+        + texel.xyxy * vec4(-0.125, -0.25, -0.125, 1.25);
+    vec4 offset2 = vec4(offset0.x, offset0.z, offset1.y, offset1.w)
+        + smaaMetrics.xxyy * vec4(-32.0, 32.0, -32.0, 32.0);
     vec2 edge = smaaEdges(uv);
     vec4 weights = vec4(0.0, 0.0, 0.0, 0.0);
 
     if (edge.y > 0.0) {
-        float leftDistance = 0.0;
-        float rightDistance = 0.0;
-        float leftCrossing = 0.0;
-        float rightCrossing = 0.0;
-        vec2 leftEndUv = uv;
-        vec2 rightEndUv = uv;
-        bool leftDone = false;
-        bool rightDone = false;
-        for (int i = 1; i <= 16; ++i) {
-            float distance = float(i);
-            if (!leftDone) {
-                leftEndUv = uv - vec2(distance * texel.x, 0.0);
-                vec2 sampleEdge = smaaEdges(leftEndUv);
-                leftDistance = distance;
-                if (sampleEdge.y < 0.5 || sampleEdge.x > 0.0) {
-                    leftDone = true;
-                }
-            }
-            if (!rightDone) {
-                rightEndUv = uv + vec2(distance * texel.x, 0.0);
-                vec2 sampleEdge = smaaEdges(rightEndUv);
-                rightDistance = distance;
-                if (sampleEdge.y < 0.5 || sampleEdge.x > 0.0) {
-                    rightDone = true;
-                }
-            }
+        weights.rg = smaaCalculateDiagWeights(uv, edge);
+        if (dot(weights.rg, vec2(1.0, 1.0)) < 0.00001) {
+            vec3 coords;
+            coords.x = smaaSearchXLeft(offset0.xy, offset2.x);
+            coords.y = offset1.y;
+            float crossing0 = smaaEdges(coords.xy).x;
+            coords.z = smaaSearchXRight(offset0.zw, offset2.y);
+            vec2 distance = abs(round(
+                smaaMetrics.zz * coords.xz - pixelCoord.xx));
+            float crossing1 = smaaEdgesOffset(
+                coords.zy, vec2(1.0, 0.0)).x;
+            weights.rg = smaaArea(sqrt(distance), crossing0, crossing1);
+            coords.y = uv.y;
+            weights.rg = smaaHorizontalCorner(
+                weights.rg, vec4(coords.x, coords.y, coords.z, coords.y),
+                distance);
+        } else {
+            edge.x = 0.0;
         }
-
-        // SMAA's crossing offset is essential here. Sampling a quarter pixel
-        // towards the north lets linear filtering distinguish the two
-        // possible endpoint edges (0.25/0.75) instead of collapsing every
-        // staircase to a null 0/4 AreaTex pattern.
-        vec2 crossingOffset = vec2(0.0, -0.25 * texel.y);
-        leftCrossing = smaaEdges(leftEndUv + crossingOffset).x;
-        rightCrossing = smaaEdges(rightEndUv + crossingOffset).x;
-        weights.rg = smaaArea(vec2(leftDistance, rightDistance),
-                              leftCrossing, rightCrossing);
-        float cornerAttenuation = 1.0
-            - 0.25 * max(leftCrossing, rightCrossing);
-        weights.rg *= cornerAttenuation;
     }
 
     if (edge.x > 0.0) {
-        float topDistance = 0.0;
-        float bottomDistance = 0.0;
-        float topCrossing = 0.0;
-        float bottomCrossing = 0.0;
-        vec2 topEndUv = uv;
-        vec2 bottomEndUv = uv;
-        bool topDone = false;
-        bool bottomDone = false;
-        for (int i = 1; i <= 16; ++i) {
-            float distance = float(i);
-            if (!topDone) {
-                topEndUv = uv - vec2(0.0, distance * texel.y);
-                vec2 sampleEdge = smaaEdges(topEndUv);
-                topDistance = distance;
-                if (sampleEdge.x < 0.5 || sampleEdge.y > 0.0) {
-                    topDone = true;
-                }
-            }
-            if (!bottomDone) {
-                bottomEndUv = uv + vec2(0.0, distance * texel.y);
-                vec2 sampleEdge = smaaEdges(bottomEndUv);
-                bottomDistance = distance;
-                if (sampleEdge.x < 0.5 || sampleEdge.y > 0.0) {
-                    bottomDone = true;
-                }
-            }
-        }
-        vec2 crossingOffset = vec2(-0.25 * texel.x, 0.0);
-        topCrossing = smaaEdges(topEndUv + crossingOffset).y;
-        bottomCrossing = smaaEdges(bottomEndUv + crossingOffset).y;
-        weights.ba = smaaArea(vec2(topDistance, bottomDistance),
-                              topCrossing, bottomCrossing);
-        float cornerAttenuation = 1.0
-            - 0.25 * max(topCrossing, bottomCrossing);
-        weights.ba *= cornerAttenuation;
+        vec3 coords;
+        coords.y = smaaSearchYUp(offset1.xy, offset2.z);
+        coords.x = offset0.x;
+        float crossing0 = smaaEdges(coords.xy).y;
+        coords.z = smaaSearchYDown(offset1.zw, offset2.w);
+        vec2 distance = abs(round(
+            smaaMetrics.ww * coords.yz - pixelCoord.yy));
+        float crossing1 = smaaEdgesOffset(
+            coords.xz, vec2(0.0, 1.0)).y;
+        weights.ba = smaaArea(sqrt(distance), crossing0, crossing1);
+        coords.x = uv.x;
+        weights.ba = smaaVerticalCorner(
+            weights.ba, vec4(coords.x, coords.y, coords.x, coords.z),
+            distance);
     }
 
     gl_FragColor = weights;
@@ -232,7 +416,7 @@ void main()
     a.x = texture2D(blendTex,
         smaaClampUv(uv + vec2(texel.x, 0.0))).a;
     a.y = texture2D(blendTex,
-        smaaClampUv(uv - vec2(0.0, texel.y))).g;
+        smaaClampUv(uv + vec2(0.0, texel.y))).g;
     a.z = centerWeights.b;
     a.w = centerWeights.r;
 
@@ -250,8 +434,8 @@ void main()
         coord1 = smaaClampUv(uv - vec2(a.z * texel.x, 0.0));
         blendWeight = a.xz;
     } else {
-        coord0 = smaaClampUv(uv - vec2(0.0, a.y * texel.y));
-        coord1 = smaaClampUv(uv + vec2(0.0, a.w * texel.y));
+        coord0 = smaaClampUv(uv + vec2(0.0, a.y * texel.y));
+        coord1 = smaaClampUv(uv - vec2(0.0, a.w * texel.y));
         blendWeight = a.yw;
     }
     blendWeight /= max(dot(blendWeight, vec2(1.0, 1.0)), 0.00001);
@@ -260,113 +444,9 @@ void main()
 }
 )";
 
-constexpr const char* kSmaaEdgeCacheKey = "smaa1x_luma_edge_v1";
-constexpr const char* kSmaaWeightCacheKey = "smaa1x_ortho_weights_v2";
-constexpr const char* kSmaaNeighborhoodCacheKey = "smaa1x_neighborhood_v1";
-
-struct Vec2 {
-    float x = 0.0f;
-    float y = 0.0f;
-};
-
-Vec2 operator+(Vec2 a, Vec2 b) { return {a.x + b.x, a.y + b.y}; }
-Vec2 operator*(Vec2 a, float s) { return {a.x * s, a.y * s}; }
-
-Vec2 lerp(Vec2 a, Vec2 b, float t)
-{
-    return a + (b + a * -1.0f) * t;
-}
-
-Vec2 lineArea(Vec2 p1, Vec2 p2, int pixel)
-{
-    const Vec2 d{p2.x - p1.x, p2.y - p1.y};
-    const float x1 = static_cast<float>(pixel);
-    const float x2 = x1 + 1.0f;
-    const float y1 = p1.y + d.y * (x1 - p1.x) / d.x;
-    const float y2 = p1.y + d.y * (x2 - p1.x) / d.x;
-    const bool inside = (x1 >= p1.x && x1 < p2.x)
-        || (x2 > p1.x && x2 <= p2.x);
-    if (!inside) {
-        return {};
-    }
-
-    const bool trapezoid = std::signbit(y1) == std::signbit(y2)
-        || std::abs(y1) < 0.0001f || std::abs(y2) < 0.0001f;
-    if (trapezoid) {
-        const float area = 0.5f * (y1 + y2);
-        return area < 0.0f ? Vec2{std::abs(area), 0.0f}
-                           : Vec2{0.0f, std::abs(area)};
-    }
-
-    const float crossing = -p1.y * d.x / d.y + p1.x;
-    float integral = 0.0f;
-    const float fraction = std::modf(crossing, &integral);
-    const float a1 = crossing > p1.x ? y1 * fraction * 0.5f : 0.0f;
-    const float a2 = crossing < p2.x
-        ? y2 * (1.0f - fraction) * 0.5f : 0.0f;
-    const float dominant = std::abs(a1) > std::abs(a2) ? a1 : -a2;
-    return dominant < 0.0f
-        ? Vec2{std::abs(a1), std::abs(a2)}
-        : Vec2{std::abs(a2), std::abs(a1)};
-}
-
-std::pair<Vec2, Vec2> smoothArea(float distance, Vec2 a1, Vec2 a2)
-{
-    const Vec2 b1{0.5f * std::sqrt(2.0f * a1.x),
-                  0.5f * std::sqrt(2.0f * a1.y)};
-    const Vec2 b2{0.5f * std::sqrt(2.0f * a2.x),
-                  0.5f * std::sqrt(2.0f * a2.y)};
-    const float t = std::clamp(distance / 32.0f, 0.0f, 1.0f);
-    return {lerp(b1, a1, t), lerp(b2, a2, t)};
-}
-
-Vec2 areaOrtho(uint8_t pattern, int left, int right)
-{
-    const float distance = static_cast<float>(left + right + 1);
-    constexpr float upper = 0.5f;
-    constexpr float lower = -0.5f;
-    const Vec2 leftLower{0.0f, lower};
-    const Vec2 leftUpper{0.0f, upper};
-    const Vec2 middle{distance * 0.5f, 0.0f};
-    const Vec2 rightLower{distance, lower};
-    const Vec2 rightUpper{distance, upper};
-
-    switch (pattern) {
-    case 0: return {};
-    case 1: return left <= right ? lineArea(leftLower, middle, left) : Vec2{};
-    case 2: return left >= right ? lineArea(middle, rightLower, left) : Vec2{};
-    case 3: {
-        const Vec2 a1 = lineArea(leftLower, middle, left);
-        const Vec2 a2 = lineArea(middle, rightLower, left);
-        const auto smoothed = smoothArea(distance, a1, a2);
-        return smoothed.first + smoothed.second;
-    }
-    case 4: return left <= right ? lineArea(leftUpper, middle, left) : Vec2{};
-    case 5: return {};
-    case 6: return lineArea(leftUpper, rightLower, left);
-    case 7: return lineArea(leftUpper, rightLower, left);
-    case 8: return left >= right ? lineArea(middle, rightUpper, left) : Vec2{};
-    case 9: return lineArea(leftLower, rightUpper, left);
-    case 10: return {};
-    case 11: return lineArea(leftLower, rightUpper, left);
-    case 12: {
-        const Vec2 a1 = lineArea(leftUpper, middle, left);
-        const Vec2 a2 = lineArea(middle, rightUpper, left);
-        const auto smoothed = smoothArea(distance, a1, a2);
-        return smoothed.first + smoothed.second;
-    }
-    case 13: return lineArea(leftLower, rightUpper, left);
-    case 14: return lineArea(leftUpper, rightLower, left);
-    case 15: return {};
-    default: return {};
-    }
-}
-
-uint8_t toAreaByte(float value)
-{
-    value = std::clamp(value, 0.0f, 1.0f);
-    return static_cast<uint8_t>(value * 255.0f);
-}
+constexpr const char* kSmaaEdgeCacheKey = "smaa1x_color_edge_v2";
+constexpr const char* kSmaaWeightCacheKey = "smaa1x_high_weights_v3";
+constexpr const char* kSmaaNeighborhoodCacheKey = "smaa1x_neighborhood_v2";
 
 } // namespace
 
@@ -383,35 +463,6 @@ const char* smaaNeighborhoodFragmentScForTests() noexcept
     return kSmaaNeighborhoodFragmentSc;
 }
 
-std::vector<uint8_t> generateSmaaAreaTextureRg8()
-{
-    constexpr std::array<std::array<uint8_t, 2>, 16> edgeLayout = {{
-        {{0, 0}}, {{3, 0}}, {{0, 3}}, {{3, 3}},
-        {{1, 0}}, {{4, 0}}, {{1, 3}}, {{4, 3}},
-        {{0, 1}}, {{3, 1}}, {{0, 4}}, {{3, 4}},
-        {{1, 1}}, {{4, 1}}, {{1, 4}}, {{4, 4}},
-    }};
-    constexpr uint16_t size = SMAAPass::kAreaTextureSize;
-    constexpr uint16_t blockSize = 16;
-    std::vector<uint8_t> pixels(size * size * 2u, 0u);
-    for (uint8_t pattern = 0; pattern < edgeLayout.size(); ++pattern) {
-        for (uint16_t y = 0; y < blockSize; ++y) {
-            for (uint16_t x = 0; x < blockSize; ++x) {
-                const Vec2 area = areaOrtho(pattern,
-                                            static_cast<int>(x * x),
-                                            static_cast<int>(y * y));
-                const uint16_t dstX = edgeLayout[pattern][0] * blockSize + x;
-                const uint16_t dstY = edgeLayout[pattern][1] * blockSize + y;
-                const size_t index =
-                    (static_cast<size_t>(dstY) * size + dstX) * 2u;
-                pixels[index + 0u] = toAreaByte(area.x);
-                pixels[index + 1u] = toAreaByte(area.y);
-            }
-        }
-    }
-    return pixels;
-}
-
 bool SMAAPass::isReady() const noexcept
 {
     return _geometry.isReady()
@@ -419,11 +470,13 @@ bool SMAAPass::isReady() const noexcept
         && _weightProgram.isValid()
         && _neighborhoodProgram.isValid()
         && BGFXAdapter::isValid(_areaTexture)
+        && BGFXAdapter::isValid(_searchTexture)
         && _edgeInputColor != ayt::shader::InvalidBinding
         && _edgeMetrics != ayt::shader::InvalidBinding
         && _edgeParams != ayt::shader::InvalidBinding
         && _weightEdges != ayt::shader::InvalidBinding
         && _weightArea != ayt::shader::InvalidBinding
+        && _weightSearch != ayt::shader::InvalidBinding
         && _weightMetrics != ayt::shader::InvalidBinding
         && _neighborhoodColor != ayt::shader::InvalidBinding
         && _neighborhoodBlend != ayt::shader::InvalidBinding
@@ -464,8 +517,8 @@ uint32_t SMAAPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    if (!_geometry.ensure(adapter) || !ensureAreaTexture(adapter)) {
-        rateLimitedEarlyReturn("SMAAPass", "geometry/AreaTex unavailable");
+    if (!_geometry.ensure(adapter) || !ensureLookupTextures(adapter)) {
+        rateLimitedEarlyReturn("SMAAPass", "geometry/lookup textures unavailable");
         return 0;
     }
     ensurePrograms(ctx.pool);
@@ -505,6 +558,7 @@ uint32_t SMAAPass::execute(PassExecContext& ctx)
     _geometry.bind(adapter);
     _weightProgram.setTexture(0, _weightEdges, toShaderTexture(edgeTexture));
     _weightProgram.setTexture(1, _weightArea, toShaderTexture(_areaTexture));
+    _weightProgram.setTexture(2, _weightSearch, toShaderTexture(_searchTexture));
     _weightProgram.setUniform(_weightMetrics, metrics, sizeof(metrics));
     adapter.setStateDepthTestAlways();
     draw.viewId = kBlendWeightViewId;
@@ -529,34 +583,45 @@ uint32_t SMAAPass::execute(PassExecContext& ctx)
                                         FgResourceId::SmaaColor);
     if (!_firstDispatchLogged) {
         std::fprintf(stderr,
-                     "[SMAAPass] first SMAA 1x dispatch views=%u/%u/%u "
-                     "size=%ux%u threshold=%.2f search=%u\n",
+                     "[SMAAPass] first SMAA 1x High dispatch views=%u/%u/%u "
+                     "size=%ux%u threshold=%.2f search=%u diag=%u\n",
                      static_cast<unsigned>(kEdgeViewId),
                      static_cast<unsigned>(kBlendWeightViewId),
                      static_cast<unsigned>(kNeighborhoodViewId),
                      static_cast<unsigned>(ctx.viewportWidth),
                      static_cast<unsigned>(ctx.viewportHeight),
                      static_cast<double>(kEdgeThreshold),
-                     static_cast<unsigned>(kMaxSearchSteps));
+                     static_cast<unsigned>(kMaxSearchSteps),
+                     static_cast<unsigned>(kMaxDiagonalSearchSteps));
         _firstDispatchLogged = true;
     }
     return 3;
 }
 
-bool SMAAPass::ensureAreaTexture(BGFXAdapter& adapter)
+bool SMAAPass::ensureLookupTextures(BGFXAdapter& adapter)
 {
-    if (BGFXAdapter::isValid(_areaTexture)) {
-        return true;
+    if (!BGFXAdapter::isValid(_areaTexture)) {
+        const std::vector<uint8_t> pixels = generateSmaaAreaTextureRg8();
+        _areaTexture = adapter.createTexture2DFromData(
+            kAreaTextureWidth,
+            kAreaTextureHeight,
+            bgfx::TextureFormat::RG8,
+            pixels.data(),
+            static_cast<uint32_t>(pixels.size()),
+            BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP);
     }
-    const std::vector<uint8_t> pixels = generateSmaaAreaTextureRg8();
-    _areaTexture = adapter.createTexture2DFromData(
-        kAreaTextureSize,
-        kAreaTextureSize,
-        bgfx::TextureFormat::RG8,
-        pixels.data(),
-        static_cast<uint32_t>(pixels.size()),
-        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP);
-    return BGFXAdapter::isValid(_areaTexture);
+    if (!BGFXAdapter::isValid(_searchTexture)) {
+        const std::vector<uint8_t> pixels = generateSmaaSearchTextureR8();
+        _searchTexture = adapter.createTexture2DFromData(
+            kSearchTextureWidth,
+            kSearchTextureHeight,
+            bgfx::TextureFormat::R8,
+            pixels.data(),
+            static_cast<uint32_t>(pixels.size()),
+            BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP);
+    }
+    return BGFXAdapter::isValid(_areaTexture)
+        && BGFXAdapter::isValid(_searchTexture);
 }
 
 void SMAAPass::ensurePrograms(shader::ShaderResourcePool& pool)
@@ -596,6 +661,7 @@ void SMAAPass::ensurePrograms(shader::ShaderResourcePool& pool)
     const ayt::shader::BindingId edgeParams = uniformBinding(edge, "smaaParams");
     const ayt::shader::BindingId weightEdges = textureBinding(weight, "edgesTex");
     const ayt::shader::BindingId weightArea = textureBinding(weight, "areaTex");
+    const ayt::shader::BindingId weightSearch = textureBinding(weight, "searchTex");
     const ayt::shader::BindingId weightMetrics = uniformBinding(weight, "smaaMetrics");
     const ayt::shader::BindingId neighborhoodColor =
         textureBinding(neighborhood, "inputColor");
@@ -610,6 +676,7 @@ void SMAAPass::ensurePrograms(shader::ShaderResourcePool& pool)
         || edgeParams == ayt::shader::InvalidBinding
         || weightEdges == ayt::shader::InvalidBinding
         || weightArea == ayt::shader::InvalidBinding
+        || weightSearch == ayt::shader::InvalidBinding
         || weightMetrics == ayt::shader::InvalidBinding
         || neighborhoodColor == ayt::shader::InvalidBinding
         || neighborhoodBlend == ayt::shader::InvalidBinding
@@ -634,6 +701,7 @@ void SMAAPass::ensurePrograms(shader::ShaderResourcePool& pool)
     _edgeParams = edgeParams;
     _weightEdges = weightEdges;
     _weightArea = weightArea;
+    _weightSearch = weightSearch;
     _weightMetrics = weightMetrics;
     _neighborhoodColor = neighborhoodColor;
     _neighborhoodBlend = neighborhoodBlend;
@@ -647,7 +715,11 @@ void SMAAPass::destroyResources(BGFXAdapter& adapter)
     if (BGFXAdapter::isValid(_areaTexture)) {
         adapter.destroy(_areaTexture);
     }
+    if (BGFXAdapter::isValid(_searchTexture)) {
+        adapter.destroy(_searchTexture);
+    }
     _areaTexture = BGFX_INVALID_HANDLE;
+    _searchTexture = BGFX_INVALID_HANDLE;
     _edgeProgram.reset();
     _weightProgram.reset();
     _neighborhoodProgram.reset();
@@ -656,6 +728,7 @@ void SMAAPass::destroyResources(BGFXAdapter& adapter)
     _edgeParams = ayt::shader::InvalidBinding;
     _weightEdges = ayt::shader::InvalidBinding;
     _weightArea = ayt::shader::InvalidBinding;
+    _weightSearch = ayt::shader::InvalidBinding;
     _weightMetrics = ayt::shader::InvalidBinding;
     _neighborhoodColor = ayt::shader::InvalidBinding;
     _neighborhoodBlend = ayt::shader::InvalidBinding;

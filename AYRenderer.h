@@ -329,6 +329,12 @@ public:
     void setSmaaEnabled(bool enabled);
     bool smaaEnabled() const noexcept;
 
+    // Deferred temporal AA. Uses camera jitter plus persistent history and
+    // GBuffer world-position reprojection. Defaults disabled. Enabling it
+    // disables both spatial AA alternatives; Forward pipelines ignore it.
+    void setTaaEnabled(bool enabled);
+    bool taaEnabled() const noexcept;
+
     // Display-referred 32^3 LUT grading after FXAA. The LUT is represented as
     // a portable 2D strip so D3D11/D3D12 share one shader/resource path.
     // Defaults disabled, strength 0.75, preset Warm.

@@ -13,10 +13,10 @@
 namespace ayt::render::detail
 {
 
-// Display-referred SMAA 1x. The pass owns the canonical three stages:
-// color/luma edge detection, orthogonal pattern blend-weight calculation, and
-// neighborhood blending. The Area lookup is generated from the reference
-// algorithm at startup, so the renderer does not depend on loose texture files.
+// Display-referred SMAA 1x High. The pass owns the canonical three stages:
+// color/luma edge detection, orthogonal + diagonal pattern blend-weight
+// calculation, and neighborhood blending. Full Area/Search lookups are
+// generated from the reference algorithms, avoiding loose texture files.
 class SMAAPass final : public RenderPass {
 public:
     // Reclaimed from the retained-UI offscreen range. RenderViewOrder places
@@ -26,12 +26,16 @@ public:
     static constexpr uint8_t kBlendWeightViewId = 248;
     static constexpr uint8_t kNeighborhoodViewId = 249;
 
-    static constexpr uint16_t kAreaTextureSize = 80;
+    static constexpr uint16_t kAreaTextureWidth = 160;
+    static constexpr uint16_t kAreaTextureHeight = 560;
+    static constexpr uint16_t kSearchTextureWidth = 64;
+    static constexpr uint16_t kSearchTextureHeight = 16;
     // Quarter-pixel endpoint decoding depends on bilinear interpolation.
     static constexpr bool kIntermediatePointSampled = false;
     static constexpr float kEdgeThreshold = 0.10f;
     static constexpr float kLocalContrastAdaptation = 2.0f;
     static constexpr uint8_t kMaxSearchSteps = 16;
+    static constexpr uint8_t kMaxDiagonalSearchSteps = 8;
     static constexpr float kCornerRounding = 0.25f;
 
     std::string_view name() const override { return "SMAA"; }
@@ -41,7 +45,7 @@ public:
     void destroyResources(BGFXAdapter& adapter);
 
 private:
-    bool ensureAreaTexture(BGFXAdapter& adapter);
+    bool ensureLookupTextures(BGFXAdapter& adapter);
     void ensurePrograms(shader::ShaderResourcePool& pool);
 
     FullscreenPassGeometry _geometry;
@@ -49,6 +53,7 @@ private:
     ayt::shader::ShaderResource _weightProgram;
     ayt::shader::ShaderResource _neighborhoodProgram;
     bgfx::TextureHandle _areaTexture = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle _searchTexture = BGFX_INVALID_HANDLE;
 
     ayt::shader::BindingId _edgeInputColor = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _edgeMetrics = ayt::shader::InvalidBinding;
@@ -56,6 +61,7 @@ private:
 
     ayt::shader::BindingId _weightEdges = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _weightArea = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _weightSearch = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _weightMetrics = ayt::shader::InvalidBinding;
 
     ayt::shader::BindingId _neighborhoodColor = ayt::shader::InvalidBinding;
@@ -75,5 +81,6 @@ const char* smaaEdgeFragmentScForTests() noexcept;
 const char* smaaWeightFragmentScForTests() noexcept;
 const char* smaaNeighborhoodFragmentScForTests() noexcept;
 std::vector<uint8_t> generateSmaaAreaTextureRg8();
+std::vector<uint8_t> generateSmaaSearchTextureR8();
 
 } // namespace ayt::render::detail
