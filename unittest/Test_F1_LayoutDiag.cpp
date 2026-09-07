@@ -19,9 +19,9 @@
 
 #include "detail/FrameContext.h"
 
-#include <AYApplication/AppEventHost.h>
 #include <AYEventSystem/EventBus.h>
 #include <AYEventSystem/Events/WindowEvents.h>
+#include <AYEventSystem/SubscriptionScope.h>
 
 #include <cstdio>
 #include <iostream>

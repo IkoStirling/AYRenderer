@@ -25,9 +25,9 @@
 #include "AYRenderer/RendererSubSystem.h"
 #include "AYTest.h"
 
-#include <AYApplication/AppEventHost.h>
 #include <AYEventSystem/EventBus.h>
 #include <AYEventSystem/Events/WindowEvents.h>
+#include <AYEventSystem/SubscriptionScope.h>
 
 #include <atomic>
 #include <utility>
@@ -111,7 +111,7 @@ TEST_CASE(Bridge_MultipleResizeEvents_AllForwarded) {
     std::atomic<int> deliveredCount{0};
     std::atomic<int> lastWidth{0};
     std::atomic<int> lastHeight{0};
-    ayt::app::EventBusHostScope probeScope;
+    ayt::event::SubscriptionScope probeScope;
     // Use a separate probe listener on the SAME event to verify multiple
     // posts each fire. The bridge listener runs first (or interleaved), but
     // both are dispatched per pump.
@@ -140,7 +140,7 @@ TEST_CASE(Bridge_MultipleResizeEvents_AllForwarded) {
 }
 
 TEST_CASE(Bridge_Shutdown_DisconnectsHostScope) {
-    // Phase 4 lesson applied: shutdown() must drain the EventBusHostScope
+    // Phase 4 lesson applied: shutdown() must drain the SubscriptionScope
     // exactly once and leave the bus in baseline state. Idempotent re-shutdown
     // must not double-unsubscribe (which would crash on stale ConnectionIds).
     auto& bus = ayt::event::EventBus::instance();

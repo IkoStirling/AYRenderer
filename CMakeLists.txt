@@ -32,10 +32,6 @@ target_include_directories(AYRenderer PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
-    # INT-04 (2026-07-20): AYApplication/AppEventHost.h (EventBusHostScope) + AYEventSystem/Events/AYEventSystem/Events/AYEventSystem/Events/WindowEvents.h.
-    # PUBLIC because AYRenderer/RendererSubSystem.h (in include/) references these types,
-    # so consumers of AYRenderer (e.g. AYEntity) need the include path.
-    ${CMAKE_CURRENT_SOURCE_DIR}/../AYApplication/interface
 )
 
 target_include_directories(AYRenderer PRIVATE
@@ -51,6 +47,7 @@ target_link_libraries(AYRenderer PUBLIC
     AYShader
     AYMath
     AYIO
+    AYEventSystem
     AYGameLoop
     AYUI
 )
@@ -58,10 +55,6 @@ target_link_libraries(AYRenderer PUBLIC
 target_link_libraries(AYRenderer PRIVATE
     AYResource
     AYFont
-    # INT-04 (2026-07-20): EventBusHostScope (Renderer -> Bus bridge).
-    # AYApplication transitively pulls AYEventSystem; the type is only
-    # referenced inside RendererSubSystem's TU so PRIVATE is sufficient.
-    AYApplication
     bgfx::bgfx
     bgfx::bimg
     bgfx::bimg_decode

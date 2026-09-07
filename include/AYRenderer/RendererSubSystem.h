@@ -4,13 +4,12 @@
 
 #include <AYGameLoop.h>
 
-// INT-04 (2026-07-20): Renderer -> EventBus bridge. EventBusHostScope is the
-// host-side RAII container from AYApplication that owns the WindowResize
-// subscription. RendererSubSystem is a pure consumer of WindowResizeEvent
+// Renderer owns its WindowResize listener through the event module's explicit
+// subscription lifetime container. RendererSubSystem is a pure consumer of WindowResizeEvent
 // (DeviceSubSystem produces it via INT-03); the handler calls
 // Renderer::resize(width, height) which wraps bgfx::reset.
-#include <AYApplication/AppEventHost.h>
 #include <AYEventSystem/Events/WindowEvents.h>
+#include <AYEventSystem/SubscriptionScope.h>
 
 #include <atomic>
 #include <cstddef>
@@ -155,12 +154,12 @@ private:
     ayt::math::FVector3 _camUp{0.0f, 1.0f, 0.0f};
     float               _camFovYDegrees = 50.0f;
 
-    // INT-04: host-side EventBus host scope (Phase 4 lesson applied). The
+    // INT-04: EventBus subscription scope (Phase 4 lesson applied). The
     // renderer is a pure consumer today — the scope owns the WindowResize
     // subscription registered in initialize() and released in shutdown().
     // Dtor is a no-op so a forgotten disconnect() cannot re-open the
     // shutdown-time SIGSEGV path documented in [[ay-event-system]] §Phase 4.
-    ayt::app::EventBusHostScope _events;
+    ayt::event::SubscriptionScope _events;
 };
 
 } // namespace ayt::render

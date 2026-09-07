@@ -286,7 +286,7 @@ Windows Debug 当前全量基线为 `3334 / 3334` 条断言通过。
 ## 依赖
 
 - 公开：AYShader、AYMath、AYIO、AYGameLoop、AYUI
-- 内部：AYResource、AYFont、AYApplication
+- 内部：AYResource、AYFont、AYEventSystem
 - bgfx、bimg（仅实现层；公开头不泄漏 bgfx 类型）
 
 ## 目录（当前）
