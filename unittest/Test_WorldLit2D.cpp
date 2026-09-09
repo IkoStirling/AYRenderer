@@ -62,6 +62,8 @@ TEST_CASE(render_domain_and_alpha_mode_values_are_append_only)
 {
     using ayt::render::Material2DAlphaMode;
     using ayt::render::RenderDomain2D;
+    using ayt::render::TilemapSamplingQuality;
+    using ayt::render::UvMapping2D;
 
     CHECK(static_cast<uint8_t>(RenderDomain2D::SceneOverlay) == 0u);
     CHECK(static_cast<uint8_t>(RenderDomain2D::WorldLit) == 1u);
@@ -70,6 +72,14 @@ TEST_CASE(render_domain_and_alpha_mode_values_are_append_only)
     CHECK(static_cast<uint8_t>(Material2DAlphaMode::Cutout) == 1u);
     CHECK(static_cast<uint8_t>(Material2DAlphaMode::Blend) == 2u);
     CHECK(static_cast<uint8_t>(Material2DAlphaMode::Count) == 3u);
+    CHECK(static_cast<uint8_t>(UvMapping2D::SourceRectBottomLeft) == 0u);
+    CHECK(static_cast<uint8_t>(UvMapping2D::BakedAtlas) == 1u);
+    CHECK(static_cast<uint8_t>(UvMapping2D::Count) == 2u);
+    CHECK(static_cast<uint8_t>(TilemapSamplingQuality::Nearest) == 0u);
+    CHECK(static_cast<uint8_t>(TilemapSamplingQuality::Linear) == 1u);
+    CHECK(static_cast<uint8_t>(TilemapSamplingQuality::Tap4) == 2u);
+    CHECK(static_cast<uint8_t>(TilemapSamplingQuality::Tap9) == 3u);
+    CHECK(static_cast<uint8_t>(TilemapSamplingQuality::Count) == 4u);
 }
 
 TEST_CASE(material2d_defaults_are_safe_for_a_cutout_sprite)
@@ -94,6 +104,11 @@ TEST_CASE(payload_defaults_to_overlay_and_routes_exclusively)
     ayt::render::DrawPayload2D overlayPayload;
     ayt::render::DrawPayload2D worldPayload;
     worldPayload.renderDomain = ayt::render::RenderDomain2D::WorldLit;
+
+    CHECK(overlayPayload.uvMapping
+          == ayt::render::UvMapping2D::SourceRectBottomLeft);
+    CHECK(overlayPayload.samplingQuality
+          == ayt::render::TilemapSamplingQuality::Linear);
 
     ayt::render::DrawItem overlay;
     overlay.payload = &overlayPayload;
@@ -218,6 +233,11 @@ TEST_CASE(world_lit_2d_source_pins_mrt_cutout_and_normal_contract)
     CHECK(source.find("mix(1.0, -1.0, flip.x)") != std::string::npos);
     CHECK(source.find("normalYSign.x * mix(1.0, -1.0, flip.y)")
           != std::string::npos);
+    CHECK(source.find("property uvMapping") != std::string::npos);
+    CHECK(source.find("property samplingQuality") != std::string::npos);
+    CHECK(source.find("mix(sourceRectUv, uv") != std::string::npos);
+    CHECK(source.find("samplingQuality.x > 1.5") != std::string::npos);
+    CHECK(source.find("samplingQuality.x > 2.5") != std::string::npos);
 }
 
 TEST_CASE(uninitialized_renderer_rejects_material2d_without_dereference)

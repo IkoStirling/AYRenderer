@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AYRenderer/RenderTypes.h"
+
 namespace ayt::render
 {
 
@@ -136,13 +138,6 @@ material TilemapChunk9Tap {
     }
 }
 )";
-
-enum class TilemapSamplingQuality : unsigned char {
-    Nearest = 0,
-    Linear = 1,
-    Tap4 = 2,
-    Tap9 = 3,
-};
 
 [[nodiscard]] inline constexpr const char* tilemapChunkShaderSource(
     TilemapSamplingQuality quality) noexcept

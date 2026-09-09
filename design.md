@@ -1,5 +1,14 @@
 # AYRenderer Design
 
+> **2026-09-09 — WorldLit2D 第二刀（Tilemap）**：Tilemap chunk 可沿现有
+> GBuffer 进入延迟光照，并通过 `UvMapping2D` 明确区分 Sprite 的 source-rect/
+> bottom-left UV 与 chunk mesh 已烘焙的 atlas UV。`DrawPayload2D` 同时携带
+> sampling quality；WorldLit albedo 保留 Nearest、Linear、4-tap、9-tap，
+> normal/roughness/emissive 在中心 texel 采样，alpha cutout 使用过滤后的
+> albedo alpha。默认 Overlay 路径与 view 246 行为不变。当前仍未覆盖 Blend、
+> 2D 阴影、逐物体 Motion Vector，以及 3D 主相机下的 Tilemap chunk frustum
+> streaming；后者当前 fail-open，避免错误复用 Ortho overlay 剔除导致缺块。
+
 > **2026-09-09 — WorldLit2D 第一刀**：没有新增独立 Pass，而是在现有唯一
 > GBuffer producer 内加入 Position+UV 专用的 2D geometry substage。新增
 > `RenderDomain2D` 与 `Material2DDesc`；默认 `SceneOverlay` 保持原 view 246、

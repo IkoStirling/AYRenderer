@@ -39,6 +39,14 @@ inline void upload2DDrawUniforms(shader::ShaderResource& shader,
     const float atlasTexel[4] = {
         payload.atlasTexelSize.x, payload.atlasTexelSize.y, 0.0f, 0.0f,
     };
+    const float uvMapping[4] = {
+        static_cast<float>(static_cast<uint8_t>(payload.uvMapping)),
+        0.0f, 0.0f, 0.0f,
+    };
+    const float samplingQuality[4] = {
+        static_cast<float>(static_cast<uint8_t>(payload.samplingQuality)),
+        0.0f, 0.0f, 0.0f,
+    };
 
     const shader::BindingId srcRectBinding = shader.getUniformBinding("srcRect");
     if (srcRectBinding != shader::InvalidBinding) {
@@ -56,6 +64,17 @@ inline void upload2DDrawUniforms(shader::ShaderResource& shader,
         shader.getUniformBinding("atlasTexel");
     if (atlasTexelBinding != shader::InvalidBinding) {
         shader.setUniform(atlasTexelBinding, atlasTexel, sizeof(atlasTexel));
+    }
+    const shader::BindingId uvMappingBinding =
+        shader.getUniformBinding("uvMapping");
+    if (uvMappingBinding != shader::InvalidBinding) {
+        shader.setUniform(uvMappingBinding, uvMapping, sizeof(uvMapping));
+    }
+    const shader::BindingId samplingQualityBinding =
+        shader.getUniformBinding("samplingQuality");
+    if (samplingQualityBinding != shader::InvalidBinding) {
+        shader.setUniform(samplingQualityBinding, samplingQuality,
+                          sizeof(samplingQuality));
     }
 }
 

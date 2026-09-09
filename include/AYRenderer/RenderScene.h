@@ -37,7 +37,9 @@ struct DrawPayload2D {
     // alpha-blended/no-depth lane; WorldLit is consumed by GBuffer using the
     // main world camera and is excluded from the overlay pass.
     RenderDomain2D renderDomain = RenderDomain2D::SceneOverlay;
-    uint8_t reservedDomain[3] = {};
+    UvMapping2D uvMapping = UvMapping2D::SourceRectBottomLeft;
+    TilemapSamplingQuality samplingQuality = TilemapSamplingQuality::Linear;
+    uint8_t reservedDomain = 0;
 };
 
 struct DrawItem {

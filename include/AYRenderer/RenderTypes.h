@@ -61,6 +61,25 @@ enum class Material2DAlphaMode : uint8_t {
     Count,
 };
 
+// How DrawPayload2D vertex UVs reach the surface samplers. Sprites author a
+// source rectangle and use the historical bottom-left atlas convention;
+// chunked tilemaps already bake final atlas UVs into their mesh vertices.
+enum class UvMapping2D : uint8_t {
+    SourceRectBottomLeft = 0,
+    BakedAtlas           = 1,
+    Count,
+};
+
+// Shared between the overlay tilemap shaders and WorldLit2D GBuffer draws.
+// Keep values stable because TilemapComponent serializes them as integers.
+enum class TilemapSamplingQuality : uint8_t {
+    Nearest = 0,
+    Linear  = 1,
+    Tap4    = 2,
+    Tap9    = 3,
+    Count,
+};
+
 constexpr bool isTransparentBlendMode(BlendMode mode) noexcept
 {
     return mode != BlendMode::Opaque;

@@ -130,7 +130,7 @@ material GBufferFill {
 static constexpr const char* kGBufferCacheKey =
     "gbuffer_fill_v16_model_coverage_split";
 static constexpr const char* kWorldLit2DGBufferCacheKey =
-    "gbuffer_world_lit_2d_cutout_v1";
+    "gbuffer_world_lit_2d_cutout_v2_tilemap_uv";
 static constexpr const char* kGBufferAlphaCutoutCacheKey =
     "gbuffer_fill_v16_alpha_model_coverage_split";
 
@@ -155,6 +155,9 @@ material WorldLit2DGBufferFill {
     property normalYSign = vec4(1.0, 0.0, 0.0, 0.0)
     property srcRect = vec4(0.0, 0.0, 1.0, 1.0)
     property flip = vec4(0.0, 0.0, 0.0, 0.0)
+    property uvMapping = vec4(0.0, 0.0, 0.0, 0.0)
+    property samplingQuality = vec4(1.0, 0.0, 0.0, 0.0)
+    uniform vec4 atlasTexel
     property alphaCutoff = vec4(0.0, 0.0, 0.0, 0.0)
     uniform mat4 u_normalMatrix
     uniform vec4 cameraPos
@@ -170,9 +173,11 @@ material WorldLit2DGBufferFill {
         let sourceU = mix(uv.x, 1.0 - uv.x, flip.x)
         let sourceVBase = 1.0 - uv.y
         let sourceV = mix(sourceVBase, 1.0 - sourceVBase, flip.y)
-        vUv = vec2(
+        let sourceRectUv = vec2(
             mix(srcRect.x, srcRect.z, sourceU),
             mix(srcRect.y, srcRect.w, sourceV))
+        vUv = mix(sourceRectUv, uv,
+                  max(0.0, min(1.0, uvMapping.x)))
         return modelViewProjection * vec4(pos, 1.0)
     }
     fragment {
@@ -184,14 +189,42 @@ material WorldLit2DGBufferFill {
         out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferWorldPosition : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferMaterial : color = vec4(0.0, 0.0, 0.0, 0.0)
-        let albedo = sample(albedoMap, vUv) * baseColor * tint
+        let nearestUv = vec2(
+            (floor(vUv.x / max(atlasTexel.x, 0.000001)) + 0.5)
+                * atlasTexel.x,
+            (floor(vUv.y / max(atlasTexel.y, 0.000001)) + 0.5)
+                * atlasTexel.y)
+        let sampleUv = mix(nearestUv, vUv,
+                           step(0.5, samplingQuality.x))
+        let albedo = sample(albedoMap, sampleUv) * baseColor * tint
+        if (samplingQuality.x > 1.5) {
+            let d4 = atlasTexel.xy * 0.25
+            albedo = (sample(albedoMap, vUv + vec2(-d4.x, -d4.y))
+                    + sample(albedoMap, vUv + vec2( d4.x, -d4.y))
+                    + sample(albedoMap, vUv + vec2(-d4.x,  d4.y))
+                    + sample(albedoMap, vUv + vec2( d4.x,  d4.y)))
+                    * 0.25 * baseColor * tint
+        }
+        if (samplingQuality.x > 2.5) {
+            let d9 = atlasTexel.xy * 0.3333333
+            albedo = (sample(albedoMap, vUv + vec2(-d9.x, -d9.y))
+                    + sample(albedoMap, vUv + vec2( 0.0,  -d9.y))
+                    + sample(albedoMap, vUv + vec2( d9.x, -d9.y))
+                    + sample(albedoMap, vUv + vec2(-d9.x,  0.0))
+                    + sample(albedoMap, vUv)
+                    + sample(albedoMap, vUv + vec2( d9.x,  0.0))
+                    + sample(albedoMap, vUv + vec2(-d9.x,  d9.y))
+                    + sample(albedoMap, vUv + vec2( 0.0,   d9.y))
+                    + sample(albedoMap, vUv + vec2( d9.x,  d9.y)))
+                    * 0.1111111 * baseColor * tint
+        }
         if (albedo.a < alphaCutoff.x) { discard }
         let rawN = normalize(worldNormal)
         let tangentSeed = worldTangent.xyz - rawN * dot(worldTangent.xyz, rawN)
                          + vec3(0.000001, 0.0, 0.0)
         let T = normalize(tangentSeed)
         let B = normalize(cross(rawN, T)) * worldTangent.w
-        let tangentNormal = sample(normalMap, vUv).xyz * 2.0
+        let tangentNormal = sample(normalMap, sampleUv).xyz * 2.0
                           - vec3(1.0, 1.0, 1.0)
         let tangentXSign = mix(1.0, -1.0, flip.x)
         let tangentYSign = normalYSign.x * mix(1.0, -1.0, flip.y)
@@ -204,10 +237,10 @@ material WorldLit2DGBufferFill {
         let n = mappedN * faceSign
         let materialMetallic = max(0.0, min(1.0, metallic.x))
         let materialRoughness = max(0.045, min(1.0,
-            roughness.x * sample(roughnessMap, vUv).x))
+            roughness.x * sample(roughnessMap, sampleUv).x))
         let materialAo = max(0.0, min(1.0, ao.x))
         let packedAoModel = materialModel.x * 2.0 + materialAo
-        let materialEmissive = emissive.xyz * sample(emissiveMap, vUv).rgb
+        let materialEmissive = emissive.xyz * sample(emissiveMap, sampleUv).rgb
         gbufferAlbedo = vec4(albedo.rgb, materialMetallic)
         gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), materialRoughness)
         gbufferWorldPosition = vec4(worldPos, packedAoModel)
