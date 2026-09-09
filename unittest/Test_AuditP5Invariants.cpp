@@ -262,7 +262,7 @@ TEST_CASE(post_process_renderer_owns_teardown_before_pipeline_clear) {
         rendererSourcePath("src/AYRenderer.cpp"));
     CHECK(!source.empty());
     const std::size_t passLookup = source.find(
-        "pipeline.findPass(\"PostProcess\")");
+        "pipeline.findPass<detail::PostProcessPass>()");
     const std::size_t destroyCall = source.find(
         "->destroyResources(adapter)", passLookup);
     const std::size_t pipelineClear = source.find("pipeline.clear()", passLookup);

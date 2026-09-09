@@ -4,6 +4,9 @@
 
 #include <memory>
 #include <string_view>
+#include <typeindex>
+#include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 namespace ayt::render::detail
@@ -50,6 +53,32 @@ public:
     RenderPass*       findPass(std::string_view name) noexcept;
     const RenderPass* findPass(std::string_view name) const noexcept;
 
+    // Exact-type lookup for production wiring. This removes the unsafe
+    // "string lookup + unchecked static_cast" pair: a custom pass reporting a
+    // built-in name can no longer be interpreted as the wrong concrete type.
+    // The index is maintained when passes are registered, so lookup is O(1)
+    // and duplicate concrete types preserve the first-registration behavior
+    // of the legacy name lookup. The legacy lookup remains for diagnostics.
+    template<class PassT>
+    PassT* findPass() noexcept
+    {
+        static_assert(std::is_base_of_v<RenderPass, PassT>);
+        const auto it = _passesByType.find(std::type_index(typeid(PassT)));
+        return it != _passesByType.end()
+            ? static_cast<PassT*>(it->second)
+            : nullptr;
+    }
+
+    template<class PassT>
+    const PassT* findPass() const noexcept
+    {
+        static_assert(std::is_base_of_v<RenderPass, PassT>);
+        const auto it = _passesByType.find(std::type_index(typeid(PassT)));
+        return it != _passesByType.end()
+            ? static_cast<const PassT*>(it->second)
+            : nullptr;
+    }
+
     // Non-owning access; valid until next addPass/clear or destruction.
     const std::vector<std::unique_ptr<RenderPass>>& passes() const noexcept { return _passes; }
     std::vector<std::unique_ptr<RenderPass>>&       passes()       noexcept { return _passes; }
@@ -73,6 +102,10 @@ public:
 
 private:
     std::vector<std::unique_ptr<RenderPass>> _passes;
+    // Non-owning pointers into _passes. Moving a unique_ptr during vector
+    // growth does not move its pointee. try_emplace keeps the first instance
+    // if a pipeline intentionally registers the same concrete type twice.
+    std::unordered_map<std::type_index, RenderPass*> _passesByType;
     std::vector<RenderPassFrameStats>         _lastPassStats;
 };
 

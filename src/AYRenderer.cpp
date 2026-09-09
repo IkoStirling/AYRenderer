@@ -435,8 +435,9 @@ struct Renderer::Impl {
 
     void applyShadowQualityKnobs()
     {
-        if (detail::RenderPass* shadowPass = pipeline.findPass("Shadow")) {
-            static_cast<detail::ShadowPass*>(shadowPass)->setPcfEnabled(shadowPcfEnabled);
+        if (detail::ShadowPass* shadow =
+                pipeline.findPass<detail::ShadowPass>()) {
+            shadow->setPcfEnabled(shadowPcfEnabled);
         }
     }
 
@@ -488,9 +489,8 @@ struct Renderer::Impl {
 
     void applyEditorOverlayKnobs()
     {
-        if (detail::RenderPass* overlay = pipeline.findPass("EditorOverlay")) {
-            auto* editorOverlay =
-                static_cast<detail::EditorOverlayPass*>(overlay);
+        if (detail::EditorOverlayPass* editorOverlay =
+                pipeline.findPass<detail::EditorOverlayPass>()) {
             editorOverlay->setOrientationAxisEnabled(
                 viewportOrientationAxisEnabled);
             editorOverlay->setTransformGizmoState(editorTransformGizmo);
@@ -499,27 +499,27 @@ struct Renderer::Impl {
 
     void applyAntiAliasingKnobs()
     {
-        if (detail::RenderPass* fxaa = pipeline.findPass("FXAA")) {
+        if (detail::FXAAPass* fxaa = pipeline.findPass<detail::FXAAPass>()) {
             fxaa->setEnabled(fxaaEnabled);
         }
-        if (detail::RenderPass* smaa = pipeline.findPass("SMAA")) {
+        if (detail::SMAAPass* smaa = pipeline.findPass<detail::SMAAPass>()) {
             smaa->setEnabled(smaaEnabled);
         }
-        if (detail::RenderPass* taa = pipeline.findPass("TAA")) {
+        if (detail::TAAPass* taa = pipeline.findPass<detail::TAAPass>()) {
             taa->setEnabled(taaEnabled);
             if (!taaEnabled) {
-                static_cast<detail::TAAPass*>(taa)->invalidateHistory();
+                taa->invalidateHistory();
             }
         }
     }
 
     void applyColorGradingKnobs()
     {
-        if (detail::RenderPass* grading = pipeline.findPass("ColorGrading")) {
+        if (detail::ColorGradingPass* grading =
+                pipeline.findPass<detail::ColorGradingPass>()) {
             grading->setEnabled(colorGradingEnabled);
-            auto* pass = static_cast<detail::ColorGradingPass*>(grading);
-            pass->setStrength(colorGradingStrength);
-            pass->setPreset(colorGradingPreset);
+            grading->setStrength(colorGradingStrength);
+            grading->setPreset(colorGradingPreset);
         }
     }
 
@@ -637,32 +637,32 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     ensurePresentAfterPostProcess(resolved);
 
     UIRenderBackend* retainedUi = nullptr;
-    if (detail::RenderPass* uiPass = pipeline.findPass("UI")) {
-        retainedUi = static_cast<detail::UIPass*>(uiPass)->backend();
+    if (detail::UIPass* uiPass = pipeline.findPass<detail::UIPass>()) {
+        retainedUi = uiPass->backend();
     }
 
     // Transparent's deferred composite FBO borrows Lighting color + GBuffer
     // depth. Release the FBO shell before either producer rotates handles.
-    if (detail::RenderPass* transparentPass = pipeline.findPass("Transparent")) {
+    if (detail::TransparentPass* transparentPass =
+            pipeline.findPass<detail::TransparentPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::TransparentPass*>(transparentPass)
-                ->destroyResources(adapter);
+            transparentPass->destroyResources(adapter);
         }
     }
 
     // MotionVector's FBO shell borrows GBuffer depth. Release the shell and
     // its independently-owned RG16F texture before GBuffer rotates handles.
-    if (detail::RenderPass* motionPass = pipeline.findPass("MotionVector")) {
+    if (detail::MotionVectorPass* motionPass =
+            pipeline.findPass<detail::MotionVectorPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::MotionVectorPass*>(motionPass)
-                ->destroyResources(adapter);
+            motionPass->destroyResources(adapter);
         }
     }
 
-    if (detail::RenderPass* shadowPass = pipeline.findPass("Shadow")) {
+    if (detail::ShadowPass* shadowPass =
+            pipeline.findPass<detail::ShadowPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::ShadowPass*>(shadowPass)
-                ->destroyResources(adapter);
+            shadowPass->destroyResources(adapter);
         }
     }
 
@@ -672,9 +672,10 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // the rebuild (matches Shadow mirror — bgfx handle table rotates
     // between pipeline rebuilds, post-clear destroy would race with
     // new-pass FBO allocation).
-    if (detail::RenderPass* gbufferPass = pipeline.findPass("GBuffer")) {
+    if (detail::GBufferPass* gbufferPass =
+            pipeline.findPass<detail::GBufferPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::GBufferPass*>(gbufferPass)->destroyResources(adapter);
+            gbufferPass->destroyResources(adapter);
         }
     }
 
@@ -686,9 +687,10 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // Shadow/GBuffer. cutsheet `pass-lessons-from-deferred.md:151,
     // 161, 169` lock the LightingOutput FBO lifetime to the
     // LightingPass owner.
-    if (detail::RenderPass* lightingPass = pipeline.findPass("Lighting")) {
+    if (detail::LightingPass* lightingPass =
+            pipeline.findPass<detail::LightingPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::LightingPass*>(lightingPass)->destroyResources(adapter);
+            lightingPass->destroyResources(adapter);
         }
     }
 
@@ -697,9 +699,10 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // 1× RGBA8 SkyOutput FBO + fullscreen triangle VB/IB + Phoskia
     // Skybox program; all three must be released BEFORE
     // pipeline.clear() for the same handle-rotation reason.
-    if (detail::RenderPass* skyboxPass = pipeline.findPass("Skybox")) {
+    if (detail::SkyboxPass* skyboxPass =
+            pipeline.findPass<detail::SkyboxPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::SkyboxPass*>(skyboxPass)->destroyResources(adapter);
+            skyboxPass->destroyResources(adapter);
         }
     }
 
@@ -709,9 +712,10 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // (no depth) + fullscreen-triangle VB/IB + Phoskia extract
     // program; all three must be released BEFORE pipeline.clear()
     // for the same handle-rotation reason.
-    if (detail::RenderPass* bloomExtractPass = pipeline.findPass("BloomExtract")) {
+    if (detail::BloomExtractPass* bloomExtractPass =
+            pipeline.findPass<detail::BloomExtractPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::BloomExtractPass*>(bloomExtractPass)->destroyResources(adapter);
+            bloomExtractPass->destroyResources(adapter);
         }
     }
 
@@ -722,82 +726,79 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // fullscreen-triangle VB/IB + Phoskia blur program; all four
     // must be released BEFORE pipeline.clear() for the same
     // handle-rotation reason.
-    if (detail::RenderPass* bloomBlurPass = pipeline.findPass("BloomBlur")) {
+    if (detail::BloomBlurPass* bloomBlurPass =
+            pipeline.findPass<detail::BloomBlurPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::BloomBlurPass*>(bloomBlurPass)->destroyResources(adapter);
+            bloomBlurPass->destroyResources(adapter);
         }
     }
 
     // DepthHaze owns only fullscreen geometry and its Phoskia program; the
     // full-resolution HazeColor target is FrameGraph-owned. Release the
     // pass-local GPU objects before pipeline.clear().
-    if (detail::RenderPass* depthHazePass = pipeline.findPass("DepthHaze")) {
+    if (detail::DepthHazePass* depthHazePass =
+            pipeline.findPass<detail::DepthHazePass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::DepthHazePass*>(depthHazePass)->destroyResources(adapter);
+            depthHazePass->destroyResources(adapter);
         }
     }
 
-    if (detail::RenderPass* ssaoPass = pipeline.findPass("SSAO")) {
+    if (detail::SSAOPass* ssaoPass = pipeline.findPass<detail::SSAOPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::SSAOPass*>(ssaoPass)->destroyResources(adapter);
+            ssaoPass->destroyResources(adapter);
         }
     }
 
-    if (detail::RenderPass* debugPass = pipeline.findPass("GBufferDebug")) {
+    if (detail::GBufferDebugPass* debugPass =
+            pipeline.findPass<detail::GBufferDebugPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::GBufferDebugPass*>(debugPass)
-                ->destroyResources(adapter);
+            debugPass->destroyResources(adapter);
         }
     }
 
-    if (detail::RenderPass* postProcessPass =
-            pipeline.findPass("PostProcess")) {
+    if (detail::PostProcessPass* postProcessPass =
+            pipeline.findPass<detail::PostProcessPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::PostProcessPass*>(postProcessPass)
-                ->destroyResources(adapter);
+            postProcessPass->destroyResources(adapter);
         }
     }
 
-    if (detail::RenderPass* fxaaPass = pipeline.findPass("FXAA")) {
+    if (detail::FXAAPass* fxaaPass = pipeline.findPass<detail::FXAAPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::FXAAPass*>(fxaaPass)
-                ->destroyResources(adapter);
+            fxaaPass->destroyResources(adapter);
         }
     }
 
-    if (detail::RenderPass* smaaPass = pipeline.findPass("SMAA")) {
+    if (detail::SMAAPass* smaaPass = pipeline.findPass<detail::SMAAPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::SMAAPass*>(smaaPass)
-                ->destroyResources(adapter);
+            smaaPass->destroyResources(adapter);
         }
     }
 
-    if (detail::RenderPass* taaPass = pipeline.findPass("TAA")) {
+    if (detail::TAAPass* taaPass = pipeline.findPass<detail::TAAPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::TAAPass*>(taaPass)
-                ->destroyResources(adapter);
+            taaPass->destroyResources(adapter);
         }
     }
 
-    if (detail::RenderPass* gradingPass = pipeline.findPass("ColorGrading")) {
+    if (detail::ColorGradingPass* gradingPass =
+            pipeline.findPass<detail::ColorGradingPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::ColorGradingPass*>(gradingPass)
-                ->destroyResources(adapter);
+            gradingPass->destroyResources(adapter);
         }
     }
 
-    if (detail::RenderPass* presentPass = pipeline.findPass("Present")) {
+    if (detail::PresentPass* presentPass =
+            pipeline.findPass<detail::PresentPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::PresentPass*>(presentPass)
-                ->destroyResources(adapter);
+            presentPass->destroyResources(adapter);
         }
     }
 
-    if (detail::RenderPass* editorOverlayPass =
-            pipeline.findPass("EditorOverlay")) {
+    if (detail::EditorOverlayPass* editorOverlayPass =
+            pipeline.findPass<detail::EditorOverlayPass>()) {
         if (adapter.isInitialized()) {
-            static_cast<detail::EditorOverlayPass*>(editorOverlayPass)
-                ->destroyResources(adapter);
+            editorOverlayPass->destroyResources(adapter);
         }
     }
 
@@ -819,8 +820,8 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     pipelineDesc = std::move(resolved);
 
     if (retainedUi != nullptr) {
-        if (detail::RenderPass* uiPass = pipeline.findPass("UI")) {
-            static_cast<detail::UIPass*>(uiPass)->setBackend(retainedUi);
+        if (detail::UIPass* uiPass = pipeline.findPass<detail::UIPass>()) {
+            uiPass->setBackend(retainedUi);
         }
     }
 
@@ -955,18 +956,16 @@ void Renderer::shutdown()
         _impl->aliveToken->store(false, std::memory_order_release);
     }
 
-    if (detail::RenderPass* transparentPass =
-            _impl->pipeline.findPass("Transparent")) {
+    if (detail::TransparentPass* transparentPass =
+            _impl->pipeline.findPass<detail::TransparentPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::TransparentPass*>(transparentPass)
-                ->destroyResources(_impl->adapter);
+            transparentPass->destroyResources(_impl->adapter);
         }
     }
-    if (detail::RenderPass* motionPass =
-            _impl->pipeline.findPass("MotionVector")) {
+    if (detail::MotionVectorPass* motionPass =
+            _impl->pipeline.findPass<detail::MotionVectorPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::MotionVectorPass*>(motionPass)
-                ->destroyResources(_impl->adapter);
+            motionPass->destroyResources(_impl->adapter);
         }
     }
 
@@ -974,125 +973,114 @@ void Renderer::shutdown()
     // initialized again. Reset every Pass-owned GPU handle before bgfx shuts
     // down; bgfx::isValid only checks the numeric handle sentinel and cannot
     // distinguish a stale handle from one allocated by the next context.
-    if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
+    if (detail::ShadowPass* shadowPass =
+            _impl->pipeline.findPass<detail::ShadowPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::ShadowPass*>(shadowPass)
-                ->destroyResources(_impl->adapter);
+            shadowPass->destroyResources(_impl->adapter);
         }
     }
-    if (detail::RenderPass* gbufferPass = _impl->pipeline.findPass("GBuffer")) {
+    if (detail::GBufferPass* gbufferPass =
+            _impl->pipeline.findPass<detail::GBufferPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::GBufferPass*>(gbufferPass)
-                ->destroyResources(_impl->adapter);
+            gbufferPass->destroyResources(_impl->adapter);
         }
     }
-    if (detail::RenderPass* lightingPass = _impl->pipeline.findPass("Lighting")) {
+    if (detail::LightingPass* lightingPass =
+            _impl->pipeline.findPass<detail::LightingPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::LightingPass*>(lightingPass)
-                ->destroyResources(_impl->adapter);
+            lightingPass->destroyResources(_impl->adapter);
         }
     }
-    if (detail::RenderPass* skyboxPass = _impl->pipeline.findPass("Skybox")) {
+    if (detail::SkyboxPass* skyboxPass =
+            _impl->pipeline.findPass<detail::SkyboxPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::SkyboxPass*>(skyboxPass)
-                ->destroyResources(_impl->adapter);
+            skyboxPass->destroyResources(_impl->adapter);
         }
     }
-    if (detail::RenderPass* bloomExtractPass =
-            _impl->pipeline.findPass("BloomExtract")) {
+    if (detail::BloomExtractPass* bloomExtractPass =
+            _impl->pipeline.findPass<detail::BloomExtractPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::BloomExtractPass*>(bloomExtractPass)
-                ->destroyResources(_impl->adapter);
+            bloomExtractPass->destroyResources(_impl->adapter);
         }
     }
-    if (detail::RenderPass* bloomBlurPass =
-            _impl->pipeline.findPass("BloomBlur")) {
+    if (detail::BloomBlurPass* bloomBlurPass =
+            _impl->pipeline.findPass<detail::BloomBlurPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::BloomBlurPass*>(bloomBlurPass)
-                ->destroyResources(_impl->adapter);
+            bloomBlurPass->destroyResources(_impl->adapter);
         }
     }
-    if (detail::RenderPass* depthHazePass =
-            _impl->pipeline.findPass("DepthHaze")) {
+    if (detail::DepthHazePass* depthHazePass =
+            _impl->pipeline.findPass<detail::DepthHazePass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::DepthHazePass*>(depthHazePass)
-                ->destroyResources(_impl->adapter);
+            depthHazePass->destroyResources(_impl->adapter);
         }
     }
-    if (detail::RenderPass* debugPass =
-            _impl->pipeline.findPass("GBufferDebug")) {
+    if (detail::GBufferDebugPass* debugPass =
+            _impl->pipeline.findPass<detail::GBufferDebugPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::GBufferDebugPass*>(debugPass)
-                ->destroyResources(_impl->adapter);
+            debugPass->destroyResources(_impl->adapter);
         }
     }
 
     // PostProcess owns raw fullscreen geometry and a ShaderResource. Clear
     // both while the adapter and shader pool are still alive so a later
     // initialize() cannot mistake stale numeric handles for live objects.
-    if (detail::RenderPass* postProcessPass =
-            _impl->pipeline.findPass("PostProcess")) {
+    if (detail::PostProcessPass* postProcessPass =
+            _impl->pipeline.findPass<detail::PostProcessPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::PostProcessPass*>(postProcessPass)
-                ->destroyResources(_impl->adapter);
+            postProcessPass->destroyResources(_impl->adapter);
         }
     }
 
-    if (detail::RenderPass* fxaaPass =
-            _impl->pipeline.findPass("FXAA")) {
+    if (detail::FXAAPass* fxaaPass =
+            _impl->pipeline.findPass<detail::FXAAPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::FXAAPass*>(fxaaPass)
-                ->destroyResources(_impl->adapter);
+            fxaaPass->destroyResources(_impl->adapter);
         }
     }
 
-    if (detail::RenderPass* smaaPass =
-            _impl->pipeline.findPass("SMAA")) {
+    if (detail::SMAAPass* smaaPass =
+            _impl->pipeline.findPass<detail::SMAAPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::SMAAPass*>(smaaPass)
-                ->destroyResources(_impl->adapter);
+            smaaPass->destroyResources(_impl->adapter);
         }
     }
 
-    if (detail::RenderPass* taaPass =
-            _impl->pipeline.findPass("TAA")) {
+    if (detail::TAAPass* taaPass =
+            _impl->pipeline.findPass<detail::TAAPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::TAAPass*>(taaPass)
-                ->destroyResources(_impl->adapter);
+            taaPass->destroyResources(_impl->adapter);
         }
     }
 
-    if (detail::RenderPass* gradingPass =
-            _impl->pipeline.findPass("ColorGrading")) {
+    if (detail::ColorGradingPass* gradingPass =
+            _impl->pipeline.findPass<detail::ColorGradingPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::ColorGradingPass*>(gradingPass)
-                ->destroyResources(_impl->adapter);
+            gradingPass->destroyResources(_impl->adapter);
         }
     }
 
-    if (detail::RenderPass* presentPass =
-            _impl->pipeline.findPass("Present")) {
+    if (detail::PresentPass* presentPass =
+            _impl->pipeline.findPass<detail::PresentPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::PresentPass*>(presentPass)
-                ->destroyResources(_impl->adapter);
+            presentPass->destroyResources(_impl->adapter);
         }
     }
 
-    if (detail::RenderPass* editorOverlayPass =
-            _impl->pipeline.findPass("EditorOverlay")) {
+    if (detail::EditorOverlayPass* editorOverlayPass =
+            _impl->pipeline.findPass<detail::EditorOverlayPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::EditorOverlayPass*>(editorOverlayPass)
-                ->destroyResources(_impl->adapter);
+            editorOverlayPass->destroyResources(_impl->adapter);
         }
     }
 
     // SSAO keeps raw fullscreen geometry handles in the pass instance. Reset
     // them before adapter shutdown so initialize() on the same Renderer never
     // mistakes stale numeric handles for live resources.
-    if (detail::RenderPass* ssaoPass = _impl->pipeline.findPass("SSAO")) {
+    if (detail::SSAOPass* ssaoPass =
+            _impl->pipeline.findPass<detail::SSAOPass>()) {
         if (_impl->adapter.isInitialized()) {
-            static_cast<detail::SSAOPass*>(ssaoPass)
-                ->destroyResources(_impl->adapter);
+            ssaoPass->destroyResources(_impl->adapter);
         }
     }
 
@@ -1176,13 +1164,13 @@ void Renderer::render(const RenderScene& scene)
 
     detail::TAAPass* taaPassPtr = nullptr;
     bool taaPrepared = false;
-    if (detail::RenderPass* taaSlot = _impl->pipeline.findPass("TAA")) {
-        taaPassPtr = static_cast<detail::TAAPass*>(taaSlot);
+    if (detail::TAAPass* taa = _impl->pipeline.findPass<detail::TAAPass>()) {
+        taaPassPtr = taa;
         // Current TAA reprojection requires the Deferred GBuffer. Forward
         // pipelines intentionally keep their stable, unjittered path.
         const bool deferredInputsMounted =
-            _impl->pipeline.findPass("GBuffer") != nullptr
-            && _impl->pipeline.findPass("Lighting") != nullptr;
+            _impl->pipeline.findPass<detail::GBufferPass>() != nullptr
+            && _impl->pipeline.findPass<detail::LightingPass>() != nullptr;
         if (deferredInputsMounted) {
             taaPrepared = taaPassPtr->prepareFrame(
                 _impl->adapter,
@@ -1279,9 +1267,9 @@ void Renderer::render(const RenderScene& scene)
     // wiring above (size is the same panel rect for the Deferred
     // path). Skipped when GBuffer isn't in the configured pipeline
     // (Forward path) — cutsheet §4.1 red line #4.
-    if (detail::RenderPass* gbufferSlot = _impl->pipeline.findPass("GBuffer")) {
-        static_cast<detail::GBufferPass*>(gbufferSlot)
-            ->setGbufferSize(_impl->viewportW, _impl->viewportH);
+    if (detail::GBufferPass* gbuffer =
+            _impl->pipeline.findPass<detail::GBufferPass>()) {
+        gbuffer->setGbufferSize(_impl->viewportW, _impl->viewportH);
         // §P5 B4c (2026-07-22) — push previous-frame view/projection
         // into GBufferPass so execute() can build prevViewProj =
         // prevProj * prevView (P×V same-order as `setViewTransform`
@@ -1292,14 +1280,12 @@ void Renderer::render(const RenderScene& scene)
         // consumer tolerates (B4c cutsheet decision). Repeated
         // calls per frame are idempotent — GBufferPass stores
         // locally, no GPU work until execute() runs.
-        auto* gbufferTyped = static_cast<detail::GBufferPass*>(gbufferSlot);
-        gbufferTyped->setPrevViewProj(_impl->prevMainView,
-                                      _impl->prevMainProjection);
+        gbuffer->setPrevViewProj(_impl->prevMainView,
+                                 _impl->prevMainProjection);
     }
 
-    if (detail::RenderPass* motionSlot =
-            _impl->pipeline.findPass("MotionVector")) {
-        auto* motion = static_cast<detail::MotionVectorPass*>(motionSlot);
+    if (detail::MotionVectorPass* motion =
+            _impl->pipeline.findPass<detail::MotionVectorPass>()) {
         motion->setOutputSize(_impl->viewportW, _impl->viewportH);
         // Motion vectors are a temporal dependency, not an always-on fifth
         // GBuffer MRT. Allocate/replay only when TAA resolved successfully.
@@ -1312,8 +1298,8 @@ void Renderer::render(const RenderScene& scene)
     // setGbufferSize block above (same viewport rect). Skipped
     // when Lighting isn't in the configured pipeline (Forward path)
     // — cutsheet §4.1 red line #4.
-    if (detail::RenderPass* lightingSlot = _impl->pipeline.findPass("Lighting")) {
-        auto* lighting = static_cast<detail::LightingPass*>(lightingSlot);
+    if (detail::LightingPass* lighting =
+            _impl->pipeline.findPass<detail::LightingPass>()) {
         lighting->setOutputSize(_impl->viewportW, _impl->viewportH);
         // FrameGraph imports SceneColor below, before pass dispatch. Ensure
         // the lazy Lighting output exists now so cold-start and post-resize
@@ -1334,9 +1320,9 @@ void Renderer::render(const RenderScene& scene)
     // make on Forward — the borrowed pointer is simply ignored
     // because `ctx.skyboxPass == nullptr` and `ctx.skySource` is
     // never read.
-    if (detail::RenderPass* skyboxSlot = _impl->pipeline.findPass("Skybox")) {
-        static_cast<detail::SkyboxPass*>(skyboxSlot)
-            ->setOutputSize(_impl->viewportW, _impl->viewportH);
+    if (detail::SkyboxPass* skybox =
+            _impl->pipeline.findPass<detail::SkyboxPass>()) {
+        skybox->setOutputSize(_impl->viewportW, _impl->viewportH);
     }
 
     // P1 (PR-C, 2026-07-20): build the PassExecContext once per frame
@@ -1349,10 +1335,8 @@ void Renderer::render(const RenderScene& scene)
     // pipeline, hand FO/Transparent a non-owning pointer so
     // tryBindShadowSampler can upload u_lightViewProj + bind
     // shadowMap. Absent Shadow ⇒ nullptr (no upload, no sampler).
-    const detail::ShadowPass* shadowPassPtr = nullptr;
-    if (detail::RenderPass* shadowSlot = _impl->pipeline.findPass("Shadow")) {
-        shadowPassPtr = static_cast<const detail::ShadowPass*>(shadowSlot);
-    }
+    const detail::ShadowPass* shadowPassPtr =
+        _impl->pipeline.findPass<detail::ShadowPass>();
 
     // §P5 B2 (2026-07-22) — when GBuffer is in the configured
     // pipeline, hand downstream passes (B5 LightingPass, future
@@ -1363,17 +1347,15 @@ void Renderer::render(const RenderScene& scene)
     // shell's execute() Noop-gates — so consumers receive a
     // present-but-empty signal (same shape as ShadowPass on
     // Noop). Absent GBuffer ⇒ nullptr.
-    detail::GBufferPass* gbufferPassPtr = nullptr;
-    if (detail::RenderPass* gbufferSlot = _impl->pipeline.findPass("GBuffer")) {
-        gbufferPassPtr = static_cast<detail::GBufferPass*>(gbufferSlot);
+    detail::GBufferPass* gbufferPassPtr =
+        _impl->pipeline.findPass<detail::GBufferPass>();
+    if (gbufferPassPtr != nullptr) {
         gbufferPassPtr->resetFrameState();
     }
 
-    detail::MotionVectorPass* motionVectorPassPtr = nullptr;
-    if (detail::RenderPass* motionSlot =
-            _impl->pipeline.findPass("MotionVector")) {
-        motionVectorPassPtr =
-            static_cast<detail::MotionVectorPass*>(motionSlot);
+    detail::MotionVectorPass* motionVectorPassPtr =
+        _impl->pipeline.findPass<detail::MotionVectorPass>();
+    if (motionVectorPassPtr != nullptr) {
         motionVectorPassPtr->resetFrameState();
     }
 
@@ -1387,76 +1369,57 @@ void Renderer::render(const RenderScene& scene)
     // and the shell's execute() Noop-gates — so consumers receive
     // a present-but-empty signal (same shape as GBufferPass /
     // ShadowPass on Noop). Absent Lighting ⇒ nullptr.
-    detail::LightingPass* lightingPassPtr = nullptr;
-    if (detail::RenderPass* lightingSlot = _impl->pipeline.findPass("Lighting")) {
-        lightingPassPtr = static_cast<detail::LightingPass*>(lightingSlot);
+    detail::LightingPass* lightingPassPtr =
+        _impl->pipeline.findPass<detail::LightingPass>();
+    if (lightingPassPtr != nullptr) {
         lightingPassPtr->resetFrameState();
     }
 
     // §Skybox0 (2026-07-23) — borrowed pointer to the SkyboxPass in
     // the pipeline. nullptr when the host did not opt in via
     // `configurePipeline(makeDeferred())` (Forward / no skybox path).
-    const detail::SkyboxPass* skyboxPassPtr = nullptr;
-    if (detail::RenderPass* skyboxSlot = _impl->pipeline.findPass("Skybox")) {
-        skyboxPassPtr = static_cast<const detail::SkyboxPass*>(skyboxSlot);
-    }
+    const detail::SkyboxPass* skyboxPassPtr =
+        _impl->pipeline.findPass<detail::SkyboxPass>();
 
     // Borrow both bloom passes and clear their production latches before graph
     // compilation. Downstream consumers require a successful submit from this
     // frame, never merely a still-valid attachment handle.
-    detail::BloomExtractPass* bloomExtractPassPtr = nullptr;
-    if (detail::RenderPass* bloomExtractSlot = _impl->pipeline.findPass("BloomExtract")) {
-        bloomExtractPassPtr = static_cast<detail::BloomExtractPass*>(bloomExtractSlot);
+    detail::BloomExtractPass* bloomExtractPassPtr =
+        _impl->pipeline.findPass<detail::BloomExtractPass>();
+    if (bloomExtractPassPtr != nullptr) {
         bloomExtractPassPtr->resetFrameState();
     }
 
-    detail::BloomBlurPass* bloomBlurPassPtr = nullptr;
-    if (detail::RenderPass* bloomBlurSlot = _impl->pipeline.findPass("BloomBlur")) {
-        bloomBlurPassPtr = static_cast<detail::BloomBlurPass*>(bloomBlurSlot);
+    detail::BloomBlurPass* bloomBlurPassPtr =
+        _impl->pipeline.findPass<detail::BloomBlurPass>();
+    if (bloomBlurPassPtr != nullptr) {
         bloomBlurPassPtr->resetFrameState();
     }
 
     // Borrow the haze producer so downstream passes can require a successful
     // submit from this frame before promoting FgSemantic::HazeSource.
-    detail::DepthHazePass* depthHazePassPtr = nullptr;
-    if (detail::RenderPass* depthHazeSlot = _impl->pipeline.findPass("DepthHaze")) {
-        depthHazePassPtr = static_cast<detail::DepthHazePass*>(depthHazeSlot);
+    detail::DepthHazePass* depthHazePassPtr =
+        _impl->pipeline.findPass<detail::DepthHazePass>();
+    if (depthHazePassPtr != nullptr) {
         depthHazePassPtr->resetFrameState();
     }
 
-    detail::SSAOPass* ssaoPassPtr = nullptr;
-    if (detail::RenderPass* ssaoSlot = _impl->pipeline.findPass("SSAO")) {
-        ssaoPassPtr = static_cast<detail::SSAOPass*>(ssaoSlot);
+    detail::SSAOPass* ssaoPassPtr =
+        _impl->pipeline.findPass<detail::SSAOPass>();
+    if (ssaoPassPtr != nullptr) {
         ssaoPassPtr->resetFrameState();
     }
 
-    detail::PostProcessPass* postProcessPassPtr = nullptr;
-    if (detail::RenderPass* postProcessSlot =
-            _impl->pipeline.findPass("PostProcess")) {
-        postProcessPassPtr =
-            static_cast<detail::PostProcessPass*>(postProcessSlot);
-    }
-    detail::FXAAPass* fxaaPassPtr = nullptr;
-    if (detail::RenderPass* fxaaSlot =
-            _impl->pipeline.findPass("FXAA")) {
-        fxaaPassPtr = static_cast<detail::FXAAPass*>(fxaaSlot);
-    }
-    detail::SMAAPass* smaaPassPtr = nullptr;
-    if (detail::RenderPass* smaaSlot =
-            _impl->pipeline.findPass("SMAA")) {
-        smaaPassPtr = static_cast<detail::SMAAPass*>(smaaSlot);
-    }
-    detail::ColorGradingPass* colorGradingPassPtr = nullptr;
-    if (detail::RenderPass* gradingSlot =
-            _impl->pipeline.findPass("ColorGrading")) {
-        colorGradingPassPtr =
-            static_cast<detail::ColorGradingPass*>(gradingSlot);
-    }
-    detail::PresentPass* presentPassPtr = nullptr;
-    if (detail::RenderPass* presentSlot =
-            _impl->pipeline.findPass("Present")) {
-        presentPassPtr = static_cast<detail::PresentPass*>(presentSlot);
-    }
+    detail::PostProcessPass* postProcessPassPtr =
+        _impl->pipeline.findPass<detail::PostProcessPass>();
+    detail::FXAAPass* fxaaPassPtr =
+        _impl->pipeline.findPass<detail::FXAAPass>();
+    detail::SMAAPass* smaaPassPtr =
+        _impl->pipeline.findPass<detail::SMAAPass>();
+    detail::ColorGradingPass* colorGradingPassPtr =
+        _impl->pipeline.findPass<detail::ColorGradingPass>();
+    detail::PresentPass* presentPassPtr =
+        _impl->pipeline.findPass<detail::PresentPass>();
 
     // §P5.5 C (2026-07-23) — wire the per-frame SceneLights ref
     // into ShadowPass so its multi-caster loop can read
@@ -1472,27 +1435,25 @@ void Renderer::render(const RenderScene& scene)
     // When `_impl->sceneLights == nullptr` (host on Forward path /
     // never called setSceneLights), ShadowPass falls back to the
     // pre-C single key-light caster (pre-C byte-equivalent).
-    if (detail::RenderPass* shadowSlot = _impl->pipeline.findPass("Shadow")) {
-        static_cast<detail::ShadowPass*>(shadowSlot)->setSceneLightsRef(
-            _impl->sceneLights);
+    if (detail::ShadowPass* shadow =
+            _impl->pipeline.findPass<detail::ShadowPass>()) {
+        shadow->setSceneLightsRef(_impl->sceneLights);
     }
 
     // Scene projection may carry TAA jitter, but the post-Present editor
     // gizmo must remain pixel-stable. Keep this pass-local instead of growing
     // FrameContext, whose layout is an ODR/ABI diagnostic boundary.
-    if (detail::RenderPass* overlaySlot =
-            _impl->pipeline.findPass("EditorOverlay")) {
-        static_cast<detail::EditorOverlayPass*>(overlaySlot)
-            ->setUnjitteredProjection(_impl->mainProjection);
+    if (detail::EditorOverlayPass* overlay =
+            _impl->pipeline.findPass<detail::EditorOverlayPass>()) {
+        overlay->setUnjitteredProjection(_impl->mainProjection);
     }
-    if (detail::RenderPass* transparentSlot =
-            _impl->pipeline.findPass("Transparent")) {
+    if (detail::TransparentPass* transparent =
+            _impl->pipeline.findPass<detail::TransparentPass>()) {
         const detail::TaaJitter selectionJitter = taaPrepared
             ? taaPassPtr->currentJitter()
             : detail::TaaJitter{};
-        static_cast<detail::TransparentPass*>(transparentSlot)
-            ->setSelectionProjectionJitter(selectionJitter.x,
-                                           selectionJitter.y);
+        transparent->setSelectionProjectionJitter(selectionJitter.x,
+                                                  selectionJitter.y);
     }
 
     // Decide stage eligibility from concrete runtime/pass capabilities here.
@@ -1735,33 +1696,31 @@ void Renderer::resize(uint32_t width, uint32_t height)
     }
     _impl->sceneFboW = 0;
     _impl->sceneFboH = 0;
-    if (detail::RenderPass* transparentPass =
-            _impl->pipeline.findPass("Transparent")) {
-        static_cast<detail::TransparentPass*>(transparentPass)
-            ->destroyResources(_impl->adapter);
+    if (detail::TransparentPass* transparentPass =
+            _impl->pipeline.findPass<detail::TransparentPass>()) {
+        transparentPass->destroyResources(_impl->adapter);
     }
-    if (detail::RenderPass* motionPass =
-            _impl->pipeline.findPass("MotionVector")) {
-        static_cast<detail::MotionVectorPass*>(motionPass)
-            ->destroyResources(_impl->adapter);
+    if (detail::MotionVectorPass* motionPass =
+            _impl->pipeline.findPass<detail::MotionVectorPass>()) {
+        motionPass->destroyResources(_impl->adapter);
     }
     // Full destroyResources also drops Phoskia programs — fine on
     // rare window resize; MSAA change already does the same.
-    if (detail::RenderPass* gbufferPass = _impl->pipeline.findPass("GBuffer")) {
-        static_cast<detail::GBufferPass*>(gbufferPass)
-            ->destroyResources(_impl->adapter);
+    if (detail::GBufferPass* gbufferPass =
+            _impl->pipeline.findPass<detail::GBufferPass>()) {
+        gbufferPass->destroyResources(_impl->adapter);
     }
-    if (detail::RenderPass* lightingPass = _impl->pipeline.findPass("Lighting")) {
-        static_cast<detail::LightingPass*>(lightingPass)
-            ->destroyResources(_impl->adapter);
+    if (detail::LightingPass* lightingPass =
+            _impl->pipeline.findPass<detail::LightingPass>()) {
+        lightingPass->destroyResources(_impl->adapter);
     }
-    if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
-        static_cast<detail::ShadowPass*>(shadowPass)
-            ->destroyResources(_impl->adapter);
+    if (detail::ShadowPass* shadowPass =
+            _impl->pipeline.findPass<detail::ShadowPass>()) {
+        shadowPass->destroyResources(_impl->adapter);
     }
-    if (detail::RenderPass* taaPass = _impl->pipeline.findPass("TAA")) {
-        static_cast<detail::TAAPass*>(taaPass)
-            ->destroyResources(_impl->adapter);
+    if (detail::TAAPass* taaPass =
+            _impl->pipeline.findPass<detail::TAAPass>()) {
+        taaPass->destroyResources(_impl->adapter);
     }
     // §F6 (2026-07-24, mid-term FG MVP sub-cut 6) — PostProcessPass
     // FBO destroy block removed. PostProcessPass is a thin blit pass

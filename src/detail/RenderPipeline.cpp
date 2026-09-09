@@ -8,11 +8,15 @@ namespace ayt::render::detail
 
 void RenderPipeline::addPass(std::unique_ptr<RenderPass> pass)
 {
+    if (pass) {
+        _passesByType.try_emplace(std::type_index(typeid(*pass)), pass.get());
+    }
     _passes.push_back(std::move(pass));
 }
 
 void RenderPipeline::clear()
 {
+    _passesByType.clear();
     _passes.clear();
     _lastPassStats.clear();
 }

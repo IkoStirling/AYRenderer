@@ -7,7 +7,7 @@
 
 | 阶段 | 文档 | 状态 |
 |------|------|------|
-| **R6（正在做）** | [`render-architecture-r6.md`](render-architecture-r6.md) | **唯一开工清单** — R6-1/R6-2 已完成，下一刀 R6-3 |
+| **R6（正在做）** | [`render-architecture-r6.md`](render-architecture-r6.md) | **唯一开工清单** — R6-1/R6-2/R6-3a 已完成，下一刀 R6-3b |
 | **历史 cutsheet** | [`short-term-plan.md`](short-term-plan.md)、[`frame-graph-mvp.md`](frame-graph-mvp.md) | Bloom/Haze/SSAO/FrameGraph MVP 已落地，仅供追溯 |
 | **Deferred 验收锁** | [`deferred-acceptance.md`](deferred-acceptance.md) | 已钉；回归先查此表 |
 
@@ -49,7 +49,7 @@ Deferred: Shadow → Skybox → GBuffer → MotionVector(on demand) → SSAO
 
 1. **R6-1 FrameGraph 编译契约（已完成）** — 结构校验、semantic roots、终端反向裁剪已落地。
 2. **R6-2 图计划外移（已完成）** — 后处理图声明已提取为不持有具体 Pass 的 `PostProcessGraphPlan`。
-3. **R6-3/R6-4 Pass 契约与资源黑板（当前）** — 减少字符串查找、具体 Pass 指针与 stale handle 风险。
+3. **R6-3b/R6-4 Pass 契约与资源黑板（当前）** — 类型安全 lookup 已落地；下一步集中静态资源契约、具体 Pass 指针与 stale handle 风险。
 4. **R6-5 DrawListBuilder** — 共享可见集、分桶，再做 instancing。
 5. **R6-6 诊断与 D3D11 capture** — 完成后再恢复新画质 Pass。
 

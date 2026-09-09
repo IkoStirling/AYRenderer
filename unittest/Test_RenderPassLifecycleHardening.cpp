@@ -29,14 +29,16 @@ TEST_CASE(shutdown_releases_every_pass_owned_gpu_resource_before_adapter)
     CHECK(shutdown != std::string::npos);
     CHECK(adapterShutdown != std::string::npos);
 
-    constexpr std::array<const char*, 14> passNames = {
-        "Transparent", "Shadow", "GBuffer", "Lighting", "Skybox",
-        "BloomExtract", "BloomBlur", "DepthHaze", "GBufferDebug",
-        "PostProcess", "FXAA", "ColorGrading", "Present", "SSAO",
+    constexpr std::array<const char*, 14> passTypes = {
+        "TransparentPass", "ShadowPass", "GBufferPass", "LightingPass",
+        "SkyboxPass", "BloomExtractPass", "BloomBlurPass", "DepthHazePass",
+        "GBufferDebugPass", "PostProcessPass", "FXAAPass",
+        "ColorGradingPass", "PresentPass", "SSAOPass",
     };
-    for (const char* passName : passNames) {
+    for (const char* passType : passTypes) {
         const std::string lookupText =
-            std::string("_impl->pipeline.findPass(\"") + passName + "\")";
+            std::string("_impl->pipeline.findPass<detail::")
+            + passType + ">()";
         const std::size_t lookup = source.find(lookupText, shutdown);
         const std::size_t destroy = source.find(
             "->destroyResources(_impl->adapter)", lookup);

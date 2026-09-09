@@ -180,7 +180,7 @@ TEST_CASE(a3_ssao_resources_are_destroyed_before_pipeline_or_adapter_teardown)
     const size_t reconfigure =
         source.find("void Renderer::Impl::applyPipelineDesc");
     const size_t reconfigureSsao =
-        source.find("pipeline.findPass(\"SSAO\")", reconfigure);
+        source.find("pipeline.findPass<detail::SSAOPass>()", reconfigure);
     const size_t pipelineClear = source.find("pipeline.clear();", reconfigure);
     CHECK(reconfigure != std::string::npos);
     CHECK(reconfigureSsao != std::string::npos);
@@ -189,7 +189,7 @@ TEST_CASE(a3_ssao_resources_are_destroyed_before_pipeline_or_adapter_teardown)
 
     const size_t shutdown = source.find("void Renderer::shutdown()");
     const size_t shutdownSsao =
-        source.find("_impl->pipeline.findPass(\"SSAO\")", shutdown);
+        source.find("_impl->pipeline.findPass<detail::SSAOPass>()", shutdown);
     const size_t adapterShutdown =
         source.find("_impl->adapter.shutdown()", shutdown);
     CHECK(shutdown != std::string::npos);

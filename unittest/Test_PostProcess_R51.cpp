@@ -191,7 +191,7 @@ TEST_CASE(r51_public_setters_frame_bridge_and_lifecycle_are_hardened)
 
     const std::size_t shutdown = source.find("void Renderer::shutdown()");
     const std::size_t post = source.find(
-        "_impl->pipeline.findPass(\"PostProcess\")", shutdown);
+        "_impl->pipeline.findPass<detail::PostProcessPass>()", shutdown);
     const std::size_t shaderPool = source.find(
         "_impl->shaderPool.shutdown()", shutdown);
     const std::size_t adapter = source.find("_impl->adapter.shutdown()", shutdown);
