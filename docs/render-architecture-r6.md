@@ -1,7 +1,7 @@
 # AYRenderer R6 架构收口计划
 
 > 日期：2026-09-09
-> 状态：R6-0、R6-1、R6-2、R6-3a 已落地；下一刀 R6-3b。
+> 状态：R6-0、R6-1、R6-2、R6-3a、R6-3b 已落地；下一刀 R6-3c。
 > 范围：在不重写 bgfx/RHI、不改变 Forward/Deferred 画面顺序的前提下，收口 Pass 描述、资源依赖、诊断和场景提交。
 
 ## 1. 当前真实基线
@@ -59,17 +59,19 @@ R6 明确不做：
 - `Renderer::render()` 只保留具体 Pass/backend 能力判断、计划输入组装、执行上下文和 dispatch；cache key、view id 与 `RenderPipeline` 顺序未改变。
 - 新增 5 个计划组合测试（32 项断言），覆盖空图、完整 temporal 链、FXAA→SMAA、TAA 优先裁枝和不完整 Bloom fail-close。
 
-验收：后处理图声明已从 `Renderer::render()` 移除；定向 FrameGraph/后处理/AA 回归通过，全量 `AYRenderer_Test` 为 4119/4119，`AYRenderer_Demo` 链接通过。`AYEditorShell_Demo` 当前被 AYEditor 并行改动中的既有编译错误阻断（`AYEditorSession.cpp` 的未声明 `dt` 与 `u8string`/`string` 转换），不是本刀引入；修复后需补跑该集成链接门禁。真 GPU 画面仍归 R6-6 capture 门禁。
+验收：后处理图声明已从 `Renderer::render()` 移除；定向 FrameGraph/后处理/AA 回归通过，全量 `AYRenderer_Test` 为 4119/4119，`AYRenderer_Demo` 链接通过。R6-2 当时被 AYEditor 并行编译错误阻断的 `AYEditorShell_Demo` 门禁已在 R6-3a 补跑通过。真 GPU 画面仍归 R6-6 capture 门禁。
 
 ### R6-3：Pass 契约与类型安全注册（进行中）
 
 - **R6-3a（已完成）**：`RenderPipeline` 在 `addPass/clear` 时维护 exact-type 索引，生产路径改用 O(1) `findPass<ConcretePass>()`；移除 `AYRenderer.cpp` 中字符串查找后直接 `static_cast` 的组合。诊断名称仍可重复，重复具体类型保持“第一次注册优先”。
-- **R6-3b（下一刀）**：为 Pass 提供静态 `reads/writes/output desc/persistent/side-effect` 描述；动态组合由 plan builder 选择，不让 Pass 反向知道邻居。
-- 后续把“是否挂载”“是否启用”“是否本帧生产”拆成三个明确状态。
+- **R6-3b（已完成）**：为 21 个公开 Pass slot 建立静态 `reads/writes/output format/extent/lifetime/side-effect` 契约；管线重建前验证未知/重复 slot 和 required resource 的缺失、错序，失败时保留上一条有效管线。后处理图的 transient RT 格式与尺寸直接从同一契约生成，动态输入选择仍由 `PostProcessGraphPlan` 决定。
+- **R6-3c（下一刀）**：把“是否挂载”“是否启用”“是否本帧生产”拆成三个明确状态，并向诊断层提供只读快照。
 
 验收：缺 Pass、错顺序和错资源在 plan compile 阶段报告，不等到 GPU submit 才表现为黑屏。
 
-R6-3a 验证：类型查找、重复注册、`clear()` 失效和 const lookup 共 11 项断言通过；相关生命周期/PP/SSAO 定向回归通过；全量 `AYRenderer_Test` 为 4130/4130。
+R6-3a 验证：类型查找、重复注册、`clear()` 失效和 const lookup 共 11 项断言通过。
+
+R6-3b 验证：21 个 slot 契约覆盖、四条 canonical pipeline、资源 lifetime、缺生产者、错序、重复/未知 slot、TAA/Overlay 前置条件和“拒绝后不破坏基线”共 96 项断言通过；FrameGraph/PostProcessGraphPlan/PipelineConfig 定向回归通过；全量 `AYRenderer_Test` 为 4226/4226。
 
 ### R6-4：资源黑板与历史资源
 

@@ -28,6 +28,7 @@
 #include "detail/PresentPass.h"
 #include "detail/EditorOverlayPass.h"
 #include "detail/Forward2DOpaquePass.h"  // CM-1 (2026-08-11) — 2D lane pass factory.
+#include "detail/RenderPassContract.h"
 #include "detail/RenderPipeline.h"
 #include "detail/RenderTargetPool.h"
 #include "detail/RenderViewOrder.h"
@@ -635,6 +636,33 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // PostProcess. Auto-insert it for source compatibility with custom
     // descriptors created before RenderPassSlot::Present was appended.
     ensurePresentAfterPostProcess(resolved);
+
+    // R6-3b — reject malformed mount orders before tearing down the current
+    // pipeline. This keeps a known-good pipeline live when a custom descriptor
+    // has a duplicate slot or reads a resource before its required producer.
+    const detail::RenderPipelineContractValidation contractValidation =
+        detail::validateRenderPipelineContracts(resolved.passes);
+    if (!contractValidation.valid()) {
+        for (const detail::RenderPipelineContractError& error :
+             contractValidation.errors) {
+            const detail::RenderPassContract* contract =
+                detail::renderPassContract(error.slot);
+            std::fprintf(stderr,
+                         "[RenderPipeline] descriptor rejected: "
+                         "error=%s passIndex=%u pass=%s resource=%s; "
+                         "keeping previous pipeline\n",
+                         detail::renderPipelineContractErrorName(error.code),
+                         static_cast<unsigned>(error.passIndex),
+                         contract != nullptr
+                             ? contract->name.data()
+                             : "<unknown>",
+                         error.code == detail::RenderPipelineContractErrorCode::
+                                           MissingRequiredResource
+                             ? detail::renderPassResourceName(error.resource)
+                             : "<none>");
+        }
+        return;
+    }
 
     UIRenderBackend* retainedUi = nullptr;
     if (detail::UIPass* uiPass = pipeline.findPass<detail::UIPass>()) {

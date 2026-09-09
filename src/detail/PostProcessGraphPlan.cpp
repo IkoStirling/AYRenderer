@@ -1,10 +1,87 @@
 #include "detail/PostProcessGraphPlan.h"
+#include "detail/RenderPassContract.h"
 
+#include <cassert>
 #include <utility>
 #include <vector>
 
 namespace ayt::render::detail
 {
+namespace
+{
+
+const RenderPassContract& contractFor(RenderPassSlot slot)
+{
+    const RenderPassContract* contract = renderPassContract(slot);
+    assert(contract != nullptr);
+    return *contract;
+}
+
+bgfx::TextureFormat::Enum toFgFormat(RenderPassResourceFormat format)
+{
+    switch (format) {
+    case RenderPassResourceFormat::R8:
+        return bgfx::TextureFormat::R8;
+    case RenderPassResourceFormat::RG16F:
+        return bgfx::TextureFormat::RG16F;
+    case RenderPassResourceFormat::RGBA8:
+        return bgfx::TextureFormat::RGBA8;
+    case RenderPassResourceFormat::RGBA16F:
+        return bgfx::TextureFormat::RGBA16F;
+    case RenderPassResourceFormat::D24S8:
+        return bgfx::TextureFormat::D24S8;
+    case RenderPassResourceFormat::Unknown:
+        break;
+    }
+    assert(false && "RenderPass contract has no FrameGraph texture format");
+    return bgfx::TextureFormat::Unknown;
+}
+
+FgTextureScale toFgScale(RenderPassResourceExtent extent)
+{
+    switch (extent) {
+    case RenderPassResourceExtent::Full:
+    case RenderPassResourceExtent::Backbuffer:
+        return FgTextureScale::Full;
+    case RenderPassResourceExtent::Half:
+        return FgTextureScale::Half;
+    case RenderPassResourceExtent::Atlas:
+        break;
+    }
+    assert(false && "Atlas output cannot be allocated by the post graph");
+    return FgTextureScale::Full;
+}
+
+FgTextureDesc graphTextureDesc(RenderPassSlot slot,
+                               RenderPassResourceId resource,
+                               bool pointSampled = false)
+{
+    const RenderPassContract& contract = contractFor(slot);
+    for (const RenderPassResourceWrite& write : contract.writes) {
+        if (write.resource == resource) {
+            assert(write.lifetime == RenderPassResourceLifetime::Transient);
+            return {toFgFormat(write.format),
+                    toFgScale(write.extent),
+                    /*transient=*/true,
+                    write.withDepth,
+                    pointSampled};
+        }
+    }
+    assert(false && "FrameGraph resource missing from RenderPass contract");
+    return {};
+}
+
+const char* contractName(RenderPassSlot slot)
+{
+    return contractFor(slot).name.data();
+}
+
+bool contractSideEffect(RenderPassSlot slot)
+{
+    return contractFor(slot).sideEffect;
+}
+
+} // namespace
 
 PostProcessGraphPlanResult buildPostProcessGraphPlan(
     FrameGraph& graph,
@@ -20,22 +97,19 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     // GBuffer -> SSAO -> Lighting chain exists.
     if (input.ssao) {
         graph.addResource(FgResourceId::SSAOTexture,
-                          {bgfx::TextureFormat::RGBA8,
-                           FgTextureScale::Full,
-                           /*transient=*/true,
-                           /*withDepth=*/false});
-        graph.addPass({"SSAO", {}, {FgResourceId::SSAOTexture}, true});
+                          graphTextureDesc(RenderPassSlot::SSAO,
+                                           RenderPassResourceId::SSAO));
+        graph.addPass({contractName(RenderPassSlot::SSAO),
+                       {}, {FgResourceId::SSAOTexture}, true});
         graph.setResolvedSemantic(FgSemantic::SSAOSource,
                                   FgResourceId::SSAOTexture);
     }
 
     if (input.haze) {
         graph.addResource(FgResourceId::HazeColor,
-                          {kHdrSceneColorFormat,
-                           FgTextureScale::Full,
-                           /*transient=*/true,
-                           /*withDepth=*/false});
-        graph.addPass({"DepthHaze",
+                          graphTextureDesc(RenderPassSlot::DepthHaze,
+                                           RenderPassResourceId::HazeColor));
+        graph.addPass({contractName(RenderPassSlot::DepthHaze),
                        {FgResourceId::SceneColor},
                        {FgResourceId::HazeColor},
                        true});
@@ -46,26 +120,20 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
 
     if (input.bloomExtract) {
         graph.addResource(FgResourceId::BloomBright,
-                          {kHdrSceneColorFormat,
-                           FgTextureScale::Half,
-                           /*transient=*/true,
-                           /*withDepth=*/false});
-        graph.addPass({"BloomExtract",
+                          graphTextureDesc(RenderPassSlot::BloomExtract,
+                                           RenderPassResourceId::BloomBright));
+        graph.addPass({contractName(RenderPassSlot::BloomExtract),
                        {result.hdrSceneSource},
                        {FgResourceId::BloomBright},
                        true});
     }
     if (input.bloomBlur) {
         graph.addResource(FgResourceId::BloomBlurA,
-                          {kHdrSceneColorFormat,
-                           FgTextureScale::Half,
-                           /*transient=*/true,
-                           /*withDepth=*/false});
+                          graphTextureDesc(RenderPassSlot::BloomBlur,
+                                           RenderPassResourceId::BloomBlurA));
         graph.addResource(FgResourceId::BloomBlurB,
-                          {kHdrSceneColorFormat,
-                           FgTextureScale::Half,
-                           /*transient=*/true,
-                           /*withDepth=*/false});
+                          graphTextureDesc(RenderPassSlot::BloomBlur,
+                                           RenderPassResourceId::BloomBlurB));
         graph.addPass({"BloomBlurH",
                        {FgResourceId::BloomBright},
                        {FgResourceId::BloomBlurA},
@@ -89,56 +157,48 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     }
 
     graph.addResource(FgResourceId::FinalLdrColor,
-                      {bgfx::TextureFormat::RGBA8,
-                       FgTextureScale::Full,
-                       /*transient=*/true,
-                       /*withDepth=*/false});
+                      graphTextureDesc(RenderPassSlot::PostProcess,
+                                       RenderPassResourceId::FinalLdrColor));
     std::vector<FgResourceId> postProcessReads{result.hdrSceneSource};
     if (input.bloomBlur) {
         postProcessReads.push_back(FgResourceId::BloomBlurB);
     }
-    graph.addPass({"PostProcess",
+    graph.addPass({contractName(RenderPassSlot::PostProcess),
                    std::move(postProcessReads),
                    {FgResourceId::FinalLdrColor},
                    true});
 
     if (input.taa) {
         graph.importExternal(FgResourceId::TaaColor, input.taaWriteTarget);
-        graph.addPass({"TAA",
+        graph.addPass({contractName(RenderPassSlot::TAA),
                        {FgResourceId::FinalLdrColor},
                        {FgResourceId::TaaColor},
                        true});
     }
     if (input.fxaa) {
         graph.addResource(FgResourceId::FxaaColor,
-                          {bgfx::TextureFormat::RGBA8,
-                           FgTextureScale::Full,
-                           /*transient=*/true,
-                           /*withDepth=*/false});
-        graph.addPass({"FXAA",
+                          graphTextureDesc(RenderPassSlot::FXAA,
+                                           RenderPassResourceId::FxaaColor));
+        graph.addPass({contractName(RenderPassSlot::FXAA),
                        {FgResourceId::FinalLdrColor},
                        {FgResourceId::FxaaColor},
                        true});
     }
     if (input.smaa) {
         graph.addResource(FgResourceId::SmaaEdges,
-                          {bgfx::TextureFormat::RGBA8,
-                           FgTextureScale::Full,
-                           /*transient=*/true,
-                           /*withDepth=*/false,
-                           input.smaaIntermediatePointSampled});
+                          graphTextureDesc(
+                              RenderPassSlot::SMAA,
+                              RenderPassResourceId::SmaaEdges,
+                              input.smaaIntermediatePointSampled));
         graph.addResource(FgResourceId::SmaaBlendWeights,
-                          {bgfx::TextureFormat::RGBA8,
-                           FgTextureScale::Full,
-                           /*transient=*/true,
-                           /*withDepth=*/false,
-                           input.smaaIntermediatePointSampled});
+                          graphTextureDesc(
+                              RenderPassSlot::SMAA,
+                              RenderPassResourceId::SmaaBlendWeights,
+                              input.smaaIntermediatePointSampled));
         graph.addResource(FgResourceId::SmaaColor,
-                          {bgfx::TextureFormat::RGBA8,
-                           FgTextureScale::Full,
-                           /*transient=*/true,
-                           /*withDepth=*/false});
-        graph.addPass({"SMAA",
+                          graphTextureDesc(RenderPassSlot::SMAA,
+                                           RenderPassResourceId::SmaaColor));
+        graph.addPass({contractName(RenderPassSlot::SMAA),
                        {input.fxaa
                             ? FgResourceId::FxaaColor
                             : FgResourceId::FinalLdrColor},
@@ -162,18 +222,19 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     result.presentationSource = result.antialiasingSource;
     if (input.colorGrading) {
         graph.addResource(FgResourceId::ColorGradedColor,
-                          {bgfx::TextureFormat::RGBA8,
-                           FgTextureScale::Full,
-                           /*transient=*/true,
-                           /*withDepth=*/false});
-        graph.addPass({"ColorGrading",
+                          graphTextureDesc(
+                              RenderPassSlot::ColorGrading,
+                              RenderPassResourceId::ColorGradedColor));
+        graph.addPass({contractName(RenderPassSlot::ColorGrading),
                        {result.antialiasingSource},
                        {FgResourceId::ColorGradedColor},
                        true});
         result.presentationSource = FgResourceId::ColorGradedColor;
     }
 
-    graph.addPass({"Present", {result.presentationSource}, {}, true});
+    graph.addPass({contractName(RenderPassSlot::Present),
+                   {result.presentationSource}, {}, true,
+                   contractSideEffect(RenderPassSlot::Present)});
     // Later stages promote PresentSource only after successful submission.
     graph.setResolvedSemantic(FgSemantic::PresentSource,
                               FgResourceId::FinalLdrColor);
