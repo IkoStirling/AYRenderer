@@ -1,0 +1,116 @@
+# AYRenderer R6 架构收口计划
+
+> 日期：2026-09-09
+> 状态：R6-0、R6-1、R6-2 已落地；下一刀 R6-3。
+> 范围：在不重写 bgfx/RHI、不改变 Forward/Deferred 画面顺序的前提下，收口 Pass 描述、资源依赖、诊断和场景提交。
+
+## 1. 当前真实基线
+
+当前功能链已经覆盖 Shadow、GBuffer、MotionVector、SSAO、Lighting、DepthHaze、Transparent、Camera Overlay 2D、Bloom、PostProcess、TAA/FXAA/SMAA、ColorGrading、Present、Editor Overlay 与 UI。继续直接增加效果会放大以下结构问题：
+
+- `RenderPipeline` 按注册顺序执行 `RenderPass`，`FrameGraph` 只管理部分逻辑资源；两者尚未形成单一编译计划。
+- `Renderer::render()` 同时负责 Pass 查找、状态预备、效果门禁、资源声明、semantic 选择和执行上下文拼装。
+- `PassExecContext` 通过多个具体 Pass 指针传递生产者状态，新增效果容易继续增加横向耦合。
+- 3D Pass 仍各自遍历 `RenderScene`，缺少共享可见集、分桶、状态排序与 instancing。
+- 自动化测试已覆盖契约与 shader 编译，但真实 D3D11 capture、GPU 时间和资源带宽基线仍不完整；D3D12 完整恢复可延后，但必须保持可诊断、失败不闪退。
+
+因此 R6 期间默认不新增独立画质 Pass。例外仅限修复现有 Pass、诊断视图和为架构收口服务的内部节点。
+
+## 2. 目标边界
+
+R6 完成后，增加一个普通后处理节点应只需要：
+
+1. 新增 Pass 实现及其静态资源契约；
+2. 在管线计划中注册节点和产品开关；
+3. 增加 shader、Noop、resize、teardown 与真 GPU 验证。
+
+不应再要求在 `Renderer::render()` 中复制资源描述、手工查找多个具体 Pass、拼接嵌套输入选择或依赖“有效 handle 等于本帧已生产”。
+
+R6 明确不做：
+
+- Vulkan/D3D12 风格命令缓冲重写；
+- 替换 bgfx 或建立第二套 RHI；
+- 自动 barrier/多队列调度；
+- 未经 capture 数据驱动的激进 RenderTarget alias；
+- 一次性迁移所有 Shadow/GBuffer/Lighting 生命周期。
+
+## 3. 分刀顺序
+
+### R6-0：文档与基线收敛（已完成）
+
+- 本文成为当前架构开工入口；旧的 `short-term-plan.md` 和 `frame-graph-mvp.md` 保留为历史 cutsheet。
+- `renderer-pass-roadmap.md` 与引擎级 Rendering Roadmap 对齐 MotionVector/TAA、FrameGraph 和 Camera Overlay 2D 现状。
+
+### R6-1：FrameGraph 编译契约（已完成）
+
+- 校验 enabled pass 的未声明 read/write。
+- owned resource 必须先生产后读取；同一 logical resource 禁止多写者。
+- semantic 不得指向未声明或无生产者的 owned resource。
+- 存在 Present/Consumer 等终端节点时，从终端与 semantic 输出反向标记 live pass，裁剪断开的 enabled 分支。
+- semantic 同时承担图外消费者根：例如 SSAO 由图外 Lighting 消费。
+- imported persistent target 优先依赖本帧较早写者；只有不存在本帧写者时才作为外部输入，覆盖 TAA history 的正确时序。
+- compile 失败输出结构化诊断并让 owned 输出 fail-close；不改变 `RenderPipeline` 的执行顺序。
+
+### R6-2：图计划从 `Renderer::render()` 外移（已完成）
+
+- 新增纯内部 `PostProcessGraphPlan`；输入只包含尺寸、外部 scene/TAA handle 和已经解析的阶段布尔值，不持有任何具体 Pass。
+- SSAO、Haze、Bloom、FinalLdr、TAA/FXAA/SMAA、ColorGrading 与 Present 的 logical resource、读写边和 semantic 声明集中在 plan builder。
+- AA 选择保持既有优先级 `TAA > SMAA > FXAA > FinalLdr`；异常多开组合仍确定性编译，未接入 Present 的低优先级分支由 liveness 裁掉。
+- `Renderer::render()` 只保留具体 Pass/backend 能力判断、计划输入组装、执行上下文和 dispatch；cache key、view id 与 `RenderPipeline` 顺序未改变。
+- 新增 5 个计划组合测试（32 项断言），覆盖空图、完整 temporal 链、FXAA→SMAA、TAA 优先裁枝和不完整 Bloom fail-close。
+
+验收：后处理图声明已从 `Renderer::render()` 移除；定向 FrameGraph/后处理/AA 回归通过，全量 `AYRenderer_Test` 为 4119/4119，`AYRenderer_Demo` 链接通过。`AYEditorShell_Demo` 当前被 AYEditor 并行改动中的既有编译错误阻断（`AYEditorSession.cpp` 的未声明 `dt` 与 `u8string`/`string` 转换），不是本刀引入；修复后需补跑该集成链接门禁。真 GPU 画面仍归 R6-6 capture 门禁。
+
+### R6-3：Pass 契约与类型安全注册（下一刀）
+
+- 为 Pass 提供静态 `reads/writes/output desc/persistent/side-effect` 描述；动态组合由 plan builder 选择，不让 Pass 反向知道邻居。
+- 用类型安全的 Pass lookup/保留句柄替换字符串查找后直接 `static_cast`。
+- 把“是否挂载”“是否启用”“是否本帧生产”拆成三个明确状态。
+
+验收：缺 Pass、错顺序和错资源在 plan compile 阶段报告，不等到 GPU submit 才表现为黑屏。
+
+### R6-4：资源黑板与历史资源
+
+- 用 renderer-internal resource blackboard 替代 `PassExecContext` 中可由 logical resource 表达的生产者指针。
+- 明确 External、Transient、PersistentHistory 三类所有权。
+- TAA history、MotionVector 与 resize/camera-cut/rebuild 失效规则集中记录；不强行迁移对象骨骼历史缓存。
+
+验收：关闭、resize、管线切换和 shader 失败均不会让消费者读取 stale handle。
+
+### R6-5：DrawListBuilder
+
+- 每帧一次完成 frustum cull、opaque/cutout/transparent/shadow/overlay 分桶和稳定排序。
+- 第一阶段只复用过滤结果，仍逐对象 submit；先消除每个几何 Pass 重复扫描。
+- 第二阶段再对相同 mesh/material/state 的非蒙皮对象启用 bgfx instancing。
+
+验收：画面与 draw 顺序不变；CPU pass 时间下降；透明排序和 MotionVector stable id 不回归。
+
+### R6-6：诊断与真 GPU 门禁
+
+- 调试视图：MotionVector、SSAO、TAA history/resolve、Shadow atlas。
+- 每 Pass CPU/GPU 时间、transient RT 数量/峰值和 graph compile 摘要。
+- D3D11 capture 覆盖 MRT、阴影、Bloom、Haze、SSAO、TAA、透明和 resize。
+- D3D12 本阶段最低要求是启动/初始化错误可报告且不闪退；完整画面对齐可独立排期。
+
+## 4. 新画质能力的恢复顺序
+
+R6-2、R6-3 和 D3D11 基线完成后再恢复新增效果：
+
+1. MotionVector/SSAO/TAA/Shadow 调试节点；
+2. TAA velocity dilation 与 reactive mask；
+3. Shadow 质量：CSM、Spot 透视锥体，再评估 Point omni；
+4. Motion Blur；
+5. Bloom 金字塔与 Auto Exposure；
+6. DOF；
+7. Hi-Z 后的 GTAO/SSR；
+8. 体积雾等高成本效果。
+
+Motion Blur 不直接消费当前基础 velocity 后就宣称完成：必须先锁定 camera cut、遮挡边界、速度膨胀和透明/reactive-mask 契约。
+
+## 5. 每刀守门
+
+- 不改变公开枚举既有数值和公开结构已有字段顺序。
+- 修改共享私有布局后执行完整依赖重建，防止 stale object/ABI 假故障。
+- shader 修改必须更新 cache key，并跑 Windows `s_5_0` 生产编译。
+- FrameGraph compile 失败必须 fail-close，不允许继续创建未验证的 owned target。
+- 每刀至少通过定向测试、`AYRenderer_Test` 全量和 `AYEditorShell_Demo` 链接。

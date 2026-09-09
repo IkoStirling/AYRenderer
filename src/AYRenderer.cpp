@@ -22,6 +22,7 @@
 #include "detail/LightingPass.h"
 #include "detail/MotionVectorPass.h"
 #include "detail/PassExecContext.h"
+#include "detail/PostProcessGraphPlan.h"
 #include "detail/PostProcessPass.h"
 #include "detail/PostProcessPipeline.h"
 #include "detail/PresentPass.h"
@@ -1494,24 +1495,18 @@ void Renderer::render(const RenderScene& scene)
                                            selectionJitter.y);
     }
 
-    // Build the post-process graph before any pass resolves a target. Bloom is
-    // one capability: finite positive strength plus both mounted/enabled
-    // stages. Otherwise all three transient targets are omitted.
+    // Decide stage eligibility from concrete runtime/pass capabilities here.
+    // The pure plan below owns only resource declarations and dependencies.
     detail::FrameGraph& fg = _impl->frameGraph;
     const uint16_t fgW = _impl->viewportW;
     const uint16_t fgH = _impl->viewportH;
-    fg.beginFrame(fgW, fgH);
-    // Import SceneColor as an external resource (borrowed, not
-    // owned). The physical source is decided per frame based on
-    // which pipeline path is active: Deferred ⇒ Lighting output;
-    // Forward ⇒ the renderer's sceneFbo.
+    // SceneColor is borrowed. Deferred uses Lighting output; Forward uses the
+    // renderer-owned scene target.
     bgfx::FrameBufferHandle sceneColorHandle = sceneFbo;
     if (lightingPassPtr != nullptr
         && detail::BGFXAdapter::isValid(lightingPassPtr->lightingOutputFbo())) {
         sceneColorHandle = lightingPassPtr->lightingOutputFbo();
     }
-    fg.importExternal(detail::FgResourceId::SceneColor, sceneColorHandle);
-
     const bool backendReady = _impl->adapter.isInitialized()
         && !_impl->adapter.isNoopBackend();
     const bool gbufferStagePresent = gbufferPassPtr != nullptr
@@ -1519,8 +1514,6 @@ void Renderer::render(const RenderScene& scene)
     const bool lightingStagePresent = lightingPassPtr != nullptr
         && lightingPassPtr->isEnabled();
 
-    // Lighting is the sole SSAO consumer. The graph allocates the target only
-    // when the complete GBuffer -> SSAO -> Lighting chain is available.
     const bool ssaoPassEnabled = detail::selectSsaoStage(
         frame.ssaoEnabled,
         frame.ssaoStrength,
@@ -1533,19 +1526,6 @@ void Renderer::render(const RenderScene& scene)
         lightingStagePresent,
         fgW,
         fgH) && backendReady;
-    if (ssaoPassEnabled) {
-        fg.addResource(detail::FgResourceId::SSAOTexture,
-                       {bgfx::TextureFormat::RGBA8,
-                        detail::FgTextureScale::Full,
-                        /*transient=*/true,
-                        /*withDepth=*/false});
-        fg.addPass({"SSAO",
-                    {},
-                    {detail::FgResourceId::SSAOTexture},
-                    /*enabled=*/true});
-        fg.setResolvedSemantic(detail::FgSemantic::SSAOSource,
-                               detail::FgResourceId::SSAOTexture);
-    }
 
     const bool hazePassEnabled = detail::selectDepthHazeStage(
         frame.hazeEnabled,
@@ -1556,181 +1536,67 @@ void Renderer::render(const RenderScene& scene)
         lightingPassPtr != nullptr && lightingPassPtr->isEnabled(),
         fgW,
         fgH) && backendReady;
-    if (hazePassEnabled) {
-        fg.addResource(detail::FgResourceId::HazeColor,
-                       {detail::kHdrSceneColorFormat,
-                        detail::FgTextureScale::Full,
-                        /*transient=*/true,
-                        /*withDepth=*/false});
-        fg.addPass({"DepthHaze",
-                    {detail::FgResourceId::SceneColor},
-                    {detail::FgResourceId::HazeColor},
-                    /*enabled=*/true});
-        fg.setResolvedSemantic(detail::FgSemantic::HazeSource,
-                               detail::FgResourceId::HazeColor);
-    }
-
-    const detail::FgResourceId hdrSceneSource = hazePassEnabled
-        ? detail::FgResourceId::HazeColor
-        : detail::FgResourceId::SceneColor;
     const detail::BloomStageState bloomStages = detail::selectBloomStages(
         frame.bloomStrength,
         bloomExtractPassPtr != nullptr,
         bloomExtractPassPtr != nullptr && bloomExtractPassPtr->isEnabled(),
         bloomBlurPassPtr != nullptr,
         bloomBlurPassPtr != nullptr && bloomBlurPassPtr->isEnabled());
-    if (bloomStages.extract) {
-        fg.addResource(detail::FgResourceId::BloomBright,
-                       {detail::kHdrSceneColorFormat,
-                        detail::FgTextureScale::Half,
-                        /*transient=*/true,
-                        /*withDepth=*/false});
-        fg.addPass({"BloomExtract",
-                    {hdrSceneSource},
-                    {detail::FgResourceId::BloomBright},
-                    /*enabled=*/true});
-    }
-    if (bloomStages.blur) {
-        fg.addResource(detail::FgResourceId::BloomBlurA,
-                       {detail::kHdrSceneColorFormat,
-                        detail::FgTextureScale::Half,
-                        /*transient=*/true,
-                        /*withDepth=*/false});
-        fg.addResource(detail::FgResourceId::BloomBlurB,
-                       {detail::kHdrSceneColorFormat,
-                        detail::FgTextureScale::Half,
-                        /*transient=*/true,
-                        /*withDepth=*/false});
-        fg.addPass({"BloomBlurH",
-                    {detail::FgResourceId::BloomBright},
-                    {detail::FgResourceId::BloomBlurA},
-                    /*enabled=*/true});
-        fg.addPass({"BloomBlurV",
-                    {detail::FgResourceId::BloomBlurA},
-                    {detail::FgResourceId::BloomBlurB},
-                    /*enabled=*/true});
-        fg.setResolvedSemantic(detail::FgSemantic::BloomSource,
-                               detail::FgResourceId::BloomBlurB);
-    }
-
-    // FinalColorSource always names the stable underlying scene. Runtime source
-    // selection promotes HazeSource only after its current-frame latch is set.
-    fg.setResolvedSemantic(detail::FgSemantic::FinalColorSource,
-                           detail::FgResourceId::SceneColor);
-
-    // FinalPP is an offscreen producer and Present is the sole owner of the
-    // default-backbuffer boundary. PresentSource starts at FinalLdrColor each
-    // frame; FXAA and ColorGrading promote it transactionally only after
-    // their successful submits.
     const bool finalLdrStageEnabled = backendReady
         && fgW != 0 && fgH != 0
         && postProcessPassPtr != nullptr
         && postProcessPassPtr->isEnabled()
         && presentPassPtr != nullptr
         && presentPassPtr->isEnabled();
-    if (finalLdrStageEnabled) {
-        fg.addResource(detail::FgResourceId::FinalLdrColor,
-                       {bgfx::TextureFormat::RGBA8,
-                        detail::FgTextureScale::Full,
-                        /*transient=*/true,
-                        /*withDepth=*/false});
-        fg.addPass({"PostProcess",
-                    {hdrSceneSource},
-                    {detail::FgResourceId::FinalLdrColor},
-                    /*enabled=*/true});
-        const bool taaStageEnabled = taaPrepared && taaPassPtr != nullptr;
-        if (taaStageEnabled) {
-            fg.importExternal(detail::FgResourceId::TaaColor,
-                              taaPassPtr->writeHistoryFbo());
-            fg.addPass({"TAA",
-                        {detail::FgResourceId::FinalLdrColor},
-                        {detail::FgResourceId::TaaColor},
-                        /*enabled=*/true});
-        }
-        const bool fxaaStageEnabled = fxaaPassPtr != nullptr
-            && fxaaPassPtr->isEnabled();
-        if (fxaaStageEnabled) {
-            fg.addResource(detail::FgResourceId::FxaaColor,
-                           {bgfx::TextureFormat::RGBA8,
-                            detail::FgTextureScale::Full,
-                            /*transient=*/true,
-                            /*withDepth=*/false});
-            fg.addPass({"FXAA",
-                        {detail::FgResourceId::FinalLdrColor},
-                        {detail::FgResourceId::FxaaColor},
-                        /*enabled=*/true});
-        }
-        const bool smaaStageEnabled = smaaPassPtr != nullptr
-            && smaaPassPtr->isEnabled();
-        if (smaaStageEnabled) {
-            fg.addResource(detail::FgResourceId::SmaaEdges,
-                           {bgfx::TextureFormat::RGBA8,
-                            detail::FgTextureScale::Full,
-                            /*transient=*/true,
-                            /*withDepth=*/false,
-                            detail::SMAAPass::kIntermediatePointSampled});
-            fg.addResource(detail::FgResourceId::SmaaBlendWeights,
-                           {bgfx::TextureFormat::RGBA8,
-                            detail::FgTextureScale::Full,
-                            /*transient=*/true,
-                            /*withDepth=*/false,
-                            detail::SMAAPass::kIntermediatePointSampled});
-            fg.addResource(detail::FgResourceId::SmaaColor,
-                           {bgfx::TextureFormat::RGBA8,
-                            detail::FgTextureScale::Full,
-                            /*transient=*/true,
-                            /*withDepth=*/false});
-            fg.addPass({"SMAA",
-                        {fxaaStageEnabled
-                             ? detail::FgResourceId::FxaaColor
-                             : detail::FgResourceId::FinalLdrColor},
-                        {detail::FgResourceId::SmaaEdges,
-                         detail::FgResourceId::SmaaBlendWeights,
-                         detail::FgResourceId::SmaaColor},
-                        /*enabled=*/true});
-        }
-        const bool colorGradingStageEnabled = colorGradingPassPtr != nullptr
-            && colorGradingPassPtr->isEnabled()
-            && colorGradingPassPtr->strength() > 0.0f
-            && colorGradingPassPtr->preset() != ColorGradingPreset::Neutral;
-        if (colorGradingStageEnabled) {
-            fg.addResource(detail::FgResourceId::ColorGradedColor,
-                           {bgfx::TextureFormat::RGBA8,
-                            detail::FgTextureScale::Full,
-                            /*transient=*/true,
-                            /*withDepth=*/false});
-            fg.addPass({"ColorGrading",
-                        {taaStageEnabled
-                             ? detail::FgResourceId::TaaColor
-                             : (smaaStageEnabled
-                             ? detail::FgResourceId::SmaaColor
-                             : (fxaaStageEnabled
-                                    ? detail::FgResourceId::FxaaColor
-                                    : detail::FgResourceId::FinalLdrColor))},
-                        {detail::FgResourceId::ColorGradedColor},
-                        /*enabled=*/true});
-        }
-        fg.addPass({"Present",
-                    {colorGradingStageEnabled
-                         ? detail::FgResourceId::ColorGradedColor
-                         : (taaStageEnabled
-                                ? detail::FgResourceId::TaaColor
-                                : (smaaStageEnabled
-                                ? detail::FgResourceId::SmaaColor
-                                : (fxaaStageEnabled
-                                       ? detail::FgResourceId::FxaaColor
-                                       : detail::FgResourceId::FinalLdrColor)))},
-                    {},
-                    /*enabled=*/true});
-        fg.setResolvedSemantic(detail::FgSemantic::PresentSource,
-                               detail::FgResourceId::FinalLdrColor);
+    const bool taaStageEnabled = finalLdrStageEnabled
+        && taaPrepared && taaPassPtr != nullptr;
+    const bool fxaaStageEnabled = finalLdrStageEnabled
+        && fxaaPassPtr != nullptr && fxaaPassPtr->isEnabled();
+    const bool smaaStageEnabled = finalLdrStageEnabled
+        && smaaPassPtr != nullptr && smaaPassPtr->isEnabled();
+    const bool colorGradingStageEnabled = finalLdrStageEnabled
+        && colorGradingPassPtr != nullptr
+        && colorGradingPassPtr->isEnabled()
+        && colorGradingPassPtr->strength() > 0.0f
+        && colorGradingPassPtr->preset() != ColorGradingPreset::Neutral;
+
+    detail::PostProcessGraphPlanInput graphInput{};
+    graphInput.width = fgW;
+    graphInput.height = fgH;
+    graphInput.sceneColor = sceneColorHandle;
+    if (taaStageEnabled) {
+        graphInput.taaWriteTarget = taaPassPtr->writeHistoryFbo();
     }
+    graphInput.ssao = ssaoPassEnabled;
+    graphInput.haze = hazePassEnabled;
+    graphInput.bloomExtract = bloomStages.extract;
+    graphInput.bloomBlur = bloomStages.blur;
+    graphInput.finalLdr = finalLdrStageEnabled;
+    graphInput.taa = taaStageEnabled;
+    graphInput.fxaa = fxaaStageEnabled;
+    graphInput.smaa = smaaStageEnabled;
+    graphInput.colorGrading = colorGradingStageEnabled;
+    graphInput.smaaIntermediatePointSampled =
+        detail::SMAAPass::kIntermediatePointSampled;
+
+    const detail::PostProcessGraphPlanResult graphPlan =
+        detail::buildPostProcessGraphPlan(fg, graphInput);
 
     // GBufferDebug now overlays the selected attachment directly into the
     // game viewport on view 250. No hidden host-owned FBO is allocated; UI
     // view 255 still renders afterwards, so Editor chrome remains intact.
 
-    fg.compile();
+    if (!graphPlan.compileSucceeded) {
+        std::fprintf(stderr, "[FrameGraph] compile failed: %zu structural error(s)\n",
+                     fg.compileErrors().size());
+        for (const detail::FgCompileError& error : fg.compileErrors()) {
+            std::fprintf(stderr,
+                         "[FrameGraph]   pass=%u resource=%u reason=%s\n",
+                         static_cast<unsigned>(error.passIndex),
+                         static_cast<unsigned>(error.resource),
+                         detail::fgCompileErrorName(error.code));
+        }
+    }
 
     detail::PassExecContext ctx{
         _impl->adapter,

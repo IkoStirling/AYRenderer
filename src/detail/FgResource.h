@@ -130,7 +130,34 @@ struct FgPassDesc {
     std::vector<FgResourceId>         reads;
     std::vector<FgResourceId>         writes;
     bool                              enabled = true;
+    // A side-effect pass is an execution root even when it has no logical
+    // output consumed by another graph pass. Passes with an empty writes list
+    // are also treated as roots for backward compatibility (Present/Consumer).
+    bool                              sideEffect = false;
 };
+
+// Compile diagnostics are deliberately structural rather than textual so
+// tests and future tooling do not have to parse log strings. passIndex uses
+// kFgNoPass when the error belongs to a semantic rather than a pass.
+enum class FgCompileErrorCode : uint8_t {
+    InvalidResourceId = 0,
+    UndeclaredRead,
+    UndeclaredWrite,
+    ReadBeforeWrite,
+    MultipleWriters,
+    UndeclaredSemanticResource,
+    MissingSemanticProducer,
+};
+
+inline constexpr uint16_t kFgNoPass = 0xffffu;
+
+struct FgCompileError {
+    FgCompileErrorCode code = FgCompileErrorCode::InvalidResourceId;
+    uint16_t           passIndex = kFgNoPass;
+    FgResourceId       resource = FgResourceId::SceneColor;
+};
+
+const char* fgCompileErrorName(FgCompileErrorCode code) noexcept;
 
 // Semantic ── F5 接入;Final PostProcess 想知道 base color 从哪取、
 // Bloom/Haze 旁路 sampler 从哪取。`Invalid` 表示该 semantic 无
@@ -212,7 +239,8 @@ public:
     // pass 不会调它。
     void addResource(FgResourceId id, const FgTextureDesc& desc);
 
-    // 声明一个 logical pass。`enabled==false` 的 pass 不进 live set。
+    // 声明一个 logical pass。`enabled==false` 的 pass 不进 live set；
+    // terminal/side-effect pass 与 semantic 输出作为反向活跃性根。
     void addPass(const FgPassDesc& desc);
 
     // F5 ── 设置 semantic 指向哪个 logical 资源。FG compile 时
@@ -221,9 +249,10 @@ public:
     void setResolvedSemantic(FgSemantic sem, FgResourceId logicalId);
 
     // ─── compile / resolve ───────────────────────────────────────
-    // 按依赖关系形成 live set;disabled pass 的 write 裁掉;F1 不
-    // 做 alias(F6 才做)。返回 true 表示 compile 成功(false 仅当
-    // addPass 后忘了 compile 或 logical ID 引用了未声明的资源)。
+    // 校验所有 enabled pass 的资源声明、生产者顺序和单写者契约，
+    // 再从 terminal/side-effect pass 与 semantic 输出反向形成 live set。
+    // 无执行终点的独立旧图保持“全部 enabled pass live”兼容行为。
+    // 返回 false 时 compileErrors() 给出结构化错误，owned target 不 live。
     bool compile();
 
     // 拿 logical 资源的物理 handle。**首次调用触发物理 FBO 创建**
@@ -257,6 +286,9 @@ public:
     void shutdown();
 
     const FgCompileStats& stats() const noexcept { return _stats; }
+    const std::vector<FgCompileError>& compileErrors() const noexcept {
+        return _compileErrors;
+    }
 
     // 诊断 ── 测试可见,owner 不可依赖。
     bool hasAdapter() const noexcept { return _adapter != nullptr; }
@@ -270,6 +302,7 @@ private:
     bool            _compiled    = false;
 
     FgCompileStats  _stats{};
+    std::vector<FgCompileError> _compileErrors;
 
     // F1 仅声明形态,真正逻辑到物理映射延后到 F6。`isExternal`
     // 区分 importExternal vs addResource;`_physical` 缓存 lazy

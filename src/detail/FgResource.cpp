@@ -2,7 +2,10 @@
 
 #include "detail/BGFXAdapter.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
+#include <limits>
 
 namespace ayt::render::detail
 {
@@ -33,6 +36,22 @@ uint16_t scaledDim(uint16_t viewport, FgTextureScale scale)
 
 } // namespace
 
+const char* fgCompileErrorName(FgCompileErrorCode code) noexcept
+{
+    switch (code) {
+    case FgCompileErrorCode::InvalidResourceId: return "invalid resource id";
+    case FgCompileErrorCode::UndeclaredRead: return "read of undeclared resource";
+    case FgCompileErrorCode::UndeclaredWrite: return "write of undeclared resource";
+    case FgCompileErrorCode::ReadBeforeWrite: return "read before producer";
+    case FgCompileErrorCode::MultipleWriters: return "multiple writers";
+    case FgCompileErrorCode::UndeclaredSemanticResource:
+        return "semantic references undeclared resource";
+    case FgCompileErrorCode::MissingSemanticProducer:
+        return "semantic resource has no producer";
+    }
+    return "unknown frame-graph compile error";
+}
+
 // ─── ctor / dtor ──────────────────────────────────────────────
 
 FrameGraph::FrameGraph(BGFXAdapter& adapter) noexcept
@@ -62,6 +81,7 @@ void FrameGraph::beginFrame(uint16_t width, uint16_t height)
     _viewportH = height;
     _compiled  = false;
     _stats     = FgCompileStats{};
+    _compileErrors.clear();
 
     // 清空 logical 声明。但 ── F6 ── 物理 RT (aliasGroup /
     // physicalW / physicalH) 在 compile() 的 alias 决策后写;
@@ -151,28 +171,186 @@ bool FrameGraph::compile()
 {
     _stats = FgCompileStats{};
     _stats.declaredPasses = static_cast<uint16_t>(_passes.size());
+    _compileErrors.clear();
+    _compiled = false;
 
-    // 1) Live 标记(同 F1)。
-    for (PassEntry& p : _passes) {
-        if (!p.desc.enabled) {
-            p.live = false;
+    constexpr size_t kResourceCount =
+        static_cast<size_t>(FgResourceId::Count);
+    constexpr int16_t kNoWriter = -1;
+    std::array<int16_t, kResourceCount> latestWriter{};
+    latestWriter.fill(kNoWriter);
+
+    for (ResourceEntry& resource : _resources) {
+        resource.live = false;
+        resource.aliasGroup = -1;
+    }
+    for (PassEntry& pass : _passes) {
+        pass.live = false;
+    }
+
+    auto addError = [this](FgCompileErrorCode code, size_t passIndex,
+                           FgResourceId resource) {
+        FgCompileError error{};
+        error.code = code;
+        error.passIndex = passIndex > std::numeric_limits<uint16_t>::max()
+            ? kFgNoPass
+            : static_cast<uint16_t>(passIndex);
+        error.resource = resource;
+        _compileErrors.push_back(error);
+    };
+    auto resourceIndex = [](FgResourceId id) {
+        return static_cast<size_t>(id);
+    };
+
+    // 1) Validate declaration and producer order in registration order.
+    // External imports are valid read sources and may also be written (TAA's
+    // imported persistent history target). Owned resources require an earlier
+    // enabled producer before they can be read.
+    for (size_t passIndex = 0; passIndex < _passes.size(); ++passIndex) {
+        const PassEntry& pass = _passes[passIndex];
+        if (!pass.desc.enabled) {
             continue;
         }
-        p.live = true;
-        ++_stats.livePasses;
-        for (FgResourceId rid : p.desc.writes) {
-            if (static_cast<size_t>(rid) < static_cast<size_t>(FgResourceId::Count)) {
-                _resources[static_cast<size_t>(rid)].live = true;
+        for (FgResourceId id : pass.desc.reads) {
+            const size_t index = resourceIndex(id);
+            if (index >= kResourceCount) {
+                addError(FgCompileErrorCode::InvalidResourceId, passIndex, id);
+                continue;
+            }
+            const ResourceEntry& resource = _resources[index];
+            if (!resource.declared) {
+                addError(FgCompileErrorCode::UndeclaredRead, passIndex, id);
+            } else if (!resource.isExternal && latestWriter[index] == kNoWriter) {
+                addError(FgCompileErrorCode::ReadBeforeWrite, passIndex, id);
             }
         }
-        for (FgResourceId rid : p.desc.reads) {
-            if (static_cast<size_t>(rid) < static_cast<size_t>(FgResourceId::Count)) {
-                _resources[static_cast<size_t>(rid)].live = true;
+        for (FgResourceId id : pass.desc.writes) {
+            const size_t index = resourceIndex(id);
+            if (index >= kResourceCount) {
+                addError(FgCompileErrorCode::InvalidResourceId, passIndex, id);
+                continue;
+            }
+            if (!_resources[index].declared) {
+                addError(FgCompileErrorCode::UndeclaredWrite, passIndex, id);
+                continue;
+            }
+            if (latestWriter[index] != kNoWriter) {
+                addError(FgCompileErrorCode::MultipleWriters, passIndex, id);
+            }
+            latestWriter[index] = static_cast<int16_t>(passIndex);
+        }
+    }
+
+    for (size_t semanticIndex = 0;
+         semanticIndex < static_cast<size_t>(FgSemantic::Count);
+         ++semanticIndex) {
+        const SemanticEntry& semantic = _semantics[semanticIndex];
+        if (!semantic.hasLogical) {
+            continue;
+        }
+        const size_t index = resourceIndex(semantic.logical);
+        if (index >= kResourceCount || !_resources[index].declared) {
+            addError(FgCompileErrorCode::UndeclaredSemanticResource,
+                     kFgNoPass, semantic.logical);
+        } else if (!_resources[index].isExternal
+                   && latestWriter[index] == kNoWriter) {
+            addError(FgCompileErrorCode::MissingSemanticProducer,
+                     kFgNoPass, semantic.logical);
+        }
+    }
+
+    if (!_compileErrors.empty()) {
+        return false;
+    }
+
+    // 2) Backward liveness from terminal/side-effect passes. Semantic outputs
+    // are additional roots because some resources (SSAO) are consumed by a
+    // pass outside this MVP graph. Graphs without an execution sink retain the
+    // legacy behavior and keep every enabled pass live; this preserves small
+    // standalone resource tests while product graphs gain real dead-branch
+    // culling through Present.
+    std::vector<size_t> worklist;
+    bool hasExecutionSink = false;
+    auto markPassLive = [this, &worklist](size_t passIndex) {
+        PassEntry& pass = _passes[passIndex];
+        if (!pass.live) {
+            pass.live = true;
+            worklist.push_back(passIndex);
+        }
+    };
+
+    for (size_t passIndex = 0; passIndex < _passes.size(); ++passIndex) {
+        const PassEntry& pass = _passes[passIndex];
+        if (!pass.desc.enabled) {
+            continue;
+        }
+        if (pass.desc.sideEffect || pass.desc.writes.empty()) {
+            hasExecutionSink = true;
+            markPassLive(passIndex);
+        }
+    }
+
+    if (hasExecutionSink) {
+        for (const SemanticEntry& semantic : _semantics) {
+            if (!semantic.hasLogical) {
+                continue;
+            }
+            const int16_t writer = latestWriter[resourceIndex(semantic.logical)];
+            if (writer != kNoWriter) {
+                markPassLive(static_cast<size_t>(writer));
+            }
+        }
+        while (!worklist.empty()) {
+            const size_t consumerIndex = worklist.back();
+            worklist.pop_back();
+            const PassEntry& consumer = _passes[consumerIndex];
+            for (FgResourceId id : consumer.desc.reads) {
+                const size_t index = resourceIndex(id);
+                bool foundCurrentFrameProducer = false;
+                for (size_t candidate = consumerIndex; candidate > 0; --candidate) {
+                    const size_t producerIndex = candidate - 1;
+                    const PassEntry& producer = _passes[producerIndex];
+                    if (!producer.desc.enabled) {
+                        continue;
+                    }
+                    if (std::find(producer.desc.writes.begin(),
+                                  producer.desc.writes.end(), id)
+                        != producer.desc.writes.end()) {
+                        markPassLive(producerIndex);
+                        foundCurrentFrameProducer = true;
+                        break;
+                    }
+                }
+                // Imported resources are valid prior-frame/upstream inputs,
+                // but only when no earlier pass overwrites them this frame.
+                // TAA history is imported and then written before Present.
+                if (!foundCurrentFrameProducer && _resources[index].isExternal) {
+                    continue;
+                }
+            }
+        }
+    } else {
+        for (size_t passIndex = 0; passIndex < _passes.size(); ++passIndex) {
+            if (_passes[passIndex].desc.enabled) {
+                _passes[passIndex].live = true;
             }
         }
     }
 
-    // 2) Logical resources 统计 + owned live 物理尺寸 / 独立
+    for (PassEntry& pass : _passes) {
+        if (!pass.live) {
+            continue;
+        }
+        ++_stats.livePasses;
+        for (FgResourceId id : pass.desc.reads) {
+            _resources[resourceIndex(id)].live = true;
+        }
+        for (FgResourceId id : pass.desc.writes) {
+            _resources[resourceIndex(id)].live = true;
+        }
+    }
+
+    // 3) Logical resources 统计 + owned live 物理尺寸 / 独立
     //    aliasGroup（F6.1：永不共享）。
     int16_t nextAliasGroup = 0;
     for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
@@ -192,7 +370,7 @@ bool FrameGraph::compile()
     }
     // aliasHits stays 0 under the conservative policy.
 
-    // 3) Semantic 只锁 logical 映射。physical 不在 compile 缓存
+    // 4) Semantic 只锁 logical 映射。physical 不在 compile 缓存
     //    （F6.1 hotfix）：owned RT 是 resolve() lazy create 的，
     //    compile 时拷贝 r.physical 会让 Final 首帧采到 invalid。
     //    resolveSemantic() 改走 resolve(logical)。
@@ -358,6 +536,7 @@ void FrameGraph::shutdown()
     _viewportH = 0;
     _compiled  = false;
     _stats     = FgCompileStats{};
+    _compileErrors.clear();
     if (_ownedTargetPool != nullptr) {
         _ownedTargetPool->shutdown();
     }
