@@ -1,5 +1,16 @@
 # AYRenderer Design
 
+> **2026-09-09 — WorldLit2D 第一刀**：没有新增独立 Pass，而是在现有唯一
+> GBuffer producer 内加入 Position+UV 专用的 2D geometry substage。新增
+> `RenderDomain2D` 与 `Material2DDesc`；默认 `SceneOverlay` 保持原 view 246、
+> 无深度 alpha 合成，显式 `WorldLit` 的 opaque/cutout Sprite 改由 3D 主相机
+> 写入同一组 albedo/metallic、normal/roughness、world-position/AO/model、
+> emissive/coverage MRT，因而复用现有 Lighting、SSAO、DepthHaze 与后处理链。
+> 支持 albedo、normal、roughness、emissive、tint/atlas/flip，normal flip 会同步
+> 修正切线空间方向；材质贴图区分 sRGB 与 linear 缓存。当前边界：只接
+> Sprite，要求 Deferred；Blend、Tilemap WorldLit、2D 阴影投射和逐物体
+> Motion Vector 留到后续刀。默认场景零行为变化。
+
 > **2026-09-09 — R6 架构收口启动**：暂停新增独立画质 Pass，当前开工入口切换为 [`docs/render-architecture-r6.md`](docs/render-architecture-r6.md)。R6-1 已把 FrameGraph `compile()` 从“全部 enabled 即 live”升级为结构校验与反向存活分析：拒绝未声明 read/write、owned resource 先读后写、多写者及无生产者 semantic；存在 Present/Consumer 终端时从终端和 semantic 输出反向裁剪，兼容 SSAO 图外 Lighting 消费与 TAA imported history 本帧覆写。失败输出结构化诊断并让 owned 输出 fail-close。R6-2 新增不持有具体 Pass 的 `PostProcessGraphPlan`，集中声明 SSAO/Haze/Bloom/FinalLdr/AA/Grading/Present 资源链；`Renderer::render()` 只负责能力判断和计划输入，既有 `RenderPipeline` 执行顺序、view id 与画面拓扑未改变。R6-3a 已在 `RenderPipeline` 中加入随 `addPass/clear` 维护的 exact-type 索引，生产路径改用 O(1) 类型查找并移除字符串查找后的直接类型转换。R6-3b 已为 21 个 Pass slot 建立静态资源/输出/lifetime/side-effect 契约，管线重建前拒绝缺生产者、错序、重复或未知 slot；后处理 transient RT 由同一契约生成。下一刀 R6-3c 拆分 mounted/enabled/produced 状态。
 
 > **2026-09-08 — 同一 Scene 的 2D / 3D 合成**：`RenderScene` 新增独立

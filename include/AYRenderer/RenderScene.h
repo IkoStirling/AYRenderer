@@ -33,6 +33,11 @@ struct DrawPayload2D {
     uint8_t  flip = 0;          // 1 = horizontal, 2 = vertical (SpriteFlip bit semantics)
     uint8_t  reserved[3] = {};
     uint32_t packedSortKey = 0; // (layer << 24) | (sortingKey & 0x00FFFFFF)
+    // Tail-appended routing discriminator. SceneOverlay preserves the legacy
+    // alpha-blended/no-depth lane; WorldLit is consumed by GBuffer using the
+    // main world camera and is excluded from the overlay pass.
+    RenderDomain2D renderDomain = RenderDomain2D::SceneOverlay;
+    uint8_t reservedDomain[3] = {};
 };
 
 struct DrawItem {

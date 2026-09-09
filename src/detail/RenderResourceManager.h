@@ -72,6 +72,8 @@ public:
                                             const std::string& cacheKey = "");
     MaterialHandle createMaterialFromFile(const std::string& path);
     MaterialHandle loadMaterial(const std::string& path);
+    MaterialHandle createMaterial2D(const Material2DDesc& desc,
+                                    const std::string& cacheKey = "");
     void destroyMaterial(MaterialHandle& material);
 
     // Re-compile materials whose ShaderResource was invalidated by pool hot-reload.

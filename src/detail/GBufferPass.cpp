@@ -2,6 +2,7 @@
 
 #include "AYRenderer/RenderTypes.h"
 #include "detail/BgfxMatrix.h"
+#include "detail/Draw2D.h"
 #include "detail/FrameContext.h"
 #include "detail/GBufferLayout.h"
 #include "detail/RasterConvention.h"
@@ -128,8 +129,92 @@ material GBufferFill {
 // Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
 static constexpr const char* kGBufferCacheKey =
     "gbuffer_fill_v16_model_coverage_split";
+static constexpr const char* kWorldLit2DGBufferCacheKey =
+    "gbuffer_world_lit_2d_cutout_v1";
 static constexpr const char* kGBufferAlphaCutoutCacheKey =
     "gbuffer_fill_v16_alpha_model_coverage_split";
+
+// WorldLit2D is a geometry substage of the existing GBuffer producer. The
+// shared unit quad only carries position+UV, so this program derives its
+// object-space +Z normal and +X tangent instead of imposing the full 3D mesh
+// vertex contract. The resulting MRT encoding is identical to GBufferFill.
+constexpr const char* kWorldLit2DGBufferPhoskiaSource = R"(
+material WorldLit2DGBufferFill {
+    texture2d albedoMap
+    texture2d normalMap
+    texture2d roughnessMap
+    texture2d emissiveMap
+    property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
+    property tint = vec4(1.0, 1.0, 1.0, 1.0)
+    property metallic = vec4(0.0, 0.0, 0.0, 0.0)
+    property roughness = vec4(0.75, 0.0, 0.0, 0.0)
+    property ao = vec4(1.0, 0.0, 0.0, 0.0)
+    property emissive = vec4(0.0, 0.0, 0.0, 0.0)
+    property materialModel = vec4(0.0, 0.0, 0.0, 0.0)
+    property doubleSided = vec4(1.0, 0.0, 0.0, 0.0)
+    property normalYSign = vec4(1.0, 0.0, 0.0, 0.0)
+    property srcRect = vec4(0.0, 0.0, 1.0, 1.0)
+    property flip = vec4(0.0, 0.0, 0.0, 0.0)
+    property alphaCutoff = vec4(0.0, 0.0, 0.0, 0.0)
+    uniform mat4 u_normalMatrix
+    uniform vec4 cameraPos
+
+    vertex {
+        in pos : position
+        in uv : texcoord
+        out worldNormal : normal = (u_normalMatrix * vec4(0.0, 0.0, 1.0, 0.0)).xyz
+        out worldTangent : tangent = vec4(
+            (modelMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz, 1.0)
+        out worldPos : position = (modelMatrix * vec4(pos, 1.0)).xyz
+        out vUv : texcoord = uv
+        let sourceU = mix(uv.x, 1.0 - uv.x, flip.x)
+        let sourceVBase = 1.0 - uv.y
+        let sourceV = mix(sourceVBase, 1.0 - sourceVBase, flip.y)
+        vUv = vec2(
+            mix(srcRect.x, srcRect.z, sourceU),
+            mix(srcRect.y, srcRect.w, sourceV))
+        return modelViewProjection * vec4(pos, 1.0)
+    }
+    fragment {
+        in worldNormal : normal
+        in worldTangent : tangent
+        in worldPos : position
+        in vUv : texcoord
+        out gbufferAlbedo : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferWorldPosition : color = vec4(0.0, 0.0, 0.0, 0.0)
+        out gbufferMaterial : color = vec4(0.0, 0.0, 0.0, 0.0)
+        let albedo = sample(albedoMap, vUv) * baseColor * tint
+        if (albedo.a < alphaCutoff.x) { discard }
+        let rawN = normalize(worldNormal)
+        let tangentSeed = worldTangent.xyz - rawN * dot(worldTangent.xyz, rawN)
+                         + vec3(0.000001, 0.0, 0.0)
+        let T = normalize(tangentSeed)
+        let B = normalize(cross(rawN, T)) * worldTangent.w
+        let tangentNormal = sample(normalMap, vUv).xyz * 2.0
+                          - vec3(1.0, 1.0, 1.0)
+        let tangentXSign = mix(1.0, -1.0, flip.x)
+        let tangentYSign = normalYSign.x * mix(1.0, -1.0, flip.y)
+        let mappedN = normalize(T * tangentNormal.x * tangentXSign
+                              + B * tangentNormal.y * tangentYSign
+                              + rawN * tangentNormal.z)
+        let viewDir = normalize(cameraPos.xyz - worldPos)
+        let faceSign = mix(1.0, step(0.0, dot(mappedN, viewDir)) * 2.0 - 1.0,
+                           max(0.0, min(1.0, doubleSided.x)))
+        let n = mappedN * faceSign
+        let materialMetallic = max(0.0, min(1.0, metallic.x))
+        let materialRoughness = max(0.045, min(1.0,
+            roughness.x * sample(roughnessMap, vUv).x))
+        let materialAo = max(0.0, min(1.0, ao.x))
+        let packedAoModel = materialModel.x * 2.0 + materialAo
+        let materialEmissive = emissive.xyz * sample(emissiveMap, vUv).rgb
+        gbufferAlbedo = vec4(albedo.rgb, materialMetallic)
+        gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), materialRoughness)
+        gbufferWorldPosition = vec4(worldPos, packedAoModel)
+        gbufferMaterial = vec4(materialEmissive, 1.0)
+    }
+}
+)";
 
 constexpr const char* kGBufferAlphaCutoutVaryingSc = R"(
 vec3 v_normal    : NORMAL    = vec3(0.0, 0.0, 1.0);
@@ -242,6 +327,8 @@ void main()
 const char* const kGBufferCacheKeyCStr = kGBufferCacheKey;
 const char* const kGBufferBuildStampCStr = kGBufferBuildStamp;
 const char* const kGBufferPhoskiaSourceCStr = kGBufferPhoskiaSource;
+const char* const kWorldLit2DGBufferPhoskiaSourceCStr =
+    kWorldLit2DGBufferPhoskiaSource;
 
 GBufferPass::~GBufferPass() = default;
 
@@ -252,12 +339,21 @@ void GBufferPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     // not std::string. Pointer-equal compare; bumping the literal
     // forces re-acquire.
     static const char* s_acquiredCacheKey = nullptr;
+    static const char* s_acquiredWorldLit2DCacheKey = nullptr;
     if (s_acquiredCacheKey != kGBufferCacheKey) {
         _program.reset();
         _alphaCutoutProgram.reset();
+        _worldLit2DProgram.reset();
         _acquireFailed = false;
         _alphaCutoutAcquireFailed = false;
+        _worldLit2DAcquireFailed = false;
         s_acquiredCacheKey = kGBufferCacheKey;
+        s_acquiredWorldLit2DCacheKey = kWorldLit2DGBufferCacheKey;
+    } else if (s_acquiredWorldLit2DCacheKey
+               != kWorldLit2DGBufferCacheKey) {
+        _worldLit2DProgram.reset();
+        _worldLit2DAcquireFailed = false;
+        s_acquiredWorldLit2DCacheKey = kWorldLit2DGBufferCacheKey;
     }
 
     if (!_program.isValid() && !_acquireFailed) {
@@ -305,6 +401,22 @@ void GBufferPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
                          "[GBufferPass] alpha-cutout program ready (cacheKey=%s)\n",
                          kGBufferAlphaCutoutCacheKey);
             _alphaCutoutProgram = acquired;
+        }
+    }
+
+    if (!_worldLit2DProgram.isValid() && !_worldLit2DAcquireFailed) {
+        ayt::shader::ShaderResource acquired = pool.acquire(
+            kWorldLit2DGBufferPhoskiaSource, kWorldLit2DGBufferCacheKey);
+        if (!acquired.isValid()) {
+            _worldLit2DAcquireFailed = true;
+            std::fprintf(stderr,
+                         "[GBufferPass] WorldLit2D program acquire failed; "
+                         "WorldLit2D draws will be skipped. Errors:\n");
+            for (const std::string& err : pool.lastCompileErrors()) {
+                std::fprintf(stderr, "[GBufferPass]   %s\n", err.c_str());
+            }
+        } else {
+            _worldLit2DProgram = acquired;
         }
     }
 }
@@ -421,12 +533,14 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     uint32_t skippedInvalidBuffer = 0;
     uint32_t skippedInvalidShader = 0;
     uint32_t skippedTransparent = 0;
-    uint32_t skippedPayload2D = 0;
+    uint32_t skippedOverlay2D = 0;
     uint32_t skippedEmptyRange = 0;
     uint32_t alphaCutoutCount = 0;
+    uint32_t worldLit2DCount = 0;
     for (const DrawItem& item : ctx.scene.items()) {
-        if (item.payload != nullptr) {
-            ++skippedPayload2D;
+        const bool worldLit2D = isWorldLit2DItem(item);
+        if (item.payload != nullptr && !worldLit2D) {
+            ++skippedOverlay2D;
             continue;
         }
         if (!item.mesh.isValid() || !item.material.isValid()) {
@@ -461,7 +575,12 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
 
         const bool needsAlphaCutout = material.alphaCutout;
         alphaCutoutCount += needsAlphaCutout ? 1u : 0u;
-        if (needsAlphaCutout && !_alphaCutoutProgram.isValid()) {
+        if (worldLit2D && !_worldLit2DProgram.isValid()) {
+            ++skippedInvalidShader;
+            continue;
+        }
+        if (!worldLit2D && needsAlphaCutout
+            && !_alphaCutoutProgram.isValid()) {
             // Drawing a cutout with the opaque fill shader writes solid depth
             // and coverage for transparent texels. A missing specialized
             // program is therefore a skipped draw, not an opaque fallback.
@@ -469,7 +588,9 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             continue;
         }
         shader::ShaderResource& drawProgram =
-            needsAlphaCutout ? _alphaCutoutProgram : _program;
+            worldLit2D ? _worldLit2DProgram
+                       : (needsAlphaCutout ? _alphaCutoutProgram : _program);
+        worldLit2DCount += worldLit2D ? 1u : 0u;
 
         // §P5 B4c (2026-07-22) — PREV-FRAME VP UPLOAD. Build
         // prevViewProj = prevProj * prevView (P×V same-order as
@@ -616,6 +737,9 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
                                        sizeof(opacityValue));
             }
         }
+        if (worldLit2D) {
+            upload2DDrawUniforms(drawProgram, *item.payload);
+        }
 
         // Forward parity: sample(albedoMap)*baseColor. Bind host
         // material texture slots onto GBufferFill's albedoMap stage
@@ -728,12 +852,14 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         ctx.adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
                                    drawRange.indexCount);
 
-        tryUploadBonePalette(
-            drawProgram,
-            drawProgram.getUniformBlockBinding("Skeleton"),
-            drawProgram.getUniformBinding("castSkinned"),
-            /*castSkinnedValue=*/1u,
-            item);
+        if (!worldLit2D) {
+            tryUploadBonePalette(
+                drawProgram,
+                drawProgram.getUniformBlockBinding("Skeleton"),
+                drawProgram.getUniformBinding("castSkinned"),
+                /*castSkinnedValue=*/1u,
+                item);
+        }
 
         shader::DrawCallContext submitCtx;
         submitCtx.viewId = viewId;
@@ -757,12 +883,13 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     if (s_routeLogFrame < 8) {
         std::fprintf(stderr,
                      "[GBufferRoute] frame=%u items=%zu draws=%u cutout=%u "
+                     "worldLit2D=%u "
                      "skip(invalidHandle=%u missing=%u buffer=%u "
-                     "shader=%u transparent=%u payload2D=%u range=%u)\n",
+                     "shader=%u transparent=%u overlay2D=%u range=%u)\n",
                      s_routeLogFrame, ctx.scene.items().size(), drawCount,
-                     alphaCutoutCount, skippedInvalidHandle,
+                     alphaCutoutCount, worldLit2DCount, skippedInvalidHandle,
                      skippedMissingResource, skippedInvalidBuffer,
-                     skippedInvalidShader, skippedTransparent, skippedPayload2D,
+                     skippedInvalidShader, skippedTransparent, skippedOverlay2D,
                      skippedEmptyRange);
         ++s_routeLogFrame;
     }
@@ -807,6 +934,12 @@ void GBufferPass::destroyResources(BGFXAdapter& adapter)
     _allocatedH = 0;
     _buildStamp = "";
     _producedThisFrame = false;
+    _program.reset();
+    _alphaCutoutProgram.reset();
+    _worldLit2DProgram.reset();
+    _acquireFailed = false;
+    _alphaCutoutAcquireFailed = false;
+    _worldLit2DAcquireFailed = false;
     if (bgfx::isValid(_gbufferFbo)) {
         adapter.destroy(_gbufferFbo);
         _gbufferFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};

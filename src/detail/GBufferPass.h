@@ -157,11 +157,15 @@ private:
     // §P5 B4b (2026-07-22) �?Phoskia GBuffer VS/FS program handle
     // (mirror ShadowCaster::_program).
     ayt::shader::ShaderResource _program;
-    // Phoskia's BGFX emitter cannot emit fragment discard yet, so atlas
-    // cutouts use a raw .sc sibling with the same MRT/binding contract.
+    // Imported 3D cutouts retain their existing raw .sc compatibility
+    // sibling. WorldLit2D uses the current Phoskia fragment-discard path.
     ayt::shader::ShaderResource _alphaCutoutProgram;
+    // Position+UV-only program for WorldLit2D quads. It derives the local
+    // +Z normal/+X tangent instead of requiring a 3D mesh vertex layout.
+    ayt::shader::ShaderResource _worldLit2DProgram;
     bool _acquireFailed = false;
     bool _alphaCutoutAcquireFailed = false;
+    bool _worldLit2DAcquireFailed = false;
     bool _producedThisFrame = false;
 
     // Previous-frame cache reserved for a future dedicated velocity target.
@@ -173,5 +177,6 @@ private:
 extern const char* const kGBufferCacheKeyCStr;
 extern const char* const kGBufferBuildStampCStr;
 extern const char* const kGBufferPhoskiaSourceCStr;
+extern const char* const kWorldLit2DGBufferPhoskiaSourceCStr;
 
 } // namespace ayt::render::detail

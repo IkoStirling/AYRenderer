@@ -3,6 +3,7 @@
 #include "detail/RenderAssetBridge.h"
 #include "detail/TextureImageLoader.h"
 #include "detail/VertexLayoutBridge.h"
+#include "detail/WorldLit2DMaterialSource.h"
 
 #include "AYResource/AssetPath.h"
 #include "AYResource/MeshMorphContract.h"
@@ -644,6 +645,68 @@ MaterialHandle RenderResourceManager::createMaterialFromBgfxSc(const std::string
                  static_cast<unsigned long long>(id));
     std::fflush(stderr);
     return out;
+}
+
+MaterialHandle RenderResourceManager::createMaterial2D(
+    const Material2DDesc& desc, const std::string& cacheKey)
+{
+    if (!desc.albedo.isValid()
+        || _textures.find(desc.albedo.id) == _textures.end()) {
+        return {};
+    }
+    const auto isKnownOptionalTexture = [this](TextureHandle texture) {
+        return !texture.isValid()
+            || _textures.find(texture.id) != _textures.end();
+    };
+    if (!isKnownOptionalTexture(desc.normal)
+        || !isKnownOptionalTexture(desc.roughnessMap)
+        || !isKnownOptionalTexture(desc.emissiveMap)) {
+        return {};
+    }
+    if (desc.alphaMode >= Material2DAlphaMode::Count) {
+        return {};
+    }
+
+    MaterialHandle material = createMaterialFromPhoskia(
+        kWorldLit2DMaterialPhoskiaSource, cacheKey);
+    if (!material.isValid()) {
+        return {};
+    }
+
+    setMaterialTexture(material, "albedoMap", desc.albedo);
+    if (desc.normal.isValid()) {
+        setMaterialTexture(material, "normalMap", desc.normal);
+    }
+    if (desc.roughnessMap.isValid()) {
+        setMaterialTexture(material, "roughnessMap", desc.roughnessMap);
+    }
+    if (desc.emissiveMap.isValid()) {
+        setMaterialTexture(material, "emissiveMap", desc.emissiveMap);
+    }
+
+    const auto finiteClamped = [](float value, float fallback,
+                                  float minimum, float maximum) noexcept {
+        return std::clamp(std::isfinite(value) ? value : fallback,
+                          minimum, maximum);
+    };
+    const float metallic = finiteClamped(desc.metallic, 0.0f, 0.0f, 1.0f);
+    const float roughness = finiteClamped(desc.roughness, 0.75f, 0.045f, 1.0f);
+    const float ao = finiteClamped(desc.ambientOcclusion, 1.0f, 0.0f, 1.0f);
+    const float emissive = finiteClamped(
+        desc.emissiveStrength, 0.0f, 0.0f, 64.0f);
+    const float alphaCutoff = finiteClamped(
+        desc.alphaCutoff, 0.5f, 0.0f, 1.0f);
+
+    setMaterialFloat(material, "metallic", metallic);
+    setMaterialFloat(material, "roughness", roughness);
+    setMaterialFloat(material, "ao", ao);
+    setMaterialFloat(material, "normalYSign", desc.invertNormalY ? -1.0f : 1.0f);
+    setMaterialVec3(material, "emissive", emissive, emissive, emissive);
+    setMaterialModel(material, MaterialModel::StandardLit);
+    setMaterialSurfaceProperties(
+        material, static_cast<int>(desc.alphaMode), alphaCutoff,
+        desc.doubleSided);
+    return material;
 }
 
 void RenderResourceManager::resetMaterialBindingCache(GpuMaterial& material)

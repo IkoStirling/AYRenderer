@@ -161,11 +161,13 @@ TEST_CASE(cm1_drawitem_payload_defaults_nullptr_and_roundtrips) {
     CHECK(item.payload == nullptr);
 
     DrawPayload2D payload;
+    CHECK(payload.renderDomain == ayt::render::RenderDomain2D::SceneOverlay);
     payload.sourceRectMin = ayt::math::FVector2(0.25f, 0.5f);
     payload.sourceRectMax = ayt::math::FVector2(0.75f, 1.0f);
     payload.tintRGBA      = ayt::math::FVector4(0.9f, 0.8f, 0.7f, 0.6f);
     payload.flip          = 2;
     payload.packedSortKey = 0x03000012;
+    payload.renderDomain  = ayt::render::RenderDomain2D::WorldLit;
 
     item.payload = &payload;
     RenderScene scene;
@@ -176,6 +178,7 @@ TEST_CASE(cm1_drawitem_payload_defaults_nullptr_and_roundtrips) {
     CHECK(back.payload == &payload);
     CHECK(back.payload->packedSortKey == 0x03000012u);
     CHECK(back.payload->flip == 2);
+    CHECK(back.payload->renderDomain == ayt::render::RenderDomain2D::WorldLit);
     CHECK_FLOAT_EQ(back.payload->sourceRectMin.x, 0.25f, 1e-5f);
     CHECK_FLOAT_EQ(back.payload->sourceRectMin.y, 0.5f, 1e-5f);
     CHECK_FLOAT_EQ(back.payload->sourceRectMax.x, 0.75f, 1e-5f);
@@ -215,9 +218,12 @@ TEST_CASE(camera_overlay_2d_globally_stable_sorts_all_payload_producers) {
     DrawPayload2D payloadA;
     DrawPayload2D payloadB;
     DrawPayload2D payloadC;
+    DrawPayload2D worldPayload;
     payloadA.packedSortKey = 30u;
     payloadB.packedSortKey = 10u;
     payloadC.packedSortKey = 30u;
+    worldPayload.packedSortKey = 5u;
+    worldPayload.renderDomain = ayt::render::RenderDomain2D::WorldLit;
 
     RenderScene scene;
     DrawItem a;
@@ -233,6 +239,10 @@ TEST_CASE(camera_overlay_2d_globally_stable_sorts_all_payload_producers) {
     c.payload = &payloadC;
     c.sortKey = 3;
     scene.add(c);
+    DrawItem world;
+    world.payload = &worldPayload;
+    world.sortKey = 4;
+    scene.add(world); // GBuffer owns WorldLit2D; overlay must exclude it.
 
     const auto sorted = collectSortedOverlay2DItems(scene);
     CHECK(sorted.size() == 3u);

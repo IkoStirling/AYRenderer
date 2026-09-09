@@ -42,6 +42,25 @@ enum class MaterialModel : uint8_t {
     Count,
 };
 
+// A 2D draw can either live in the legacy camera overlay or participate in
+// the world/deferred surface pipeline. Values are serialized by host
+// components, so keep this enum append-only.
+enum class RenderDomain2D : uint8_t {
+    SceneOverlay = 0,
+    WorldLit     = 1,
+    Count,
+};
+
+// Material alpha routing for 2D surfaces. The first WorldLit2D slice ships
+// Opaque/Cutout through GBuffer; Blend is reserved for the later forward-lit
+// transparent stage and therefore currently fails closed in deferred draws.
+enum class Material2DAlphaMode : uint8_t {
+    Opaque = 0,
+    Cutout = 1,
+    Blend  = 2,
+    Count,
+};
+
 constexpr bool isTransparentBlendMode(BlendMode mode) noexcept
 {
     return mode != BlendMode::Opaque;
@@ -161,6 +180,25 @@ struct MaterialHandle {
 struct TextureHandle {
     uint64_t id = 0;
     bool isValid() const noexcept { return id != 0; }
+};
+
+// Public, GPU-handle-only description of a shared 2D surface material.
+// Per-instance UV/tint/flip data remains in DrawPayload2D; maps and scalar
+// surface properties live here so they can be cached and shared.
+struct Material2DDesc {
+    TextureHandle albedo{};       // required
+    TextureHandle normal{};       // optional; flat +Z fallback
+    TextureHandle roughnessMap{}; // optional; white fallback
+    TextureHandle emissiveMap{};  // optional; white fallback
+
+    float metallic        = 0.0f;
+    float roughness       = 0.75f;
+    float ambientOcclusion = 1.0f;
+    float emissiveStrength = 0.0f;
+    float alphaCutoff      = 0.5f;
+    Material2DAlphaMode alphaMode = Material2DAlphaMode::Cutout;
+    bool invertNormalY = false;
+    bool doubleSided   = true;
 };
 
 // Phase 4 — per-draw shadow participation (caster pass + receiver compare).

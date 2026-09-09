@@ -85,6 +85,11 @@ public:
                                             const std::string& cacheKey = "");
     MaterialHandle createMaterialFromFile(const std::string& path);
     MaterialHandle loadMaterial(const std::string& path);
+    // Creates a shared 2D surface material. WorldLit2D opaque/cutout draws
+    // consume it in GBuffer; SceneOverlay keeps using ordinary Phoskia
+    // materials. Missing optional maps resolve to renderer-owned fallbacks.
+    MaterialHandle createMaterial2D(const Material2DDesc& desc,
+                                    const std::string& cacheKey = "");
 
     TextureHandle createTextureFromRgba8(uint32_t width, uint32_t height,
                                          const uint8_t* pixels,
@@ -103,6 +108,9 @@ public:
     TextureHandle createTextureFromFile(const std::string& path,
                                         const std::string& cacheKey = "");
     TextureHandle loadTexture(const std::string& path);
+    // Color maps should request sRGB; normal/roughness/data maps must request
+    // linear. Sampling mode participates in the renderer cache key.
+    TextureHandle loadTexture(const std::string& path, bool srgb);
 
     void setMaterialColor(MaterialHandle material, const char* propertyName,
                           float r, float g, float b, float a = 1.0f);

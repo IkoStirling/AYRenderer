@@ -1987,6 +1987,15 @@ MaterialHandle Renderer::loadMaterial(const std::string& path)
     return _impl->resources.loadMaterial(path);
 }
 
+MaterialHandle Renderer::createMaterial2D(const Material2DDesc& desc,
+                                          const std::string& cacheKey)
+{
+    if (!_impl || !_impl->adapter.isInitialized() || !_impl->shaderPoolReady) {
+        return {};
+    }
+    return _impl->resources.createMaterial2D(desc, cacheKey);
+}
+
 TextureHandle Renderer::createTextureFromRgba8(uint32_t width, uint32_t height,
                                                const uint8_t* pixels,
                                                const std::string& cacheKey)
@@ -2038,6 +2047,14 @@ TextureHandle Renderer::loadTexture(const std::string& path)
         return {};
     }
     return _impl->resources.loadTexture(path);
+}
+
+TextureHandle Renderer::loadTexture(const std::string& path, bool srgb)
+{
+    if (!_impl || !_impl->adapter.isInitialized()) {
+        return {};
+    }
+    return _impl->resources.loadTexture(path, srgb);
 }
 
 void Renderer::setMaterialColor(MaterialHandle material, const char* propertyName,

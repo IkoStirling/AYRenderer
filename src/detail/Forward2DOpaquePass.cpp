@@ -1,5 +1,6 @@
 #include "detail/Forward2DOpaquePass.h"
 
+#include "detail/Draw2D.h"
 #include "detail/FrameContext.h"
 #include "detail/SceneColorPipeline.h"
 
@@ -10,59 +11,13 @@
 namespace ayt::render::detail
 {
 
-namespace {
-
-// Upload the three 2D per-draw uniforms from the payload. Missing
-// bindings are silent no-ops (the Tilemap2D shader declares them,
-// so this only no-ops on a mismatched custom shader).
-void upload2DUniforms(shader::ShaderResource& shader, const DrawPayload2D& payload)
-{
-    const float srcRect[4] = {
-        payload.sourceRectMin.x, payload.sourceRectMin.y,
-        payload.sourceRectMax.x, payload.sourceRectMax.y,
-    };
-    const float tint[4] = {
-        payload.tintRGBA.x, payload.tintRGBA.y,
-        payload.tintRGBA.z, payload.tintRGBA.w,
-    };
-    // SpriteFlip bit semantics: 1 = horizontal, 2 = vertical.
-    const float flip[4] = {
-        static_cast<float>(payload.flip & 0x01u),
-        static_cast<float>((payload.flip >> 1) & 0x01u),
-        0.0f, 0.0f,
-    };
-    const float atlasTexel[4] = {
-        payload.atlasTexelSize.x, payload.atlasTexelSize.y, 0.0f, 0.0f,
-    };
-
-    const shader::BindingId srcRectBinding = shader.getUniformBinding("srcRect");
-    if (srcRectBinding != shader::InvalidBinding) {
-        shader.setUniform(srcRectBinding, srcRect, sizeof(srcRect));
-    }
-    const shader::BindingId tintBinding = shader.getUniformBinding("tint");
-    if (tintBinding != shader::InvalidBinding) {
-        shader.setUniform(tintBinding, tint, sizeof(tint));
-    }
-    const shader::BindingId flipBinding = shader.getUniformBinding("flip");
-    if (flipBinding != shader::InvalidBinding) {
-        shader.setUniform(flipBinding, flip, sizeof(flip));
-    }
-    const shader::BindingId atlasTexelBinding =
-        shader.getUniformBinding("atlasTexel");
-    if (atlasTexelBinding != shader::InvalidBinding) {
-        shader.setUniform(atlasTexelBinding, atlasTexel, sizeof(atlasTexel));
-    }
-}
-
-} // namespace
-
 std::vector<const DrawItem*> collectSortedOverlay2DItems(
     const RenderScene& scene)
 {
     std::vector<const DrawItem*> sortedItems;
     sortedItems.reserve(scene.items().size());
     for (const DrawItem& item : scene.items()) {
-        if (item.payload != nullptr && !item.outlineHull) {
+        if (isOverlay2DItem(item) && !item.outlineHull) {
             sortedItems.push_back(&item);
         }
     }
@@ -184,7 +139,7 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
                                        toShaderTexture(texIt->second.handle));
         }
 
-        upload2DUniforms(material.shader, *item.payload);
+        upload2DDrawUniforms(material.shader, *item.payload);
 
         ayt::shader::DrawCallContext drawCtx;
         drawCtx.viewId = viewId;

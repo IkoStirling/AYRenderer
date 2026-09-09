@@ -20,8 +20,8 @@ namespace ayt::render::detail
 std::vector<const DrawItem*> collectSortedOverlay2DItems(
     const RenderScene& scene);
 
-// CM-1 (2026-08-11) — 2D lane pass. Draws every DrawItem carrying a
-// non-null `payload` (DrawPayload2D) with:
+// CM-1 (2026-08-11) — 2D overlay lane. Draws DrawItems whose payload domain
+// is SceneOverlay. WorldLit2D payloads are consumed by GBuffer instead.
 //   - RenderScene's independent overlay camera when present; the 3D main
 //     camera remains untouched.
 //   - alpha blend ON, NO depth test/write. The lane is a camera overlay and
@@ -34,7 +34,7 @@ std::vector<const DrawItem*> collectSortedOverlay2DItems(
 //   - albedo textures bound with the same loop shape as
 //     ForwardOpaquePass::flushMaterial; "shadowMap" slots skipped
 //     (2D has no shadow path).
-// 3D passes explicitly reject payload items, so custom 2D material blend
+// Other passes reject SceneOverlay payloads, so custom 2D material blend
 // metadata cannot cause a second submission.
 class Forward2DOpaquePass : public RenderPass {
 public:
