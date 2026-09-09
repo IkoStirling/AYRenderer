@@ -2,6 +2,8 @@
 #include "AYTest.h"
 
 #include "AYResource/assetsImpl/Mesh.h"
+#include "AYResource/AssetPath.h"
+#include <filesystem>
 
 #include "AYIO/File.h"
 
@@ -223,8 +225,12 @@ TEST_CASE(mesh_cache_returns_same_handle_on_repeat_loads)
 
     const size_t cacheBefore = renderer.meshCacheSize();
 
-    // First load: populates the cache.
-    const ayt::render::MeshHandle first = renderer.loadMesh(meshPath);
+    // Editor scenes retain portable paths. First load must resolve against
+    // the asset root, and the absolute alias must reuse the same GPU entry.
+    const std::string previousRoot = ayt::resource::assetRoot();
+    ayt::resource::setAssetRoot(std::filesystem::path(meshPath).parent_path().string());
+    const std::string portablePath = std::filesystem::path(meshPath).filename().string();
+    const ayt::render::MeshHandle first = renderer.loadMesh(portablePath);
     CHECK(first.isValid());
     const size_t cacheAfterFirst = renderer.meshCacheSize();
     CHECK(cacheAfterFirst == cacheBefore + 1u);
@@ -235,6 +241,7 @@ TEST_CASE(mesh_cache_returns_same_handle_on_repeat_loads)
     CHECK(renderer.meshCacheSize() == cacheAfterFirst);
     CHECK(second.id == first.id);
     CHECK(third.id  == first.id);
+    ayt::resource::setAssetRoot(previousRoot);
 
     // Cache hit must not depend on the file still existing on disk.
     // Delete the file, then load again — if loadMesh is doing disk I/O

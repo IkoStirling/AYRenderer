@@ -599,6 +599,9 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     sortedItems.reserve(items.size());
     outlineItems.reserve(items.size());
     for (const DrawItem& item : items) {
+        if (item.payload != nullptr) {
+            continue;
+        }
         if (outlineEnabled && item.outlineHull) {
             outlineItems.push_back(&item);
         }

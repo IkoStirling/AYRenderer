@@ -1,8 +1,11 @@
 #include "detail/Forward2DOpaquePass.h"
 
 #include "detail/FrameContext.h"
+#include "detail/SceneColorPipeline.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <vector>
 
 namespace ayt::render::detail
 {
@@ -53,10 +56,28 @@ void upload2DUniforms(shader::ShaderResource& shader, const DrawPayload2D& paylo
 
 } // namespace
 
+std::vector<const DrawItem*> collectSortedOverlay2DItems(
+    const RenderScene& scene)
+{
+    std::vector<const DrawItem*> sortedItems;
+    sortedItems.reserve(scene.items().size());
+    for (const DrawItem& item : scene.items()) {
+        if (item.payload != nullptr && !item.outlineHull) {
+            sortedItems.push_back(&item);
+        }
+    }
+    std::stable_sort(
+        sortedItems.begin(), sortedItems.end(),
+        [](const DrawItem* lhs, const DrawItem* rhs) {
+            return lhs->payload->packedSortKey < rhs->payload->packedSortKey;
+        });
+    return sortedItems;
+}
+
 uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
 {
     BGFXAdapter& adapter = ctx.adapter;
-    const uint8_t viewId = ctx.viewId;
+    const uint8_t viewId = kOverlayViewId;
     const auto& meshes   = ctx.meshes;
     const auto& textures = ctx.textures;
     auto& materials      = ctx.materials;
@@ -74,34 +95,40 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    adapter.setViewTransform(viewId, ctx.frame.view, ctx.frame.projection);
+    const OverlayCamera2D& overlayCamera = scene.overlayCamera2D();
+    adapter.setViewTransform(
+        viewId,
+        overlayCamera.valid ? overlayCamera.view : ctx.frame.view,
+        overlayCamera.valid ? overlayCamera.projection : ctx.frame.projection);
+    adapter.setViewMode(viewId, bgfx::ViewMode::Sequential);
 
-    // Bind the shared scene FBO so the 2D lane composites into the
-    // same offscreen color/depth that PostProcessPass samples
-    // (ForwardOpaquePass mirror). BGFX_INVALID_HANDLE ⇒ default
-    // backbuffer (headless test path). The 2D pass does NOT clear —
-    // ForwardOpaquePass already cleared this view (mirror
-    // TransparentPass, which also draws without clearing).
-    adapter.setViewFrameBuffer(viewId, ctx.sceneFbo);
-    if (BGFXAdapter::isValid(ctx.sceneFbo)) {
+    // Composite into the current scene-linear producer. In Deferred this is
+    // Lighting/Haze color; in Forward it is sceneFbo. A mounted Deferred path
+    // fails closed when its producer is stale. Invalid Forward sceneFbo keeps
+    // the legacy backbuffer fallback.
+    const bgfx::FrameBufferHandle compositeFbo = selectSceneColorSourceFbo(ctx);
+    const bool deferredPath = ctx.gbufferPass != nullptr
+        && ctx.lightingPass != nullptr;
+    if (deferredPath && !BGFXAdapter::isValid(compositeFbo)) {
+        return 0;
+    }
+    adapter.setViewFrameBuffer(viewId, compositeFbo);
+    if (BGFXAdapter::isValid(compositeFbo)) {
         adapter.setViewRect(viewId, 0, 0, viewportWidth, viewportHeight);
     } else {
         adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
     }
 
     // Blend-only: BGFX_STATE_BLEND_ALPHA, no WRITE_Z, no DEPTH_TEST.
-    // CPU packedSortKey order is the final order (see class doc).
     adapter.setStateAlphaBlend();
 
     uint32_t drawCount = 0;
 
-    for (const DrawItem& item : scene.items()) {
-        if (item.payload == nullptr) {
-            continue;  // 3D item — other passes own it.
-        }
-        if (item.outlineHull) {
-            continue;
-        }
+    const std::vector<const DrawItem*> sortedItems =
+        collectSortedOverlay2DItems(scene);
+
+    for (const DrawItem* itemPtr : sortedItems) {
+        const DrawItem& item = *itemPtr;
         if (!item.mesh.isValid() || !item.material.isValid()) {
             continue;
         }

@@ -1060,6 +1060,14 @@ struct UIRenderBackend::FrameState {
     ayt::ui::BlendMode                 currentBlend = ayt::ui::BlendMode::Normal;
     BatchMode                          batchMode = BatchMode::OverlapAware;
     float                              uiScale = 1.0f;
+    struct TransformState {
+        bool applied = false;
+        float uiScale = 1.0f;
+        float originX = 0.0f;
+        float originY = 0.0f;
+        std::vector<UiClipEntry> clipStack;
+    };
+    std::vector<TransformState>        transformStack;
     // Overlap-aware planner scratch. These vectors retain capacity across
     // frames; beginFrame clears only the logical command stream.
     std::vector<uint32_t>              batchOrder;
@@ -1829,6 +1837,20 @@ void UIRenderBackend::beginFrame()
             active->second.dirty = true;
         }
     }
+    // Recover from an unbalanced caller before resetting per-frame state.
+    // Otherwise the previous transform's derived uiScale would leak into
+    // the next frame even though its stack and clips were discarded.
+    while (!frame.transformStack.empty()) {
+        FrameState::TransformState state =
+            std::move(frame.transformStack.back());
+        frame.transformStack.pop_back();
+        if (state.applied) {
+            frame.uiScale = state.uiScale;
+            frame.originX = state.originX;
+            frame.originY = state.originY;
+            frame.clipStack = std::move(state.clipStack);
+        }
+    }
     frame.items.clear();
     frame.clipStack.clear();
     frame.pathClipDepth = 0;
@@ -2368,6 +2390,81 @@ void UIRenderBackend::popOpacity()
     }
 }
 
+void UIRenderBackend::pushTransform(const ayt::math::Float4x4& transform)
+{
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+    FrameState& frame = *_frame;
+    FrameState::TransformState saved;
+
+    const float sx = transform(0, 0);
+    const float sy = transform(1, 1);
+    const float tx = transform(0, 3);
+    const float ty = transform(1, 3);
+    const auto nearZero = [](float value) { return std::fabs(value) < 0.0001f; };
+    bool supported = std::isfinite(sx) && std::isfinite(sy) &&
+        std::isfinite(tx) && std::isfinite(ty) && sx > 0.0001f &&
+        std::fabs(sx - sy) < 0.0001f && nearZero(transform(0, 1)) &&
+        nearZero(transform(1, 0)) && nearZero(transform(0, 2)) &&
+        nearZero(transform(1, 2)) && nearZero(transform(2, 0)) &&
+        nearZero(transform(2, 1)) && nearZero(transform(3, 0)) &&
+        nearZero(transform(3, 1)) && nearZero(transform(3, 2));
+    if (supported) {
+        for (const UiClipEntry& clip : frame.clipStack) {
+            if (clip.pathClip) {
+                supported = false;
+                break;
+            }
+        }
+    }
+    if (!supported) {
+        frame.transformStack.push_back(std::move(saved));
+        return;
+    }
+
+    // Items are converted to physical coordinates only at flush time, so a
+    // state change needs a batch boundary. This costs one boundary per
+    // transformed subtree, not one per widget or primitive.
+    flushColoredRects();
+    saved.applied = true;
+    saved.uiScale = frame.uiScale;
+    saved.originX = frame.originX;
+    saved.originY = frame.originY;
+    saved.clipStack = frame.clipStack;
+    frame.transformStack.push_back(std::move(saved));
+
+    const float inverse = 1.0f / sx;
+    for (UiClipEntry& clip : frame.clipStack) {
+        clip.bounds = ayt::math::FRectangle(
+            (clip.bounds.minX - tx) * inverse,
+            (clip.bounds.minY - ty) * inverse,
+            (clip.bounds.maxX - tx) * inverse,
+            (clip.bounds.maxY - ty) * inverse);
+    }
+    frame.originX = (frame.originX - tx) * inverse;
+    frame.originY = (frame.originY - ty) * inverse;
+    frame.uiScale *= sx;
+}
+
+void UIRenderBackend::popTransform()
+{
+    if (_frame == nullptr || _frame->transformStack.empty()) {
+        return;
+    }
+    FrameState& frame = *_frame;
+    FrameState::TransformState saved =
+        std::move(frame.transformStack.back());
+    frame.transformStack.pop_back();
+    if (!saved.applied) return;
+
+    flushColoredRects();
+    frame.uiScale = saved.uiScale;
+    frame.originX = saved.originX;
+    frame.originY = saved.originY;
+    frame.clipStack = std::move(saved.clipStack);
+}
+
 void UIRenderBackend::drawGradientRect(const ayt::math::FRectangle& bounds,
                                        const ayt::math::FVector4& topColor,
                                        const ayt::math::FVector4& bottomColor)
@@ -2814,6 +2911,31 @@ void UIRenderBackend::drawRect(const ayt::math::FRectangle& bounds, void* textur
     // multiplies v_color0 by the texture sample, so alpha rides through.
     emitClippedTexturedQuad(bounds, textureIdx, uv,
                             ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
+}
+
+bool UIRenderBackend::addTexturedQuad(
+    const ayt::math::FRectangle& bounds, void* textureHandle,
+    const ayt::math::FRectangle& uv, const ayt::math::FVector4& tint)
+{
+    if (_frame == nullptr) {
+        _frame = std::make_unique<FrameState>();
+    }
+
+    uint16_t textureIdx = detail::UiGpuContext::kInvalidIdx;
+    uint16_t textureWidth = 0;
+    uint16_t textureHeight = 0;
+    if (!resolveTextureHandle(textureHandle, textureIdx,
+                              textureWidth, textureHeight)) {
+        drawRect(bounds, ayt::math::FVector4(
+            kUnknownTextureColor.x * tint.x,
+            kUnknownTextureColor.y * tint.y,
+            kUnknownTextureColor.z * tint.z,
+            kUnknownTextureColor.w * tint.w));
+        return false;
+    }
+
+    emitClippedTexturedQuad(bounds, textureIdx, uv, tint);
+    return true;
 }
 
 void UIRenderBackend::drawWithAlpha(const ayt::math::FRectangle& bounds, void* textureHandle,

@@ -87,9 +87,9 @@ void checkCanonicalDefaultDesc(const RenderPipelineDesc& desc)
     // appended between BloomExtract and PostProcess; S4b DepthHaze
     // appended between BloomBlur and PostProcess).
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
-    CHECK(desc.passes[2] == RenderPassSlot::Forward2DOpaque);  // CM-1 (2026-08-11)
-    CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[4] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[3] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::PostProcess);

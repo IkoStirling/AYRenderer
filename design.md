@@ -1,5 +1,15 @@
 # AYRenderer Design
 
+> **2026-09-09 — R6 架构收口启动**：暂停新增独立画质 Pass，当前开工入口切换为 [`docs/render-architecture-r6.md`](docs/render-architecture-r6.md)。R6-1 已把 FrameGraph `compile()` 从“全部 enabled 即 live”升级为结构校验与反向存活分析：拒绝未声明 read/write、owned resource 先读后写、多写者及无生产者 semantic；存在 Present/Consumer 终端时从终端和 semantic 输出反向裁剪，兼容 SSAO 图外 Lighting 消费与 TAA imported history 本帧覆写。失败输出结构化诊断并让 owned 输出 fail-close。R6-2 新增不持有具体 Pass 的 `PostProcessGraphPlan`，集中声明 SSAO/Haze/Bloom/FinalLdr/AA/Grading/Present 资源链；`Renderer::render()` 只负责能力判断和计划输入，既有 `RenderPipeline` 执行顺序、view id 与画面拓扑未改变。R6-3a 已在 `RenderPipeline` 中加入随 `addPass/clear` 维护的 exact-type 索引，生产路径改用 O(1) 类型查找并移除字符串查找后的直接类型转换。R6-3b 已为 21 个 Pass slot 建立静态资源/输出/lifetime/side-effect 契约，管线重建前拒绝缺生产者、错序、重复或未知 slot；后处理 transient RT 由同一契约生成。下一刀 R6-3c 拆分 mounted/enabled/produced 状态。
+
+> **2026-09-08 — 同一 Scene 的 2D / 3D 合成**：`RenderScene` 新增独立
+> `OverlayCamera2D`，`OrthoCameraUpdateSystem` 不再覆盖 3D 主相机。
+> `Forward2DOpaquePass` 使用专用 view 246，在 Sprite/Tilemap 全部 payload 间按
+> `packedSortKey` 全局稳定排序，并于 3D Transparent 后写入当前 HDR scene color。
+> Forward 与 Deferred 均挂载该 Pass，GBuffer/Transparent 显式排除 2D payload。
+> 深度参与的 World Space 2D 留作独立域，详见
+> [`ADR-0008`](../../AYDocs/adr/0008-mixed-2d-3d-scene-composition.md)。
+
 > **2026-09-02 — 后处理 Phoskia 边界收口**：MotionVector 的 rigid/skinned 与 alpha-cutout 程序、TAA resolve 均从 raw bgfx `.sc` 迁回标准 Phoskia `ShaderResourcePool::acquire` 路径，恢复源码缓存与磁盘二进制缓存。为此 Phoskia BGFX 后端补齐真实 `if/else` 输出，并新增 fragment-only `discard`；TAA 改为单一最终输出，未把 material `return` 错当成早退。FXAA 与 SMAA 暂保留为受控 raw `.sc` 兼容例外：前者依赖用户函数与真正早退，后者依赖用户函数、C 风格循环和复杂嵌套分支；两者都有 Windows `s_5_0` 生产编译测试，不再作为新 Pass 绕过 Phoskia 的先例。
 
 > **2026-09-01 — Deferred Motion Vector Pass**：新增 append-only `RenderPassSlot::MotionVector=20` 与 view 3，固定在 `GBuffer(view 7) → MotionVector(view 3) → SSAO(view 14) → Lighting(view 8)`。Pass 不扩展 GBuffer MRT：仅在 TAA 成功准备时分配独立全分辨率 `RG16F` velocity，并通过 non-owning FBO 借用 GBuffer depth，以 `LEQUAL` color-only 重放 opaque/cutout 几何。速度编码为 `currentUV - previousUV`；新对象、断帧或姿态布局变化写 `(2,2)` 哨兵拒绝旧 history。`DrawItem::motionObjectId` 负责稳定对象匹配，AYEntity 为刚体、分段蒙皮和回退路径提供混入 World/handle generation 的标识；Pass 按对象+mesh 保存上一帧 world 与完整骨骼姿态。TAA 优先消费速度，资源或 shader 不可用时保留 RT2 world-position 静态回退；透明物体仍不在本轮覆盖。
@@ -477,6 +487,7 @@ public:
 | GBufferPass | 已落地四颜色 MRT + D24S8，契约 v3 已冻结 |
 | LightingPass | 已落地全屏 Deferred 光照；shadow atlas、完整多光 BRDF、采样变体与 HDR 链路已完成第二轮收敛 |
 | TransparentPass | 已接入双路径；Deferred 借用 LightingOutput 颜色与 GBuffer 深度组成缓存 FBO，共享多光/阴影契约，按 sortKey 与相机距离稳定排序并在输入失效时 fail-close |
+| Forward2DOpaquePass | Camera Overlay 2D；独立正交相机、无深度、跨 Sprite/Tilemap 全局稳定排序；Forward/Deferred 都在 3D Transparent 后合成 |
 | BloomExtract / BloomBlur | 已完成第二轮收敛：完整链门控、当前帧产出契约、RGBA16F、Karis 降采样、5-fetch/axis blur、曝光一致合成 |
 | DepthHaze | 已完成第二轮收敛：全分辨率 HDR HazeColor、Coverage 背景语义、逐帧 fail-close、透明 PBR 雾化与显式 view 顺序；SSAO 已在 Lighting 环境光阶段完成，不在 Haze 内重复合成 |
 | SSAO | 已完成审核与按序修复：RT3 coverage、TBN 旋转核、view-Z 比较、完整链门控、生命周期闭合，且只影响 Lighting 环境光 |
@@ -486,8 +497,8 @@ public:
 当前 Forward 默认顺序：
 
 ```text
-Shadow → ForwardOpaque → Forward2DOpaque → DepthHaze(no-op)
-       → Transparent → BloomExtract → BloomBlur
+Shadow → ForwardOpaque → DepthHaze(no-op) → Transparent
+       → Forward2DOpaque → BloomExtract → BloomBlur
        → PostProcess(FinalLdrColor) → FXAA(FxaaColor)
        → ColorGrading(ColorGradedColor) → Present → UI
 ```
@@ -495,9 +506,9 @@ Shadow → ForwardOpaque → Forward2DOpaque → DepthHaze(no-op)
 当前 Deferred opt-in 顺序：
 
 ```text
-Shadow → Skybox → GBuffer → SSAO → Lighting → DepthHaze
-       → Transparent → BloomExtract → BloomBlur
-       → PostProcess(FinalLdrColor) → FXAA(FxaaColor)
+Shadow → Skybox → GBuffer → MotionVector → SSAO → Lighting → DepthHaze
+       → Transparent → Forward2DOpaque → BloomExtract → BloomBlur
+       → PostProcess(FinalLdrColor) → TAA / FXAA / SMAA
        → ColorGrading(ColorGradedColor) → Present → UI → GBufferDebug
 ```
 

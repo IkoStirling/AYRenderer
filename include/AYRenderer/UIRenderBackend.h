@@ -55,7 +55,8 @@ public:
     //  16 = Present → backbuffer panel (Forward + Deferred)
     //  17 = FXAA offscreen LDR filter (ordered before Present)
     //  18–25 = Shadow atlas slots
-    //  26–246 = retained UI Layer / generic offscreen paint targets
+    //  26–245 = retained UI Layer / generic offscreen paint targets
+    //  246 = camera-overlay 2D composition
     //  247–249 = SMAA 1x edge / blend-weight / neighborhood stages
     //  250 = GBufferDebug, 251/252 = EditorOverlay axis/compatibility
     //  253/254 = selection visibility mask / screen-space composite
@@ -63,7 +64,7 @@ public:
     //        without reshuffling UI; must stay after presentation overlays)
     static constexpr uint8_t kViewId = 255;
     static constexpr uint8_t kFirstLayerViewId = 26;
-    static constexpr uint8_t kLastLayerViewId = 246;
+    static constexpr uint8_t kLastLayerViewId = 245;
     static constexpr uint16_t kMaxOffscreenPaintsPerFrame =
         static_cast<uint16_t>(kLastLayerViewId - kFirstLayerViewId + 1u);
 
@@ -128,6 +129,10 @@ public:
                   const ayt::math::FVector4& color) override;
     void drawRect(const ayt::math::FRectangle& bounds, void* textureHandle,
                   const ayt::math::FRectangle& uv) override;
+    bool addTexturedQuad(const ayt::math::FRectangle& bounds,
+                         void* textureHandle,
+                         const ayt::math::FRectangle& uv,
+                         const ayt::math::FVector4& tint) override;
     void drawText(const ayt::math::FRectangle& bounds, const std::wstring& text, int fontSize,
                   const ayt::math::FVector4& color) override;
     // Text-style drawText: implements Align + VAlign (outline/shadow/
@@ -160,6 +165,12 @@ public:
     // fades as a whole. Base frame is 1.0 (no-op).
     void pushOpacity(float alpha) override;
     void popOpacity() override;
+    // The UI backend supports the axis-aligned uniform scale + translation
+    // subset used by retained editor viewports. Transform boundaries flush
+    // the current batch, preserving ordering while keeping the normal fast
+    // path unchanged for trees that do not use a transform.
+    void pushTransform(const ayt::math::Float4x4& transform) override;
+    void popTransform() override;
     // IAYRenderBackend declares the 2-color (vertical) variant as
     // pure virtual — the 4-color override below does NOT satisfy it
     // (different signature). Implement both; the 2-color routes to the

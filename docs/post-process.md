@@ -184,7 +184,8 @@ PostProcess、TAA、FXAA、SMAA、ColorGrading 与 Present 共用 `FullscreenPas
 | 16 | Present → backbuffer |
 | 17 | FXAA → FxaaColor（显式排在 Present 之前） |
 | 18–25 | Shadow atlas slots |
-| 26–246 | UI offscreen layer/RenderTarget（每帧最多 221 次 retained repaint） |
+| 26–245 | UI offscreen layer/RenderTarget（每帧最多 220 次 retained repaint） |
+| 246 | 相机覆层 2D 合成（独立正交相机，位于 3D Transparent 之后） |
 | 247 | SMAA edge detection → SmaaEdges |
 | 248 | SMAA blend weights → SmaaBlendWeights |
 | 249 | SMAA neighborhood blending → SmaaColor |

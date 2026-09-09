@@ -152,48 +152,51 @@ TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {
 
 TEST_CASE(deferred_pipeline_matches_data_dependencies) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
-    CHECK(desc.passes.size() == 18u);
+    CHECK(desc.passes.size() == 19u);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
     CHECK(desc.passes[3] == RenderPassSlot::MotionVector);
     CHECK(desc.passes[4] == RenderPassSlot::SSAO);
     CHECK(desc.passes[5] == RenderPassSlot::Lighting);
     CHECK(desc.passes[6] == RenderPassSlot::DepthHaze);
     CHECK(desc.passes[7] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[8] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[9] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[10] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[8] == RenderPassSlot::Forward2DOpaque);
+    CHECK(desc.passes[9] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[10] == RenderPassSlot::BloomBlur);
+    CHECK(desc.passes[11] == RenderPassSlot::PostProcess);
 }
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 34u);
+    CHECK(order.size() == 35u);
     CHECK(order[14] == 14u);  // SSAO
     CHECK(order[15] == 8u);   // Lighting
     CHECK(order[16] == 13u);  // DepthHaze
     CHECK(order[17] == 9u);   // Deferred Transparent
     CHECK(order[18] == 253u); // Selection visibility mask
-    CHECK(order[19] == 10u);  // BloomExtract
-    CHECK(order[20] == 11u);  // BloomBlurH
-    CHECK(order[21] == 12u);  // BloomBlurV
-    CHECK(order[22] == 15u);  // PostProcess
-    CHECK(order[23] == 5u);   // TAA
-    CHECK(order[24] == 17u);  // FXAA
-    CHECK(order[25] == 247u); // SMAA edge detection
-    CHECK(order[26] == 248u); // SMAA blend weights
-    CHECK(order[27] == 249u); // SMAA neighborhood blend
-    CHECK(order[28] == 4u);   // ColorGrading
-    CHECK(order[29] == 16u);  // Present
-    CHECK(order[30] == 250u); // GBufferDebug
-    CHECK(order[31] == 254u); // Selection screen-space composite
-    CHECK(order[32] == 251u); // Editor orientation axis
-    CHECK(order[33] == 252u); // Transform gizmo
+    CHECK(order[19] == 246u); // Camera-overlay 2D
+    CHECK(order[20] == 10u);  // BloomExtract
+    CHECK(order[21] == 11u);  // BloomBlurH
+    CHECK(order[22] == 12u);  // BloomBlurV
+    CHECK(order[23] == 15u);  // PostProcess
+    CHECK(order[24] == 5u);   // TAA
+    CHECK(order[25] == 17u);  // FXAA
+    CHECK(order[26] == 247u); // SMAA edge detection
+    CHECK(order[27] == 248u); // SMAA blend weights
+    CHECK(order[28] == 249u); // SMAA neighborhood blend
+    CHECK(order[29] == 4u);   // ColorGrading
+    CHECK(order[30] == 16u);  // Present
+    CHECK(order[31] == 250u); // GBufferDebug
+    CHECK(order[32] == 254u); // Selection screen-space composite
+    CHECK(order[33] == 251u); // Editor orientation axis
+    CHECK(order[34] == 252u); // Transform gizmo
 }
 
 TEST_CASE(forward_pipeline_keeps_haze_as_safe_noop_before_transparent) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.passes.size() == 13u);
-    CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[4] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[3] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::PostProcess);

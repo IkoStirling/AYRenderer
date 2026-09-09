@@ -86,12 +86,24 @@ struct DrawItem {
     uint64_t                   motionObjectId = 0;
 };
 
+// Camera used by the camera-overlay 2D composition domain. It is independent
+// from FrameContext's perspective camera so one RenderScene can contain 3D
+// geometry and 2D sprites/tilemaps in the same frame. `valid == false` keeps
+// legacy callers on the frame camera.
+struct OverlayCamera2D {
+    ayt::math::Float4x4 view       = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 projection = ayt::math::Float4x4::identity();
+    uint32_t             layerMask = 0xFFFFFFFFu;
+    bool                 valid     = false;
+};
+
 // RenderScene crosses static-library boundaries. DrawItem is intentionally a
 // public value type, so every consumer must be rebuilt when its layout changes.
 class RenderScene {
 public:
     void clear() {
         _items.clear();
+        _overlayCamera2D = {};
     }
 
     void add(const DrawItem& item) { _items.push_back(item); }
@@ -128,8 +140,27 @@ public:
     const std::vector<DrawItem>& items() const noexcept { return _items; }
     bool empty() const noexcept { return _items.empty(); }
 
+    void setOverlayCamera2D(const ayt::math::Float4x4& view,
+                            const ayt::math::Float4x4& projection,
+                            uint32_t layerMask = 0xFFFFFFFFu) noexcept
+    {
+        _overlayCamera2D.view = view;
+        _overlayCamera2D.projection = projection;
+        _overlayCamera2D.layerMask = layerMask;
+        _overlayCamera2D.valid = true;
+    }
+
+    void clearOverlayCamera2D() noexcept { _overlayCamera2D = {}; }
+    bool hasOverlayCamera2D() const noexcept { return _overlayCamera2D.valid; }
+    const OverlayCamera2D& overlayCamera2D() const noexcept {
+        return _overlayCamera2D;
+    }
+
 private:
     std::vector<DrawItem> _items;
+    // ABI note: RenderScene crosses static-library boundaries. Keep this
+    // field tail-appended and clean-rebuild every consumer after changes.
+    OverlayCamera2D _overlayCamera2D{};
 };
 
 // §P5.5 A (2026-07-23) — host-facing multi-light DataSource. Drives

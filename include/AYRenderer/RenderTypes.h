@@ -318,14 +318,10 @@ enum class RenderPassSlot : uint8_t {
 
     // 2D opaque lane (2026-08-11, CM-1) — append-only ABI value 14.
     // Draws every DrawItem carrying a `DrawPayload2D*` (see
-    // AYRenderer/RenderScene.h) with alpha blending, NO depth test/write —
-    // ortho z=0 self-occlusion would let depth discard later draws,
-    // so the CPU-side packedSortKey order IS the final order
-    // (AY2D design.md §7.4 stable_sort semantics). Material must
-    // stay BlendMode::Opaque: an Alpha material here would also be
-    // submitted by TransparentPass (double draw). Forward path only
-    // — makeDeferred() does NOT include this slot (cutsheet §S2
-    // hard-line style: "omit slot = opt out").
+    // AYRenderer/RenderScene.h) with alpha blending and no depth test/write.
+    // The pass uses RenderScene's independent 2D overlay camera, executes
+    // after 3D transparency in both canonical pipelines, and performs one
+    // global stable sort by packedSortKey. 3D passes reject payload items.
     Forward2DOpaque = 14,
 
     // Mandatory final presentation stage — append-only ABI value 15.

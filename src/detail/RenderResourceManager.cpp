@@ -402,11 +402,15 @@ MeshHandle RenderResourceManager::createMeshFromResourceData(const void* vertice
                               indexCount, false, hasSkinWeights, morph);
 }
 
-MeshHandle RenderResourceManager::loadMesh(const std::string& path)
+MeshHandle RenderResourceManager::loadMesh(const std::string& assetReference)
 {
-    if (path.empty()) {
+    if (assetReference.empty()) {
         return {};
     }
+
+    // Scene components store portable references. ResourceManager's loose
+    // loader expects a filesystem path; resolve before loading and caching.
+    const std::string path = ayt::resource::resolveAssetPath({}, assetReference);
 
     const std::string key = normalizeAssetPathKey(path);
     if (!key.empty()) {
@@ -923,11 +927,13 @@ bool RenderResourceManager::onResourceFileChanged(const std::string& path)
     return false;
 }
 
-MaterialHandle RenderResourceManager::loadMaterial(const std::string& path)
+MaterialHandle RenderResourceManager::loadMaterial(const std::string& assetReference)
 {
-    if (path.empty()) {
+    if (assetReference.empty()) {
         return {};
     }
+
+    const std::string path = ayt::resource::resolveAssetPath({}, assetReference);
 
     const std::string key = normalizeAssetPathKey(path);
     if (!key.empty()) {
@@ -1463,7 +1469,8 @@ void RenderResourceManager::destroyTexture(TextureHandle& texture)
 MeshHandle RenderResourceManager::getMeshHandleByPath(const std::string& path) const
 {
     if (path.empty()) return {};
-    const auto it = _meshCacheByKey.find(normalizeAssetPathKey(path));
+    const auto it = _meshCacheByKey.find(normalizeAssetPathKey(
+        ayt::resource::resolveAssetPath({}, path)));
     if (it == _meshCacheByKey.end()) return {};
     return MeshHandle{ it->second };
 }
@@ -1471,7 +1478,8 @@ MeshHandle RenderResourceManager::getMeshHandleByPath(const std::string& path) c
 MaterialHandle RenderResourceManager::getMaterialHandleByPath(const std::string& path) const
 {
     if (path.empty()) return {};
-    const auto it = _materialCacheByKey.find(normalizeAssetPathKey(path));
+    const auto it = _materialCacheByKey.find(normalizeAssetPathKey(
+        ayt::resource::resolveAssetPath({}, path)));
     if (it == _materialCacheByKey.end()) return {};
     return MaterialHandle{ it->second };
 }

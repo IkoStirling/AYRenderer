@@ -84,15 +84,13 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
     return RenderPipelineDesc{{
         RenderPassSlot::Shadow,
         RenderPassSlot::ForwardOpaque,
-        // CM-1 (2026-08-11) — 2D lane between ForwardOpaque and
-        // Transparent. Zero-cost when the scene carries no
-        // DrawPayload2D items (pass returns 0 draws) ⇒ pre-CM-1
-        // Forward hosts see 0 behavior change.
-        RenderPassSlot::Forward2DOpaque,
         // Forward has no GBuffer, so DepthHaze remains a zero-cost no-op. Its
         // position matches the deferred dependency order for custom pipelines.
         RenderPassSlot::DepthHaze,
         RenderPassSlot::Transparent,
+        // Camera-overlay 2D composes after all 3D surfaces and before the HDR
+        // post chain. Zero payload items remain a zero-draw fast path.
+        RenderPassSlot::Forward2DOpaque,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
@@ -203,6 +201,9 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::Lighting,
         RenderPassSlot::DepthHaze,
         RenderPassSlot::Transparent,
+        // The same camera-overlay 2D stage is available in Deferred. It writes
+        // the current Lighting/Haze color producer without entering GBuffer.
+        RenderPassSlot::Forward2DOpaque,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::PostProcess,
@@ -315,11 +316,9 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
     // before allocating its fullscreen triangle or shader program.
     case RenderPassSlot::GBufferDebug:
         return std::make_unique<detail::GBufferDebugPass>();
-    // CM-1 (2026-08-11) — 2D lane. Mounted only when the desc
-    // includes RenderPassSlot::Forward2DOpaque (makeDefault() does;
-    // makeDeferred() does NOT — 2D is Forward-path-only per the
-    // slot comment in AYRenderer/RenderTypes.h). Zero payload items ⇒
-    // execute() returns 0 (zero behavior change for 3D hosts).
+    // Camera-overlay 2D lane. Both canonical pipelines mount it after 3D
+    // transparency; custom pipelines may omit the slot. Zero payload items
+    // return zero draws.
     case RenderPassSlot::Forward2DOpaque:
         return std::make_unique<detail::Forward2DOpaquePass>();
     }

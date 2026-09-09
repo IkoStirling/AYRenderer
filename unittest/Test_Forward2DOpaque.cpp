@@ -3,11 +3,10 @@
 // Pins the CM-1 contract (AY2D engine integration, 刀 1):
 //   1) RenderPassSlot::Forward2DOpaque enum value = 14 (append-only,
 //      EditorOverlay=13 was the previous max) + full table mirror.
-//   2) makeDefault() includes the slot between ForwardOpaque and
-//      Transparent (9 slots, was 8); makeDeferred() does NOT include
-//      it (2D is Forward-path-only).
-//   3) DrawItem.payload defaults to nullptr (pre-CM-1 behavior);
-//      a payload survives the RenderScene round-trip.
+//   2) makeDefault() and makeDeferred() include the slot after 3D
+//      Transparent and before the HDR post chain.
+//   3) DrawItem.payload defaults to nullptr; payload and independent 2D
+//      overlay-camera state survive the RenderScene round-trip.
 //   4) Forward2DOpaquePass on an uninitialized adapter returns 0
 //      (mirror Test_FO_Trans_NoopGate UB fix).
 //   5) Lane split (sticky-Noop backend, logical draw counting):
@@ -53,6 +52,7 @@ using ayt::render::RenderPath;
 using ayt::render::RenderPipelineDesc;
 using ayt::render::RenderScene;
 using ayt::render::detail::BGFXAdapter;
+using ayt::render::detail::collectSortedOverlay2DItems;
 using ayt::render::detail::Forward2DOpaquePass;
 using ayt::render::detail::FrameContext;
 using ayt::render::detail::GpuMaterial;
@@ -124,15 +124,15 @@ TEST_CASE(cm1_renderpassslot_forward2dopaque_value_is_14) {
 
 // === 2. Pipeline slot position ======================================
 
-TEST_CASE(cm1_make_default_includes_forward2dopaque_between_fo_and_transparent) {
+TEST_CASE(camera_overlay_2d_runs_after_3d_transparent_in_forward) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
     CHECK(desc.passes.size() == 13);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
-    CHECK(desc.passes[2] == RenderPassSlot::Forward2DOpaque);
-    CHECK(desc.passes[3] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[4] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[3] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
     CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
@@ -144,12 +144,14 @@ TEST_CASE(cm1_make_default_includes_forward2dopaque_between_fo_and_transparent) 
     CHECK(desc.contains(RenderPassSlot::Forward2DOpaque));
 }
 
-TEST_CASE(cm1_make_deferred_omits_forward2dopaque) {
-    // 2D is Forward-path-only (slot comment in AYRenderer/RenderTypes.h).
+TEST_CASE(camera_overlay_2d_is_mounted_after_3d_transparent_in_deferred) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(!desc.contains(RenderPassSlot::Forward2DOpaque));
-    CHECK(desc.passes.size() == 18);
+    CHECK(desc.contains(RenderPassSlot::Forward2DOpaque));
+    CHECK(desc.passes.size() == 19);
+    CHECK(desc.passes[7] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[8] == RenderPassSlot::Forward2DOpaque);
+    CHECK(desc.passes[9] == RenderPassSlot::BloomExtract);
 }
 
 // === 3. Payload default + round-trip ================================
@@ -186,6 +188,57 @@ TEST_CASE(cm1_drawpayload2d_is_16byte_aligned_pod) {
     // NEVER #pragma pack; the natural layout must keep alignof 16.
     CHECK(alignof(DrawPayload2D) == 16);
     CHECK(sizeof(DrawPayload2D) >= 48);
+}
+
+TEST_CASE(render_scene_owns_independent_overlay_camera_state) {
+    RenderScene scene;
+    CHECK_FALSE(scene.hasOverlayCamera2D());
+
+    const auto view = ayt::math::Float4x4::identity();
+    const auto projection = ayt::math::Float4x4::identity();
+    scene.setOverlayCamera2D(view, projection, 0x00000025u);
+
+    CHECK(scene.hasOverlayCamera2D());
+    CHECK(scene.overlayCamera2D().valid);
+    CHECK(scene.overlayCamera2D().layerMask == 0x00000025u);
+
+    scene.clear();
+    CHECK_FALSE(scene.hasOverlayCamera2D());
+    CHECK(scene.empty());
+}
+
+TEST_CASE(camera_overlay_2d_has_a_dedicated_ordered_view) {
+    CHECK(Forward2DOpaquePass::kOverlayViewId == 246u);
+}
+
+TEST_CASE(camera_overlay_2d_globally_stable_sorts_all_payload_producers) {
+    DrawPayload2D payloadA;
+    DrawPayload2D payloadB;
+    DrawPayload2D payloadC;
+    payloadA.packedSortKey = 30u;
+    payloadB.packedSortKey = 10u;
+    payloadC.packedSortKey = 30u;
+
+    RenderScene scene;
+    DrawItem a;
+    a.payload = &payloadA;
+    a.sortKey = 1;
+    scene.add(a);
+    scene.add(DrawItem{}); // 3D item is excluded.
+    DrawItem b;
+    b.payload = &payloadB;
+    b.sortKey = 2;
+    scene.add(b);
+    DrawItem c;
+    c.payload = &payloadC;
+    c.sortKey = 3;
+    scene.add(c);
+
+    const auto sorted = collectSortedOverlay2DItems(scene);
+    CHECK(sorted.size() == 3u);
+    CHECK(sorted[0]->sortKey == 2);
+    CHECK(sorted[1]->sortKey == 1); // equal keys retain producer order
+    CHECK(sorted[2]->sortKey == 3);
 }
 
 // === 4. Pass gate on uninitialized adapter ==========================
@@ -281,9 +334,9 @@ TEST_CASE(cm1_3d_item_stays_in_forward_opaque_lane) {
 }
 
 TEST_CASE(cm1_payload_item_drawn_exactly_once) {
-    // 2D material stays BlendMode::Opaque (default): FO skips payload
-    // items, Transparent skips Opaque materials, Shadow skips payload
-    // casters ⇒ exactly 1 draw. A double-submit would be 2.
+    // Even an Alpha-tagged 2D material stays in the dedicated lane:
+    // FO, GBuffer, Transparent and Shadow reject payload items, so the
+    // scene still produces exactly one draw. A double-submit would be 2.
     if (!shadercAvailable()) {
         std::cerr << "[Renderer test] SKIP: shaderc not available.\n";
         return;
@@ -311,6 +364,7 @@ TEST_CASE(cm1_payload_item_drawn_exactly_once) {
         renderer.createTextureFromRgba8(8, 8, pixels, "cm1_checker");
     CHECK(tex.isValid());
     renderer.setMaterialTexture(material, "albedoMap", tex);
+    renderer.setMaterialBlendMode(material, ayt::render::BlendMode::Alpha);
 
     DrawPayload2D payload;
     payload.sourceRectMin = ayt::math::FVector2(0.0f, 0.0f);
