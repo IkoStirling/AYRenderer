@@ -121,6 +121,10 @@ public:
 private:
     void renderFrame();
     void renderScenePass();
+    // Keep the Renderer camera current before scene builders query it for
+    // CPU visibility. This is also called immediately when Editor freecam or
+    // viewport aspect changes.
+    void syncMainCamera();
 
     // INT-04: WindowResize handler. Triggered by EventBus pump (main thread,
     // sync — Phase 4 contract) when DeviceSubSystem posts a delta. Calls

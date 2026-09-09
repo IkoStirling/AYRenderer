@@ -159,6 +159,12 @@ public:
     // until then). Used by RenderSystem for Transparent back-to-front sortKey.
     ayt::math::FVector3 mainCameraPosition() const noexcept;
 
+    // Returns the unjittered main-camera matrices currently used to build the
+    // frame. False means no camera has been authored yet; scene builders must
+    // fail open instead of culling against the identity defaults.
+    bool mainCameraMatrices(ayt::math::Float4x4& outView,
+                            ayt::math::Float4x4& outProjection) const noexcept;
+
     void setDirectionalLight(const ayt::math::FVector3& direction,
                              const ayt::math::FVector3& color);
 

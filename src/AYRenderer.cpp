@@ -378,6 +378,7 @@ struct Renderer::Impl {
 
     ayt::math::Float4x4           mainView        = ayt::math::Float4x4::identity();
     ayt::math::Float4x4           mainProjection  = ayt::math::Float4x4::identity();
+    bool                          mainCameraValid = false;
     // §Skybox0 (2026-07-23) — host-supplied Skybox DataSource
     // borrowed pointer. Default nullptr = no sky mounted (Forward
     // default). When the host calls `Renderer::setSkySource(&sky)`,
@@ -2139,6 +2140,7 @@ void Renderer::setMainCamera(const ayt::math::Float4x4& view,
     }
     _impl->mainView       = view;
     _impl->mainProjection = projection;
+    _impl->mainCameraValid = true;
 }
 
 void Renderer::setDirectionalLight(const ayt::math::FVector3& direction,
@@ -2825,6 +2827,18 @@ void Renderer::setMainCameraLookAtPerspective(const ayt::math::FVector3& eye,
 ayt::math::FVector3 Renderer::mainCameraPosition() const noexcept
 {
     return _impl ? _impl->mainCameraPosition : ayt::math::FVector3(0.0f, 0.0f, 4.0f);
+}
+
+bool Renderer::mainCameraMatrices(
+    ayt::math::Float4x4& outView,
+    ayt::math::Float4x4& outProjection) const noexcept
+{
+    if (!_impl || !_impl->mainCameraValid) {
+        return false;
+    }
+    outView = _impl->mainView;
+    outProjection = _impl->mainProjection;
+    return true;
 }
 
 void Renderer::destroyMesh(MeshHandle& mesh)

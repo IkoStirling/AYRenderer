@@ -1,5 +1,12 @@
 # AYRenderer Design
 
+> **2026-09-09 — WorldLit2D 第三刀（Perspective visibility）**：Renderer
+> 新增只读的未抖动主相机矩阵快照；未设置相机时返回无效，调用侧必须
+> fail-open，不能把 identity 当视锥。`RendererSubSystem` 在初始化、FreeCam
+> 更新、清除 override、视口比例变化及提交前同步相机，因此 ECS 场景构建阶段
+> 可使用与当帧一致的 view/projection。此刀不改变 `RenderScene`/`DrawItem`
+> 布局，也不把 TAA jitter 泄漏到 CPU 可见性判断。
+
 > **2026-09-09 — WorldLit2D 第二刀（Tilemap）**：Tilemap chunk 可沿现有
 > GBuffer 进入延迟光照，并通过 `UvMapping2D` 明确区分 Sprite 的 source-rect/
 > bottom-left UV 与 chunk mesh 已烘焙的 atlas UV。`DrawPayload2D` 同时携带
@@ -7,7 +14,7 @@
 > normal/roughness/emissive 在中心 texel 采样，alpha cutout 使用过滤后的
 > albedo alpha。默认 Overlay 路径与 view 246 行为不变。当前仍未覆盖 Blend、
 > 2D 阴影、逐物体 Motion Vector，以及 3D 主相机下的 Tilemap chunk frustum
-> streaming；后者当前 fail-open，避免错误复用 Ortho overlay 剔除导致缺块。
+> streaming；第二刀曾对后者 fail-open，现已由上方第三刀关闭。
 
 > **2026-09-09 — WorldLit2D 第一刀**：没有新增独立 Pass，而是在现有唯一
 > GBuffer producer 内加入 Position+UV 专用的 2D geometry substage。新增

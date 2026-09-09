@@ -97,6 +97,32 @@ TEST_CASE(camera_projection_converts_public_degrees_to_aymath_radians)
     CHECK(projection.row[1].y > 0.0f);
 }
 
+TEST_CASE(main_camera_matrices_fail_open_until_authored_then_round_trip)
+{
+    ayt::render::Renderer renderer;
+    ayt::math::Float4x4 actualView;
+    ayt::math::Float4x4 actualProjection;
+    CHECK_FALSE(renderer.mainCameraMatrices(actualView, actualProjection));
+
+    ayt::render::InitDesc desc;
+    desc.backend = ayt::render::Backend::Noop;
+    desc.width = 320;
+    desc.height = 180;
+    CHECK(renderer.initialize(desc));
+    CHECK_FALSE(renderer.mainCameraMatrices(actualView, actualProjection));
+
+    ayt::math::Float4x4 expectedView = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 expectedProjection = ayt::math::Float4x4::identity();
+    expectedView.row[0].w = -3.0f;
+    expectedProjection.row[1].y = 2.0f;
+    renderer.setMainCamera(expectedView, expectedProjection);
+
+    CHECK(renderer.mainCameraMatrices(actualView, actualProjection));
+    CHECK(actualView.row[0].w == -3.0f);
+    CHECK(actualProjection.row[1].y == 2.0f);
+    renderer.shutdown();
+}
+
 TEST_CASE(frame_uniforms_allow_rotated_cube_draw)
 {
     if (!fileExists(AY_SHADER_SHADERC_HINT)) {

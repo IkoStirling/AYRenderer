@@ -367,6 +367,10 @@ bool RendererSubSystem::initialize()
 
     _ready = true;
 
+    // Scene builders may run during update(), before the first render callback.
+    // Seed the real camera now so perspective visibility never sees identity.
+    syncMainCamera();
+
     std::fprintf(stderr, "[RendererSubSystem] initialized client %ux%u viewport (%u,%u %ux%u)\n",
 
                  _width, _height,
@@ -474,6 +478,8 @@ void RendererSubSystem::setViewportRect(uint16_t x, uint16_t y, uint16_t width, 
 
         _renderer.setViewportRect(x, y, width, height);
 
+        syncMainCamera();
+
     }
 
 }
@@ -568,16 +574,24 @@ void RendererSubSystem::setCameraLookAt(const ayt::math::FVector3& eye,
     _camUp = up;
     _camFovYDegrees = fovYDegrees;
     _cameraOverride = true;
+    syncMainCamera();
 }
 
 void RendererSubSystem::clearCameraOverride()
 {
     _cameraOverride = false;
+    syncMainCamera();
 }
 
-void RendererSubSystem::renderScenePass()
+void RendererSubSystem::syncMainCamera()
 {
-    const float aspect = static_cast<float>(_viewportW) / static_cast<float>(_viewportH);
+    if (!_renderer.isInitialized()) {
+        return;
+    }
+    const uint16_t safeWidth = std::max<uint16_t>(_viewportW, 1u);
+    const uint16_t safeHeight = std::max<uint16_t>(_viewportH, 1u);
+    const float aspect = static_cast<float>(safeWidth)
+                       / static_cast<float>(safeHeight);
 
     if (_cameraOverride) {
         _renderer.setMainCameraLookAtPerspective(
@@ -593,6 +607,11 @@ void RendererSubSystem::renderScenePass()
             ayt::math::FVector3(0.0f, 1.0f, 0.0f),
             50.0f, aspect, 0.1f, 100.0f);
     }
+}
+
+void RendererSubSystem::renderScenePass()
+{
+    syncMainCamera();
 
     // Non-GameLoop editor callers still get a packet on demand. In the staged
     // path update() has already populated it before submission.
