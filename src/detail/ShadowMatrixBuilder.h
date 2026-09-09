@@ -17,7 +17,9 @@ struct ShadowSceneBounds {
     bool valid = false;
 };
 
-// Merge axis-aligned bounds from draw items (centered unit mesh * world scale).
+// Merge axis-aligned bounds from world-domain shadow participants using each
+// uploaded mesh's bind-pose local bounds. Overlay2D and ShadowFlags::None do
+// not enlarge the fitted light frustum.
 ShadowSceneBounds computeShadowSceneBounds(
     const RenderScene& scene,
     const std::unordered_map<uint64_t, GpuMesh>& meshes);

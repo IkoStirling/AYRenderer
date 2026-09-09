@@ -3,9 +3,11 @@
 #include "AYRenderer.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
+#include "AYRenderer/ShadowShaderSources.h"
 #include "AYShader/BGFXConverter.h"
 #include "AYShader/Ir.h"
 #include "AYShader/Phoskia.h"
+#include "AYShader/ShadercDriver.h"
 
 #include "detail/Draw2D.h"
 #include "detail/Forward2DOpaquePass.h"
@@ -13,6 +15,7 @@
 #include "detail/WorldLit2DMaterialSource.h"
 
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -52,6 +55,15 @@ bool hasTextureBinding(const ayt::shader::CompiledShaderProgram& program,
         }
     }
     return false;
+}
+
+bool worldLit2DFileExists(const char* path)
+{
+    if (path == nullptr || path[0] == '\0') {
+        return false;
+    }
+    std::ifstream file(path, std::ios::binary);
+    return file.good();
 }
 
 } // namespace
@@ -238,6 +250,57 @@ TEST_CASE(world_lit_2d_source_pins_mrt_cutout_and_normal_contract)
     CHECK(source.find("mix(sourceRectUv, uv") != std::string::npos);
     CHECK(source.find("samplingQuality.x > 1.5") != std::string::npos);
     CHECK(source.find("samplingQuality.x > 2.5") != std::string::npos);
+}
+
+TEST_CASE(world_lit_2d_shadow_mask_matches_gbuffer_coverage_contract)
+{
+    const std::string vertex(ayt::render::kShadowMaskCasterVertexSc);
+    const std::string fragment(ayt::render::kShadowMaskCasterFragmentSc);
+    CHECK(vertex.find("uniform vec4 srcRect") != std::string::npos);
+    CHECK(vertex.find("uniform vec4 flip") != std::string::npos);
+    CHECK(vertex.find("uniform vec4 uvMapping") != std::string::npos);
+    CHECK(vertex.find("mix(sourceRectUv, a_texcoord0") != std::string::npos);
+    CHECK(fragment.find("uniform vec4 tint") != std::string::npos);
+    CHECK(fragment.find("uniform vec4 atlasTexel") != std::string::npos);
+    CHECK(fragment.find("uniform vec4 samplingQuality") != std::string::npos);
+    CHECK(fragment.find("samplingQuality.x > 1.5") != std::string::npos);
+    CHECK(fragment.find("samplingQuality.x > 2.5") != std::string::npos);
+    CHECK(fragment.find("baseColor.a * tint.a") != std::string::npos);
+}
+
+TEST_CASE(world_lit_2d_shadow_mask_compiles_for_d3d11_and_d3d12)
+{
+    if (!worldLit2DFileExists(AY_SHADER_SHADERC_HINT)) {
+        std::cerr << "[WorldLit2D test] SKIP: shaderc unavailable.\n";
+        return;
+    }
+
+    ayt::shader::AYShadercDriver driver(AY_SHADER_SHADERC_HINT);
+    const auto compileStage = [&](const char* stage, const char* source) {
+        ayt::shader::ShaderCompileRequest request;
+        request.stage = stage;
+        request.scSource = source;
+        request.varyingdefSource = ayt::render::kShadowMaskCasterVaryingSc;
+        request.platform = "windows";
+        request.profile = "s_5_0";
+        request.outputName = std::string("world_lit_2d_shadow_") + stage;
+        request.timeoutMs = 30000;
+#ifdef AY_SHADER_BGFX_COMMON_HINT
+        request.includeDirs.emplace_back(AY_SHADER_BGFX_COMMON_HINT);
+#endif
+#ifdef AY_SHADER_BGFX_SRC_HINT
+        request.includeDirs.emplace_back(AY_SHADER_BGFX_SRC_HINT);
+#endif
+        const ayt::shader::ShaderCompileResult result = driver.compile(request);
+        if (!result.ok) {
+            std::cerr << "[WorldLit2D shadow] shaderc " << stage
+                      << " failed: " << result.stderrText << '\n';
+        }
+        return result.ok;
+    };
+
+    CHECK(compileStage("vertex", ayt::render::kShadowMaskCasterVertexSc));
+    CHECK(compileStage("fragment", ayt::render::kShadowMaskCasterFragmentSc));
 }
 
 TEST_CASE(uninitialized_renderer_rejects_material2d_without_dereference)

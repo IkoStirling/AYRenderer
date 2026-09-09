@@ -35,6 +35,74 @@ std::string textureSamplingCacheKey(const std::string& path, bool srgb)
     return key;
 }
 
+uint32_t vertexElementSize(const VertexElement& element) noexcept
+{
+    const uint32_t scalarSize = element.componentType == VertexComponentType::Float
+        ? sizeof(float) : sizeof(uint8_t);
+    return static_cast<uint32_t>(element.componentCount) * scalarSize;
+}
+
+bool computeMeshLocalBounds(const void* vertices,
+                            uint32_t vertexCount,
+                            uint32_t vertexStride,
+                            const VertexLayoutDesc& layout,
+                            ayt::math::FVector3& outMin,
+                            ayt::math::FVector3& outMax) noexcept
+{
+    if (vertices == nullptr || vertexCount == 0u || vertexStride == 0u) {
+        return false;
+    }
+
+    uint32_t positionOffset = 0u;
+    const VertexElement* position = nullptr;
+    for (uint8_t i = 0; i < layout.elementCount; ++i) {
+        const VertexElement& element = layout.elements[i];
+        if (element.attribute == VertexAttribute::Position) {
+            position = &element;
+            break;
+        }
+        positionOffset += vertexElementSize(element);
+    }
+    if (position == nullptr
+        || position->componentType != VertexComponentType::Float
+        || position->componentCount < 2u
+        || position->componentCount > 4u
+        || positionOffset + vertexElementSize(*position) > vertexStride) {
+        return false;
+    }
+
+    const uint8_t* bytes = static_cast<const uint8_t*>(vertices);
+    bool initialized = false;
+    for (uint32_t i = 0; i < vertexCount; ++i) {
+        float value[3] = {0.0f, 0.0f, 0.0f};
+        const uint32_t copiedComponents = std::min<uint32_t>(
+            position->componentCount, 3u);
+        std::memcpy(value,
+                    bytes + static_cast<size_t>(i) * vertexStride
+                          + positionOffset,
+                    static_cast<size_t>(copiedComponents) * sizeof(float));
+        if (!std::isfinite(value[0]) || !std::isfinite(value[1])
+            || !std::isfinite(value[2])) {
+            return false;
+        }
+
+        const ayt::math::FVector3 point(value[0], value[1], value[2]);
+        if (!initialized) {
+            outMin = point;
+            outMax = point;
+            initialized = true;
+            continue;
+        }
+        outMin.x = std::min(outMin.x, point.x);
+        outMin.y = std::min(outMin.y, point.y);
+        outMin.z = std::min(outMin.z, point.z);
+        outMax.x = std::max(outMax.x, point.x);
+        outMax.y = std::max(outMax.y, point.y);
+        outMax.z = std::max(outMax.z, point.z);
+    }
+    return initialized;
+}
+
 // §P1 M1 (2026-08-24) — return bool + log on drop. Previously silent:
 // a 128B array or null binding would silently not register, leaving
 // the shader uniform un-set with no signal to the host. Now callers
@@ -314,6 +382,9 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
     mesh.morphDeltaCount = morph.deltaCount;
     mesh.morphPayloadChannels = morph.payloadChannels;
     mesh.morphContract = morph.contract;
+    mesh.localBoundsValid = computeMeshLocalBounds(
+        vertices, vertexCount, vertexStride, layout,
+        mesh.localBoundsMin, mesh.localBoundsMax);
     if (mesh.morphContract != nullptr) {
         mesh.morphWeights.reserve(mesh.morphContract->targets.size());
         for (const ayt::resource::MeshMorphTarget& target : mesh.morphContract->targets) {

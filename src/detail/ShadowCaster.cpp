@@ -3,6 +3,7 @@
 #include "AYRenderer/ShadowConfig.h"
 #include "AYRenderer/ShadowDiagnostics.h"
 #include "AYRenderer/ShadowShaderSources.h"
+#include "detail/Draw2D.h"
 #include "detail/RasterConvention.h"
 #include "detail/RenderPass.h"
 
@@ -216,11 +217,9 @@ uint32_t ShadowCaster::drawCasters(
         if (!castsShadow(item.shadowFlags)) {
             continue;
         }
-        // CM-1 (2026-08-11) — 2D lane items never cast: ortho z=0
-        // quads in the light's view-proj are meaningless + waste the
-        // shadow map. The payload pointer is the lane discriminator
-        // (ForwardOpaquePass mirror).
-        if (item.payload != nullptr) {
+        // Camera-overlay 2D never enters the world shadow domain. WorldLit2D
+        // deliberately does and uses the alpha-mask caster below.
+        if (!isShadowDomainItem(item)) {
             continue;
         }
         if (!item.mesh.isValid()) {
@@ -294,6 +293,14 @@ uint32_t ShadowCaster::drawCasters(
                                  item);
 
             if (alphaMask) {
+                // The shared mask shader must be reset for ordinary 3D draws
+                // after a WorldLit2D draw. BakedAtlas selects raw mesh UVs,
+                // which is the legacy 3D contract.
+                DrawPayload2D rawMeshPayload;
+                rawMeshPayload.uvMapping = UvMapping2D::BakedAtlas;
+                upload2DDrawUniforms(
+                    drawProgram,
+                    item.payload != nullptr ? *item.payload : rawMeshPayload);
                 if (_maskCutoffBinding != ayt::shader::InvalidBinding) {
                     const float cutoff[4] = {
                         material.alphaCutoff, 0.0f, 0.0f, 0.0f

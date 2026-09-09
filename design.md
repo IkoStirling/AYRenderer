@@ -1,5 +1,14 @@
 # AYRenderer Design
 
+> **2026-09-09 — WorldLit2D 第四刀（Shadow caster）**：ShadowCaster
+> 不再粗暴跳过所有 `DrawPayload2D`；SceneOverlay 仍完全排除，
+> WorldLit Sprite/Tilemap 则使用 alpha-mask caster 写入现有多光源
+> shadow atlas。遮罩阶段与 GBuffer 共享 source rect、flip、tint alpha、
+> baked-atlas UV 及 Nearest/Linear/4-tap/9-tap 采样语义，避免投出整张
+> 卡片或错误图块。GPU mesh 上传时同步保留真实 bind-pose 局部
+> bounds，Shadow 场景拟合不再假设所有网格都是单位立方体；
+> Overlay 和 `ShadowFlags::None` 也不再污染光源视锥。
+
 > **2026-09-09 — WorldLit2D 第三刀（Perspective visibility）**：Renderer
 > 新增只读的未抖动主相机矩阵快照；未设置相机时返回无效，调用侧必须
 > fail-open，不能把 identity 当视锥。`RendererSubSystem` 在初始化、FreeCam

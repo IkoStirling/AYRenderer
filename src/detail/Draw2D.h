@@ -18,6 +18,14 @@ inline bool isWorldLit2DItem(const DrawItem& item) noexcept
         && item.payload->renderDomain == RenderDomain2D::WorldLit;
 }
 
+// Shadow rendering shares the perspective world domain. Ordinary 3D items
+// and WorldLit2D participate; camera-overlay geometry must never affect either
+// caster submission or the scene-fit light frustum.
+inline bool isShadowDomainItem(const DrawItem& item) noexcept
+{
+    return item.payload == nullptr || isWorldLit2DItem(item);
+}
+
 // Shared per-instance upload for every 2D geometry program. Missing bindings
 // remain legal so Overlay and WorldLit shaders can consume different subsets.
 inline void upload2DDrawUniforms(shader::ShaderResource& shader,

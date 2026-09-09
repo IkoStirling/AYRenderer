@@ -36,6 +36,12 @@ struct GpuMesh {
     std::vector<float> morphWeights;
 
     VertexLayoutDesc layout{};
+    // CPU-side bind-pose bounds captured before upload. Shadow scene fitting
+    // must not assume every mesh is a centered unit cube (tilemap chunks use
+    // authored local coordinates and imported meshes have arbitrary extents).
+    ayt::math::FVector3 localBoundsMin{-0.5f, -0.5f, -0.5f};
+    ayt::math::FVector3 localBoundsMax{ 0.5f,  0.5f,  0.5f};
+    bool localBoundsValid = false;
 };
 
 struct GpuTexture {

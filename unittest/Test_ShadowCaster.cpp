@@ -2,6 +2,7 @@
 #include "AYTest.h"
 
 #include "detail/BGFXAdapter.h"
+#include "detail/Draw2D.h"
 #include "detail/GpuResources.h"
 #include "detail/ShadowMapResources.h"
 #include "detail/ShadowCaster.h"
@@ -38,6 +39,23 @@ TEST_CASE(draw_item_defaults_to_cast_and_receive)
     DrawItem item;
     CHECK(castsShadow(item.shadowFlags));
     CHECK(item.shadowFlags == kShadowCastAndReceive);
+}
+
+TEST_CASE(shadow_domain_excludes_overlay_but_accepts_world_lit_2d)
+{
+    DrawItem mesh3d;
+    CHECK(ayt::render::detail::isShadowDomainItem(mesh3d));
+
+    ayt::render::DrawPayload2D overlayPayload;
+    DrawItem overlay;
+    overlay.payload = &overlayPayload;
+    CHECK_FALSE(ayt::render::detail::isShadowDomainItem(overlay));
+
+    ayt::render::DrawPayload2D worldPayload;
+    worldPayload.renderDomain = ayt::render::RenderDomain2D::WorldLit;
+    DrawItem worldLit;
+    worldLit.payload = &worldPayload;
+    CHECK(ayt::render::detail::isShadowDomainItem(worldLit));
 }
 
 TEST_CASE(draw_casters_empty_scene_returns_zero)

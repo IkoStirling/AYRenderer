@@ -340,7 +340,7 @@ TEST_CASE(mask_caster_cache_key_v4) {
     // L7 fix: bumped v3 → v4 to invalidate the mask caster
     // shader cache after the colorOverride ternary removal.
     CHECK(std::string_view(kShadowMaskCasterCacheKey)
-          == "shadow_mask_caster_sc_v4_audit_p4_coloroverride");
+          == "shadow_mask_caster_sc_v5_world_lit_2d_uv");
 }
 
 TEST_SUITE_END

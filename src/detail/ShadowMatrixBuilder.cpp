@@ -1,6 +1,7 @@
 #include "detail/ShadowMatrixBuilder.h"
 
 #include "detail/BgfxMatrix.h"
+#include "detail/Draw2D.h"
 
 #include "AYRenderer/ShadowConfig.h"
 
@@ -55,7 +56,9 @@ void expandItemBounds(ShadowSceneBounds& bounds,
                       const DrawItem& item,
                       const std::unordered_map<uint64_t, GpuMesh>& meshes)
 {
-    if (!item.mesh.isValid()) {
+    if (!item.mesh.isValid() || !isShadowDomainItem(item)
+        || (!castsShadow(item.shadowFlags)
+            && !receivesShadow(item.shadowFlags))) {
         return;
     }
     const auto meshIt = meshes.find(item.mesh.id);
@@ -63,13 +66,19 @@ void expandItemBounds(ShadowSceneBounds& bounds,
         return;
     }
 
-    // Unit-cube local AABB [-0.5,0.5]^3 → 8 corners through world matrix.
-    // (Previous center±axisScale AABB missed rotation and under-fit the map.)
+    const GpuMesh& mesh = meshIt->second;
+    const ayt::math::FVector3 localMin = mesh.localBoundsValid
+        ? mesh.localBoundsMin : ayt::math::FVector3(-0.5f, -0.5f, -0.5f);
+    const ayt::math::FVector3 localMax = mesh.localBoundsValid
+        ? mesh.localBoundsMax : ayt::math::FVector3(0.5f, 0.5f, 0.5f);
+
+    // Transform all local AABB corners. Flat Sprite/Tilemap meshes naturally
+    // have min.z == max.z; duplicate corners are harmless and keep one path.
     const float* m = item.world.ptr();
     for (int i = 0; i < 8; ++i) {
-        const float lx = (i & 1) ? 0.5f : -0.5f;
-        const float ly = (i & 2) ? 0.5f : -0.5f;
-        const float lz = (i & 4) ? 0.5f : -0.5f;
+        const float lx = (i & 1) ? localMax.x : localMin.x;
+        const float ly = (i & 2) ? localMax.y : localMin.y;
+        const float lz = (i & 4) ? localMax.z : localMin.z;
         const float wx = m[0] * lx + m[1] * ly + m[2] * lz + m[3];
         const float wy = m[4] * lx + m[5] * ly + m[6] * lz + m[7];
         const float wz = m[8] * lx + m[9] * ly + m[10] * lz + m[11];
