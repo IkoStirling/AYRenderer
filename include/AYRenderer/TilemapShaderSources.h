@@ -139,6 +139,22 @@ material TilemapChunk9Tap {
 }
 )";
 
+// Runtime v3 semantic shadows are authored as quarter-cell masks rather
+// than baked pixels. Geometry supplies the selected quarters and this
+// transparent untextured material supplies the map-wide shadow color.
+inline constexpr const char* kTilemapSemanticShadowPhoskiaSource = R"(
+material TilemapSemanticShadow {
+    property tint = vec4(0.0, 0.0, 0.0, 0.5)
+    vertex {
+        in pos : position
+        return modelViewProjection * vec4(pos, 1.0)
+    }
+    fragment {
+        return tint
+    }
+}
+)";
+
 [[nodiscard]] inline constexpr const char* tilemapChunkShaderSource(
     TilemapSamplingQuality quality) noexcept
 {

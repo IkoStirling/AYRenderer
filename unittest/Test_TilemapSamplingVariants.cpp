@@ -69,4 +69,21 @@ TEST_CASE(AllChunkSamplingVariantsCompile)
     renderer.shutdown();
 }
 
+TEST_CASE(SemanticShadowMaterialCompiles)
+{
+    if (!tilemapShadercAvailable()) return;
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend = ayt::render::Backend::Noop;
+    desc.width = 64u;
+    desc.height = 64u;
+    CHECK_TRUE(renderer.initialize(desc));
+    auto material = renderer.createMaterialFromPhoskia(
+        ayt::render::kTilemapSemanticShadowPhoskiaSource,
+        "tilemap_semantic_shadow");
+    CHECK_TRUE(material.isValid());
+    if (material.isValid()) renderer.destroyMaterial(material);
+    renderer.shutdown();
+}
+
 TEST_SUITE_END
