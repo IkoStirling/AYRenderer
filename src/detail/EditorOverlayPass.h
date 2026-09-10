@@ -34,6 +34,7 @@ public:
     static constexpr uint8_t kMaskViewId  = kAxisViewId;
     static constexpr uint8_t kBlitViewId  = 252;
     static constexpr uint8_t kGizmoViewId = kBlitViewId;
+    static constexpr uint8_t kGridViewId  = kGizmoViewId;
 
     ~EditorOverlayPass() override = default;
 
@@ -54,6 +55,10 @@ public:
     const EditorTransformGizmoState& transformGizmoState() const noexcept {
         return _transformGizmo;
     }
+    void setGrid2DState(const EditorGrid2DState& state) noexcept {
+        _grid2D = state;
+    }
+    const EditorGrid2DState& grid2DState() const noexcept { return _grid2D; }
     void setUnjitteredProjection(
         const ayt::math::Float4x4& projection) noexcept {
         _unjitteredProjection = projection;
@@ -79,6 +84,9 @@ private:
                                   const FrameContext& frame);
     bool ensureTransformGizmoResources(PassExecContext& ctx);
     void destroyTransformGizmoGeometry(BGFXAdapter& adapter);
+    uint32_t submitGrid2D(PassExecContext& ctx, const FrameContext& frame);
+    bool ensureGrid2DResources(PassExecContext& ctx);
+    void destroyGrid2DGeometry(BGFXAdapter& adapter);
 
     bool _orientationAxisEnabled = false;
     bool _axisProgramAcquireFailed = false;
@@ -101,6 +109,14 @@ private:
     ayt::math::Float4x4 _unjitteredProjection =
         ayt::math::Float4x4::identity();
     bool _hasUnjitteredProjection = false;
+
+    EditorGrid2DState _grid2D{};
+    EditorGrid2DState _builtGrid2D{};
+    uint16_t _builtGridViewportWidth = 0;
+    uint16_t _builtGridViewportHeight = 0;
+    bgfx::VertexBufferHandle _gridVertexBuffer = BGFX_INVALID_HANDLE;
+    bgfx::IndexBufferHandle _gridIndexBuffer = BGFX_INVALID_HANDLE;
+    uint32_t _gridIndexCount = 0;
 };
 
 } // namespace ayt::render::detail

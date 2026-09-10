@@ -23,6 +23,7 @@ using ayt::render::RenderPipelineDesc;
 using ayt::render::Renderer;
 using ayt::render::EditorTransformGizmoMode;
 using ayt::render::EditorTransformGizmoState;
+using ayt::render::EditorGrid2DState;
 
 namespace {
 
@@ -104,6 +105,26 @@ TEST_CASE(renderer_transform_gizmo_state_survives_pipeline_rebuild) {
     CHECK(restored.activeHandle == 4u);
     CHECK(restored.disabledHandleMask == state.disabledHandleMask);
     CHECK(restored.position.z == 5.0f);
+}
+
+TEST_CASE(renderer_two_d_grid_state_survives_pipeline_rebuild) {
+    Renderer renderer;
+    EditorGrid2DState state;
+    state.visible = true;
+    state.center = {480.0f, 300.0f};
+    state.verticalWorldSize = 600.0f;
+    state.minorSpacing = 50.0f;
+    state.majorEvery = 10u;
+    renderer.setEditorGrid2DState(state);
+    renderer.configurePipeline(RenderPipelineDesc::makeEditorDeferred());
+    const EditorGrid2DState restored = renderer.editorGrid2DState();
+    CHECK(restored.visible);
+    CHECK(restored.center.x == 480.0f);
+    CHECK(restored.center.y == 300.0f);
+    CHECK(restored.verticalWorldSize == 600.0f);
+    CHECK(restored.minorSpacing == 50.0f);
+    CHECK(restored.majorEvery == 10u);
+    CHECK(ayt::render::detail::EditorOverlayPass::kGridViewId == 252u);
 }
 
 TEST_CASE(editoroverlay_orientation_axis_view_keeps_rotation_not_translation) {

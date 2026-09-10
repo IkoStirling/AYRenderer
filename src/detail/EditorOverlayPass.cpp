@@ -401,6 +401,41 @@ void appendRing(std::vector<AxisVertex>& vertices,
     }
 }
 
+void appendGridLine(std::vector<AxisVertex>& vertices,
+                    std::vector<uint16_t>& indices,
+                    const ayt::math::FVector2& from,
+                    const ayt::math::FVector2& to,
+                    float halfWidth,
+                    uint32_t abgr)
+{
+    const float dx = to.x - from.x;
+    const float dy = to.y - from.y;
+    const float length = std::sqrt(dx * dx + dy * dy);
+    if (!(length > 1.0e-6f) || vertices.size() > 65530u) return;
+    const float px = -dy / length * halfWidth;
+    const float py =  dx / length * halfWidth;
+    const uint16_t base = static_cast<uint16_t>(vertices.size());
+    appendVertex(vertices, {from.x + px, from.y + py, 0.0f}, abgr);
+    appendVertex(vertices, {from.x - px, from.y - py, 0.0f}, abgr);
+    appendVertex(vertices, {to.x - px, to.y - py, 0.0f}, abgr);
+    appendVertex(vertices, {to.x + px, to.y + py, 0.0f}, abgr);
+    constexpr uint16_t quad[] = {0, 1, 2, 0, 2, 3};
+    for (uint16_t index : quad) {
+        indices.push_back(static_cast<uint16_t>(base + index));
+    }
+}
+
+bool sameGridState(const EditorGrid2DState& lhs,
+                   const EditorGrid2DState& rhs) noexcept
+{
+    return lhs.visible == rhs.visible
+        && lhs.center.x == rhs.center.x
+        && lhs.center.y == rhs.center.y
+        && lhs.verticalWorldSize == rhs.verticalWorldSize
+        && lhs.minorSpacing == rhs.minorSpacing
+        && lhs.majorEvery == rhs.majorEvery;
+}
+
 } // namespace
 
 ayt::math::Float4x4 EditorOverlayPass::makeOrientationAxisView(
@@ -736,6 +771,7 @@ uint32_t EditorOverlayPass::submitTransformGizmo(
             ? _unjitteredProjection
             : frame.projection;
     ctx.adapter.setViewTransform(kGizmoViewId, frame.view, overlayProjection);
+    ctx.adapter.setViewMode(kGizmoViewId, bgfx::ViewMode::Sequential);
     // Present has already written color. Clear only depth so the gizmo is
     // always reachable while retaining correct self-occlusion.
     ctx.adapter.setViewClearRaw(kGizmoViewId, BGFX_CLEAR_DEPTH, 0, 1.0f, 0);
@@ -777,8 +813,136 @@ uint32_t EditorOverlayPass::submitTransformGizmo(
                        0, _gizmoIndexCount);
 }
 
+void EditorOverlayPass::destroyGrid2DGeometry(BGFXAdapter& adapter)
+{
+    if (BGFXAdapter::isValid(_gridVertexBuffer)) {
+        adapter.destroy(_gridVertexBuffer);
+        _gridVertexBuffer = BGFX_INVALID_HANDLE;
+    }
+    if (BGFXAdapter::isValid(_gridIndexBuffer)) {
+        adapter.destroy(_gridIndexBuffer);
+        _gridIndexBuffer = BGFX_INVALID_HANDLE;
+    }
+    _gridIndexCount = 0;
+    _builtGridViewportWidth = 0;
+    _builtGridViewportHeight = 0;
+    _builtGrid2D = {};
+}
+
+bool EditorOverlayPass::ensureGrid2DResources(PassExecContext& ctx)
+{
+    if (!_grid2D.visible || !std::isfinite(_grid2D.center.x)
+        || !std::isfinite(_grid2D.center.y)
+        || !std::isfinite(_grid2D.verticalWorldSize)
+        || !std::isfinite(_grid2D.minorSpacing)
+        || _grid2D.verticalWorldSize <= 0.0f
+        || _grid2D.minorSpacing <= 0.0f
+        || ctx.viewportWidth == 0 || ctx.viewportHeight == 0) {
+        return false;
+    }
+    if (BGFXAdapter::isValid(_gridVertexBuffer)
+        && BGFXAdapter::isValid(_gridIndexBuffer)
+        && _gridIndexCount != 0
+        && _builtGridViewportWidth == ctx.viewportWidth
+        && _builtGridViewportHeight == ctx.viewportHeight
+        && sameGridState(_builtGrid2D, _grid2D)) {
+        return true;
+    }
+
+    destroyGrid2DGeometry(ctx.adapter);
+    if (!ensureOrientationAxisResources(ctx)) return false;
+
+    const float aspect = static_cast<float>(ctx.viewportWidth)
+                       / static_cast<float>(ctx.viewportHeight);
+    const float halfH = _grid2D.verticalWorldSize * 0.5f;
+    const float halfW = halfH * aspect;
+    const float spacing = _grid2D.minorSpacing;
+    const float minX = _grid2D.center.x - halfW - spacing;
+    const float maxX = _grid2D.center.x + halfW + spacing;
+    const float minY = _grid2D.center.y - halfH - spacing;
+    const float maxY = _grid2D.center.y + halfH + spacing;
+    const float halfLineWidth = std::max(
+        _grid2D.verticalWorldSize
+            / static_cast<float>(ctx.viewportHeight) * 0.45f,
+        spacing * 0.0005f);
+    const int firstX = static_cast<int>(std::floor(minX / spacing));
+    const int lastX = static_cast<int>(std::ceil(maxX / spacing));
+    const int firstY = static_cast<int>(std::floor(minY / spacing));
+    const int lastY = static_cast<int>(std::ceil(maxY / spacing));
+    if ((lastX - firstX) > 1024 || (lastY - firstY) > 1024) return false;
+
+    std::vector<AxisVertex> vertices;
+    std::vector<uint16_t> indices;
+    vertices.reserve(static_cast<std::size_t>(
+        std::max(0, lastX - firstX + lastY - firstY + 2)) * 4u);
+    indices.reserve(vertices.capacity() / 4u * 6u);
+    const uint32_t majorEvery = std::max(1u, _grid2D.majorEvery);
+    constexpr uint32_t minorColor = 0x243e4650u;
+    constexpr uint32_t majorColor = 0x4057626eu;
+    constexpr uint32_t xAxisColor = 0x806060d8u;
+    constexpr uint32_t yAxisColor = 0x8067b858u;
+
+    for (int index = firstX; index <= lastX; ++index) {
+        const float x = static_cast<float>(index) * spacing;
+        const bool axis = index == 0;
+        const bool major = (std::abs(index) % static_cast<int>(majorEvery)) == 0;
+        appendGridLine(vertices, indices, {x, minY}, {x, maxY}, halfLineWidth,
+                       axis ? yAxisColor : (major ? majorColor : minorColor));
+    }
+    for (int index = firstY; index <= lastY; ++index) {
+        const float y = static_cast<float>(index) * spacing;
+        const bool axis = index == 0;
+        const bool major = (std::abs(index) % static_cast<int>(majorEvery)) == 0;
+        appendGridLine(vertices, indices, {minX, y}, {maxX, y}, halfLineWidth,
+                       axis ? xAxisColor : (major ? majorColor : minorColor));
+    }
+    if (vertices.empty() || indices.empty()) return false;
+
+    const bgfx::VertexLayout layout =
+        ctx.adapter.vertexLayoutPosScreenOffsetColor();
+    _gridVertexBuffer = ctx.adapter.createVertexBuffer(
+        vertices.data(),
+        static_cast<uint32_t>(vertices.size() * sizeof(AxisVertex)), layout);
+    _gridIndexBuffer = ctx.adapter.createIndexBuffer(
+        indices.data(),
+        static_cast<uint32_t>(indices.size() * sizeof(uint16_t)));
+    if (!BGFXAdapter::isValid(_gridVertexBuffer)
+        || !BGFXAdapter::isValid(_gridIndexBuffer)) {
+        destroyGrid2DGeometry(ctx.adapter);
+        return false;
+    }
+    _gridIndexCount = static_cast<uint32_t>(indices.size());
+    _builtGrid2D = _grid2D;
+    _builtGridViewportWidth = ctx.viewportWidth;
+    _builtGridViewportHeight = ctx.viewportHeight;
+    return true;
+}
+
+uint32_t EditorOverlayPass::submitGrid2D(PassExecContext& ctx,
+                                         const FrameContext& frame)
+{
+    if (!ensureGrid2DResources(ctx)) return 0;
+    ctx.adapter.setViewFrameBuffer(kGridViewId, BGFX_INVALID_HANDLE);
+    ctx.adapter.setViewRect(kGridViewId, ctx.viewportX, ctx.viewportY,
+                            ctx.viewportWidth, ctx.viewportHeight);
+    const ayt::math::Float4x4& projection = _hasUnjitteredProjection
+        ? _unjitteredProjection : frame.projection;
+    ctx.adapter.setViewTransform(kGridViewId, frame.view, projection);
+    ctx.adapter.setViewMode(kGridViewId, bgfx::ViewMode::Sequential);
+    ctx.adapter.setTransformIdentity();
+    ctx.adapter.setVertexBuffer(_gridVertexBuffer);
+    ctx.adapter.setIndexBuffer(_gridIndexBuffer, 0, _gridIndexCount);
+    ctx.adapter.setStateAlphaBlend();
+    ayt::shader::DrawCallContext draw;
+    draw.viewId = kGridViewId;
+    draw.state = 0;
+    _axisProgram.submit(draw);
+    return 1;
+}
+
 void EditorOverlayPass::destroyResources(BGFXAdapter& adapter)
 {
+    destroyGrid2DGeometry(adapter);
     destroyTransformGizmoGeometry(adapter);
     if (BGFXAdapter::isValid(_axisVertexBuffer)) {
         adapter.destroy(_axisVertexBuffer);
@@ -810,6 +974,7 @@ uint32_t EditorOverlayPass::execute(PassExecContext& ctx)
     }
 
     return submitOrientationAxis(ctx, frame)
+         + submitGrid2D(ctx, frame)
          + submitTransformGizmo(ctx, frame);
 }
 

@@ -101,8 +101,21 @@ public:
                          const ayt::math::FVector3& at,
                          const ayt::math::FVector3& up,
                          float fovYDegrees = 50.0f);
+    void setCameraMatrices(const ayt::math::Float4x4& view,
+                           const ayt::math::Float4x4& projection,
+                           const ayt::math::FVector3& position);
     void clearCameraOverride();
     bool hasCameraOverride() const noexcept { return _cameraOverride; }
+
+    // Edit-mode preview override for Camera Overlay 2D. Runtime scene builders
+    // still author their camera first; this host override is applied last and
+    // is cleared when the editor enters Play.
+    void setOverlayCamera2DOverride(
+        const ayt::math::Float4x4& view,
+        const ayt::math::Float4x4& projection,
+        uint32_t layerMask = 0xFFFFFFFFu);
+    void clearOverlayCamera2DOverride();
+    bool hasOverlayCamera2DOverride() const noexcept;
 
     static RendererSubSystem* findRegistered();
 
@@ -128,6 +141,7 @@ public:
 private:
     void renderFrame();
     void renderScenePass();
+    void applySceneCameraOverrides(RenderScene& scene);
     // Keep the Renderer camera current before scene builders query it for
     // CPU visibility. This is also called immediately when Editor freecam or
     // viewport aspect changes.

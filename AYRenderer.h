@@ -144,6 +144,9 @@ public:
 
     void setMainCamera(const ayt::math::Float4x4& view,
                        const ayt::math::Float4x4& projection);
+    void setMainCamera(const ayt::math::Float4x4& view,
+                       const ayt::math::Float4x4& projection,
+                       const ayt::math::FVector3& position);
 
     // Build a left-handed view/projection pair. fovYDegrees is expressed in
     // degrees for compatibility with the original bx-backed API.
@@ -437,6 +440,8 @@ public:
     // the default hidden state; editor hosts publish the selected transform.
     void setEditorTransformGizmoState(const EditorTransformGizmoState& state);
     EditorTransformGizmoState editorTransformGizmoState() const noexcept;
+    void setEditorGrid2DState(const EditorGrid2DState& state);
+    EditorGrid2DState editorGrid2DState() const noexcept;
 
     void setDebugOverlayEnabled(bool enabled);
     bool isDebugOverlayEnabled() const noexcept;

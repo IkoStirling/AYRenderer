@@ -445,6 +445,17 @@ struct EditorTransformGizmoState {
     ayt::math::FQuaternion rotation = ayt::math::FQuaternion::identity();
 };
 
+// Editor-only XY grid drawn after scene presentation and before the transform
+// gizmo. The renderer owns GPU geometry; AYEditor only supplies the visible
+// world range and adaptive spacing.
+struct EditorGrid2DState {
+    bool visible = false;
+    ayt::math::FVector2 center{};
+    float verticalWorldSize = 600.0f;
+    float minorSpacing = 50.0f;
+    std::uint32_t majorEvery = 10u;
+};
+
 // AYEditor compile-time checks this value against its CPU hit geometry so the
 // gizmo keeps an approximately constant screen size as the camera dollies.
 inline constexpr float kEditorTransformGizmoScalePerDistance = 0.18f;

@@ -475,6 +475,7 @@ struct Renderer::Impl {
     // preserve the host's toggle even though the pass object is recreated.
     bool                           viewportOrientationAxisEnabled = false;
     EditorTransformGizmoState      editorTransformGizmo{};
+    EditorGrid2DState              editorGrid2D{};
 
     // Display-referred anti-aliasing is enabled by default. The state lives on
     // Impl so pipeline rebuilds preserve the host's runtime choice.
@@ -495,6 +496,7 @@ struct Renderer::Impl {
             editorOverlay->setOrientationAxisEnabled(
                 viewportOrientationAxisEnabled);
             editorOverlay->setTransformGizmoState(editorTransformGizmo);
+            editorOverlay->setGrid2DState(editorGrid2D);
         }
     }
 
@@ -2143,6 +2145,15 @@ void Renderer::setMainCamera(const ayt::math::Float4x4& view,
     _impl->mainCameraValid = true;
 }
 
+void Renderer::setMainCamera(const ayt::math::Float4x4& view,
+                             const ayt::math::Float4x4& projection,
+                             const ayt::math::FVector3& position)
+{
+    if (!_impl) return;
+    _impl->mainCameraPosition = position;
+    setMainCamera(view, projection);
+}
+
 void Renderer::setDirectionalLight(const ayt::math::FVector3& direction,
                                    const ayt::math::FVector3& color)
 {
@@ -2917,6 +2928,18 @@ EditorTransformGizmoState Renderer::editorTransformGizmoState() const noexcept
 {
     return _impl ? _impl->editorTransformGizmo
                  : EditorTransformGizmoState{};
+}
+
+void Renderer::setEditorGrid2DState(const EditorGrid2DState& state)
+{
+    if (!_impl) return;
+    _impl->editorGrid2D = state;
+    _impl->applyEditorOverlayKnobs();
+}
+
+EditorGrid2DState Renderer::editorGrid2DState() const noexcept
+{
+    return _impl ? _impl->editorGrid2D : EditorGrid2DState{};
 }
 
 void Renderer::setDebugOverlayEnabled(bool enabled)

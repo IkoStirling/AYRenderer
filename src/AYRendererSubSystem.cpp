@@ -58,6 +58,24 @@ std::uint64_t g_nextSceneBuilderRegistrationId = 1;
 std::unordered_map<RendererSubSystem*, std::vector<OwnedSceneBuilder>>
     g_sceneBuilders;
 
+struct MatrixCameraOverride {
+    ayt::math::Float4x4 view = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 projection = ayt::math::Float4x4::identity();
+    ayt::math::FVector3 position{};
+};
+
+struct OverlayCameraOverride {
+    ayt::math::Float4x4 view = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 projection = ayt::math::Float4x4::identity();
+    uint32_t layerMask = 0xFFFFFFFFu;
+};
+
+std::mutex g_cameraOverrideMutex;
+std::unordered_map<RendererSubSystem*, MatrixCameraOverride>
+    g_matrixCameraOverrides;
+std::unordered_map<RendererSubSystem*, OverlayCameraOverride>
+    g_overlayCameraOverrides;
+
 bool sceneBuilderIsRegistered(RendererSubSystem* renderer,
                               std::uint64_t registrationId)
 {
@@ -98,6 +116,13 @@ void clearAllSceneBuilders(RendererSubSystem* renderer)
 {
     std::lock_guard<std::mutex> lock(g_sceneBuilderMutex);
     g_sceneBuilders.erase(renderer);
+}
+
+void clearAllCameraOverrides(RendererSubSystem* renderer)
+{
+    std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+    g_matrixCameraOverrides.erase(renderer);
+    g_overlayCameraOverrides.erase(renderer);
 }
 
 
@@ -395,6 +420,7 @@ void RendererSubSystem::update(float /*deltaTime*/)
     if (_sceneBuilder) {
         _sceneBuilder(_scene);
     }
+    applySceneCameraOverrides(_scene);
     auto& loop = ayt::game::GameLoop::instance();
     _scenePacketFrame = loop.getFrameCount();
     _scenePacketInterpolationAlpha = loop.getInterpolationFactor();
@@ -416,6 +442,7 @@ void RendererSubSystem::shutdown()
 {
 
     clearAllSceneBuilders(this);
+    clearAllCameraOverrides(this);
 
     if (_ready) {
 
@@ -569,6 +596,10 @@ void RendererSubSystem::setCameraLookAt(const ayt::math::FVector3& eye,
                                         const ayt::math::FVector3& up,
                                         float fovYDegrees)
 {
+    {
+        std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+        g_matrixCameraOverrides.erase(this);
+    }
     _camEye = eye;
     _camAt = at;
     _camUp = up;
@@ -577,10 +608,51 @@ void RendererSubSystem::setCameraLookAt(const ayt::math::FVector3& eye,
     syncMainCamera();
 }
 
+void RendererSubSystem::setCameraMatrices(
+    const ayt::math::Float4x4& view,
+    const ayt::math::Float4x4& projection,
+    const ayt::math::FVector3& position)
+{
+    {
+        std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+        g_matrixCameraOverrides[this] = {view, projection, position};
+    }
+    _cameraOverride = true;
+    syncMainCamera();
+}
+
 void RendererSubSystem::clearCameraOverride()
 {
+    {
+        std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+        g_matrixCameraOverrides.erase(this);
+    }
     _cameraOverride = false;
     syncMainCamera();
+}
+
+void RendererSubSystem::setOverlayCamera2DOverride(
+    const ayt::math::Float4x4& view,
+    const ayt::math::Float4x4& projection,
+    uint32_t layerMask)
+{
+    std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+    g_overlayCameraOverrides[this] = {view, projection, layerMask};
+    _scenePacketValid.store(false, std::memory_order_release);
+}
+
+void RendererSubSystem::clearOverlayCamera2DOverride()
+{
+    std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+    g_overlayCameraOverrides.erase(this);
+    _scenePacketValid.store(false, std::memory_order_release);
+}
+
+bool RendererSubSystem::hasOverlayCamera2DOverride() const noexcept
+{
+    std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+    return g_overlayCameraOverrides.contains(
+        const_cast<RendererSubSystem*>(this));
 }
 
 void RendererSubSystem::syncMainCamera()
@@ -593,7 +665,21 @@ void RendererSubSystem::syncMainCamera()
     const float aspect = static_cast<float>(safeWidth)
                        / static_cast<float>(safeHeight);
 
+    MatrixCameraOverride matrixOverride;
+    bool hasMatrixOverride = false;
     if (_cameraOverride) {
+        std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+        if (const auto found = g_matrixCameraOverrides.find(this);
+            found != g_matrixCameraOverrides.end()) {
+            matrixOverride = found->second;
+            hasMatrixOverride = true;
+        }
+    }
+    if (hasMatrixOverride) {
+        _renderer.setMainCamera(
+            matrixOverride.view, matrixOverride.projection,
+            matrixOverride.position);
+    } else if (_cameraOverride) {
         _renderer.setMainCameraLookAtPerspective(
             _camEye, _camAt, _camUp,
             _camFovYDegrees, aspect, 0.1f, 100.0f);
@@ -606,6 +692,24 @@ void RendererSubSystem::syncMainCamera()
             ayt::math::FVector3(0.0f, 0.0f, 0.0f),
             ayt::math::FVector3(0.0f, 1.0f, 0.0f),
             50.0f, aspect, 0.1f, 100.0f);
+    }
+}
+
+void RendererSubSystem::applySceneCameraOverrides(RenderScene& scene)
+{
+    OverlayCameraOverride overlay;
+    bool foundOverride = false;
+    {
+        std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+        if (const auto found = g_overlayCameraOverrides.find(this);
+            found != g_overlayCameraOverrides.end()) {
+            overlay = found->second;
+            foundOverride = true;
+        }
+    }
+    if (foundOverride) {
+        scene.setOverlayCamera2D(
+            overlay.view, overlay.projection, overlay.layerMask);
     }
 }
 
@@ -623,6 +727,8 @@ void RendererSubSystem::renderScenePass()
         _scenePacketFrame = ayt::game::GameLoop::instance().getFrameCount();
         _scenePacketValid.store(true, std::memory_order_release);
     }
+
+    applySceneCameraOverrides(_scene);
 
     _renderer.render(_scene);
     // The packet has been consumed. This also preserves legacy/editor callers
