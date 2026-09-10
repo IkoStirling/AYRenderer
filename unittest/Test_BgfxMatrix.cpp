@@ -1,6 +1,7 @@
 #include "detail/BgfxMatrix.h"
 
 #include "AYMath/MathUtils.h"
+#include "AYRenderer/RendererSubSystem.h"
 
 #include "AYTest.h"
 
@@ -77,6 +78,38 @@ TEST_CASE(bgfx_matrix_editor_cube_height_maps_to_m13)
     CHECK(nearlyEqual(col[12], 0.0f));
     CHECK(nearlyEqual(col[13], 1.25f));
     CHECK(nearlyEqual(col[14], 0.0f));
+}
+
+TEST_CASE(bgfx_matrix_orthographic_projection_round_trip_preserves_extents)
+{
+    const Float4x4 projection = ayt::math::lh::ortho(
+        -480.0f, 480.0f, -300.0f, 300.0f, -1.0f, 1.0f);
+    float col[16] = {};
+    toBgfxColumnMajor(projection, col);
+    const Float4x4 restored = fromBgfxColumnMajor(col);
+
+    CHECK(matricesNearlyEqual(projection, restored));
+    CHECK(nearlyEqual(restored.row[0].x, 1.0f / 480.0f));
+    CHECK(nearlyEqual(restored.row[1].y, 1.0f / 300.0f));
+    CHECK(nearlyEqual(restored.row[2].z, 0.5f));
+    CHECK(nearlyEqual(restored.row[2].w, 0.5f));
+}
+
+TEST_CASE(renderer_subsystem_viewport_aspect_tracks_2d_resize)
+{
+    ayt::render::RendererSubSystem subsystem;
+    subsystem.setViewportRect(0u, 0u, 960u, 600u);
+    CHECK(subsystem.viewportWidth() == 960u);
+    CHECK(subsystem.viewportHeight() == 600u);
+    CHECK(nearlyEqual(subsystem.viewportAspect(), 1.6f));
+
+    subsystem.setViewportRect(0u, 0u, 600u, 960u);
+    CHECK(subsystem.viewportWidth() == 600u);
+    CHECK(subsystem.viewportHeight() == 960u);
+    CHECK(nearlyEqual(subsystem.viewportAspect(), 0.625f));
+
+    subsystem.setViewportRect(0u, 0u, 600u, 0u);
+    CHECK(nearlyEqual(subsystem.viewportAspect(), 1.0f));
 }
 
 TEST_SUITE_END

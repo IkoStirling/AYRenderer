@@ -28,3 +28,15 @@ target_compile_definitions(${TEST_NAME} PRIVATE
 )
 
 ay_add_test(${TEST_NAME})
+ay_add_test(${TEST_NAME}
+    NAME AYRenderer_2DMatrixBaseline
+    SUITE BgfxMatrixTests
+    LABELS "2d-baseline;ayrenderer")
+ay_add_test(${TEST_NAME}
+    NAME AYRenderer_2DOverlayBaseline
+    SUITE Renderer2DLaneTests
+    LABELS "2d-baseline;ayrenderer")
+ay_add_test(${TEST_NAME}
+    NAME AYRenderer_2DEditorOverlayBaseline
+    SUITE AYRenderer_EditorOverlay
+    LABELS "2d-baseline;ayrenderer")
