@@ -442,6 +442,9 @@ public:
     EditorTransformGizmoState editorTransformGizmoState() const noexcept;
     void setEditorGrid2DState(const EditorGrid2DState& state);
     EditorGrid2DState editorGrid2DState() const noexcept;
+    void setEditorSelectionOutline2DState(
+        const EditorSelectionOutline2DState& state);
+    EditorSelectionOutline2DState editorSelectionOutline2DState() const noexcept;
 
     void setDebugOverlayEnabled(bool enabled);
     bool isDebugOverlayEnabled() const noexcept;

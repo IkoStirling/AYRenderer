@@ -425,6 +425,48 @@ void appendGridLine(std::vector<AxisVertex>& vertices,
     }
 }
 
+void appendSelectionLine(std::vector<AxisVertex>& vertices,
+                         std::vector<uint16_t>& indices,
+                         const ayt::math::FVector3& from,
+                         const ayt::math::FVector3& to,
+                         float halfWidth,
+                         uint32_t abgr)
+{
+    const float dx = to.x - from.x;
+    const float dy = to.y - from.y;
+    const float length = std::sqrt(dx * dx + dy * dy);
+    if (!(length > 1.0e-6f) || vertices.size() > 65530u) return;
+    const float px = -dy / length * halfWidth;
+    const float py =  dx / length * halfWidth;
+    const uint16_t base = static_cast<uint16_t>(vertices.size());
+    appendVertex(vertices, {from.x + px, from.y + py, from.z}, abgr);
+    appendVertex(vertices, {from.x - px, from.y - py, from.z}, abgr);
+    appendVertex(vertices, {to.x - px, to.y - py, to.z}, abgr);
+    appendVertex(vertices, {to.x + px, to.y + py, to.z}, abgr);
+    constexpr uint16_t quad[] = {0, 1, 2, 0, 2, 3};
+    for (uint16_t index : quad) {
+        indices.push_back(static_cast<uint16_t>(base + index));
+    }
+}
+
+bool sameSelectionOutline2DState(
+    const EditorSelectionOutline2DState& lhs,
+    const EditorSelectionOutline2DState& rhs) noexcept
+{
+    if (lhs.visible != rhs.visible
+        || lhs.lineWidthWorld != rhs.lineWidthWorld) {
+        return false;
+    }
+    for (int index = 0; index < 4; ++index) {
+        if (lhs.corners[index].x != rhs.corners[index].x
+            || lhs.corners[index].y != rhs.corners[index].y
+            || lhs.corners[index].z != rhs.corners[index].z) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool sameGridState(const EditorGrid2DState& lhs,
                    const EditorGrid2DState& rhs) noexcept
 {
@@ -761,8 +803,11 @@ uint32_t EditorOverlayPass::submitTransformGizmo(
     const auto& state = _transformGizmo;
     const float distance = (state.position - frame.cameraPosition).length();
     if (!std::isfinite(distance)) return 0;
-    const float scale = std::clamp(
-        distance * kEditorTransformGizmoScalePerDistance, 0.12f, 1000.0f);
+    const float scale = std::isfinite(state.worldScaleOverride)
+            && state.worldScaleOverride > 0.0f
+        ? std::clamp(state.worldScaleOverride, 0.12f, 1000.0f)
+        : std::clamp(distance * kEditorTransformGizmoScalePerDistance,
+                     0.12f, 1000.0f);
     ctx.adapter.setViewFrameBuffer(kGizmoViewId, BGFX_INVALID_HANDLE);
     ctx.adapter.setViewRect(kGizmoViewId, ctx.viewportX, ctx.viewportY,
                             ctx.viewportWidth, ctx.viewportHeight);
@@ -940,8 +985,100 @@ uint32_t EditorOverlayPass::submitGrid2D(PassExecContext& ctx,
     return 1;
 }
 
+void EditorOverlayPass::destroySelectionOutline2DGeometry(
+    BGFXAdapter& adapter)
+{
+    if (BGFXAdapter::isValid(_selectionOutline2DVertexBuffer)) {
+        adapter.destroy(_selectionOutline2DVertexBuffer);
+        _selectionOutline2DVertexBuffer = BGFX_INVALID_HANDLE;
+    }
+    if (BGFXAdapter::isValid(_selectionOutline2DIndexBuffer)) {
+        adapter.destroy(_selectionOutline2DIndexBuffer);
+        _selectionOutline2DIndexBuffer = BGFX_INVALID_HANDLE;
+    }
+    _selectionOutline2DIndexCount = 0;
+    _builtSelectionOutline2D = {};
+}
+
+bool EditorOverlayPass::ensureSelectionOutline2DResources(
+    PassExecContext& ctx)
+{
+    const auto& state = _selectionOutline2D;
+    if (!state.visible || !std::isfinite(state.lineWidthWorld)
+        || state.lineWidthWorld <= 0.0f) {
+        return false;
+    }
+    for (const auto& corner : state.corners) {
+        if (!std::isfinite(corner.x) || !std::isfinite(corner.y)
+            || !std::isfinite(corner.z)) {
+            return false;
+        }
+    }
+    if (BGFXAdapter::isValid(_selectionOutline2DVertexBuffer)
+        && BGFXAdapter::isValid(_selectionOutline2DIndexBuffer)
+        && _selectionOutline2DIndexCount != 0
+        && sameSelectionOutline2DState(_builtSelectionOutline2D, state)) {
+        return true;
+    }
+
+    destroySelectionOutline2DGeometry(ctx.adapter);
+    if (!ensureOrientationAxisResources(ctx)) return false;
+    std::vector<AxisVertex> vertices;
+    std::vector<uint16_t> indices;
+    vertices.reserve(16u);
+    indices.reserve(24u);
+    constexpr uint32_t outlineColor = 0xff39a8ffu;
+    const float halfWidth = state.lineWidthWorld * 0.5f;
+    for (int index = 0; index < 4; ++index) {
+        appendSelectionLine(vertices, indices, state.corners[index],
+                            state.corners[(index + 1) % 4], halfWidth,
+                            outlineColor);
+    }
+    if (vertices.empty() || indices.empty()) return false;
+    const bgfx::VertexLayout layout =
+        ctx.adapter.vertexLayoutPosScreenOffsetColor();
+    _selectionOutline2DVertexBuffer = ctx.adapter.createVertexBuffer(
+        vertices.data(),
+        static_cast<uint32_t>(vertices.size() * sizeof(AxisVertex)), layout);
+    _selectionOutline2DIndexBuffer = ctx.adapter.createIndexBuffer(
+        indices.data(),
+        static_cast<uint32_t>(indices.size() * sizeof(uint16_t)));
+    if (!BGFXAdapter::isValid(_selectionOutline2DVertexBuffer)
+        || !BGFXAdapter::isValid(_selectionOutline2DIndexBuffer)) {
+        destroySelectionOutline2DGeometry(ctx.adapter);
+        return false;
+    }
+    _selectionOutline2DIndexCount = static_cast<uint32_t>(indices.size());
+    _builtSelectionOutline2D = state;
+    return true;
+}
+
+uint32_t EditorOverlayPass::submitSelectionOutline2D(
+    PassExecContext& ctx, const FrameContext& frame)
+{
+    if (!ensureSelectionOutline2DResources(ctx)) return 0;
+    ctx.adapter.setViewFrameBuffer(kGridViewId, BGFX_INVALID_HANDLE);
+    ctx.adapter.setViewRect(kGridViewId, ctx.viewportX, ctx.viewportY,
+                            ctx.viewportWidth, ctx.viewportHeight);
+    const ayt::math::Float4x4& projection = _hasUnjitteredProjection
+        ? _unjitteredProjection : frame.projection;
+    ctx.adapter.setViewTransform(kGridViewId, frame.view, projection);
+    ctx.adapter.setViewMode(kGridViewId, bgfx::ViewMode::Sequential);
+    ctx.adapter.setTransformIdentity();
+    ctx.adapter.setVertexBuffer(_selectionOutline2DVertexBuffer);
+    ctx.adapter.setIndexBuffer(_selectionOutline2DIndexBuffer, 0,
+                               _selectionOutline2DIndexCount);
+    ctx.adapter.setStateAlphaBlend();
+    ayt::shader::DrawCallContext draw;
+    draw.viewId = kGridViewId;
+    draw.state = 0;
+    _axisProgram.submit(draw);
+    return 1;
+}
+
 void EditorOverlayPass::destroyResources(BGFXAdapter& adapter)
 {
+    destroySelectionOutline2DGeometry(adapter);
     destroyGrid2DGeometry(adapter);
     destroyTransformGizmoGeometry(adapter);
     if (BGFXAdapter::isValid(_axisVertexBuffer)) {
@@ -975,6 +1112,7 @@ uint32_t EditorOverlayPass::execute(PassExecContext& ctx)
 
     return submitOrientationAxis(ctx, frame)
          + submitGrid2D(ctx, frame)
+         + submitSelectionOutline2D(ctx, frame)
          + submitTransformGizmo(ctx, frame);
 }
 

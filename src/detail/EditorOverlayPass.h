@@ -59,6 +59,13 @@ public:
         _grid2D = state;
     }
     const EditorGrid2DState& grid2DState() const noexcept { return _grid2D; }
+    void setSelectionOutline2DState(
+        const EditorSelectionOutline2DState& state) noexcept {
+        _selectionOutline2D = state;
+    }
+    const EditorSelectionOutline2DState& selectionOutline2DState() const noexcept {
+        return _selectionOutline2D;
+    }
     void setUnjitteredProjection(
         const ayt::math::Float4x4& projection) noexcept {
         _unjitteredProjection = projection;
@@ -87,6 +94,10 @@ private:
     uint32_t submitGrid2D(PassExecContext& ctx, const FrameContext& frame);
     bool ensureGrid2DResources(PassExecContext& ctx);
     void destroyGrid2DGeometry(BGFXAdapter& adapter);
+    uint32_t submitSelectionOutline2D(PassExecContext& ctx,
+                                      const FrameContext& frame);
+    bool ensureSelectionOutline2DResources(PassExecContext& ctx);
+    void destroySelectionOutline2DGeometry(BGFXAdapter& adapter);
 
     bool _orientationAxisEnabled = false;
     bool _axisProgramAcquireFailed = false;
@@ -117,6 +128,14 @@ private:
     bgfx::VertexBufferHandle _gridVertexBuffer = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle _gridIndexBuffer = BGFX_INVALID_HANDLE;
     uint32_t _gridIndexCount = 0;
+
+    EditorSelectionOutline2DState _selectionOutline2D{};
+    EditorSelectionOutline2DState _builtSelectionOutline2D{};
+    bgfx::VertexBufferHandle _selectionOutline2DVertexBuffer =
+        BGFX_INVALID_HANDLE;
+    bgfx::IndexBufferHandle _selectionOutline2DIndexBuffer =
+        BGFX_INVALID_HANDLE;
+    uint32_t _selectionOutline2DIndexCount = 0;
 };
 
 } // namespace ayt::render::detail

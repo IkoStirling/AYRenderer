@@ -476,6 +476,7 @@ struct Renderer::Impl {
     bool                           viewportOrientationAxisEnabled = false;
     EditorTransformGizmoState      editorTransformGizmo{};
     EditorGrid2DState              editorGrid2D{};
+    EditorSelectionOutline2DState  editorSelectionOutline2D{};
 
     // Display-referred anti-aliasing is enabled by default. The state lives on
     // Impl so pipeline rebuilds preserve the host's runtime choice.
@@ -497,6 +498,7 @@ struct Renderer::Impl {
                 viewportOrientationAxisEnabled);
             editorOverlay->setTransformGizmoState(editorTransformGizmo);
             editorOverlay->setGrid2DState(editorGrid2D);
+            editorOverlay->setSelectionOutline2DState(editorSelectionOutline2D);
         }
     }
 
@@ -2940,6 +2942,21 @@ void Renderer::setEditorGrid2DState(const EditorGrid2DState& state)
 EditorGrid2DState Renderer::editorGrid2DState() const noexcept
 {
     return _impl ? _impl->editorGrid2D : EditorGrid2DState{};
+}
+
+void Renderer::setEditorSelectionOutline2DState(
+    const EditorSelectionOutline2DState& state)
+{
+    if (!_impl) return;
+    _impl->editorSelectionOutline2D = state;
+    _impl->applyEditorOverlayKnobs();
+}
+
+EditorSelectionOutline2DState
+Renderer::editorSelectionOutline2DState() const noexcept
+{
+    return _impl ? _impl->editorSelectionOutline2D
+                 : EditorSelectionOutline2DState{};
 }
 
 void Renderer::setDebugOverlayEnabled(bool enabled)

@@ -443,6 +443,10 @@ struct EditorTransformGizmoState {
     uint16_t disabledHandleMask = 0;
     ayt::math::FVector3 position{};
     ayt::math::FQuaternion rotation = ayt::math::FQuaternion::identity();
+    // Optional editor-supplied world size. Perspective views leave this at
+    // zero and retain distance scaling; orthographic 2D views provide a
+    // world-units-per-pixel derived value so the gizmo stays screen-stable.
+    float worldScaleOverride = 0.0f;
 };
 
 // Editor-only XY grid drawn after scene presentation and before the transform
@@ -454,6 +458,16 @@ struct EditorGrid2DState {
     float verticalWorldSize = 600.0f;
     float minorSpacing = 50.0f;
     std::uint32_t majorEvery = 10u;
+};
+
+// Editor-only outline for a selected 2D object. Corners are supplied in
+// clockwise or counter-clockwise world order, which supports centered
+// sprites, origin-based tilemaps and rotated camera frames without teaching
+// AYRenderer about editor component types.
+struct EditorSelectionOutline2DState {
+    bool visible = false;
+    ayt::math::FVector3 corners[4]{};
+    float lineWidthWorld = 1.0f;
 };
 
 // AYEditor compile-time checks this value against its CPU hit geometry so the

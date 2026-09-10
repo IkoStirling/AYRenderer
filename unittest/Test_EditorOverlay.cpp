@@ -24,6 +24,7 @@ using ayt::render::Renderer;
 using ayt::render::EditorTransformGizmoMode;
 using ayt::render::EditorTransformGizmoState;
 using ayt::render::EditorGrid2DState;
+using ayt::render::EditorSelectionOutline2DState;
 
 namespace {
 
@@ -79,6 +80,7 @@ TEST_CASE(editoroverlay_transform_gizmo_is_explicit_state_and_uses_view_252) {
     state.activeHandle = 8u;
     state.disabledHandleMask = static_cast<uint16_t>((1u << 3) | (1u << 12));
     state.position = {1.0f, 2.0f, 3.0f};
+    state.worldScaleOverride = 24.0f;
     pass.setTransformGizmoState(state);
     CHECK(pass.transformGizmoState().visible);
     CHECK(pass.transformGizmoState().localSpace);
@@ -86,6 +88,7 @@ TEST_CASE(editoroverlay_transform_gizmo_is_explicit_state_and_uses_view_252) {
     CHECK(pass.transformGizmoState().disabledHandleMask
           == state.disabledHandleMask);
     CHECK(pass.transformGizmoState().position.y == 2.0f);
+    CHECK(pass.transformGizmoState().worldScaleOverride == 24.0f);
 }
 
 TEST_CASE(renderer_transform_gizmo_state_survives_pipeline_rebuild) {
@@ -125,6 +128,30 @@ TEST_CASE(renderer_two_d_grid_state_survives_pipeline_rebuild) {
     CHECK(restored.minorSpacing == 50.0f);
     CHECK(restored.majorEvery == 10u);
     CHECK(ayt::render::detail::EditorOverlayPass::kGridViewId == 252u);
+}
+
+TEST_CASE(renderer_two_d_selection_outline_survives_pipeline_rebuild) {
+    Renderer renderer;
+    EditorSelectionOutline2DState state;
+    state.visible = true;
+    state.corners[0] = {-2.0f, -1.0f, 0.0f};
+    state.corners[1] = { 2.0f, -1.0f, 0.0f};
+    state.corners[2] = { 2.0f,  1.0f, 0.0f};
+    state.corners[3] = {-2.0f,  1.0f, 0.0f};
+    state.lineWidthWorld = 1.5f;
+    renderer.setEditorSelectionOutline2DState(state);
+    renderer.configurePipeline(RenderPipelineDesc::makeEditorDeferred());
+    const EditorSelectionOutline2DState restored =
+        renderer.editorSelectionOutline2DState();
+    CHECK(restored.visible);
+    CHECK(restored.corners[2].x == 2.0f);
+    CHECK(restored.corners[2].y == 1.0f);
+    CHECK(restored.lineWidthWorld == 1.5f);
+
+    ayt::render::detail::EditorOverlayPass pass;
+    pass.setSelectionOutline2DState(state);
+    CHECK(pass.selectionOutline2DState().visible);
+    CHECK(pass.selectionOutline2DState().corners[0].x == -2.0f);
 }
 
 TEST_CASE(editoroverlay_orientation_axis_view_keeps_rotation_not_translation) {
