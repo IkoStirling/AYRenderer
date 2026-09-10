@@ -1559,7 +1559,9 @@ TextureHandle RenderResourceManager::loadTexture(const std::string& path, bool s
         return {};
     }
 
-    const std::string key = textureSamplingCacheKey(path, srgb);
+    const std::string resolvedPath =
+        ayt::resource::resolveAssetPath({}, path);
+    const std::string key = textureSamplingCacheKey(resolvedPath, srgb);
     if (!key.empty()) {
         const auto cached = _textureCacheByKey.find(key);
         if (cached != _textureCacheByKey.end()) {
@@ -1572,9 +1574,10 @@ TextureHandle RenderResourceManager::loadTexture(const std::string& path, bool s
     // P0: L2 load must go through ResourceManager (cache/deps/pak/hot-reload).
     // Fall back to raw image decode when the path is not a typed .ay* asset.
     const std::shared_ptr<ayt::resource::ITexture> texture =
-        ayt::resource::ResourceManager::instance().load<ayt::resource::ITexture>(path);
+        ayt::resource::ResourceManager::instance().load<ayt::resource::ITexture>(
+            resolvedPath);
     if (!texture) {
-        return createTextureFromFile(path, key, srgb);
+        return createTextureFromFile(resolvedPath, key, srgb);
     }
 
     return uploadTextureFromResource(*this, *texture, key, srgb);

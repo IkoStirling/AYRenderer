@@ -77,6 +77,13 @@ public:
 
     void setClientSize(uint32_t width, uint32_t height);
     void setViewportRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
+    [[nodiscard]] uint16_t viewportWidth() const noexcept { return _viewportW; }
+    [[nodiscard]] uint16_t viewportHeight() const noexcept { return _viewportH; }
+    [[nodiscard]] float viewportAspect() const noexcept {
+        return _viewportH > 0u
+            ? static_cast<float>(_viewportW) / static_cast<float>(_viewportH)
+            : 1.0f;
+    }
 
     // Legacy/global builders remain active regardless of the current ECS
     // World (standalone demos use this path). World-owned builders must use
