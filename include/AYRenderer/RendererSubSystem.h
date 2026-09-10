@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYRenderer.h"
+#include "AYRenderer/SceneVisibility.h"
 
 #include <AYGameLoop.h>
 
@@ -116,6 +117,13 @@ public:
         uint32_t layerMask = 0xFFFFFFFFu);
     void clearOverlayCamera2DOverride();
     bool hasOverlayCamera2DOverride() const noexcept;
+
+    // Editor/diagnostic presentation filter. The source RenderScene remains
+    // complete and the override is applied only to the packet passed to
+    // Renderer::render. Runtime hosts keep the default all-visible behavior.
+    void setSceneVisibilityFilter(const SceneVisibilityFilter& filter);
+    void clearSceneVisibilityFilter();
+    bool hasSceneVisibilityFilter() const noexcept;
 
     static RendererSubSystem* findRegistered();
 

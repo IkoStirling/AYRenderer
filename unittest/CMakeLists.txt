@@ -40,3 +40,7 @@ ay_add_test(${TEST_NAME}
     NAME AYRenderer_2DEditorOverlayBaseline
     SUITE AYRenderer_EditorOverlay
     LABELS "2d-baseline;ayrenderer")
+ay_add_test(${TEST_NAME}
+    NAME AYRenderer_MixedSceneVisibility
+    SUITE RendererSceneVisibilityTests
+    LABELS "2d-3d-mixed;ayrenderer")

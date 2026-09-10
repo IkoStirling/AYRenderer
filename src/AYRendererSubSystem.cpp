@@ -75,6 +75,8 @@ std::unordered_map<RendererSubSystem*, MatrixCameraOverride>
     g_matrixCameraOverrides;
 std::unordered_map<RendererSubSystem*, OverlayCameraOverride>
     g_overlayCameraOverrides;
+std::unordered_map<RendererSubSystem*, SceneVisibilityFilter>
+    g_sceneVisibilityFilters;
 
 bool sceneBuilderIsRegistered(RendererSubSystem* renderer,
                               std::uint64_t registrationId)
@@ -123,6 +125,7 @@ void clearAllCameraOverrides(RendererSubSystem* renderer)
     std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
     g_matrixCameraOverrides.erase(renderer);
     g_overlayCameraOverrides.erase(renderer);
+    g_sceneVisibilityFilters.erase(renderer);
 }
 
 
@@ -655,6 +658,26 @@ bool RendererSubSystem::hasOverlayCamera2DOverride() const noexcept
         const_cast<RendererSubSystem*>(this));
 }
 
+void RendererSubSystem::setSceneVisibilityFilter(
+    const SceneVisibilityFilter& filter)
+{
+    std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+    g_sceneVisibilityFilters[this] = filter;
+}
+
+void RendererSubSystem::clearSceneVisibilityFilter()
+{
+    std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+    g_sceneVisibilityFilters.erase(this);
+}
+
+bool RendererSubSystem::hasSceneVisibilityFilter() const noexcept
+{
+    std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+    return g_sceneVisibilityFilters.contains(
+        const_cast<RendererSubSystem*>(this));
+}
+
 void RendererSubSystem::syncMainCamera()
 {
     if (!_renderer.isInitialized()) {
@@ -730,7 +753,24 @@ void RendererSubSystem::renderScenePass()
 
     applySceneCameraOverrides(_scene);
 
-    _renderer.render(_scene);
+    SceneVisibilityFilter visibility;
+    bool hasVisibilityFilter = false;
+    {
+        std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+        if (const auto found = g_sceneVisibilityFilters.find(this);
+            found != g_sceneVisibilityFilters.end()) {
+            visibility = found->second;
+            hasVisibilityFilter = true;
+        }
+    }
+    if (hasVisibilityFilter && !visibility.allVisible()) {
+        RenderScene presentationScene;
+        copyVisibleSceneForPresentation(
+            _scene, presentationScene, visibility);
+        _renderer.render(presentationScene);
+    } else {
+        _renderer.render(_scene);
+    }
     // The packet has been consumed. This also preserves legacy/editor callers
     // that invoke renderFrame() without a preceding GameLoop Presentation tick.
     _scenePacketValid.store(false, std::memory_order_release);
