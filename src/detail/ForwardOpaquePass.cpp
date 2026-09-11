@@ -349,14 +349,6 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
             continue;
         }
 
-        const uint64_t opaqueState = BGFX_STATE_WRITE_RGB
-                                   | BGFX_STATE_WRITE_A
-                                   | BGFX_STATE_WRITE_Z
-                                   | BGFX_STATE_DEPTH_TEST_LEQUAL;
-        adapter.setState(material.doubleSided
-                             ? opaqueState
-                             : opaqueState | cullBackFacesForTransform(item.world));
-
         const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
         if (drawRange.indexCount == 0) {
             continue;
@@ -364,8 +356,16 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
 
         adapter.setTransform(item.world);
         adapter.setVertexBuffer(mesh.vertexBuffer);
-        adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
-                               drawRange.indexCount);
+        const bool wireframe = bindDrawIndexBuffer(
+            adapter, mesh, drawRange, ctx.wireframe);
+        uint64_t opaqueState = BGFX_STATE_WRITE_RGB
+                             | BGFX_STATE_WRITE_A
+                             | BGFX_STATE_WRITE_Z
+                             | BGFX_STATE_DEPTH_TEST_LEQUAL;
+        if (wireframe) opaqueState |= BGFX_STATE_PT_LINES;
+        adapter.setState(material.doubleSided
+                             ? opaqueState
+                             : opaqueState | cullBackFacesForTransform(item.world));
 
         // PR-F2 (2026-07-21) — ctx.shadowPass feeds flushMaterial. When
         // the active shadow producer has a ready FBO, the helper

@@ -878,12 +878,12 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // §P3 M11 (2026-08-24) — routed through BGFXAdapter state preset
         // (cutsheet red line + named state helpers preferred over inline
         // bit assembly).
-        ctx.adapter.setStateOpaqueLEQUAL(
-            material.doubleSided, reversesWinding(item.world));
         ctx.adapter.setTransform(item.world);
         ctx.adapter.setVertexBuffer(mesh.vertexBuffer);
-        ctx.adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
-                                   drawRange.indexCount);
+        const bool wireframe = bindDrawIndexBuffer(
+            ctx.adapter, mesh, drawRange, ctx.wireframe);
+        ctx.adapter.setStateOpaqueLEQUAL(
+            material.doubleSided, reversesWinding(item.world), wireframe);
 
         if (!worldLit2D) {
             tryUploadBonePalette(

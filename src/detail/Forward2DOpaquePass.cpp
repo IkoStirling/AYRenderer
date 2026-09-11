@@ -74,9 +74,6 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
         adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
     }
 
-    // Blend-only: BGFX_STATE_BLEND_ALPHA, no WRITE_Z, no DEPTH_TEST.
-    adapter.setStateAlphaBlend();
-
     uint32_t drawCount = 0;
 
     const std::vector<const DrawItem*> sortedItems =
@@ -112,8 +109,10 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
 
         adapter.setTransform(item.world);
         adapter.setVertexBuffer(mesh.vertexBuffer);
-        adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
-                               drawRange.indexCount);
+        const bool wireframe = bindDrawIndexBuffer(
+            adapter, mesh, drawRange, ctx.wireframe);
+        // Blend-only: BGFX_STATE_BLEND_ALPHA, no WRITE_Z.
+        adapter.setStateAlphaBlend(wireframe);
 
         // Bind albedo textures (flushMaterial loop shape; shadowMap
         // slots skipped — 2D has no shadow path).

@@ -1,4 +1,5 @@
 #include "detail/RenderResourceManager.h"
+#include "detail/WireframeGeometry.h"
 
 #include "detail/RenderAssetBridge.h"
 #include "detail/TextureImageLoader.h"
@@ -256,6 +257,7 @@ void RenderResourceManager::destroyAllMeshes()
         (void)id;
         _adapter.destroy(mesh.vertexBuffer);
         _adapter.destroy(mesh.indexBuffer);
+        _adapter.destroy(mesh.wireframeIndexBuffer);
     }
     _meshes.clear();
 }
@@ -311,6 +313,7 @@ void RenderResourceManager::destroyMeshGpuOnly(uint64_t id)
     }
     _adapter.destroy(it->second.vertexBuffer);
     _adapter.destroy(it->second.indexBuffer);
+    _adapter.destroy(it->second.wireframeIndexBuffer);
     _meshes.erase(it);
 }
 
@@ -394,12 +397,35 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
     mesh.vertexBuffer = _adapter.createVertexBuffer(vertices, vertexBytes, bgfxLayout);
     mesh.indexBuffer  = _adapter.createIndexBuffer(indices, indexBytes, indexFlags);
 
+    if (use32BitIndices) {
+        const auto wireIndices = buildTriangleWireframeIndices(
+            static_cast<const uint32_t*>(indices), indexCount);
+        mesh.wireframeIndexCount = static_cast<uint32_t>(wireIndices.size());
+        if (!wireIndices.empty()) {
+            mesh.wireframeIndexBuffer = _adapter.createIndexBuffer(
+                wireIndices.data(),
+                static_cast<uint32_t>(wireIndices.size() * sizeof(uint32_t)),
+                BGFX_BUFFER_INDEX32);
+        }
+    } else {
+        const auto wireIndices = buildTriangleWireframeIndices(
+            static_cast<const uint16_t*>(indices), indexCount);
+        mesh.wireframeIndexCount = static_cast<uint32_t>(wireIndices.size());
+        if (!wireIndices.empty()) {
+            mesh.wireframeIndexBuffer = _adapter.createIndexBuffer(
+                wireIndices.data(),
+                static_cast<uint32_t>(wireIndices.size() * sizeof(uint16_t)),
+                BGFX_BUFFER_NONE);
+        }
+    }
+
     if (!bgfx::isValid(mesh.vertexBuffer) || !bgfx::isValid(mesh.indexBuffer)) {
         std::fprintf(stderr,
                      "[RenderResourceManager] GPU mesh upload failed (stride=%u verts=%u indices=%u)\n",
                      uploadStride, vertexCount, indexCount);
         _adapter.destroy(mesh.vertexBuffer);
         _adapter.destroy(mesh.indexBuffer);
+        _adapter.destroy(mesh.wireframeIndexBuffer);
         return out;
     }
 
@@ -571,6 +597,7 @@ void RenderResourceManager::destroyMesh(MeshHandle& mesh)
     if (it != _meshes.end()) {
         _adapter.destroy(it->second.vertexBuffer);
         _adapter.destroy(it->second.indexBuffer);
+        _adapter.destroy(it->second.wireframeIndexBuffer);
         _meshes.erase(it);
     }
     mesh = {};

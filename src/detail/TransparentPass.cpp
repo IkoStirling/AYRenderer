@@ -278,8 +278,18 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
     // §P2 L5 (2026-08-24) — `worldOverride` arg dropped (was unused).
     adapter.setTransform(item.world);
     adapter.setVertexBuffer(mesh.vertexBuffer);
-    adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
-                           drawRange.indexCount);
+    const bool wireframe = bindDrawIndexBuffer(
+        adapter, mesh, drawRange,
+        mode == SubmitMode::TransparentSurface && ctx.wireframe);
+    if (mode == SubmitMode::TransparentSurface) {
+        uint64_t state = transparentDrawState(
+            material.blendMode,
+            material.premultipliedAlpha,
+            material.doubleSided,
+            reversesWinding(item.world));
+        if (wireframe) state |= BGFX_STATE_PT_LINES;
+        adapter.setState(state);
+    }
 
     // §P2 supplemental (2026-08-24) — hoisted to RenderPass::tryUploadLightUniforms
     // to dedup with ForwardOpaquePass::flushMaterial.
@@ -682,12 +692,6 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
             continue;
         }
         const GpuMaterial& material = matIt->second;
-
-        adapter.setState(transparentDrawState(
-            material.blendMode,
-            material.premultipliedAlpha,
-            material.doubleSided,
-            reversesWinding(pItem->world)));
 
         const PackedShadowAtlas& packedShadows =
             receivesShadow(pItem->shadowFlags)

@@ -230,10 +230,11 @@ public:
     //                                mouth, garment/trim) preserve
     //                                source-order tie-breaking.
     void setStateOpaque();
-    void setStateAlphaBlend();
+    void setStateAlphaBlend(bool lineList = false);
     void setStateDepthTestAlways();
     void setStateDepthOnlyWrite();
-    void setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding = false);
+    void setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding = false,
+                              bool lineList = false);
     // Color-only replay against an existing depth attachment. Used by the
     // MotionVector pass: preserve GBuffer depth, write RG velocity only.
     void setStateColorLEQUAL(bool doubleSided, bool reverseWinding = false);

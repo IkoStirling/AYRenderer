@@ -369,6 +369,11 @@ struct PassExecContext {
     // ignore the persistent texture whenever this pointer/latch is absent.
     const MotionVectorPass* motionVectorPass = nullptr;
 
+    // Per-dispatch Scene View presentation. This must never be implemented
+    // through BGFX_DEBUG_WIREFRAME because that flag affects every view,
+    // including the editor UI.
+    bool wireframe = false;
+
 };
 
 } // namespace ayt::render::detail

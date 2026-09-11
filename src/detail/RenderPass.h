@@ -7,6 +7,7 @@
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
+#include "detail/WireframeGeometry.h"
 
 #include <cstdint>
 #include <array>
@@ -47,6 +48,25 @@ inline DrawIndexRange resolveDrawIndexRange(const DrawItem& item,
     const uint32_t remaining = mesh.indexCount - item.firstIndex;
     return {item.firstIndex,
             item.indexCount < remaining ? item.indexCount : remaining};
+}
+
+inline bool bindDrawIndexBuffer(BGFXAdapter& adapter, const GpuMesh& mesh,
+                                const DrawIndexRange& range,
+                                bool wireframe) noexcept
+{
+    if (wireframe && BGFXAdapter::isValid(mesh.wireframeIndexBuffer)) {
+        const WireframeIndexRange wireRange = resolveWireframeIndexRange(
+            range.firstIndex, range.indexCount, mesh.wireframeIndexCount);
+        if (wireRange.valid) {
+            adapter.setIndexBuffer(mesh.wireframeIndexBuffer,
+                                   wireRange.firstIndex,
+                                   wireRange.indexCount);
+            return true;
+        }
+    }
+    adapter.setIndexBuffer(mesh.indexBuffer, range.firstIndex,
+                           range.indexCount);
+    return false;
 }
 
 // U1.5 — shared per-material uniform-upload helpers. ForwardOpaquePass

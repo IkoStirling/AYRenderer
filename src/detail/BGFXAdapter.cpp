@@ -845,13 +845,15 @@ void BGFXAdapter::setStateOpaque()
                  | kCullBackFaces);
 }
 
-void BGFXAdapter::setStateAlphaBlend()
+void BGFXAdapter::setStateAlphaBlend(bool lineList)
 {
-    bgfx::setState(BGFX_STATE_WRITE_RGB
-                 | BGFX_STATE_WRITE_A
-                 | BGFX_STATE_BLEND_ALPHA
-                 | BGFX_STATE_DEPTH_TEST_LESS
-                 | kCullBackFaces);
+    uint64_t state = BGFX_STATE_WRITE_RGB
+                   | BGFX_STATE_WRITE_A
+                   | BGFX_STATE_BLEND_ALPHA
+                   | BGFX_STATE_DEPTH_TEST_LESS
+                   | kCullBackFaces;
+    if (lineList) state |= BGFX_STATE_PT_LINES;
+    bgfx::setState(state);
 }
 
 void BGFXAdapter::setStateDepthTestAlways()
@@ -869,7 +871,8 @@ void BGFXAdapter::setStateDepthOnlyWrite()
                  | BGFX_STATE_DEPTH_TEST_LESS);
 }
 
-void BGFXAdapter::setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding)
+void BGFXAdapter::setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding,
+                                       bool lineList)
 {
     // §P3 M11 (2026-08-24) — same bits as the inline LEQUAL block
     // GBufferPass used to assemble. Coincident-overlay tie-breaking
@@ -883,6 +886,7 @@ void BGFXAdapter::setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding)
     if (!doubleSided) {
         state |= reverseWinding ? kCullFrontFaces : kCullBackFaces;
     }
+    if (lineList) state |= BGFX_STATE_PT_LINES;
     bgfx::setState(state);
 }
 

@@ -470,6 +470,7 @@ struct Renderer::Impl {
     // scalar view; the public byte setter keeps the host surface lightweight.
     bool                           gbufferDebugEnabled  = false;
     uint8_t                        gbufferDebugChannel  = 0;
+    bool                           wireframeEnabled = false;
 
     // EditorOverlay orientation widget. Stored on Impl so pipeline rebuilds
     // preserve the host's toggle even though the pass object is recreated.
@@ -1649,6 +1650,7 @@ void Renderer::render(const RenderScene& scene)
         detail::sanitizeBloomSoftKnee(_impl->postProcessBloomSoftKnee),
         ssaoPassPtr,
         motionVectorPassPtr,
+        _impl->wireframeEnabled,
     };
 
     static uint32_t s_compositeLog = 0;
@@ -2985,12 +2987,12 @@ bool Renderer::isDebugOverlaySuppressed() const noexcept
 
 void Renderer::setWireframeEnabled(bool enabled)
 {
-    if (_impl) _impl->debugOverlay.setWireframeEnabled(enabled);
+    if (_impl) _impl->wireframeEnabled = enabled;
 }
 
 bool Renderer::isWireframeEnabled() const noexcept
 {
-    return _impl && _impl->debugOverlay.isWireframeEnabled();
+    return _impl && _impl->wireframeEnabled;
 }
 
 void Renderer::resetDebugOverlayStats()
