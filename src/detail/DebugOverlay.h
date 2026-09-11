@@ -20,6 +20,9 @@ public:
     void setSuppressed(bool suppressed);
     bool isSuppressed() const noexcept { return _suppressed; }
 
+    void setWireframeEnabled(bool enabled);
+    bool isWireframeEnabled() const noexcept { return _wireframeEnabled; }
+
     void onBeginFrame();
     void onEndFrame(uint32_t drawCalls, uint32_t sceneItems,
                     const std::vector<RenderPassFrameStats>& passStats,
@@ -37,6 +40,7 @@ private:
 
     bool              _enabled     = false;
     bool              _suppressed  = false;
+    bool              _wireframeEnabled = false;
     RenderFrameStats  _stats{};
     std::chrono::steady_clock::time_point _frameStart{};
     std::chrono::steady_clock::time_point _lastFrameStart{};

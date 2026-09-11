@@ -450,6 +450,10 @@ public:
     bool isDebugOverlayEnabled() const noexcept;
     void setDebugOverlaySuppressed(bool suppressed);
     bool isDebugOverlaySuppressed() const noexcept;
+    // Editor presentation aid. bgfx applies this to submitted geometry while
+    // preserving the normal scene packet, materials and visibility filters.
+    void setWireframeEnabled(bool enabled);
+    bool isWireframeEnabled() const noexcept;
     void resetDebugOverlayStats();
     const RenderFrameStats& getFrameStats() const noexcept;
 

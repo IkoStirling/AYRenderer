@@ -2983,6 +2983,16 @@ bool Renderer::isDebugOverlaySuppressed() const noexcept
     return _impl && _impl->debugOverlay.isSuppressed();
 }
 
+void Renderer::setWireframeEnabled(bool enabled)
+{
+    if (_impl) _impl->debugOverlay.setWireframeEnabled(enabled);
+}
+
+bool Renderer::isWireframeEnabled() const noexcept
+{
+    return _impl && _impl->debugOverlay.isWireframeEnabled();
+}
+
 void Renderer::resetDebugOverlayStats()
 {
     if (_impl) {

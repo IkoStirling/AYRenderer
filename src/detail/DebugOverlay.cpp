@@ -13,7 +13,10 @@ namespace ayt::render::detail
 
 void DebugOverlay::applyDebugMode()
 {
-    bgfx::setDebug(_enabled ? BGFX_DEBUG_TEXT : BGFX_DEBUG_NONE);
+    uint32_t flags = BGFX_DEBUG_NONE;
+    if (_enabled) flags |= BGFX_DEBUG_TEXT;
+    if (_wireframeEnabled) flags |= BGFX_DEBUG_WIREFRAME;
+    bgfx::setDebug(flags);
 }
 
 void DebugOverlay::setEnabled(bool enabled)
@@ -28,6 +31,13 @@ void DebugOverlay::setEnabled(bool enabled)
 void DebugOverlay::setSuppressed(bool suppressed)
 {
     _suppressed = suppressed;
+}
+
+void DebugOverlay::setWireframeEnabled(bool enabled)
+{
+    if (_wireframeEnabled == enabled) return;
+    _wireframeEnabled = enabled;
+    applyDebugMode();
 }
 
 void DebugOverlay::onBeginFrame()
