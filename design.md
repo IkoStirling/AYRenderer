@@ -64,7 +64,7 @@
 > source. This reuses the existing compiler/material path; it is not a new pass
 > or shader file type. Sprites remain Linear by default.
 
-> **文档状态**：2026-08-30 已对齐当前代码；R0–R5 主管线已落地。
+> **文档状态**：2026-09-12 已对齐当前代码与可选高级效果执行策略；R0–R5 主管线已落地。
 > **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、MotionVector、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、TAA、FXAA、SMAA、ColorGrading、Present、UI 和 GBufferDebug 已接入 Pass 调度。PostProcess 产出 FrameGraph `FinalLdrColor`，TAA/FXAA/SMAA 与 ColorGrading 作为可选 LDR 节点提升 `PresentSource`，Present 保持唯一 backbuffer 边界；静态审核/修复已完成，等待真实 GPU capture 验收。
 > **活动执行计划**：[`docs/execution-plan.md`](execution-plan.md)（P0–P6 队列、§5 segfault 约束、§5.4 隔离实验、附录 B/C/D 索引）。本文件是目标架构，与代码不一致时以代码与 execution-plan 为准。
 > **关联文档**：[`docs/gbuffer-current.md`](docs/gbuffer-current.md)（当前 MRT/数据契约）、[`AYShader/design.md` §8.5](../AYShader/design.md)（opaque handle contract）、[`AYShader/README.md`](../AYShader/README.md)。
@@ -641,6 +641,82 @@ group/nested opacity、Additive/Multiply/Screen 隔离组、resize、动态 DPI�
 边缘作为错误参考。`RunLayerVisualRegressionMatrix.ps1` 默认串行运行 D3D12/Vulkan/OpenGL 并汇总
 失败，单后端脚本仍可用于 D3D11 或诊断。
 
+### 8.6 可选高级效果的配置与执行边界（2026-09-12）
+
+高级效果采用“统一配置入口、按数据依赖分组执行”的设计，不建立包含全部算法的单一
+`AdvancedEffectPass`。配置层可以向 Editor 和游戏暴露同一组开关与参数，但配置分组不等于 GPU Pass：
+具体执行单元由输入资源、执行时序、分辨率、历史状态和中间结果决定。候选效果本身由
+[`AYRendering-Architecture-Roadmap.md` §8.1](../../AYDocs/AYRendering-Architecture-Roadmap.md)
+维护，本节只规定 AYRenderer 的工程边界。
+
+建议的配置分组为 `ColorStylization`、`Outline` 与 `TemporalFeedback`。该形态是未来 API 方向，
+不要求直接扩展 `FrameContext` POD；结合既有 MSVC stale object/ABI 事故，新增参数优先保存在
+Renderer-owned sidecar 或对应 Pass 对象中，经清洗后逐帧上传。
+
+#### 合并与拆分规则
+
+- 输入颜色、输出格式、分辨率和执行位置相同，且不拥有历史/中间资源的逐像素颜色运算可以融合。
+  色板量化、黑白/双色映射、posterize、简单 dithering、scanline、grain 与轻量色差属于候选
+  `StylizedColor` 组。融合后固定内部处理顺序，避免设置顺序隐式改变画面。
+- 读取 GBuffer Depth/Normal/Material 数据的轮廓与蓝图效果独立成 `StylizedOutline` 组；隐藏线若需要
+  额外几何或深度层，不能伪装成普通颜色滤镜。边缘 mask 的生成与最终 composite 可以是同一
+  C++ Pass 所有的多个 GPU stage。
+- 使用持久 history、Motion Vector 或多帧 ring 的冻结、残影、时间回声、Datamosh 与 slit-scan
+  独立成 `TemporalFeedback` 组。它们的失效、resize、camera cut 和 scene/pipeline switch 规则
+  不得泄漏到无历史颜色效果。
+- Kuwahara、水彩扩散、大半径卷积和其它需要多轮邻域采样或降采样链的算法保持独立能力；一个
+  C++ Pass 可以拥有多个 stage，不能为了表面上的“单 Pass”强行压成一次 draw。
+- Bayer、Blue Noise 与 Spatiotemporal Blue Noise 归入共享 `NoiseSequenceProvider` 能力，而不是
+  固定画面 Pass。SSAO、随机透明、dithering 和 temporal hold 可以消费同一确定性 seed/frame
+  序列。TAA 继续使用低差异投影 jitter；是否改变其 Halton 序列必须单独验证，不能由风格化
+  dithering 设置间接改变。
+
+建议的逻辑顺序为：
+
+```text
+PostProcess(FinalLdr) -> TAA/FXAA/SMAA
+    -> optional Outline composite -> ColorGrading
+    -> optional StylizedColor -> optional TemporalFeedback
+    -> Present -> Editor/UI
+```
+
+Outline 的 edge mask 可以读取更早产生的 GBuffer，但最终在 AA 前还是 AA 后 composite 由视觉原型
+验证决定；选择框、Gizmo、方向轴和 Editor/UI 始终位于高级效果之后，不进入游戏画面 history。
+TemporalFeedback 只在最终合成时选择/重投影 current 与 history，绝不能通过跳过 simulation、场景
+提交、renderer frame advancement 或 backend present 来制造“掉帧”效果。
+
+#### 开关、Shader variant 与零开销旁路
+
+关闭行为分为三层，必须优先使用最外层裁剪：
+
+1. **FrameGraph gate**：某一效果组全部关闭时，不声明逻辑输出、不申请 transient RT、不添加 live
+   节点，`PresentSource` 直接沿用上一生产者；禁止用 identity blit 表示关闭。
+2. **Pass gate**：已挂载但 disabled 的 Pass 由 `RenderPipeline::executeAll()` 跳过，不进入
+   `execute()`，不产生 draw、dispatch 或 GPU state mutation。
+3. **Shader gate**：只有同组内仍有其它操作开启时，才允许使用 uniform strength/flag 跳过轻量
+   算法。需要额外 sampler、history、GBuffer 或显著控制流的差异使用少量结构性 variant；不为每个布尔
+   组合生成 `2^N` 个排列。
+
+默认从未启用的高级效果不得编译 shader、创建 history/LUT/noise 私有资源或占用 RenderTargetPool
+lease。某效果开启过再关闭时，Pass 可以缓存 immutable shader/LUT 以降低二次开启卡顿；history
+纹理必须标无效，是否立即释放由显存预算策略决定，但关闭期间 GPU frame cost 仍为零。首次开启
+可能触发 shader 编译和目标创建；产品若要求无卡顿切换，应在 loading 阶段预热指定 variant，而不是
+让所有可选效果随 Renderer 初始化无条件编译。
+
+在 RGBA8 下，一次最小全屏 source read + target write 的理论流量约为 1080p 每帧 16.6 MB、4K
+每帧 66.4 MB；60 FPS 时分别约 1 GB/s 与 4 GB/s，尚未包含多 tap、缓存失效和 HDR 格式。因此
+同位置的轻量颜色运算应尽量融合，跨资源/跨时序效果则以正确生命周期优先，不能只为减少 draw
+数量破坏契约。
+
+#### 验收不变量
+
+- 全部高级效果关闭时，FrameGraph live set、GPU submit 数与 presentation 字节结果保持基线一致。
+- 单组关闭不保留孤立输出或无消费者历史依赖；节点失败时不提升 `PresentSource`。
+- 时间类效果使用可重复 seed，并在 resize、camera cut、scene/pipeline switch、backend reset 与
+  disabled-to-enabled 时明确初始化 history，不读取旧尺寸或旧场景内容。
+- 高级效果默认不影响 Editor/UI；需要影响 UI 的产品特效必须另设显式合成策略。
+- 性能验收同时记录 GPU 时间、全屏读写次数、瞬态/持久显存和首次启用耗时，不能只比较 draw count。
+
 ---
 
 ## 9. AYRenderer 主类
@@ -955,6 +1031,15 @@ include/AYRenderer/
 ---
 
 ## 16. 变更记录
+
+### 2026-09-12 — 可选高级效果执行策略
+
+- 统一 Editor/游戏配置入口，但按颜色、GBuffer 轮廓、时间历史和多阶段邻域处理的数据依赖拆分执行；
+  不采用包含全部算法的 mega-pass。
+- 明确 FrameGraph gate → Pass gate → Shader gate 的三级旁路；全部效果关闭时不新增 RT、GPU submit
+  或 identity blit，首次资源创建保持 lazy，并允许产品 loading 阶段有选择地预热。
+- Blue/Spatiotemporal Blue Noise 定位为共享采样能力，TAA Halton 投影 jitter 不随风格化设置隐式改变；
+  时间反馈不得通过跳过引擎帧更新实现，Editor/UI 保持在高级效果之后。
 
 ### 2026-09-01 — FXAA Quality 修复
 
