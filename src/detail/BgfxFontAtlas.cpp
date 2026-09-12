@@ -2,11 +2,16 @@
 
 #include "detail/BGFXAdapter.h"
 
+#include "AYFont/SystemFontDiscovery.h"
+#include "AYUI/UnicodeText.h"
+
 #include <AYCore/CoreUtility.h>
 
 #include <bgfx/bgfx.h>
 
 #include <cstdio>
+#include <cwctype>
+#include <filesystem>
 
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -23,16 +28,19 @@ constexpr uint16_t kInvalidIdx = UINT16_MAX;
 
 bool fileExists(const wchar_t* path)
 {
-#if defined(_WIN32)
     if (path == nullptr || path[0] == L'\0') {
         return false;
     }
-    const DWORD attr = GetFileAttributesW(path);
-    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
-#else
-    AYUNREFERENCED_PARAM(path);
-    return false;
-#endif
+    std::error_code ec;
+    return std::filesystem::is_regular_file(std::filesystem::path(path), ec);
+}
+
+std::wstring normalizedFamily(std::wstring value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t ch) {
+        return static_cast<wchar_t>(std::towlower(ch));
+    });
+    return value;
 }
 
 uint32_t nextTextCodePoint(const std::wstring& text, size_t& index)
@@ -94,6 +102,22 @@ bool BgfxFontAtlas::initialize(BGFXAdapter& adapter)
     }
 
     if (!registered) {
+        static const wchar_t* kPortableDefaults[] = {
+            L"Noto Sans CJK SC", L"Noto Sans", L"DejaVu Sans",
+            L"Liberation Sans", L"Arial"
+        };
+        for (const wchar_t* family : kPortableDefaults) {
+            if (const ayt::font::SystemFontFace* face =
+                    ayt::font::matchSystemFont(family, 400, false)) {
+                if (tryRegisterFont(14, face->path.c_str())) {
+                    registered = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!registered) {
         std::fprintf(stderr, "[BgfxFontAtlas] no UI font registered\n");
         return false;
     }
@@ -130,7 +154,26 @@ bool BgfxFontAtlas::initialize(BGFXAdapter& adapter)
         if (fileExists(entry.bold)) faces.bold = entry.bold;
         if (fileExists(entry.italic)) faces.italic = entry.italic;
         if (fileExists(entry.boldItalic)) faces.boldItalic = entry.boldItalic;
-        _familyFaces[entry.family] = std::move(faces);
+        _familyFaces[normalizedFamily(entry.family)] = std::move(faces);
+    }
+
+    // Fill the same family table from platform font discovery. This is the
+    // primary path on Linux/macOS and also exposes installed Windows fonts
+    // beyond the small compatibility list above.
+    for (const ayt::font::SystemFontFace& entry : ayt::font::discoverSystemFonts()) {
+        FamilyFaces& faces = _familyFaces[normalizedFamily(entry.family)];
+        if (entry.italic) {
+            if (entry.weight >= 600) {
+                if (faces.boldItalic.empty()) faces.boldItalic = entry.path;
+            } else if (faces.italic.empty()) {
+                faces.italic = entry.path;
+            }
+        } else if (entry.weight >= 600) {
+            if (faces.bold.empty()) faces.bold = entry.path;
+        } else if (faces.regular.empty()
+                   || std::abs(entry.weight - 400) < 100) {
+            faces.regular = entry.path;
+        }
     }
 
     if (ensureGpuAtlas(acquireFont(14)) == kInvalidIdx) {
@@ -160,6 +203,7 @@ void BgfxFontAtlas::shutdown(BGFXAdapter& adapter)
     _fontsBySize.clear();
     _familyFaces.clear();
     _fontsByFaceRequest.clear();
+    _fallbackFontsBySize.clear();
     _adapter    = nullptr;
 }
 
@@ -241,14 +285,14 @@ ayt::font::IFont* BgfxFontAtlas::acquireFont(const wchar_t* familyName,
     std::wstring family = familyName != nullptr ? familyName : L"";
     if (family.empty() && !bold && !italic) return acquireFont(pixelSize);
     if (family.empty()) {
-        if (_familyFaces.find(L"Microsoft YaHei UI") != _familyFaces.end()) {
+        if (_familyFaces.find(normalizedFamily(L"Microsoft YaHei UI")) != _familyFaces.end()) {
             family = L"Microsoft YaHei UI";
         } else {
             return acquireFont(pixelSize);
         }
     }
 
-    const auto facesIt = _familyFaces.find(family);
+    const auto facesIt = _familyFaces.find(normalizedFamily(family));
     if (facesIt == _familyFaces.end()) return acquireFont(pixelSize);
     const FamilyFaces& faces = facesIt->second;
     const std::wstring* path = &faces.regular;
@@ -257,8 +301,9 @@ ayt::font::IFont* BgfxFontAtlas::acquireFont(const wchar_t* familyName,
     else if (italic && !faces.italic.empty()) path = &faces.italic;
     if (path->empty()) path = &faces.regular;
 
-    const std::wstring requestKey = family + L"|" + std::to_wstring(pixelSize)
-        + L"|" + std::to_wstring(bold ? 700 : 400)
+    const int requestedWeight = std::clamp(fontWeight, 100, 900);
+    const std::wstring requestKey = normalizedFamily(family) + L"|" + std::to_wstring(pixelSize)
+        + L"|" + std::to_wstring(requestedWeight)
         + L"|" + std::to_wstring(italic ? 1 : 0);
     const auto existing = _fontsByFaceRequest.find(requestKey);
     if (existing != _fontsByFaceRequest.end()) {
@@ -268,10 +313,10 @@ ayt::font::IFont* BgfxFontAtlas::acquireFont(const wchar_t* familyName,
     wchar_t name[128] = {};
 #if defined(_WIN32)
     swprintf_s(name, L"UI_%ls_%d_%d_%d", family.c_str(), pixelSize,
-               bold ? 700 : 400, italic ? 1 : 0);
+               requestedWeight, italic ? 1 : 0);
 #else
     swprintf(name, sizeof(name) / sizeof(name[0]), L"UI_%ls_%d_%d_%d",
-             family.c_str(), pixelSize, bold ? 700 : 400, italic ? 1 : 0);
+             family.c_str(), pixelSize, requestedWeight, italic ? 1 : 0);
 #endif
     const ayt::font::FontHandle handle =
         _fontManager->registerFont(name, path->c_str(), pixelSize);
@@ -279,6 +324,12 @@ ayt::font::IFont* BgfxFontAtlas::acquireFont(const wchar_t* familyName,
         return acquireFont(pixelSize);
     }
     _fontManager->preloadFont(handle);
+    if (ayt::font::IFont* loaded = _fontManager->getFont(handle);
+        loaded != nullptr && loaded->hasVariationAxes()) {
+        // CSS weight maps directly to the standard OpenType wght axis.
+        // Fonts without that axis simply keep their default instance.
+        (void)loaded->setVariationAxis(L"wght", static_cast<float>(requestedWeight));
+    }
     _fontsByFaceRequest[requestKey] = handle;
     return _fontManager->getFont(handle);
 }
@@ -340,6 +391,140 @@ std::vector<ayt::font::ShapedGlyph> BgfxFontAtlas::shapeText(
     options.direction = direction;
     options.language = language;
     return shaper->shapeWithOptions(text.c_str(), static_cast<int>(text.size()), options);
+}
+
+void BgfxFontAtlas::ensureFallbackFonts(int pixelSize, ayt::font::IFont* primary)
+{
+    if (_fontManager == nullptr || primary == nullptr
+        || _fallbackFontsBySize.find(pixelSize) != _fallbackFontsBySize.end()) return;
+
+    std::vector<const ayt::font::SystemFontFace*> candidates;
+    for (const auto& face : ayt::font::discoverSystemFonts()) {
+        // One upright regular/variable face per family is enough for glyph
+        // coverage. The requested style remains on the primary face.
+        if (!face.italic && face.weight >= 300 && face.weight <= 500) {
+            candidates.push_back(&face);
+        }
+    }
+    auto priority = [](const ayt::font::SystemFontFace* face) {
+        const std::wstring name = normalizedFamily(face->family);
+        if (face->color || name.find(L"emoji") != std::wstring::npos) return 0;
+        if (name.find(L"symbol") != std::wstring::npos) return 1;
+        if (name.find(L"cjk") != std::wstring::npos
+            || name.find(L"yahei") != std::wstring::npos
+            || name.find(L"simsun") != std::wstring::npos) return 2;
+        if (name.find(L"noto sans") != std::wstring::npos) return 3;
+        return 4;
+    };
+    std::stable_sort(candidates.begin(), candidates.end(), [&](const auto* a, const auto* b) {
+        return priority(a) < priority(b);
+    });
+
+    std::vector<ayt::font::FontHandle> handles;
+    std::unordered_set<std::wstring> families;
+    for (const auto* face : candidates) {
+        if (handles.size() >= 32u) break;
+        const std::wstring familyKey = normalizedFamily(face->family);
+        if (!families.insert(familyKey).second) continue;
+        const std::wstring key = L"fallback|" + familyKey + L"|" + std::to_wstring(pixelSize);
+        ayt::font::FontHandle handle;
+        const auto existing = _fontsByFaceRequest.find(key);
+        if (existing != _fontsByFaceRequest.end()) {
+            handle = existing->second;
+        } else {
+            const std::wstring name = L"UI_Fallback_" + std::to_wstring(pixelSize)
+                + L"_" + std::to_wstring(handles.size());
+            handle = _fontManager->registerFont(name.c_str(), face->path.c_str(), pixelSize);
+            if (handle.isValid()) _fontsByFaceRequest[key] = handle;
+        }
+        if (handle.isValid() && handle != primary->getHandle()) handles.push_back(handle);
+    }
+    _fallbackFontsBySize[pixelSize] = handles;
+    _fontManager->setFallbackChain(primary->getHandle(), handles);
+}
+
+std::vector<BgfxFontAtlas::ShapedFontRun> BgfxFontAtlas::shapeTextWithFallback(
+    ayt::font::IFont* primary, int pixelSize, const std::wstring& text,
+    ayt::font::ShapingDirection direction, const char* language)
+{
+    std::vector<ShapedFontRun> result;
+    if (primary == nullptr || text.empty() || _fontManager == nullptr) return result;
+    ensureFallbackFonts(pixelSize, primary);
+    const auto analysis = ayt::ui::analyzeUnicodeText(text, ayt::ui::TextDirection::Auto);
+    for (const auto& cluster : analysis.clusters) {
+        ayt::font::IFont* selected = primary;
+        std::vector<ayt::font::IFont*> candidates{primary};
+        const auto fallbackIt = _fallbackFontsBySize.find(pixelSize);
+        if (fallbackIt != _fallbackFontsBySize.end()) {
+            for (const auto handle : fallbackIt->second) {
+                if (ayt::font::IFont* candidate = _fontManager->getFont(handle)) {
+                    candidates.push_back(candidate);
+                }
+            }
+        }
+        auto covers = [&](ayt::font::IFont* candidate) {
+            bool coversCluster = true;
+            bool sawRequiredCodePoint = false;
+            size_t cpIndex = cluster.textStart;
+            while (cpIndex < cluster.textStart + cluster.textLength) {
+                const uint32_t cp = nextTextCodePoint(text, cpIndex);
+                // Joiners and variation selectors are shaping controls and
+                // legitimately have no cmap glyph of their own.
+                if (cp == 0x200Du || (cp >= 0xFE00u && cp <= 0xFE0Fu)
+                    || (cp >= 0xE0100u && cp <= 0xE01EFu)) continue;
+                sawRequiredCodePoint = true;
+                if (!candidate->hasGlyph(cp)) { coversCluster = false; break; }
+            }
+            return coversCluster && sawRequiredCodePoint;
+        };
+        bool foundCoveringFace = false;
+        for (ayt::font::IFont* candidate : candidates) {
+            if (!covers(candidate)) continue;
+            selected = candidate;
+            foundCoveringFace = true;
+            break;
+        }
+        // Uncommon scripts should not depend on falling inside a fixed
+        // startup shortlist. Resolve the first matching installed family on
+        // demand, then cache its handle in this size's fallback set.
+        if (!foundCoveringFace) {
+            for (const auto& face : ayt::font::discoverSystemFonts()) {
+                if (face.italic || face.weight < 300 || face.weight > 500) continue;
+                ayt::font::IFont* candidate = acquireFont(
+                    face.family.c_str(), pixelSize, 400, false);
+                if (candidate == nullptr || !covers(candidate)) continue;
+                selected = candidate;
+                foundCoveringFace = true;
+                auto& handles = _fallbackFontsBySize[pixelSize];
+                if (std::find(handles.begin(), handles.end(), candidate->getHandle()) == handles.end()) {
+                    handles.push_back(candidate->getHandle());
+                    _fontManager->setFallbackChain(primary->getHandle(), handles);
+                }
+                break;
+            }
+        }
+        if (selected == nullptr) selected = primary;
+        if (!result.empty() && result.back().font == selected
+            && result.back().sourceStart + result.back().sourceLength == cluster.textStart) {
+            result.back().sourceLength += cluster.textLength;
+        } else {
+            result.push_back({selected, cluster.textStart, cluster.textLength, {}});
+        }
+    }
+    for (ShapedFontRun& run : result) {
+        const std::wstring span = text.substr(run.sourceStart, run.sourceLength);
+        run.glyphs = shapeText(run.font, span, direction, language);
+        for (auto& glyph : run.glyphs) glyph.charIndex += static_cast<uint32_t>(run.sourceStart);
+    }
+    result.erase(std::remove_if(result.begin(), result.end(), [](const ShapedFontRun& run) {
+        return run.glyphs.empty();
+    }), result.end());
+    if (direction == ayt::font::ShapingDirection::RightToLeft
+        || (direction == ayt::font::ShapingDirection::Auto
+            && analysis.baseRightToLeft)) {
+        std::reverse(result.begin(), result.end());
+    }
+    return result;
 }
 
 void BgfxFontAtlas::prepareShapedGlyphs(ayt::font::IFont* font, int pixelSize,
@@ -425,8 +610,8 @@ void BgfxFontAtlas::syncAtlasToGpu(ayt::font::IFont* font)
     FontGpuAtlas& atlas = _gpuAtlases[font->getHandle().id];
     if (!atlas.dirty) return;
 
-    const uint8_t* gray = static_cast<const uint8_t*>(font->getAtlasTexture());
-    if (gray == nullptr) {
+    const uint8_t* pixels = static_cast<const uint8_t*>(font->getAtlasTexture());
+    if (pixels == nullptr) {
         return;
     }
 
@@ -435,13 +620,17 @@ void BgfxFontAtlas::syncAtlasToGpu(ayt::font::IFont* font)
         atlas.bgraScratch.resize(pixelCount * 4u);
     }
 
-    for (size_t i = 0; i < pixelCount; ++i) {
-        const uint8_t alpha   = gray[i];
-        const size_t  dst     = i * 4u;
-        atlas.bgraScratch[dst + 0] = 255;
-        atlas.bgraScratch[dst + 1] = 255;
-        atlas.bgraScratch[dst + 2] = 255;
-        atlas.bgraScratch[dst + 3] = alpha;
+    if (font->getAtlasBytesPerPixel() == 4) {
+        std::copy(pixels, pixels + pixelCount * 4u, atlas.bgraScratch.begin());
+    } else {
+        for (size_t i = 0; i < pixelCount; ++i) {
+            const uint8_t alpha = pixels[i];
+            const size_t dst = i * 4u;
+            atlas.bgraScratch[dst + 0] = 255;
+            atlas.bgraScratch[dst + 1] = 255;
+            atlas.bgraScratch[dst + 2] = 255;
+            atlas.bgraScratch[dst + 3] = alpha;
+        }
     }
 
     const bgfx::Memory* mem =

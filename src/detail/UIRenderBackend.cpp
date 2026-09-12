@@ -3552,8 +3552,12 @@ ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(
     // Glyph advances (px). Shaped path = HB 26.6 fixed-point; fallback =
     // per-codepoint advance (same default advance the draw path uses).
     const char* language = style.language.empty() ? nullptr : style.language.c_str();
-    const std::vector<ayt::font::ShapedGlyph> shaped = atlas->shapeText(
-        font, text, toFontDirection(style.direction), language);
+    const auto shapedRuns = atlas->shapeTextWithFallback(
+        font, rasterSize, text, toFontDirection(style.direction), language);
+    std::vector<ayt::font::ShapedGlyph> shaped;
+    for (const auto& run : shapedRuns) {
+        shaped.insert(shaped.end(), run.glyphs.begin(), run.glyphs.end());
+    }
     std::vector<float> advances;
     std::vector<bool>  isSpace;
     if (!shaped.empty()) {
@@ -3667,8 +3671,12 @@ ayt::ui::IRenderBackend::ShapedText UIRenderBackend::shapeText(
     }
 
     const char* language = style.language.empty() ? nullptr : style.language.c_str();
-    const std::vector<ayt::font::ShapedGlyph> shaped = atlas->shapeText(
-        font, text, toFontDirection(style.direction), language);
+    const auto shapedRuns = atlas->shapeTextWithFallback(
+        font, rasterSize, text, toFontDirection(style.direction), language);
+    std::vector<ayt::font::ShapedGlyph> shaped;
+    for (const auto& run : shapedRuns) {
+        shaped.insert(shaped.end(), run.glyphs.begin(), run.glyphs.end());
+    }
     if (shaped.empty()) {
         return ayt::ui::IRenderBackend::shapeText(text, fontSize, style);
     }
@@ -3796,18 +3804,22 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     }
 
     const char* language = style.language.empty() ? nullptr : style.language.c_str();
-    std::vector<ayt::font::ShapedGlyph> shaped = _fontAtlas->shapeText(
-        font, text, toFontDirection(style.direction), language);
-    const bool useShaped = !shaped.empty();
+    const auto shapedFontRuns = _fontAtlas->shapeTextWithFallback(
+        font, rasterSize, text, toFontDirection(style.direction), language);
+    std::vector<ayt::font::ShapedGlyph> shaped;
+    for (const auto& run : shapedFontRuns) {
+        shaped.insert(shaped.end(), run.glyphs.begin(), run.glyphs.end());
+    }
+    const bool useShaped = !shapedFontRuns.empty();
     if (useShaped) {
-        _fontAtlas->prepareShapedGlyphs(font, rasterSize, shaped);
+        for (const auto& run : shapedFontRuns) {
+            _fontAtlas->prepareShapedGlyphs(run.font, rasterSize, run.glyphs);
+            syncTextAtlasIfNeeded(run.font);
+        }
     } else {
         _fontAtlas->prepareGlyphs(font, rasterSize, text);
+        syncTextAtlasIfNeeded(font);
     }
-
-    syncTextAtlasIfNeeded(font);
-
-    const uint16_t atlasIdx = _fontAtlas->atlasTextureIdx(font);
 
     const ayt::font::FontMetrics& metrics = font->getMetrics();
     const float boundsW = bounds.maxX - bounds.minX;
@@ -3818,6 +3830,7 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     // positions can never diverge.
     struct GlyphRun {
         ayt::font::GlyphInfo* glyph;
+        uint16_t atlasIdx;
         float xOff;
         float yOff;
         float xAdv;
@@ -3827,16 +3840,19 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
     std::vector<GlyphRun> runs;
     if (useShaped) {
         runs.reserve(shaped.size());
-        for (size_t index = 0; index < shaped.size(); ++index) {
-            const ayt::font::ShapedGlyph& sg = shaped[index];
-            const size_t ci = std::min<size_t>(sg.charIndex, text.size() - 1);
-            runs.push_back({font->getGlyphByIndex(sg.glyphIndex),
-                            static_cast<float>(sg.xOffset) / (64.0f * scale),
-                            static_cast<float>(sg.yOffset) / (64.0f * scale),
-                            static_cast<float>(sg.xAdvance) / (64.0f * scale),
-                            text[ci] == L' ' || text[ci] == L'\t',
-                            index + 1u == shaped.size()
-                                || shaped[index + 1u].charIndex != sg.charIndex});
+        for (const auto& fontRun : shapedFontRuns) {
+            const uint16_t runAtlas = _fontAtlas->atlasTextureIdx(fontRun.font);
+            for (size_t index = 0; index < fontRun.glyphs.size(); ++index) {
+                const ayt::font::ShapedGlyph& sg = fontRun.glyphs[index];
+                const size_t ci = std::min<size_t>(sg.charIndex, text.size() - 1);
+                runs.push_back({fontRun.font->getGlyphByIndex(sg.glyphIndex), runAtlas,
+                                static_cast<float>(sg.xOffset) / (64.0f * scale),
+                                static_cast<float>(sg.yOffset) / (64.0f * scale),
+                                static_cast<float>(sg.xAdvance) / (64.0f * scale),
+                                text[ci] == L' ' || text[ci] == L'\t',
+                                index + 1u == fontRun.glyphs.size()
+                                    || fontRun.glyphs[index + 1u].charIndex != sg.charIndex});
+            }
         }
     } else {
         const auto analysis = ayt::ui::analyzeUnicodeText(text, style.direction);
@@ -3846,7 +3862,7 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
             const size_t end = cluster.textStart + cluster.textLength;
             while (index < end) {
                 ayt::font::GlyphInfo* glyph = font->getGlyph(nextTextCodePoint(text, index));
-                runs.push_back({glyph, 0.0f, 0.0f,
+                runs.push_back({glyph, _fontAtlas->atlasTextureIdx(font), 0.0f, 0.0f,
                                 (glyph != nullptr)
                                     ? static_cast<float>(glyph->metrics.advance) / scale
                                     : (metrics.lineHeight / scale) * 0.25f,
@@ -4000,7 +4016,7 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         // P0 unified batch: one UiItem per glyph quad; all glyphs of a
         // drawText call share (atlas, state) so they form one flush run.
         UiItem item;
-        item.textureIdx = atlasIdx;
+        item.textureIdx = g.atlasIdx;
         item.state = blendStateBits(frame.currentBlend);  // P1
         item.minX = glyphBounds.minX;
         item.minY = glyphBounds.minY;
@@ -4031,7 +4047,18 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
             const float penY = baselineY + pass.dy;
             for (int gi = line.begin; gi < line.end; ++gi) {
                 const GlyphRun& g = runs[static_cast<size_t>(gi)];
-                emitGlyph(g, penX, penY, abgr);
+                const bool fillPass = &pass == &passes.back();
+                if (g.glyph != nullptr && g.glyph->colorBitmap && !fillPass) {
+                    penX += g.xAdv + (g.clusterEnd ? ls : 0.0f);
+                    continue;
+                }
+                uint32_t glyphColor = abgr;
+                if (g.glyph != nullptr && g.glyph->colorBitmap
+                    && fillPass) {
+                    ayt::math::FVector4 intrinsic(1.0f, 1.0f, 1.0f, passColor.w);
+                    glyphColor = toAbgr(intrinsic);
+                }
+                emitGlyph(g, penX, penY, glyphColor);
                 penX += g.xAdv + (g.clusterEnd ? ls : 0.0f);
             }
         }

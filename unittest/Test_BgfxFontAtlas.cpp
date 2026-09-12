@@ -3,6 +3,7 @@
 #include "AYRenderer.h"
 #include "AYTest.h"
 #include "AYRenderer/UIRenderBackend.h"
+#include "AYFont/SystemFontDiscovery.h"
 
 #include <cstdio>
 
@@ -22,7 +23,7 @@ bool systemFontAvailable()
     const DWORD arial = GetFileAttributesW(L"C:\\Windows\\Fonts\\arial.ttf");
     return arial != INVALID_FILE_ATTRIBUTES && (arial & FILE_ATTRIBUTE_DIRECTORY) == 0;
 #else
-    return false;
+    return !ayt::font::discoverSystemFonts().empty();
 #endif
 }
 
@@ -120,6 +121,42 @@ TEST_CASE(ui_render_backend_shaped_cjk_draw)
     ui.endFrame();
     CHECK(ui.getDrawCallCount() > 0);
 
+    ui.shutdown();
+    renderer.shutdown();
+}
+
+TEST_CASE(ui_render_backend_mixed_script_fallback_keeps_source_clusters)
+{
+    if (!systemFontAvailable()) return;
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend = ayt::render::Backend::Noop;
+    desc.width = 800;
+    desc.height = 600;
+    CHECK(renderer.initialize(desc));
+    ayt::render::UIRenderBackend ui;
+    CHECK(ui.initialize(renderer));
+    ui.setFramebufferSize(800, 600);
+
+    ayt::ui::IRenderBackend::TextStyle style;
+    style.fontFamily = L"Arial"; // intentionally lacks CJK
+    style.language = "zh-CN";
+    const std::wstring mixed = L"AY \u4f60\u597d \U0001F600";
+    const auto shaped = ui.shapeText(mixed, 18, style);
+    size_t invalidClusterStarts = 0;
+    for (const auto& cluster : shaped.clusters) {
+        if (cluster.sourceStart < mixed.size()
+            && mixed[cluster.sourceStart] >= 0xDC00
+            && mixed[cluster.sourceStart] <= 0xDFFF) ++invalidClusterStarts;
+    }
+    CHECK(shaped.metrics.width > 1.0f);
+    CHECK(!shaped.clusters.empty());
+    CHECK(invalidClusterStarts == 0u);
+
+    ui.beginFrame();
+    ui.drawText(ayt::math::FRectangle(8, 8, 300, 48), mixed, 18, style);
+    ui.endFrame();
+    CHECK(ui.getDrawCallCount() > 0);
     ui.shutdown();
     renderer.shutdown();
 }

@@ -255,6 +255,9 @@ FrameGraph 保持允许临时超预算的 soft acquire；UI RenderTarget/Layer �
   FrameGraph 目标仍默认线性采样，pool key 保证两者不会误复用。
 - OpenGL/Vulkan 等 RenderTarget 读取通过 bgfx caps 的 `originBottomLeft` 决定 V 方向；point-sampled
   glyph quad 吸附物理像素网格，避免默认 framebuffer 与 FBO 对半像素边界选择不同 coverage。
+- Text shaping 以完整 grapheme 选择 primary/fallback face，罕见脚本按需发现并缓存系统字体；每个
+  shaped font run 使用自己的 atlas，但继续进入同一 UI item batch。FreeType BGRA color glyph 保留
+  固有颜色，普通 coverage glyph 仍由 TextStyle 着色。
 - Layer backing 的物理 min/max 分别按 DPI 向外对齐，保留与主 framebuffer 相同的像素中心；合成完整
   backing 后裁回 logical bounds，支持小数 origin/extent 而不产生一像素接缝。
 - Layer 内部按正确 coverage alpha 累积 straight-alpha 图元，最终以 premultiplied-over composite；

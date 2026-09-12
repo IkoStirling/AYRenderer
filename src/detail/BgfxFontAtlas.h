@@ -48,6 +48,20 @@ public:
         ayt::font::IFont* font, const std::wstring& text,
         ayt::font::ShapingDirection direction, const char* language = nullptr);
 
+    struct ShapedFontRun {
+        ayt::font::IFont* font = nullptr;
+        size_t sourceStart = 0;
+        size_t sourceLength = 0;
+        std::vector<ayt::font::ShapedGlyph> glyphs;
+    };
+
+    // Shapes contiguous grapheme ranges with the first registered face that
+    // covers the entire cluster. The source indices in each returned glyph
+    // are document-relative, not substring-relative.
+    std::vector<ShapedFontRun> shapeTextWithFallback(
+        ayt::font::IFont* primary, int pixelSize, const std::wstring& text,
+        ayt::font::ShapingDirection direction, const char* language = nullptr);
+
     // Rasterize shaped glyphs; marks atlas dirty when a new glyph index appears.
     void prepareShapedGlyphs(ayt::font::IFont* font, int pixelSize,
                              const std::vector<ayt::font::ShapedGlyph>& shaped);
@@ -66,6 +80,7 @@ private:
     bool              tryRegisterFont(int pixelSize, const wchar_t* path);
     ayt::font::IAYShaper* acquireShaper(ayt::font::IFont* font);
     uint16_t ensureGpuAtlas(ayt::font::IFont* font);
+    void ensureFallbackFonts(int pixelSize, ayt::font::IFont* primary);
 
     struct FamilyFaces {
         std::wstring regular;
@@ -89,6 +104,7 @@ private:
     std::unordered_map<std::wstring, ayt::font::FontHandle> _fontsByFaceRequest;
     std::unordered_map<int, std::unique_ptr<ayt::font::IAYShaper>> _shapersByFontId;
     std::unordered_map<int, FontGpuAtlas> _gpuAtlases;
+    std::unordered_map<int, std::vector<ayt::font::FontHandle>> _fallbackFontsBySize;
     BGFXAdapter*         _adapter         = nullptr;
 };
 

@@ -611,6 +611,12 @@ Color clear 的全量 view clear 与局部覆盖 clear 都先写入 `(rgb*alpha,
 Screen 保留各自 RGB 方程，但 alpha 独立使用 `ONE/INV_SRC_ALPHA` coverage source-over。直接使用 bgfx
 Multiply/Screen convenience state 会把 RGB factor 复用于 alpha，破坏不透明隔离层，属于错误实现。
 
+文字路径按 Unicode grapheme 做跨 face fallback；一个 cluster 不会被拆到多个字体。常用 emoji、symbol、
+CJK family 预热，其他系统字体按首次缺字按需注册并缓存。每个 shaped run 携带自己的 font/atlas key，
+测量、cluster source offset、换行和绘制共用同一序列；RTL 会同步反转 font-run 视觉顺序。普通 glyph
+以白色 coverage 写 BGRA8 atlas 并由顶点色着色，FreeType color bitmap 先从 premultiplied BGRA 转为
+straight alpha，再以白色顶点色提交，匹配 UI pass 的 straight-alpha source-over。
+
 AYUI 的 root Production Layer 是 opt-in。首次、无范围 dirty、resize/DPI/reset 帧完整绘制主树；
 显式 dirty rect 由 sidecar 保留最多 8 个独立 damage region 并逐区 replay；重叠/相邻区域合并，
 第 9 个区域退化为 union，累计面积达到 layer 的 70% 时 full repaint。Widget 的 Always/Auto policy
