@@ -617,6 +617,10 @@ CJK family 预热，其他系统字体按首次缺字按需注册并缓存。每
 以白色 coverage 写 BGRA8 atlas 并由顶点色着色，FreeType color bitmap 先从 premultiplied BGRA 转为
 straight alpha，再以白色顶点色提交，匹配 UI pass 的 straight-alpha source-over。
 
+当前字体渲染的产品目标与发布门禁以 Windows 为准。Linux/macOS 的系统字体枚举、fallback 字体集差异、
+彩色 Emoji/可变字体和真实后端组合验证进入最低优先队列；跨平台代码路径继续保持可构建、可扩展，
+但现阶段不承诺与 Windows 相同的实机覆盖，也不以补齐该矩阵阻塞 Windows 主线。
+
 AYUI 的 root Production Layer 是 opt-in。首次、无范围 dirty、resize/DPI/reset 帧完整绘制主树；
 显式 dirty rect 由 sidecar 保留最多 8 个独立 damage region 并逐区 replay；重叠/相邻区域合并，
 第 9 个区域退化为 union，累计面积达到 layer 的 70% 时 full repaint。Widget 的 Always/Auto policy
