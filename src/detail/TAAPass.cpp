@@ -262,18 +262,30 @@ bool TAAPass::prepareFrame(BGFXAdapter& adapter,
     constexpr float kStableProjectionThreshold = 1.0e-5f;
     constexpr float kStableRotationThreshold = 1.0e-5f;
     constexpr float kStableTranslationDistance = 1.0e-4f;
-    _backgroundHistoryValid = _hasPreviousCamera
+    const bool hadPreviousCamera = _hasPreviousCamera;
+    const bool cameraStable = hadPreviousCamera
         && maxAbsProjectionDelta(_previousBaseProjection, projection)
                <= kStableProjectionThreshold
         && maxAbsRotationDelta(_previousBaseView, view)
                <= kStableRotationThreshold
         && (cameraPosition - _previousCameraPosition).length()
                <= kStableTranslationDistance;
-    if (detectCameraCut(view, projection, cameraPosition)) {
+    const bool cameraCut = detectCameraCut(view, projection, cameraPosition);
+    _backgroundHistoryValid = cameraStable && !cameraCut;
+    if (cameraCut) {
         invalidateHistory();
     }
     _writeHistoryIndex = static_cast<uint8_t>(1u - _readHistoryIndex);
-    const TaaJitter jitter = taaHaltonJitter(_jitterSampleIndex);
+    // A moving camera currently has no background velocity (the GBuffer has
+    // no sky depth), so rejecting that history while retaining projection
+    // jitter exposes the Halton pattern directly. Render navigation and cut
+    // recovery unjittered; resume subpixel sampling only after a stable frame
+    // with valid history exists. Opaque geometry still uses MotionVector for
+    // temporal accumulation while the camera moves.
+    const bool useProjectionJitter = _historyValid && cameraStable;
+    const TaaJitter jitter = useProjectionJitter
+        ? taaHaltonJitter(_jitterSampleIndex)
+        : TaaJitter{};
     _currentJitter = jitter;
     _jitteredProjection = taaApplyProjectionJitter(
         projection, jitter, width, height);
@@ -384,7 +396,14 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
     _previousCameraPosition = _currentCameraPosition;
     _previousJitter = _currentJitter;
     _hasPreviousCamera = true;
-    _jitterSampleIndex = (_jitterSampleIndex + 1u) % kJitterSampleCount;
+    if (_currentJitter.x != 0.0f || _currentJitter.y != 0.0f) {
+        _jitterSampleIndex = (_jitterSampleIndex + 1u) % kJitterSampleCount;
+    } else {
+        // Navigation/cut frames do not consume the sequence. Restarting from
+        // a known low-discrepancy phase avoids a random-looking jump when the
+        // camera settles.
+        _jitterSampleIndex = 0u;
+    }
     _preparedThisFrame = false;
 
     if (!_firstDispatchLogged) {

@@ -144,15 +144,15 @@ TEST_CASE(motion_vector_shader_contract_covers_rigid_skin_cutout_and_sentinel)
     const std::string cutout =
         ayt::render::detail::motionVectorCutoutPhoskiaSourceForTests();
 
-    CHECK(opaque.find("uniformblock MotionBones") != std::string::npos);
-    CHECK(opaque.find("mat4 bones[128]") != std::string::npos);
-    CHECK(opaque.find("mat4 previousBones[128]") != std::string::npos);
+    CHECK(opaque.find("uniform mat4 bones[128]") != std::string::npos);
+    CHECK(opaque.find("uniform mat4 previousBones[128]")
+          != std::string::npos);
     CHECK(opaque.find("uniform mat4 previousWorld") != std::string::npos);
     CHECK(opaque.find("uniform mat4 previousViewProjection")
           != std::string::npos);
-    CHECK(opaque.find("skinningMatrix(boneId, boneWt, MotionBones.bones")
+    CHECK(opaque.find("skinningMatrix(boneId, boneWt, bones")
           != std::string::npos);
-    CHECK(opaque.find("MotionBones.previousBones")
+    CHECK(opaque.find("skinningMatrix(boneId, boneWt, previousBones")
           != std::string::npos);
     CHECK(opaque.find("let velocity = vec2(2.0, 2.0)")
           != std::string::npos);
@@ -161,7 +161,7 @@ TEST_CASE(motion_vector_shader_contract_covers_rigid_skin_cutout_and_sentinel)
     CHECK(cutout.find("texture2d opacityMap") != std::string::npos);
     CHECK(cutout.find("discard") != std::string::npos);
     CHECK(std::string(ayt::render::detail::kMotionVectorCacheKeyCStr)
-          == "motion_vector_phoskia_rg16f_rigid_skin_v2");
+          == "motion_vector_phoskia_rg16f_rigid_skin_v3");
 }
 
 TEST_CASE(motion_vector_noop_backend_returns_zero_and_lifecycle_is_idempotent)
@@ -218,8 +218,22 @@ TEST_CASE(motion_vector_phoskia_sources_compile_for_d3d11_and_d3d12)
                 std::cerr << "  " << error << '\n';
             }
         }
+        const auto hasBoneArray = [&program](const char* name) {
+            return std::any_of(
+                program.uniforms.begin(), program.uniforms.end(),
+                [name](const ayt::shader::BGFXUniform& uniform) {
+                    return uniform.name == name && uniform.type == "mat4"
+                        && uniform.count == 128u;
+                });
+        };
+        const bool boneBindings = hasBoneArray("bones")
+            && hasBoneArray("previousBones");
+        if (program.success && !boneBindings) {
+            std::cerr << "[MotionVectorPass test] " << label
+                      << " omitted current/previous bone array bindings\n";
+        }
         return program.success && !program.vsBin.empty()
-            && !program.fsBin.empty();
+            && !program.fsBin.empty() && boneBindings;
     };
     CHECK(compileSource(
         ayt::render::detail::motionVectorPhoskiaSourceForTests(), "opaque"));

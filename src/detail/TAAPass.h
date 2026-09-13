@@ -34,10 +34,10 @@ class TAAPass final : public RenderPass {
 public:
     static constexpr uint8_t kTaaViewId = 5;
     static constexpr uint32_t kJitterSampleCount = 8;
-    // A full half-pixel Halton radius was visibly restless in the editor at
-    // small viewport sizes. Keep most of the subpixel coverage while reducing
-    // the maximum displacement to roughly one third of a pixel.
-    static constexpr float kJitterSpread = 0.75f;
+    // Editor viewports are often substantially smaller than the host window.
+    // Keep the Halton footprint inside roughly one quarter pixel per axis;
+    // larger offsets were visible whenever history had to be rejected.
+    static constexpr float kJitterSpread = 0.50f;
     static constexpr float kStaticHistoryWeight = 0.92f;
     static constexpr float kMovingHistoryWeight = 0.65f;
     static constexpr float kNeighborhoodExpansion = 0.025f;

@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <cstring>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -27,11 +26,11 @@ namespace
 // interpolators for the current and previous clip positions; their names are
 // engine semantics here, not material color/tangent data.
 constexpr const char* kMotionVectorPhoskiaSource = R"(
-uniformblock MotionBones {
-    mat4 bones[128]
-    mat4 previousBones[128]
-}
 material MotionVector {
+    // Keep the palettes as reflected arrays. A mixed cbuffer containing two
+    // mat4 arrays has no field-level bgfx bindings on D3D.
+    uniform mat4 bones[128]
+    uniform mat4 previousBones[128]
     uniform mat4 previousWorld
     uniform mat4 previousViewProjection
     // x = skinned draw, y = previous object/frame history is valid.
@@ -42,13 +41,13 @@ material MotionVector {
         in boneWt : boneweights
         out currentClip : color = modelViewProjection * mix(
             vec4(pos, 1.0),
-            skinningMatrix(boneId, boneWt, MotionBones.bones,
+            skinningMatrix(boneId, boneWt, bones,
                            vec4(pos, 1.0)),
             motionParams.x)
         out previousClip : tangent = previousViewProjection *
             (previousWorld * mix(
                 vec4(pos, 1.0),
-                skinningMatrix(boneId, boneWt, MotionBones.previousBones,
+                skinningMatrix(boneId, boneWt, previousBones,
                                vec4(pos, 1.0)),
                 motionParams.x))
         return currentClip
@@ -73,11 +72,10 @@ material MotionVector {
 )";
 
 constexpr const char* kMotionVectorCutoutPhoskiaSource = R"(
-uniformblock MotionBones {
-    mat4 bones[128]
-    mat4 previousBones[128]
-}
 material MotionVectorCutout {
+    // See the opaque variant: each palette needs its own bgfx binding.
+    uniform mat4 bones[128]
+    uniform mat4 previousBones[128]
     texture2d albedoMap
     texture2d opacityMap
     uniform vec4 baseColor
@@ -94,13 +92,13 @@ material MotionVectorCutout {
         in boneWt : boneweights
         out currentClip : color = modelViewProjection * mix(
             vec4(pos, 1.0),
-            skinningMatrix(boneId, boneWt, MotionBones.bones,
+            skinningMatrix(boneId, boneWt, bones,
                            vec4(pos, 1.0)),
             motionParams.x)
         out previousClip : tangent = previousViewProjection *
             (previousWorld * mix(
                 vec4(pos, 1.0),
-                skinningMatrix(boneId, boneWt, MotionBones.previousBones,
+                skinningMatrix(boneId, boneWt, previousBones,
                                vec4(pos, 1.0)),
                 motionParams.x))
         out vUv : texcoord = uv
@@ -137,9 +135,9 @@ material MotionVectorCutout {
 )";
 
 constexpr const char* kMotionVectorCacheKey =
-    "motion_vector_phoskia_rg16f_rigid_skin_v2";
+    "motion_vector_phoskia_rg16f_rigid_skin_v3";
 constexpr const char* kMotionVectorCutoutCacheKey =
-    "motion_vector_phoskia_rg16f_rigid_skin_cutout_v2";
+    "motion_vector_phoskia_rg16f_rigid_skin_cutout_v3";
 
 struct CommitKey final {
     uint64_t objectId = 0;
@@ -169,14 +167,11 @@ uint32_t completeSkeletonCount(const DrawItem& item) noexcept
         : item.jointCount;
 }
 
-bool uploadBonePalette(ayt::shader::ShaderResource& program,
-                       const char* uniformName,
-                       const DrawItem& item,
-                       const ayt::math::Float4x4* sourceBones,
-                       uint32_t sourceBoneCount)
+bool bonePaletteIsValid(const DrawItem& item,
+                        const ayt::math::Float4x4* sourceBones,
+                        uint32_t sourceBoneCount)
 {
-    if (uniformName == nullptr || sourceBones == nullptr
-        || item.jointCount == 0u
+    if (sourceBones == nullptr || item.jointCount == 0u
         || item.jointCount > ayt::render::kUniformSkinPaletteCapacity) {
         return false;
     }
@@ -192,13 +187,27 @@ bool uploadBonePalette(ayt::shader::ShaderResource& program,
     } else if (sourceBoneCount < item.jointCount) {
         return false;
     }
+    return true;
+}
 
+bool uploadBonePalette(
+    ayt::shader::ShaderResource& program,
+    const char* uniformName,
+    const DrawItem& item,
+    const ayt::math::Float4x4* sourceBones,
+    uint32_t sourceBoneCount)
+{
+    if (uniformName == nullptr
+        || !bonePaletteIsValid(item, sourceBones, sourceBoneCount)) {
+        return false;
+    }
     const ayt::shader::BindingId binding =
         program.getUniformBinding(uniformName);
     if (binding == ayt::shader::InvalidBinding) {
         return false;
     }
-    std::vector<float> matrices(static_cast<std::size_t>(item.jointCount) * 16u);
+    std::vector<float> matrices(
+        static_cast<std::size_t>(item.jointCount) * 16u);
     for (uint32_t slot = 0; slot < item.jointCount; ++slot) {
         const uint32_t joint = item.boneRemap != nullptr
             ? item.boneRemap[slot]
@@ -262,7 +271,8 @@ bool hasRequiredBindings(const ayt::shader::ShaderResource& program,
 {
     const bool common = program.isValid()
         && program.getUniformBinding("bones") != ayt::shader::InvalidBinding
-        && program.getUniformBinding("previousBones") != ayt::shader::InvalidBinding
+        && program.getUniformBinding("previousBones")
+               != ayt::shader::InvalidBinding
         && program.getUniformBinding("previousWorld") != ayt::shader::InvalidBinding
         && program.getUniformBinding("previousViewProjection") != ayt::shader::InvalidBinding
         && program.getUniformBinding("motionParams") != ayt::shader::InvalidBinding;
@@ -438,11 +448,21 @@ void MotionVectorPass::ensureResources(BGFXAdapter& adapter,
 uint32_t MotionVectorPass::execute(PassExecContext& ctx)
 {
     _producedThisFrame = false;
-    if (!_requestedThisFrame || !isEnabled()
-        || !ctx.adapter.isInitialized() || ctx.adapter.isNoopBackend()
-        || ctx.gbufferPass == nullptr
+    if (!_requestedThisFrame) {
+        return 0u;
+    }
+    if (!isEnabled()) {
+        rateLimitedEarlyReturn("MotionVectorPass", "requested pass disabled");
+        return 0u;
+    }
+    if (!ctx.adapter.isInitialized() || ctx.adapter.isNoopBackend()) {
+        rateLimitedEarlyReturn("MotionVectorPass", "backend unavailable");
+        return 0u;
+    }
+    if (ctx.gbufferPass == nullptr
         || !ctx.gbufferPass->producedThisFrame()
         || !ctx.gbufferPass->hasValidAttachments()) {
+        rateLimitedEarlyReturn("MotionVectorPass", "current GBuffer unavailable");
         return 0u;
     }
 
@@ -450,8 +470,13 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
     ensureResources(ctx.adapter, gbufferDepth);
     ensurePrograms(ctx.pool);
     if (!BGFXAdapter::isValid(_velocityTexture)
-        || !BGFXAdapter::isValid(_velocityFbo)
-        || !programsReady()) {
+        || !BGFXAdapter::isValid(_velocityFbo)) {
+        rateLimitedEarlyReturn(
+            "MotionVectorPass", "RG16F target or borrowed-depth FBO unavailable");
+        return 0u;
+    }
+    if (!programsReady()) {
+        rateLimitedEarlyReturn("MotionVectorPass", "shader bindings unavailable");
         return 0u;
     }
 
@@ -504,8 +529,8 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
             ? _cutoutProgram
             : _opaqueProgram;
         const uint32_t currentBoneCount = completeSkeletonCount(item);
-        const bool currentSkinned = uploadBonePalette(
-            program, "bones", item, item.boneMatrices, currentBoneCount);
+        const bool currentSkinned = bonePaletteIsValid(
+            item, item.boneMatrices, currentBoneCount);
 
         const MotionHistorySnapshot* previous = nullptr;
         bool historyValid = _hasPreviousFrame;
@@ -524,10 +549,16 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
         const uint32_t previousBoneCount = previous != nullptr
             ? static_cast<uint32_t>(previous->bones.size())
             : currentBoneCount;
-        if (currentSkinned) {
-            historyValid = historyValid && uploadBonePalette(
-                program, "previousBones", item,
-                previousBones, previousBoneCount);
+        if (currentSkinned
+            && (!uploadBonePalette(
+                    program, "bones", item,
+                    item.boneMatrices, currentBoneCount)
+                || !uploadBonePalette(
+                    program, "previousBones", item,
+                    previousBones, previousBoneCount))) {
+            // Do not publish rigid velocity for a skinned surface when its
+            // complete current/previous palette could not be uploaded.
+            continue;
         }
 
         trySetUniformMat4(program, "previousWorld", nullptr, previousWorld);
