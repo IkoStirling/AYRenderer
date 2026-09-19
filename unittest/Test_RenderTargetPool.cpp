@@ -8,6 +8,7 @@ using ayt::render::detail::BGFXAdapter;
 using ayt::render::detail::BGFXInitParams;
 using ayt::render::detail::RenderTargetKey;
 using ayt::render::detail::RenderTargetPool;
+using ayt::render::detail::RenderTargetPoolCategory;
 
 TEST_SUITE(AYRenderer_RenderTargetPool)
 
@@ -184,6 +185,59 @@ TEST_CASE(RenderTargetPool_SoftBudgetRemainsAvailableForFrameGraph)
     CHECK(pool.stats().budgetMisses == 0u);
 
     pool.release(lease);
+    pool.shutdown();
+    adapter.shutdown();
+}
+
+TEST_CASE(RenderTargetPool_CategoryBudgetIsolatesRetainedUiFromFrameGraph)
+{
+    BGFXAdapter adapter;
+    BGFXInitParams init;
+    init.backend = Backend::Noop;
+    init.width = 64;
+    init.height = 64;
+    init.vsync = false;
+    CHECK_TRUE(adapter.initialize(init));
+    if (!adapter.isInitialized()) return;
+
+    constexpr size_t kTargetBytes = 32u * 32u * 4u;
+    RenderTargetPool pool(adapter);
+    pool.setBudgetBytes(kTargetBytes * 3u);
+    pool.setCategoryBudgetBytes(
+        RenderTargetPoolCategory::RetainedUi, kTargetBytes);
+
+    RenderTargetKey key;
+    key.width = 32;
+    key.height = 32;
+    key.withDepth = false;
+    const auto ui = pool.acquire(
+        key, false, RenderTargetPoolCategory::RetainedUi);
+    CHECK_TRUE(ui.isValid());
+
+    RenderTargetKey otherUi = key;
+    otherUi.width = 16;
+    otherUi.height = 64;
+    CHECK_FALSE(pool.acquire(
+        otherUi, false, RenderTargetPoolCategory::RetainedUi).isValid());
+
+    // A UI budget miss must not consume or evict the FrameGraph partition.
+    const auto frameGraph = pool.acquire(
+        otherUi, true, RenderTargetPoolCategory::FrameGraph);
+    CHECK_TRUE(frameGraph.isValid());
+    const auto stats = pool.stats();
+    const auto& uiStats = stats.categories[static_cast<size_t>(
+        RenderTargetPoolCategory::RetainedUi)];
+    const auto& frameStats = stats.categories[static_cast<size_t>(
+        RenderTargetPoolCategory::FrameGraph)];
+    CHECK(uiStats.allocatedBytes == kTargetBytes);
+    CHECK(uiStats.budgetBytes == kTargetBytes);
+    CHECK(uiStats.budgetMisses == 1u);
+    CHECK(uiStats.liveLeases == 1u);
+    CHECK(frameStats.allocatedBytes == kTargetBytes);
+    CHECK(frameStats.liveLeases == 1u);
+
+    pool.release(ui);
+    pool.release(frameGraph);
     pool.shutdown();
     adapter.shutdown();
 }

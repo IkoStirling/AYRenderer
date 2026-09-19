@@ -2,6 +2,7 @@
 
 #include <bgfx/bgfx.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -10,6 +11,12 @@ namespace ayt::render::detail
 {
 
 class BGFXAdapter;
+
+enum class RenderTargetPoolCategory : uint8_t {
+    FrameGraph = 0,
+    RetainedUi,
+    Count
+};
 
 struct RenderTargetKey {
     uint16_t width = 0;
@@ -39,6 +46,15 @@ struct PooledRenderTargetHandle {
 };
 
 struct RenderTargetPoolStats {
+    struct Category {
+        uint32_t allocations = 0;
+        uint32_t reuses = 0;
+        uint32_t budgetMisses = 0;
+        uint32_t liveLeases = 0;
+        uint32_t idleTargets = 0;
+        size_t allocatedBytes = 0;
+        size_t budgetBytes = 0;
+    };
     uint32_t allocations = 0;
     uint32_t reuses = 0;
     uint32_t releases = 0;
@@ -49,6 +65,8 @@ struct RenderTargetPoolStats {
     size_t allocatedBytes = 0;
     size_t budgetBytes = 0;
     size_t peakAllocatedBytes = 0;
+    std::array<Category,
+        static_cast<size_t>(RenderTargetPoolCategory::Count)> categories{};
 };
 
 // Renderer-wide pool for transient and retained framebuffer targets.
@@ -71,7 +89,9 @@ public:
     // budget. Retained UI uses false so pressure can degrade to immediate
     // rendering instead of growing GPU memory without bound.
     PooledRenderTargetHandle acquire(const RenderTargetKey& key,
-                                     bool allowBudgetOverflow = true);
+                                     bool allowBudgetOverflow = true,
+                                     RenderTargetPoolCategory category =
+                                         RenderTargetPoolCategory::FrameGraph);
     void release(PooledRenderTargetHandle handle);
 
     bool isValid(PooledRenderTargetHandle handle) const noexcept;
@@ -85,6 +105,9 @@ public:
     size_t budgetBytes() const noexcept { return _budgetBytes; }
     void setDeferredFrames(uint32_t frames) noexcept { _deferredFrames = frames; }
     uint32_t deferredFrames() const noexcept { return _deferredFrames; }
+    void setCategoryBudgetBytes(RenderTargetPoolCategory category,
+                                size_t bytes);
+    size_t categoryBudgetBytes(RenderTargetPoolCategory category) const noexcept;
 
     RenderTargetPoolStats stats() const noexcept;
     void resetStats() noexcept;
@@ -102,14 +125,19 @@ private:
         uint64_t lastUsedFrame = 0;
         uint64_t reusableAfterFrame = 0;
         size_t estimatedBytes = 0;
+        RenderTargetPoolCategory category =
+            RenderTargetPoolCategory::FrameGraph;
         bool leased = false;
     };
 
     const Entry* find(PooledRenderTargetHandle handle) const noexcept;
     Entry* find(PooledRenderTargetHandle handle) noexcept;
     bool evictOldestIdle();
+    bool evictOldestIdle(RenderTargetPoolCategory category);
     void trimToBudget();
     void trimToBytes(size_t bytes);
+    void trimCategoryToBytes(RenderTargetPoolCategory category, size_t bytes);
+    size_t allocatedBytes(RenderTargetPoolCategory category) const noexcept;
     void destroyEntry(Entry& entry);
     static size_t estimateBytes(const RenderTargetKey& key) noexcept;
 
@@ -125,6 +153,17 @@ private:
     uint32_t _releases = 0;
     uint32_t _evictions = 0;
     uint32_t _budgetMisses = 0;
+    std::array<size_t,
+        static_cast<size_t>(RenderTargetPoolCategory::Count)> _categoryBudgets{
+            256u * 1024u * 1024u,
+            128u * 1024u * 1024u,
+        };
+    std::array<uint32_t,
+        static_cast<size_t>(RenderTargetPoolCategory::Count)> _categoryAllocations{};
+    std::array<uint32_t,
+        static_cast<size_t>(RenderTargetPoolCategory::Count)> _categoryReuses{};
+    std::array<uint32_t,
+        static_cast<size_t>(RenderTargetPoolCategory::Count)> _categoryBudgetMisses{};
 };
 
 } // namespace ayt::render::detail

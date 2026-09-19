@@ -1289,7 +1289,8 @@ UIRenderBackend::RenderTargetHandle UIRenderBackend::createRenderTarget(
     const detail::RenderTargetKey key{
         static_cast<uint16_t>(desc.width), static_cast<uint16_t>(desc.height),
         bgfx::TextureFormat::RGBA8, true, 1, true};
-    const detail::PooledRenderTargetHandle pooled = _targetPool->acquire(key, false);
+    const detail::PooledRenderTargetHandle pooled = _targetPool->acquire(
+        key, false, detail::RenderTargetPoolCategory::RetainedUi);
     if (!pooled.isValid()) {
         ++_frame->layerStats.allocationFailures;
         return {-1};
@@ -1323,7 +1324,8 @@ bool UIRenderBackend::ensureRenderTarget(int targetId)
         _targetPool->release(ref.pooled);
         ref.pooled = {};
     }
-    ref.pooled = _targetPool->acquire(key, false);
+    ref.pooled = _targetPool->acquire(
+        key, false, detail::RenderTargetPoolCategory::RetainedUi);
     if (ref.pooled.isValid()) return true;
 
     // Long-lived retained layers are the only leases the UI backend can
@@ -1332,7 +1334,8 @@ bool UIRenderBackend::ensureRenderTarget(int targetId)
     // the pool's idle LRU reclaim it on subsequent frames. This frame falls
     // back to immediate rendering if the strict allocation still cannot fit.
     if (releaseLruLayerBacking(targetId)) {
-        ref.pooled = _targetPool->acquire(key, false);
+        ref.pooled = _targetPool->acquire(
+            key, false, detail::RenderTargetPoolCategory::RetainedUi);
         if (ref.pooled.isValid()) return true;
     }
     ++_frame->layerStats.allocationFailures;
@@ -1389,7 +1392,8 @@ bool UIRenderBackend::resizeRenderTarget(RenderTargetHandle target,
     const detail::RenderTargetKey key{
         static_cast<uint16_t>(desc.width), static_cast<uint16_t>(desc.height),
         bgfx::TextureFormat::RGBA8, true, 1, true};
-    const detail::PooledRenderTargetHandle replacement = _targetPool->acquire(key, false);
+    const detail::PooledRenderTargetHandle replacement = _targetPool->acquire(
+        key, false, detail::RenderTargetPoolCategory::RetainedUi);
     if (!replacement.isValid()) return false;
     _targetPool->release(ref.pooled);
     ref.pooled = replacement;
@@ -1785,20 +1789,25 @@ UIRenderBackend::LayerCacheStats UIRenderBackend::getLayerCacheStats() const
     }
     if (_targetPool != nullptr) {
         const detail::RenderTargetPoolStats pool = _targetPool->stats();
-        out.targetAllocations = pool.allocations;
-        out.targetReuses = pool.reuses;
+        const auto& uiPool = pool.categories[static_cast<size_t>(
+            detail::RenderTargetPoolCategory::RetainedUi)];
+        out.targetAllocations = uiPool.allocations;
+        out.targetReuses = uiPool.reuses;
         out.targetEvictions = pool.evictions;
-        out.liveTargetLeases = pool.liveLeases;
-        out.idleTargets = pool.idleTargets;
-        out.allocatedTargetBytes = pool.allocatedBytes;
-        out.targetBudgetBytes = pool.budgetBytes;
+        out.liveTargetLeases = uiPool.liveLeases;
+        out.idleTargets = uiPool.idleTargets;
+        out.allocatedTargetBytes = uiPool.allocatedBytes;
+        out.targetBudgetBytes = uiPool.budgetBytes;
     }
     return out;
 }
 
 void UIRenderBackend::setLayerCacheBudgetBytes(size_t bytes)
 {
-    if (_targetPool != nullptr) _targetPool->setBudgetBytes(bytes);
+    if (_targetPool != nullptr) {
+        _targetPool->setCategoryBudgetBytes(
+            detail::RenderTargetPoolCategory::RetainedUi, bytes);
+    }
 }
 
 void UIRenderBackend::resetLayerCacheStats()

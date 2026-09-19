@@ -26,7 +26,8 @@ void RenderTargetPool::beginFrame()
 }
 
 PooledRenderTargetHandle RenderTargetPool::acquire(const RenderTargetKey& key,
-                                                   bool allowBudgetOverflow)
+                                                   bool allowBudgetOverflow,
+                                                   RenderTargetPoolCategory category)
 {
     if (_adapter == nullptr || !_adapter->isInitialized()
         || key.width == 0 || key.height == 0 || key.sampleCount != 1) {
@@ -36,7 +37,8 @@ PooledRenderTargetHandle RenderTargetPool::acquire(const RenderTargetKey& key,
     for (uint32_t slot = 0; slot < static_cast<uint32_t>(_entries.size()); ++slot) {
         Entry& entry = _entries[slot];
         if (entry.leased || entry.reusableAfterFrame > _frameIndex
-            || !BGFXAdapter::isValid(entry.framebuffer) || !(entry.key == key)) {
+            || !BGFXAdapter::isValid(entry.framebuffer) || !(entry.key == key)
+            || entry.category != category) {
             continue;
         }
         entry.leased = true;
@@ -44,18 +46,28 @@ PooledRenderTargetHandle RenderTargetPool::acquire(const RenderTargetKey& key,
         ++entry.generation;
         if (entry.generation == 0) ++entry.generation;
         ++_reuses;
+        ++_categoryReuses[static_cast<size_t>(category)];
         return {slot, entry.generation};
     }
 
     const size_t requestedBytes = estimateBytes(key);
     if (!allowBudgetOverflow) {
-        if (requestedBytes > _budgetBytes) {
+        const size_t categoryBudget = categoryBudgetBytes(category);
+        if (requestedBytes > _budgetBytes || requestedBytes > categoryBudget) {
             ++_budgetMisses;
+            ++_categoryBudgetMisses[static_cast<size_t>(category)];
+            return {};
+        }
+        trimCategoryToBytes(category, categoryBudget - requestedBytes);
+        if (allocatedBytes(category) > categoryBudget - requestedBytes) {
+            ++_budgetMisses;
+            ++_categoryBudgetMisses[static_cast<size_t>(category)];
             return {};
         }
         trimToBytes(_budgetBytes - requestedBytes);
         if (_allocatedBytes > _budgetBytes - requestedBytes) {
             ++_budgetMisses;
+            ++_categoryBudgetMisses[static_cast<size_t>(category)];
             return {};
         }
     }
@@ -95,11 +107,13 @@ PooledRenderTargetHandle RenderTargetPool::acquire(const RenderTargetKey& key,
     entry.lastUsedFrame = _frameIndex;
     entry.reusableAfterFrame = _frameIndex;
     entry.estimatedBytes = requestedBytes;
+    entry.category = category;
     ++entry.generation;
     if (entry.generation == 0) ++entry.generation;
     _allocatedBytes += entry.estimatedBytes;
     _peakAllocatedBytes = std::max(_peakAllocatedBytes, _allocatedBytes);
     ++_allocations;
+    ++_categoryAllocations[static_cast<size_t>(category)];
     return {slot, entry.generation};
 }
 
@@ -149,6 +163,22 @@ void RenderTargetPool::setBudgetBytes(size_t bytes)
     trimToBudget();
 }
 
+void RenderTargetPool::setCategoryBudgetBytes(
+    RenderTargetPoolCategory category, size_t bytes)
+{
+    const size_t index = static_cast<size_t>(category);
+    if (index >= _categoryBudgets.size()) return;
+    _categoryBudgets[index] = bytes;
+    trimCategoryToBytes(category, bytes);
+}
+
+size_t RenderTargetPool::categoryBudgetBytes(
+    RenderTargetPoolCategory category) const noexcept
+{
+    const size_t index = static_cast<size_t>(category);
+    return index < _categoryBudgets.size() ? _categoryBudgets[index] : 0u;
+}
+
 RenderTargetPoolStats RenderTargetPool::stats() const noexcept
 {
     RenderTargetPoolStats out{};
@@ -164,6 +194,16 @@ RenderTargetPoolStats RenderTargetPool::stats() const noexcept
         if (!BGFXAdapter::isValid(entry.framebuffer)) continue;
         if (entry.leased) ++out.liveLeases;
         else ++out.idleTargets;
+        auto& category = out.categories[static_cast<size_t>(entry.category)];
+        category.allocatedBytes += entry.estimatedBytes;
+        if (entry.leased) ++category.liveLeases;
+        else ++category.idleTargets;
+    }
+    for (size_t index = 0; index < out.categories.size(); ++index) {
+        out.categories[index].allocations = _categoryAllocations[index];
+        out.categories[index].reuses = _categoryReuses[index];
+        out.categories[index].budgetMisses = _categoryBudgetMisses[index];
+        out.categories[index].budgetBytes = _categoryBudgets[index];
     }
     return out;
 }
@@ -175,6 +215,9 @@ void RenderTargetPool::resetStats() noexcept
     _releases = 0;
     _evictions = 0;
     _budgetMisses = 0;
+    _categoryAllocations.fill(0u);
+    _categoryReuses.fill(0u);
+    _categoryBudgetMisses.fill(0u);
     _peakAllocatedBytes = _allocatedBytes;
 }
 
@@ -240,6 +283,45 @@ bool RenderTargetPool::evictOldestIdle()
     destroyEntry(*victim);
     ++_evictions;
     return true;
+}
+
+bool RenderTargetPool::evictOldestIdle(RenderTargetPoolCategory category)
+{
+    Entry* victim = nullptr;
+    for (Entry& entry : _entries) {
+        if (entry.category != category || entry.leased
+            || entry.reusableAfterFrame > _frameIndex
+            || !BGFXAdapter::isValid(entry.framebuffer)) {
+            continue;
+        }
+        if (victim == nullptr || entry.lastUsedFrame < victim->lastUsedFrame) {
+            victim = &entry;
+        }
+    }
+    if (victim == nullptr) return false;
+    destroyEntry(*victim);
+    ++_evictions;
+    return true;
+}
+
+void RenderTargetPool::trimCategoryToBytes(
+    RenderTargetPoolCategory category, size_t bytes)
+{
+    while (allocatedBytes(category) > bytes
+           && evictOldestIdle(category)) {}
+}
+
+size_t RenderTargetPool::allocatedBytes(
+    RenderTargetPoolCategory category) const noexcept
+{
+    size_t bytes = 0u;
+    for (const Entry& entry : _entries) {
+        if (entry.category == category
+            && BGFXAdapter::isValid(entry.framebuffer)) {
+            bytes += entry.estimatedBytes;
+        }
+    }
+    return bytes;
 }
 
 void RenderTargetPool::destroyEntry(Entry& entry)
