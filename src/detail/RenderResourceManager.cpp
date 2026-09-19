@@ -104,6 +104,51 @@ bool computeMeshLocalBounds(const void* vertices,
     return initialized;
 }
 
+bool extractWireframePositions(const void* vertices,
+                               uint32_t vertexCount,
+                               uint32_t vertexStride,
+                               const VertexLayoutDesc& layout,
+                               std::vector<WireframePosition>& out)
+{
+    if (vertices == nullptr || vertexCount == 0u || vertexStride == 0u) {
+        return false;
+    }
+    uint32_t positionOffset = 0u;
+    const VertexElement* position = nullptr;
+    for (uint8_t i = 0; i < layout.elementCount; ++i) {
+        const VertexElement& element = layout.elements[i];
+        if (element.attribute == VertexAttribute::Position) {
+            position = &element;
+            break;
+        }
+        positionOffset += vertexElementSize(element);
+    }
+    if (position == nullptr
+        || position->componentType != VertexComponentType::Float
+        || position->componentCount < 2u
+        || positionOffset + vertexElementSize(*position) > vertexStride) {
+        return false;
+    }
+    out.clear();
+    out.reserve(vertexCount);
+    const uint8_t* bytes = static_cast<const uint8_t*>(vertices);
+    for (uint32_t i = 0; i < vertexCount; ++i) {
+        float value[3] = {0.0f, 0.0f, 0.0f};
+        std::memcpy(value,
+                    bytes + static_cast<size_t>(i) * vertexStride
+                          + positionOffset,
+                    static_cast<size_t>(std::min<uint32_t>(
+                        position->componentCount, 3u)) * sizeof(float));
+        if (!std::isfinite(value[0]) || !std::isfinite(value[1])
+            || !std::isfinite(value[2])) {
+            out.clear();
+            return false;
+        }
+        out.push_back({value[0], value[1], value[2]});
+    }
+    return true;
+}
+
 // §P1 M1 (2026-08-24) — return bool + log on drop. Previously silent:
 // a 128B array or null binding would silently not register, leaving
 // the shader uniform un-set with no signal to the host. Now callers
@@ -397,9 +442,16 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
     mesh.vertexBuffer = _adapter.createVertexBuffer(vertices, vertexBytes, bgfxLayout);
     mesh.indexBuffer  = _adapter.createIndexBuffer(indices, indexBytes, indexFlags);
 
+    std::vector<WireframePosition> wirePositions;
+    const bool hasWirePositions = extractWireframePositions(
+        vertices, vertexCount, vertexStride, layout, wirePositions);
     if (use32BitIndices) {
-        const auto wireIndices = buildTriangleWireframeIndices(
-            static_cast<const uint32_t*>(indices), indexCount);
+        const auto wireIndices = hasWirePositions
+            ? buildFeatureWireframeIndices(
+                static_cast<const uint32_t*>(indices), indexCount,
+                wirePositions.data(), vertexCount)
+            : buildTriangleWireframeIndices(
+                static_cast<const uint32_t*>(indices), indexCount);
         mesh.wireframeIndexCount = static_cast<uint32_t>(wireIndices.size());
         if (!wireIndices.empty()) {
             mesh.wireframeIndexBuffer = _adapter.createIndexBuffer(
@@ -408,8 +460,12 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
                 BGFX_BUFFER_INDEX32);
         }
     } else {
-        const auto wireIndices = buildTriangleWireframeIndices(
-            static_cast<const uint16_t*>(indices), indexCount);
+        const auto wireIndices = hasWirePositions
+            ? buildFeatureWireframeIndices(
+                static_cast<const uint16_t*>(indices), indexCount,
+                wirePositions.data(), vertexCount)
+            : buildTriangleWireframeIndices(
+                static_cast<const uint16_t*>(indices), indexCount);
         mesh.wireframeIndexCount = static_cast<uint32_t>(wireIndices.size());
         if (!wireIndices.empty()) {
             mesh.wireframeIndexBuffer = _adapter.createIndexBuffer(

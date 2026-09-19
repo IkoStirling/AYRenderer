@@ -24,6 +24,42 @@ TEST_CASE(triangle_indices_expand_to_independent_edges)
     }
 }
 
+TEST_CASE(coplanar_triangle_diagonal_is_hidden)
+{
+    const WireframePosition positions[] = {
+        {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f},
+        {1.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f}};
+    const std::uint16_t triangles[] = {0, 1, 2, 0, 2, 3};
+    const auto lines = buildFeatureWireframeIndices(
+        triangles, static_cast<std::uint32_t>(std::size(triangles)),
+        positions, static_cast<std::uint32_t>(std::size(positions)));
+
+    CHECK(lines.size() == 12u);
+    if (lines.size() != 12u) return;
+    CHECK(lines[5] == lines[4]);
+    CHECK(lines[7] == lines[6]);
+    CHECK(lines[0] != lines[1]);
+    CHECK(lines[2] != lines[3]);
+    CHECK(lines[8] != lines[9]);
+    CHECK(lines[10] != lines[11]);
+}
+
+TEST_CASE(sharp_shared_edge_remains_visible)
+{
+    const WireframePosition positions[] = {
+        {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}};
+    const std::uint16_t triangles[] = {0, 1, 2, 0, 3, 1};
+    const auto lines = buildFeatureWireframeIndices(
+        triangles, static_cast<std::uint32_t>(std::size(triangles)),
+        positions, static_cast<std::uint32_t>(std::size(positions)));
+
+    CHECK(lines.size() == 12u);
+    if (lines.size() != 12u) return;
+    CHECK(lines[0] != lines[1]);
+    CHECK(lines[10] != lines[11]);
+}
+
 TEST_CASE(submesh_triangle_ranges_map_to_wireframe_ranges)
 {
     const WireframeIndexRange range = resolveWireframeIndexRange(3, 6, 18);

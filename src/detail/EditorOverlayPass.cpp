@@ -805,9 +805,15 @@ uint32_t EditorOverlayPass::submitTransformGizmo(
     if (!std::isfinite(distance)) return 0;
     const float scale = std::isfinite(state.worldScaleOverride)
             && state.worldScaleOverride > 0.0f
-        ? std::clamp(state.worldScaleOverride, 0.12f, 1000.0f)
-        : std::clamp(distance * kEditorTransformGizmoScalePerDistance,
-                     0.12f, 1000.0f);
+        ? std::clamp(state.worldScaleOverride,
+                     kEditorTransformGizmoMinWorldScale,
+                     kEditorTransformGizmoMaxWorldScale)
+        : std::clamp(
+            kEditorTransformGizmoScalePerDistance
+                * std::pow(std::max(distance, 0.0f),
+                           kEditorTransformGizmoDistanceExponent),
+            kEditorTransformGizmoMinWorldScale,
+            kEditorTransformGizmoMaxWorldScale);
     ctx.adapter.setViewFrameBuffer(kGizmoViewId, BGFX_INVALID_HANDLE);
     ctx.adapter.setViewRect(kGizmoViewId, ctx.viewportX, ctx.viewportY,
                             ctx.viewportWidth, ctx.viewportHeight);

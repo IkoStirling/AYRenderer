@@ -470,9 +470,13 @@ struct EditorSelectionOutline2DState {
     float lineWidthWorld = 1.0f;
 };
 
-// AYEditor compile-time checks this value against its CPU hit geometry so the
-// gizmo keeps an approximately constant screen size as the camera dollies.
+// AYEditor compile-time checks these values against its CPU hit geometry.
+// A sub-linear distance exponent lets the gizmo respond subtly to dolly
+// distance while keeping it usable, with hard world-size limits at extremes.
 inline constexpr float kEditorTransformGizmoScalePerDistance = 0.18f;
+inline constexpr float kEditorTransformGizmoDistanceExponent = 0.90f;
+inline constexpr float kEditorTransformGizmoMinWorldScale = 0.12f;
+inline constexpr float kEditorTransformGizmoMaxWorldScale = 120.0f;
 
 // §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was
 // plumbing only: `RenderPipelineDesc::path` field (default Forward)
