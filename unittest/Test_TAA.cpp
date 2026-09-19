@@ -54,6 +54,22 @@ bool taaFileExists(const std::string& path)
     return !path.empty() && ::stat(path.c_str(), &st) == 0;
 }
 
+float projectedNdcComponent(const ayt::math::Float4x4& projection,
+                            int component,
+                            float x,
+                            float y,
+                            float z)
+{
+    const float values[4] = {x, y, z, 1.0f};
+    float clipComponent = 0.0f;
+    float clipW = 0.0f;
+    for (int col = 0; col < 4; ++col) {
+        clipComponent += projection(component, col) * values[col];
+        clipW += projection(3, col) * values[col];
+    }
+    return clipComponent / clipW;
+}
+
 } // namespace
 
 TEST_SUITE(AYRenderer_TAA)
@@ -165,9 +181,27 @@ TEST_CASE(taa_halton_jitter_is_deterministic_centered_and_bounded)
     CHECK(std::abs(repeated.y - first.y) < 1.0e-7f);
 }
 
-TEST_CASE(taa_projection_jitter_changes_only_clip_xy_offsets)
+TEST_CASE(taa_jitter_ramp_enters_temporal_sampling_without_a_hard_step)
 {
-    ayt::math::Float4x4 projection = ayt::math::Float4x4::identity();
+    CHECK(std::abs(ayt::render::detail::taaJitterRampScale(0u) - 0.0f)
+          < 1.0e-7f);
+    CHECK(std::abs(ayt::render::detail::taaJitterRampScale(1u) - 0.25f)
+          < 1.0e-7f);
+    CHECK(std::abs(ayt::render::detail::taaJitterRampScale(2u) - 0.50f)
+          < 1.0e-7f);
+    CHECK(std::abs(ayt::render::detail::taaJitterRampScale(4u) - 1.0f)
+          < 1.0e-7f);
+    CHECK(std::abs(ayt::render::detail::taaJitterRampScale(40u) - 1.0f)
+          < 1.0e-7f);
+}
+
+TEST_CASE(taa_perspective_jitter_is_depth_invariant_in_ndc)
+{
+    ayt::math::Float4x4 projection = ayt::math::Float4x4::zero();
+    projection(0, 0) = 1.0f;
+    projection(1, 1) = 1.0f;
+    projection(2, 2) = 1.0f;
+    projection(3, 2) = 1.0f;
     const auto jittered = ayt::render::detail::taaApplyProjectionJitter(
         projection, {0.25f, -0.25f}, 1000, 500);
     for (int row = 0; row < 4; ++row) {
@@ -181,6 +215,14 @@ TEST_CASE(taa_projection_jitter_changes_only_clip_xy_offsets)
     }
     CHECK(std::abs(jittered(0, 2) - 0.0005f) < 1.0e-7f);
     CHECK(std::abs(jittered(1, 2) - 0.0010f) < 1.0e-7f);
+    CHECK(std::abs(projectedNdcComponent(jittered, 0, 0.0f, 0.0f, 2.0f)
+                   - 0.0005f) < 1.0e-7f);
+    CHECK(std::abs(projectedNdcComponent(jittered, 0, 0.0f, 0.0f, 20.0f)
+                   - 0.0005f) < 1.0e-7f);
+    CHECK(std::abs(projectedNdcComponent(jittered, 1, 0.0f, 0.0f, 2.0f)
+                   - 0.0010f) < 1.0e-7f);
+    CHECK(std::abs(projectedNdcComponent(jittered, 1, 0.0f, 0.0f, 20.0f)
+                   - 0.0010f) < 1.0e-7f);
     const auto zeroSize = ayt::render::detail::taaApplyProjectionJitter(
         projection, {0.25f, -0.25f}, 0, 0);
     for (int row = 0; row < 4; ++row) {
@@ -189,6 +231,29 @@ TEST_CASE(taa_projection_jitter_changes_only_clip_xy_offsets)
                   < 1.0e-7f);
         }
     }
+}
+
+TEST_CASE(taa_orthographic_jitter_uses_translation_and_is_depth_invariant)
+{
+    const ayt::math::Float4x4 projection =
+        ayt::math::Float4x4::identity();
+    const auto jittered = ayt::render::detail::taaApplyProjectionJitter(
+        projection, {0.25f, -0.25f}, 1000, 500);
+    for (int row = 0; row < 4; ++row) {
+        for (int col = 0; col < 4; ++col) {
+            if ((row == 0 || row == 1) && col == 3) {
+                continue;
+            }
+            CHECK(std::abs(jittered(row, col) - projection(row, col))
+                  < 1.0e-7f);
+        }
+    }
+    CHECK(std::abs(jittered(0, 3) - 0.0005f) < 1.0e-7f);
+    CHECK(std::abs(jittered(1, 3) - 0.0010f) < 1.0e-7f);
+    CHECK(std::abs(projectedNdcComponent(jittered, 0, 0.0f, 0.0f, 2.0f)
+                   - 0.0005f) < 1.0e-7f);
+    CHECK(std::abs(projectedNdcComponent(jittered, 0, 0.0f, 0.0f, 20.0f)
+                   - 0.0005f) < 1.0e-7f);
 }
 
 TEST_CASE(taa_noop_backend_returns_zero_and_lifecycle_is_idempotent)
@@ -225,7 +290,10 @@ TEST_CASE(taa_shader_contract_has_reprojection_neighborhood_clamp_and_motion_fee
     CHECK(source.find("texture2d motionVectors") != std::string::npos);
     CHECK(source.find("uniform mat4 previousViewProjection")
           != std::string::npos);
+    CHECK(source.find("uniform mat4 currentViewProjection")
+          != std::string::npos);
     CHECK(source.find("uniform vec4 taaJitter") != std::string::npos);
+    CHECK(source.find("uniform vec4 taaDepthParams") != std::string::npos);
     CHECK(source.find("neighborhoodMin") != std::string::npos);
     CHECK(source.find("previousClip") != std::string::npos);
     CHECK(source.find("coverage > 0.5") != std::string::npos);
@@ -238,8 +306,13 @@ TEST_CASE(taa_shader_contract_has_reprojection_neighborhood_clamp_and_motion_fee
     CHECK(source.find("localLumaSpan") != std::string::npos);
     CHECK(source.find("unexpectedMismatch") != std::string::npos);
     CHECK(source.find("luminanceMismatch") != std::string::npos);
+    CHECK(source.find("currentHistoryDepth") != std::string::npos);
+    CHECK(source.find("expectedPreviousDepth") != std::string::npos);
+    CHECK(source.find("historySample.w >= 0.0") != std::string::npos);
+    CHECK(source.find("historySample.w < 0.0") != std::string::npos);
+    CHECK(source.find("reactiveMismatch") != std::string::npos);
     CHECK(std::string(ayt::render::detail::kTaaCacheKeyCStr)
-          == "taa_phoskia_motion_vectors_ycocg_v5");
+          == "taa_phoskia_motion_vectors_depth_reject_v6");
 }
 
 TEST_CASE(taa_phoskia_source_compiles_for_d3d11_and_d3d12)

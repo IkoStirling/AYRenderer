@@ -21,6 +21,7 @@ struct TaaJitter final {
 
 // Deterministic eight-sample Halton(2,3) sequence centered on the pixel.
 TaaJitter taaHaltonJitter(uint32_t sampleIndex) noexcept;
+float taaJitterRampScale(uint32_t stableFrameCount) noexcept;
 ayt::math::Float4x4 taaApplyProjectionJitter(
     const ayt::math::Float4x4& projection,
     TaaJitter jitterPixels,
@@ -34,6 +35,7 @@ class TAAPass final : public RenderPass {
 public:
     static constexpr uint8_t kTaaViewId = 5;
     static constexpr uint32_t kJitterSampleCount = 8;
+    static constexpr uint32_t kJitterRampFrameCount = 4;
     // Editor viewports are often substantially smaller than the host window.
     // Keep the Halton footprint inside roughly one quarter pixel per axis;
     // larger offsets were visible whenever history had to be rejected.
@@ -41,6 +43,7 @@ public:
     static constexpr float kStaticHistoryWeight = 0.92f;
     static constexpr float kMovingHistoryWeight = 0.65f;
     static constexpr float kNeighborhoodExpansion = 0.025f;
+    static constexpr float kHistoryDepthTolerance = 0.0025f;
 
     std::string_view name() const override { return "TAA"; }
     uint32_t execute(PassExecContext& ctx) override;
@@ -87,6 +90,8 @@ private:
     ayt::shader::BindingId _uTaaMetrics = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uTaaParams = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uTaaJitter = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uTaaDepthParams = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uCurrentViewProjection = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uPreviousViewProjection = ayt::shader::InvalidBinding;
 
     std::array<bgfx::FrameBufferHandle, 2> _history = {
@@ -98,6 +103,7 @@ private:
     uint8_t _readHistoryIndex = 0;
     uint8_t _writeHistoryIndex = 1;
     uint32_t _jitterSampleIndex = 0;
+    uint32_t _stableFrameCount = 0;
     bool _historyValid = false;
     bool _preparedThisFrame = false;
     bool _hasPreviousCamera = false;
