@@ -20,6 +20,7 @@
 #include "detail/RenderViewOrder.h"
 #include "detail/SMAAPass.h"
 #include "detail/TAAPass.h"
+#include "detail/MotionVectorPass.h"
 
 #include <algorithm>
 #include <cmath>
@@ -289,18 +290,20 @@ TEST_CASE(taa_shader_contract_has_reprojection_neighborhood_clamp_and_motion_fee
     CHECK(source.find("texture2d geometryData") != std::string::npos);
     CHECK(source.find("texture2d motionVectors") != std::string::npos);
     CHECK(source.find("uniform mat4 previousViewProjection")
-          != std::string::npos);
+          == std::string::npos);
     CHECK(source.find("uniform mat4 currentViewProjection")
           != std::string::npos);
     CHECK(source.find("uniform vec4 taaJitter") != std::string::npos);
     CHECK(source.find("uniform vec4 taaDepthParams") != std::string::npos);
     CHECK(source.find("neighborhoodMin") != std::string::npos);
-    CHECK(source.find("previousClip") != std::string::npos);
+    CHECK(source.find("expectedPreviousDepth = motion.z") != std::string::npos);
     CHECK(source.find("coverage > 0.5") != std::string::npos);
-    CHECK(source.find("uv - sample(motionVectors, uv).xy")
+    CHECK(source.find("previousUv = outputUv - motion.xy")
           != std::string::npos);
+    CHECK(source.find("validHistory && motion.w > 0.5") != std::string::npos);
     CHECK(source.find("taaJitter.w > 0.5") != std::string::npos);
-    CHECK(source.find("uv + taaJitter.xy") != std::string::npos);
+    CHECK(source.find("outputUv.x + taaJitter.x") != std::string::npos);
+    CHECK(source.find("outputUv.y + taaJitter.y") != std::string::npos);
     CHECK(source.find("taaJitter.z > 0.5") != std::string::npos);
     CHECK(source.find("motionAmount") != std::string::npos);
     CHECK(source.find("localLumaSpan") != std::string::npos);
@@ -308,11 +311,29 @@ TEST_CASE(taa_shader_contract_has_reprojection_neighborhood_clamp_and_motion_fee
     CHECK(source.find("luminanceMismatch") != std::string::npos);
     CHECK(source.find("currentHistoryDepth") != std::string::npos);
     CHECK(source.find("expectedPreviousDepth") != std::string::npos);
-    CHECK(source.find("historySample.w >= 0.0") != std::string::npos);
-    CHECK(source.find("historySample.w < 0.0") != std::string::npos);
+    CHECK(source.find("vec2(floor(historyPixel.x), floor(historyPixel.y))") != std::string::npos);
+    CHECK(source.find("h0.w < 0.0") != std::string::npos);
+    CHECK(source.find("h3.w >= 0.0") != std::string::npos);
     CHECK(source.find("reactiveMismatch") != std::string::npos);
     CHECK(std::string(ayt::render::detail::kTaaCacheKeyCStr)
-          == "taa_phoskia_motion_vectors_depth_reject_v6");
+          == "taa_phoskia_fixed_grid_surface_history_v7");
+}
+
+TEST_CASE(taa_failed_resolve_discards_motion_snapshots)
+{
+    ayt::render::detail::TAAPass taa;
+    ayt::render::detail::MotionVectorPass motion;
+    // Simulate motion having committed an object before a downstream failure.
+    auto& snapshots = const_cast<ayt::render::detail::MotionHistoryCache&>(
+        motion.historyForTests());
+    snapshots.commit(7, 11, ayt::math::Float4x4::identity(), nullptr, 0, 1);
+    CHECK(snapshots.size() == 1u);
+    taa.finishFrame(&motion);
+    CHECK(snapshots.size() == 0u);
+    CHECK_FALSE(taa.historyValid());
+    CHECK_FALSE(taa.producedThisFrame());
+    CHECK_FALSE(motion.hasPreviousFrame());
+    taa.finishFrame(nullptr);
 }
 
 TEST_CASE(taa_phoskia_source_compiles_for_d3d11_and_d3d12)

@@ -56,7 +56,10 @@ private:
     std::unordered_map<Key, MotionHistorySnapshot, KeyHash> _entries;
 };
 
-// Deferred screen-space velocity pass. It owns one full-resolution RG16F
+// Deferred temporal surface pass. It owns one full-resolution RGBA16F
+// texture: xy = current-minus-previous UV excluding projection jitter,
+// z = the same surface's previous NDC depth, w = valid history (1 or 0).
+// Clear/missing draws are invalid, never implicitly stationary.
 // texture, borrows GBuffer depth through a non-owning FBO shell, and replays
 // only opaque 3D draws. It is dormant unless a temporal consumer requests it.
 class MotionVectorPass final : public RenderPass {
@@ -65,7 +68,7 @@ public:
     // exclusive: MotionVector is Deferred-only and executes after GBuffer 7.
     static constexpr uint8_t kMotionVectorViewId = 3;
     static constexpr bgfx::TextureFormat::Enum kVelocityFormat =
-        bgfx::TextureFormat::RG16F;
+        bgfx::TextureFormat::RGBA16F;
     static constexpr uint64_t kHistoryRetentionFrames = 120;
 
     std::string_view name() const override { return "MotionVector"; }
@@ -76,6 +79,10 @@ public:
         _requestedHeight = height;
     }
     void setRequestedThisFrame(bool requested) noexcept;
+    void setProjectionJitter(float xUv, float yUv) noexcept {
+        _currentJitterX = xUv;
+        _currentJitterY = yUv;
+    }
     void resetFrameState() noexcept { _producedThisFrame = false; }
     void invalidateHistory() noexcept;
     void destroyResources(BGFXAdapter& adapter);
@@ -119,6 +126,10 @@ private:
     ayt::math::Float4x4 _previousViewProjection =
         ayt::math::Float4x4::identity();
     uint64_t _frameSerial = 0;
+    float _currentJitterX = 0.0f;
+    float _currentJitterY = 0.0f;
+    float _previousJitterX = 0.0f;
+    float _previousJitterY = 0.0f;
     bool _requestedThisFrame = false;
     bool _wasRequestedLastFrame = false;
     bool _producedThisFrame = false;

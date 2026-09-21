@@ -35,6 +35,7 @@ material MotionVector {
     uniform mat4 previousViewProjection
     // x = skinned draw, y = previous object/frame history is valid.
     uniform vec4 motionParams
+    uniform vec4 motionJitter
     vertex {
         in pos : position
         in boneId : boneindices
@@ -61,12 +62,14 @@ material MotionVector {
                              1.0 - (currentNdc.y * 0.5 + 0.5))
         let previousUv = vec2(previousNdc.x * 0.5 + 0.5,
                               1.0 - (previousNdc.y * 0.5 + 0.5))
-        // Outside-range sentinel rejects stale history for new/recycled IDs.
+        // xy excludes jitter; z tracks the previous *deformed* surface.
         let velocity = vec2(2.0, 2.0)
+        let valid = 0.0
         if (motionParams.y > 0.5 && previousClip.w > 0.00001) {
-            velocity = currentUv - previousUv
+            velocity = currentUv - previousUv - motionJitter.xy + motionJitter.zw
+            valid = 1.0
         }
-        return vec4(velocity, 0.0, 1.0)
+        return vec4(velocity, previousClip.z / max(previousClip.w, 0.00001), valid)
     }
 }
 )";
@@ -85,6 +88,7 @@ material MotionVectorCutout {
     uniform mat4 previousWorld
     uniform mat4 previousViewProjection
     uniform vec4 motionParams
+    uniform vec4 motionJitter
     vertex {
         in pos : position
         in uv : texcoord
@@ -126,18 +130,20 @@ material MotionVectorCutout {
         let previousUv = vec2(previousNdc.x * 0.5 + 0.5,
                               1.0 - (previousNdc.y * 0.5 + 0.5))
         let velocity = vec2(2.0, 2.0)
+        let valid = 0.0
         if (motionParams.y > 0.5 && previousClip.w > 0.00001) {
-            velocity = currentUv - previousUv
+            velocity = currentUv - previousUv - motionJitter.xy + motionJitter.zw
+            valid = 1.0
         }
-        return vec4(velocity, 0.0, 1.0)
+        return vec4(velocity, previousClip.z / max(previousClip.w, 0.00001), valid)
     }
 }
 )";
 
 constexpr const char* kMotionVectorCacheKey =
-    "motion_vector_phoskia_rg16f_rigid_skin_v3";
+    "motion_vector_phoskia_rgba16f_unjittered_depth_v4";
 constexpr const char* kMotionVectorCutoutCacheKey =
-    "motion_vector_phoskia_rg16f_rigid_skin_cutout_v3";
+    "motion_vector_phoskia_rgba16f_unjittered_depth_cutout_v4";
 
 struct CommitKey final {
     uint64_t objectId = 0;
@@ -275,7 +281,8 @@ bool hasRequiredBindings(const ayt::shader::ShaderResource& program,
                != ayt::shader::InvalidBinding
         && program.getUniformBinding("previousWorld") != ayt::shader::InvalidBinding
         && program.getUniformBinding("previousViewProjection") != ayt::shader::InvalidBinding
-        && program.getUniformBinding("motionParams") != ayt::shader::InvalidBinding;
+        && program.getUniformBinding("motionParams") != ayt::shader::InvalidBinding
+        && program.getUniformBinding("motionJitter") != ayt::shader::InvalidBinding;
     if (!common || !cutout) {
         return common;
     }
@@ -371,6 +378,8 @@ void MotionVectorPass::invalidateHistory() noexcept
     _history.clear();
     _previousViewProjection = ayt::math::Float4x4::identity();
     _frameSerial = 0;
+    _previousJitterX = 0.0f;
+    _previousJitterY = 0.0f;
     _hasPreviousFrame = false;
     _producedThisFrame = false;
 }
@@ -472,7 +481,7 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
     if (!BGFXAdapter::isValid(_velocityTexture)
         || !BGFXAdapter::isValid(_velocityFbo)) {
         rateLimitedEarlyReturn(
-            "MotionVectorPass", "RG16F target or borrowed-depth FBO unavailable");
+            "MotionVectorPass", "RGBA16F target or borrowed-depth FBO unavailable");
         return 0u;
     }
     if (!programsReady()) {
@@ -495,8 +504,8 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
     ctx.adapter.setViewFrameBuffer(viewId, _velocityFbo);
     ctx.adapter.setViewRect(viewId, 0, 0,
                             _allocatedWidth, _allocatedHeight);
-    // Borrowed GBuffer depth must survive. Clear color only; zero is the
-    // background velocity and TAA handles background reprojection separately.
+    // Borrowed GBuffer depth must survive. Alpha zero marks every skipped
+    // draw (including WorldLit2D) invalid instead of publishing zero motion.
     ctx.adapter.setViewClearRaw(viewId, BGFX_CLEAR_COLOR, 0x00000000u);
     ctx.adapter.touch(viewId);
 
@@ -533,7 +542,7 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
             item, item.boneMatrices, currentBoneCount);
 
         const MotionHistorySnapshot* previous = nullptr;
-        bool historyValid = _hasPreviousFrame;
+        bool historyValid = _hasPreviousFrame && item.motionObjectId != 0u;
         if (item.motionObjectId != 0u) {
             previous = _history.find(item.motionObjectId, item.mesh.id,
                                      currentBoneCount, _frameSerial);
@@ -572,6 +581,12 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
         };
         program.setUniform(program.getUniformBinding("motionParams"),
                            motionParams, sizeof(motionParams));
+        const float motionJitter[4] = {
+            _currentJitterX, _currentJitterY,
+            _previousJitterX, _previousJitterY,
+        };
+        program.setUniform(program.getUniformBinding("motionJitter"),
+                           motionJitter, sizeof(motionJitter));
 
         if (material.alphaCutout) {
             const float baseColor[4] = {
@@ -634,13 +649,15 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
         : 0u;
     _history.pruneBefore(oldestFrame);
     _previousViewProjection = currentViewProjection;
+    _previousJitterX = _currentJitterX;
+    _previousJitterY = _currentJitterY;
     _hasPreviousFrame = true;
     _producedThisFrame = true;
 
     if (!_firstDispatchLogged) {
         std::fprintf(stderr,
                      "[MotionVectorPass] first dispatch view=%u size=%ux%u "
-                     "format=RG16F draws=%u historyKeys=%zu\n",
+                     "format=RGBA16F draws=%u historyKeys=%zu\n",
                      static_cast<unsigned>(viewId),
                      static_cast<unsigned>(_allocatedWidth),
                      static_cast<unsigned>(_allocatedHeight),

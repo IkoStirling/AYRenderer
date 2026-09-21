@@ -58,7 +58,7 @@ TEST_CASE(motion_vector_append_only_abi_format_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::MotionVector) == 20u);
     CHECK(MotionVectorPass::kMotionVectorViewId == 3u);
-    CHECK(MotionVectorPass::kVelocityFormat == bgfx::TextureFormat::RG16F);
+    CHECK(MotionVectorPass::kVelocityFormat == bgfx::TextureFormat::RGBA16F);
     CHECK(std::is_final_v<MotionVectorPass>);
 
     ayt::render::DrawItem item;
@@ -156,12 +156,16 @@ TEST_CASE(motion_vector_shader_contract_covers_rigid_skin_cutout_and_sentinel)
           != std::string::npos);
     CHECK(opaque.find("let velocity = vec2(2.0, 2.0)")
           != std::string::npos);
-    CHECK(opaque.find("velocity = currentUv - previousUv")
+    CHECK(opaque.find("velocity = currentUv - previousUv - motionJitter.xy + motionJitter.zw")
+          != std::string::npos);
+    CHECK(opaque.find("previousClip.z / max(previousClip.w, 0.00001), valid")
+          != std::string::npos);
+    CHECK(cutout.find("previousClip.z / max(previousClip.w, 0.00001), valid")
           != std::string::npos);
     CHECK(cutout.find("texture2d opacityMap") != std::string::npos);
     CHECK(cutout.find("discard") != std::string::npos);
     CHECK(std::string(ayt::render::detail::kMotionVectorCacheKeyCStr)
-          == "motion_vector_phoskia_rg16f_rigid_skin_v3");
+          == "motion_vector_phoskia_rgba16f_unjittered_depth_v4");
 }
 
 TEST_CASE(motion_vector_noop_backend_returns_zero_and_lifecycle_is_idempotent)

@@ -29,7 +29,6 @@ material TemporalAA {
     uniform vec4 taaJitter
     uniform vec4 taaDepthParams
     uniform mat4 currentViewProjection
-    uniform mat4 previousViewProjection
     vertex {
         in pos : position
         in uv : texcoord
@@ -38,9 +37,11 @@ material TemporalAA {
     }
     fragment {
         in vUv : texcoord
-        let uv = vec2(clamp(vUv.x, 0.0, 1.0),
-                      clamp(vUv.y, 0.0, 1.0))
+        // Output/history use the fixed grid. Only raw scene inputs use jitter.
+        let outputUv = vUv
         let texel = taaMetrics.xy
+        let uv = vec2(clamp(outputUv.x + taaJitter.x, texel.x * 0.5, 1.0 - texel.x * 0.5),
+                      clamp(outputUv.y + taaJitter.y, texel.y * 0.5, 1.0 - texel.y * 0.5))
         let current = sample(currentColor, uv)
 
         // 3x3 current-frame neighborhood converted to YCoCg inline. Phoskia
@@ -88,7 +89,7 @@ material TemporalAA {
 
         let coverage = sample(geometryData, uv).w
         let validHistory = taaParams.w > 0.5
-        let previousUv = uv + taaJitter.xy
+        let previousUv = outputUv
         // History alpha is private to TAA. Geometry stores its projected
         // depth; background stores -1. This rejects stale history at
         // disocclusions and prevents sky/geometry samples crossing edges.
@@ -97,18 +98,16 @@ material TemporalAA {
         if (coverage > 0.5) {
             let world = sample(worldPosition, uv).xyz
             let currentClip = currentViewProjection * vec4(world, 1.0)
-            let previousClip = previousViewProjection * vec4(world, 1.0)
-            validHistory = validHistory
-                && currentClip.w > 0.00001 && previousClip.w > 0.00001
+            validHistory = validHistory && currentClip.w > 0.00001
             currentHistoryDepth = currentClip.z / max(currentClip.w, 0.00001)
-            expectedPreviousDepth = previousClip.z / max(previousClip.w, 0.00001)
+            // Missing velocity is not zero velocity. In particular 2D and
+            // failed/new draws must never consume an unrelated surface's history.
+            validHistory = validHistory && taaJitter.w > 0.5
             if (taaJitter.w > 0.5) {
-                // Velocity convention: current UV minus previous UV.
-                previousUv = uv - sample(motionVectors, uv).xy
-            } else {
-                let previousNdc = previousClip.xy / max(previousClip.w, 0.00001)
-                previousUv = vec2(previousNdc.x * 0.5 + 0.5,
-                                  1.0 - (previousNdc.y * 0.5 + 0.5))
+                let motion = sample(motionVectors, uv)
+                validHistory = validHistory && motion.w > 0.5
+                previousUv = outputUv - motion.xy
+                expectedPreviousDepth = motion.z
             }
         } else {
             validHistory = validHistory && taaJitter.z > 0.5
@@ -118,17 +117,37 @@ material TemporalAA {
             && previousUv.y >= 0.0 && previousUv.y <= 1.0
         let safePreviousUv = vec2(clamp(previousUv.x, 0.0, 1.0),
                                   clamp(previousUv.y, 0.0, 1.0))
-        let historySample = sample(historyColor, safePreviousUv)
+        // Bilinear RGB reconstruction with per-tap surface validation.
+        // Sample texel centers: never interpolate depth or the -1 sky marker.
+        let historyPixel = safePreviousUv * taaMetrics.zw - vec2(0.5, 0.5)
+        let historyBase = vec2(floor(historyPixel.x), floor(historyPixel.y))
+        let historyFraction = historyPixel - historyBase
+        let historyBaseUv = (historyBase + vec2(0.5, 0.5)) * texel
+        let h0 = sample(historyColor, historyBaseUv)
+        let h1 = sample(historyColor, historyBaseUv + vec2(texel.x, 0.0))
+        let h2 = sample(historyColor, historyBaseUv + vec2(0.0, texel.y))
+        let h3 = sample(historyColor, historyBaseUv + texel)
+        let w0 = (1.0 - historyFraction.x) * (1.0 - historyFraction.y)
+        let w1 = historyFraction.x * (1.0 - historyFraction.y)
+        let w2 = (1.0 - historyFraction.x) * historyFraction.y
+        let w3 = historyFraction.x * historyFraction.y
         if (coverage > 0.5) {
-            validHistory = validHistory && historySample.w >= 0.0
-                && abs(historySample.w - expectedPreviousDepth)
-                    <= taaDepthParams.x
+            if (h0.w < 0.0 || abs(h0.w - expectedPreviousDepth) > taaDepthParams.x) { w0 = 0.0 }
+            if (h1.w < 0.0 || abs(h1.w - expectedPreviousDepth) > taaDepthParams.x) { w1 = 0.0 }
+            if (h2.w < 0.0 || abs(h2.w - expectedPreviousDepth) > taaDepthParams.x) { w2 = 0.0 }
+            if (h3.w < 0.0 || abs(h3.w - expectedPreviousDepth) > taaDepthParams.x) { w3 = 0.0 }
         } else {
-            validHistory = validHistory && historySample.w < 0.0
+            if (h0.w >= 0.0) { w0 = 0.0 }
+            if (h1.w >= 0.0) { w1 = 0.0 }
+            if (h2.w >= 0.0) { w2 = 0.0 }
+            if (h3.w >= 0.0) { w3 = 0.0 }
         }
+        let historyWeight = w0 + w1 + w2 + w3
+        validHistory = validHistory && historyWeight > 0.00001
+        let historyRgb = (h0.xyz * w0 + h1.xyz * w1 + h2.xyz * w2 + h3.xyz * w3)
+                         / max(historyWeight, 0.00001)
         let outputColor = vec4(current.xyz, currentHistoryDepth)
         if (validHistory) {
-            let historyRgb = historySample.xyz
             let history = vec3(
                 dot(historyRgb, vec3(0.25, 0.50, 0.25)),
                 dot(historyRgb, vec3(0.50, 0.00, -0.50)),
@@ -139,7 +158,7 @@ material TemporalAA {
             history = vec3(clamp(history.x, neighborhoodMin.x, neighborhoodMax.x),
                            clamp(history.y, neighborhoodMin.y, neighborhoodMax.y),
                            clamp(history.z, neighborhoodMin.z, neighborhoodMax.z))
-            let motionPixels = (previousUv - uv) * taaMetrics.zw
+            let motionPixels = (previousUv - outputUv) * taaMetrics.zw
             let motionAmount = clamp(length(motionPixels) / 16.0, 0.0, 1.0)
             let feedback = mix(taaParams.x, taaParams.y, motionAmount)
             let unexpectedMismatch = max(historyDifference.x
@@ -165,7 +184,7 @@ material TemporalAA {
 )";
 
 constexpr const char* kTaaCacheKey =
-    "taa_phoskia_motion_vectors_depth_reject_v6";
+    "taa_phoskia_fixed_grid_surface_history_v7";
 
 float halton(uint32_t index, uint32_t base) noexcept
 {
@@ -258,8 +277,7 @@ bool TAAPass::isReady() const noexcept
         && _uTaaParams != ayt::shader::InvalidBinding
         && _uTaaJitter != ayt::shader::InvalidBinding
         && _uTaaDepthParams != ayt::shader::InvalidBinding
-        && _uCurrentViewProjection != ayt::shader::InvalidBinding
-        && _uPreviousViewProjection != ayt::shader::InvalidBinding;
+        && _uCurrentViewProjection != ayt::shader::InvalidBinding;
 }
 
 bool TAAPass::detectCameraCut(
@@ -289,6 +307,11 @@ bool TAAPass::prepareFrame(BGFXAdapter& adapter,
                            uint16_t width,
                            uint16_t height)
 {
+    // A prepared frame without a completed resolve cannot remain temporal history.
+    if (_preparedThisFrame) {
+        invalidateHistory();
+    }
+    _producedThisFrame = false;
     _preparedThisFrame = false;
     _jitteredProjection = projection;
     if (!isEnabled() || !adapter.isInitialized() || adapter.isNoopBackend()
@@ -319,17 +342,13 @@ bool TAAPass::prepareFrame(BGFXAdapter& adapter,
     if (cameraCut) {
         invalidateHistory();
     }
-    _stableFrameCount = cameraStable && !cameraCut
+    _stableFrameCount = _historyValid && !cameraCut
         ? std::min(_stableFrameCount + 1u, kJitterRampFrameCount)
         : 0u;
     _writeHistoryIndex = static_cast<uint8_t>(1u - _readHistoryIndex);
-    // A moving camera currently has no background velocity (the GBuffer has
-    // no sky depth), so rejecting that history while retaining projection
-    // jitter exposes the Halton pattern directly. Render navigation and cut
-    // recovery unjittered; resume subpixel sampling only after a stable frame
-    // with valid history exists. Opaque geometry still uses MotionVector for
-    // temporal accumulation while the camera moves.
-    const bool useProjectionJitter = _historyValid && cameraStable;
+    // Rejected history still returns a reconstructed fixed-grid current color.
+    // Navigation no longer needs to disable jitter to conceal raw-grid wobble.
+    const bool useProjectionJitter = _historyValid;
     TaaJitter jitter = useProjectionJitter
         ? taaHaltonJitter(_jitterSampleIndex) : TaaJitter{};
     const float jitterRamp = taaJitterRampScale(_stableFrameCount);
@@ -415,9 +434,9 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
     _program.setUniform(_uTaaMetrics, metrics, sizeof(metrics));
     _program.setUniform(_uTaaParams, params, sizeof(params));
     const float jitter[4] = {
-        (_previousJitter.x - _currentJitter.x)
+        _currentJitter.x
             / static_cast<float>(ctx.viewportWidth),
-        (_previousJitter.y - _currentJitter.y)
+        _currentJitter.y
             / static_cast<float>(ctx.viewportHeight),
         _backgroundHistoryValid ? 1.0f : 0.0f,
         motionAvailable ? 1.0f : 0.0f,
@@ -432,10 +451,6 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
     toBgfxColumnMajor(_currentViewProjection, currentVp);
     _program.setUniform(_uCurrentViewProjection,
                         currentVp, sizeof(currentVp));
-    float previousVp[16];
-    toBgfxColumnMajor(_previousViewProjection, previousVp);
-    _program.setUniform(_uPreviousViewProjection,
-                        previousVp, sizeof(previousVp));
     adapter.setStateDepthTestAlways();
 
     ayt::shader::DrawCallContext draw;
@@ -448,18 +463,15 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
                                         FgResourceId::TaaColor);
     _readHistoryIndex = _writeHistoryIndex;
     _historyValid = true;
-    _previousViewProjection = _currentViewProjection;
+    _producedThisFrame = true;
     _previousBaseView = _currentBaseView;
     _previousBaseProjection = _currentBaseProjection;
     _previousCameraPosition = _currentCameraPosition;
-    _previousJitter = _currentJitter;
     _hasPreviousCamera = true;
     if (_currentJitter.x != 0.0f || _currentJitter.y != 0.0f) {
         _jitterSampleIndex = (_jitterSampleIndex + 1u) % kJitterSampleCount;
     } else {
-        // Navigation/cut frames do not consume the sequence. Restarting from
-        // a known low-discrepancy phase avoids a random-looking jump when the
-        // camera settles.
+        // Bootstrap/cut frames have no history and do not consume the sequence.
         _jitterSampleIndex = 0u;
     }
     _preparedThisFrame = false;
@@ -467,7 +479,7 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
     if (!_firstDispatchLogged) {
         std::fprintf(stderr,
                      "[TAAPass] first dispatch view=%u size=%ux%u "
-                     "history=RGBA16F reprojection=MotionVector/fallbackWorldPos\n",
+                     "history=RGBA16F fixedGrid=1 reprojection=UnjitteredMotionDepth\n",
                      static_cast<unsigned>(kTaaViewId),
                      static_cast<unsigned>(ctx.viewportWidth),
                      static_cast<unsigned>(ctx.viewportHeight));
@@ -532,7 +544,6 @@ void TAAPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     const auto jitter = uniform("taaJitter");
     const auto depthParams = uniform("taaDepthParams");
     const auto currentVp = uniform("currentViewProjection");
-    const auto previous = uniform("previousViewProjection");
     if (!program.isValid()
         || current == ayt::shader::InvalidBinding
         || history == ayt::shader::InvalidBinding
@@ -543,8 +554,7 @@ void TAAPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
         || params == ayt::shader::InvalidBinding
         || jitter == ayt::shader::InvalidBinding
         || depthParams == ayt::shader::InvalidBinding
-        || currentVp == ayt::shader::InvalidBinding
-        || previous == ayt::shader::InvalidBinding) {
+        || currentVp == ayt::shader::InvalidBinding) {
         constexpr uint16_t kRetryIntervalFrames = 120;
         _programRetryFrames = kRetryIntervalFrames;
         std::fprintf(stderr,
@@ -567,13 +577,25 @@ void TAAPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     _uTaaJitter = jitter;
     _uTaaDepthParams = depthParams;
     _uCurrentViewProjection = currentVp;
-    _uPreviousViewProjection = previous;
     _programRetryFrames = 0;
+}
+
+void TAAPass::finishFrame(MotionVectorPass* motion) noexcept
+{
+    if (!_producedThisFrame) {
+        invalidateHistory();
+        if (motion != nullptr) {
+            motion->invalidateHistory();
+        }
+    } else if (motion != nullptr && !motion->producedThisFrame()) {
+        motion->invalidateHistory();
+    }
 }
 
 void TAAPass::invalidateHistory() noexcept
 {
     _historyValid = false;
+    _producedThisFrame = false;
     _preparedThisFrame = false;
     _readHistoryIndex = 0;
     _writeHistoryIndex = 1;
@@ -582,8 +604,6 @@ void TAAPass::invalidateHistory() noexcept
     _hasPreviousCamera = false;
     _backgroundHistoryValid = false;
     _currentJitter = {};
-    _previousJitter = {};
-    _previousViewProjection = ayt::math::Float4x4::identity();
 }
 
 void TAAPass::destroyHistory(BGFXAdapter& adapter)
@@ -614,7 +634,6 @@ void TAAPass::destroyResources(BGFXAdapter& adapter)
     _uTaaJitter = ayt::shader::InvalidBinding;
     _uTaaDepthParams = ayt::shader::InvalidBinding;
     _uCurrentViewProjection = ayt::shader::InvalidBinding;
-    _uPreviousViewProjection = ayt::shader::InvalidBinding;
     _programRetryFrames = 0;
     _firstDispatchLogged = false;
 }

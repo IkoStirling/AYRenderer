@@ -87,8 +87,8 @@ struct DrawItem {
     // Bounds for validating boneRemap. Required whenever boneRemap is set.
     uint32_t                   skeletonJointCount = 0;
     // Stable host-side identity used only to match this draw with its
-    // previous rendered frame. Zero keeps the legacy/static fallback: camera
-    // motion is available, but rigid/skinned object motion cannot be tracked.
+    // previous rendered frame. Zero disables temporal history for this draw:
+    // without identity, static and moving surfaces cannot be distinguished.
     // Multiple submeshes of one object should share the same id.
     uint64_t                   motionObjectId = 0;
 };

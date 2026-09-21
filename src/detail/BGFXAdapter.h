@@ -104,7 +104,7 @@ public:
         uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
     // Standalone render-target texture. Unlike createDynamicTexture2D this
     // preserves the caller-selected format and is intended to be borrowed by
-    // an FBO shell (for example RG16F motion vectors + GBuffer depth).
+    // an FBO shell (for example temporal surface data + GBuffer depth).
     bgfx::TextureHandle createRenderTargetTexture2D(
         uint16_t width, uint16_t height,
         bgfx::TextureFormat::Enum format,
@@ -236,7 +236,7 @@ public:
     void setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding = false,
                               bool lineList = false);
     // Color-only replay against an existing depth attachment. Used by the
-    // MotionVector pass: preserve GBuffer depth, write RG velocity only.
+    // MotionVector pass: preserve GBuffer depth, write RGBA temporal data.
     void setStateColorLEQUAL(bool doubleSided, bool reverseWinding = false);
     // Small editor orientation widget: depth-clear is scoped to its own
     // sub-rect, then this state gives the procedural arrows correct

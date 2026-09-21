@@ -14,6 +14,8 @@
 namespace ayt::render::detail
 {
 
+class MotionVectorPass;
+
 struct TaaJitter final {
     float x = 0.0f;
     float y = 0.0f;
@@ -29,8 +31,9 @@ ayt::math::Float4x4 taaApplyProjectionJitter(
     uint16_t height) noexcept;
 
 // Deferred temporal AA. MotionVectorPass supplies rigid and skinned velocity;
-// GBuffer world-position reprojection remains a fail-soft fallback for custom
-// pipelines or shader/target allocation failures.
+// Output and history use the fixed (unjittered) grid. Missing temporal surface
+// data fails closed to reconstructed current color, never camera-only motion
+// for an object whose previous transform is unknown.
 class TAAPass final : public RenderPass {
 public:
     static constexpr uint8_t kTaaViewId = 5;
@@ -48,9 +51,9 @@ public:
     std::string_view name() const override { return "TAA"; }
     uint32_t execute(PassExecContext& ctx) override;
 
-    // Called before scene submission. Jitter is exposed only when every
-    // resolve dependency is ready, so shader/FBO failures cannot leave the
-    // renderer in a jitter-without-resolve state.
+    // Called before scene submission after Renderer gates the enabled chain.
+    // Checks this pass's shader/geometry/history allocation. Upstream execution
+    // failures are handled by finishFrame; preparation cannot predict them.
     bool prepareFrame(BGFXAdapter& adapter,
                       ayt::shader::ShaderResourcePool& pool,
                       const ayt::math::Float4x4& view,
@@ -65,10 +68,12 @@ public:
     bgfx::FrameBufferHandle writeHistoryFbo() const noexcept;
     bool historyValid() const noexcept { return _historyValid; }
     bool preparedThisFrame() const noexcept { return _preparedThisFrame; }
+    bool producedThisFrame() const noexcept { return _producedThisFrame; }
     uint32_t jitterSampleIndex() const noexcept { return _jitterSampleIndex; }
     TaaJitter currentJitter() const noexcept { return _currentJitter; }
 
     void invalidateHistory() noexcept;
+    void finishFrame(MotionVectorPass* motion) noexcept;
     void destroyResources(BGFXAdapter& adapter);
 
 private:
@@ -92,7 +97,6 @@ private:
     ayt::shader::BindingId _uTaaJitter = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uTaaDepthParams = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uCurrentViewProjection = ayt::shader::InvalidBinding;
-    ayt::shader::BindingId _uPreviousViewProjection = ayt::shader::InvalidBinding;
 
     std::array<bgfx::FrameBufferHandle, 2> _history = {
         bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE},
@@ -106,10 +110,10 @@ private:
     uint32_t _stableFrameCount = 0;
     bool _historyValid = false;
     bool _preparedThisFrame = false;
+    bool _producedThisFrame = false;
     bool _hasPreviousCamera = false;
     bool _backgroundHistoryValid = false;
     TaaJitter _currentJitter{};
-    TaaJitter _previousJitter{};
 
     ayt::math::Float4x4 _jitteredProjection =
         ayt::math::Float4x4::identity();
@@ -120,8 +124,6 @@ private:
     ayt::math::Float4x4 _currentBaseProjection =
         ayt::math::Float4x4::identity();
     ayt::math::FVector3 _currentCameraPosition{};
-    ayt::math::Float4x4 _previousViewProjection =
-        ayt::math::Float4x4::identity();
     ayt::math::Float4x4 _previousBaseView =
         ayt::math::Float4x4::identity();
     ayt::math::Float4x4 _previousBaseProjection =

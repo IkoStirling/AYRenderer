@@ -408,7 +408,7 @@ enum class RenderPassSlot : uint8_t {
     // runtime AA knobs keep TAA/FXAA/SMAA mutually exclusive.
     TAA = 19,
 
-    // Deferred-only RG16F screen-space velocity producer. Append-only ABI
+    // Deferred-only RGBA16F velocity/previous-depth/validity producer. Append-only ABI
     // value 20. It replays opaque geometry after GBuffer while borrowing the
     // GBuffer depth attachment, and is requested only by temporal consumers
     // such as TAA.

@@ -1201,10 +1201,16 @@ void Renderer::render(const RenderScene& scene)
         taaPassPtr = taa;
         // Current TAA reprojection requires the Deferred GBuffer. Forward
         // pipelines intentionally keep their stable, unjittered path.
-        const bool deferredInputsMounted =
-            _impl->pipeline.findPass<detail::GBufferPass>() != nullptr
-            && _impl->pipeline.findPass<detail::LightingPass>() != nullptr;
-        if (deferredInputsMounted) {
+        const auto* gbuffer = _impl->pipeline.findPass<detail::GBufferPass>();
+        const auto* lighting = _impl->pipeline.findPass<detail::LightingPass>();
+        const auto* post = _impl->pipeline.findPass<detail::PostProcessPass>();
+        const auto* present = _impl->pipeline.findPass<detail::PresentPass>();
+        // Match the final graph's resolve prerequisites before modifying the
+        // scene projection. Mounting a disabled producer is not sufficient.
+        const bool temporalChainEnabled = gbuffer && gbuffer->isEnabled()
+            && lighting && lighting->isEnabled()
+            && post && post->isEnabled() && present && present->isEnabled();
+        if (temporalChainEnabled) {
             taaPrepared = taaPassPtr->prepareFrame(
                 _impl->adapter,
                 _impl->shaderPool,
@@ -1213,6 +1219,9 @@ void Renderer::render(const RenderScene& scene)
                 _impl->mainCameraPosition,
                 _impl->viewportW,
                 _impl->viewportH);
+        }
+        if (!taaPrepared) {
+            taaPassPtr->invalidateHistory();
         }
     }
 
@@ -1323,6 +1332,11 @@ void Renderer::render(const RenderScene& scene)
         // Motion vectors are a temporal dependency, not an always-on fifth
         // GBuffer MRT. Allocate/replay only when TAA resolved successfully.
         motion->setRequestedThisFrame(taaPrepared);
+        const detail::TaaJitter jitter = taaPrepared
+            ? taaPassPtr->currentJitter() : detail::TaaJitter{};
+        motion->setProjectionJitter(
+            _impl->viewportW ? jitter.x / _impl->viewportW : 0.0f,
+            _impl->viewportH ? jitter.y / _impl->viewportH : 0.0f);
     }
 
     // §P5 B5 (2026-07-22) — broadcast viewport size to LightingPass
@@ -1696,6 +1710,13 @@ void Renderer::render(const RenderScene& scene)
     // cleanly when the adapter is uninitialized or Noop.
     detail::configureRenderViewOrder(_impl->adapter);
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
+    // Commit temporal state as a pair. A skipped/failed resolve must not
+    // leave color at t-2 while motion advances to t-1; a failed motion pass
+    // must likewise never reuse its old object snapshots on the next frame.
+    if (taaPassPtr != nullptr) {
+        taaPassPtr->finishFrame(
+            _impl->pipeline.findPass<detail::MotionVectorPass>());
+    }
 
     // §5.5 cleanup (2026-07-22) — the F1-diagnostic lastFrameShadowFbo
     // cache update is removed. Consumers that need the current shadow

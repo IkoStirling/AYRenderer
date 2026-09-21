@@ -1,5 +1,17 @@
 # AYRenderer Design
 
+## 2026-09-21 — TAA 固定输出网格与历史表面验证修正
+
+- v7 明确区分原始 jitter 输入与固定输出/history 网格：当前颜色及几何输入在 `outputUv + currentJitterUv` 查询，历史在 `outputUv - unjitteredVelocity` 查询；3×3 YCoCg 邻域限制不再被当作当前颜色重建。当前重建以双线性为基线，后续锐利滤波另行验收。
+- MotionVector v4 使用 `RGBA16F`：RG 为不含投影 jitter 的 Current−Previous UV，B 为上一帧同一刚体/骨骼表面的 NDC 深度，A 为历史有效标记。清屏、缺失身份、新对象和未覆盖的 draw 均无效，不再把缺失数据解释成静止。代价是速度目标从 4 增至 8 bytes/pixel；仅时间消费者启用时分配。
+- 深度仍存放在 history alpha（天空为 −1），但按四个 texel 中心分别验证，再仅对有效 RGB tap 做双线性加权与归一化。禁止先把天空标记和几何深度插值后再比较；动态深度来自 MotionVector 的上一帧变形表面，不再以当前世界位置代替。
+- 相机移动时保留 jitter，失效历史返回固定网格重建后的当前颜色；天空在相机运动时仍拒绝历史，尚未实现天空旋转重投影。准备阶段检查 GBuffer/Lighting/PostProcess/Present 均启用，帧末将失败的 TAA 与 Motion 历史成对失效，防止颜色和运动错帧。
+- WorldLit2D、透明及其他未覆盖对象的完整运动重放尚未实现。WorldLit2D 几何缺少有效 velocity 时保守拒绝历史；不再使用对动态对象不可靠的 world-position 相机运动回退。透明叠加和 SceneOverlay 的多层运动仍是独立后续工作。
+- 新增可选 `AYRenderer_TAAGpu`：在独立进程设置 `AY_TAA_GPU_TEST=d3d11` 或 `d3d12`，创建隐藏测试窗口，实际编译生产 Phoskia Resolve 并读回 GPU 像素。覆盖 8 相位固定网格、动态前后深度、缺失 velocity、天空混合 tap、遮挡拒绝、无历史及越界。普通全量测试明确跳过该硬件用例，不能用普通测试数替代 GPU 验收。
+- 本轮不迁移 HDR/Tonemap 顺序、不增加 Catmull–Rom、variance clipping 或速度膨胀；当前仍为 LDR TAA。Shader 缓存键升级，旧 v6/v3 二进制不复用。
+- 验收边界：上述合成输入 GPU 测试不替代编辑器整场景视觉、真实几何 MotionVector 光栅化和右键 WASD 回归；编辑器移动闪退不能由 Shader 单测通过宣称已解决。
+- 本轮结果：VS 2026 Insider x64 Debug 构建；TAA 190/190、MotionVector 50/50、Renderer 全量 4458/4458；独立 D3D11 与 D3D12 GPU Resolve 读回各 158/158。GPU 用例不依赖编辑器前台操作，不改变用户场景或配置。
+
 > **2026-09-09 — WorldLit2D 第四刀（Shadow caster）**：ShadowCaster
 > 不再粗暴跳过所有 `DrawPayload2D`；SceneOverlay 仍完全排除，
 > WorldLit Sprite/Tilemap 则使用 alpha-mask caster 写入现有多光源
@@ -1233,4 +1245,4 @@ include/AYRenderer/
 
 ### 下一步
 
-TAA 已接入独立 RG16F MotionVector，覆盖 opaque 刚体、Transform 与骨骼动画，并保留静态 world-position 回退。下一步应在 D3D11 Editor 验证静止收敛、相机运动、动态角色、对象生成/删除、Edit/Play 切换、resize/camera-cut 与透明物体边界；再以 capture 数据决定是否增加速度膨胀、透明 velocity、reactive mask 或 Motion Blur。
+TAA 当前契约以本页 2026-09-21 记录为准：固定输出网格、RGBA16F 运动/前帧深度/有效标记、逐 tap 历史验证和失败帧联动失效。下一步应在 D3D11 Editor 验证静止收敛、相机运动、动态角色、对象生成/删除、Edit/Play 切换、resize/camera-cut 与透明物体边界，并补齐 WorldLit2D 的运动重放；再以 capture 数据决定是否增加速度膨胀、透明 velocity、reactive mask 或 Motion Blur。

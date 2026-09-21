@@ -72,7 +72,7 @@ constexpr std::array<RenderPassResourceRead, 1> kMotionVectorReads = {{
     required(Id::GBufferDepth),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kMotionVectorWrites = {{
-    output(Id::MotionVectors, Life::Persistent, Format::RG16F),
+    output(Id::MotionVectors, Life::Persistent, Format::RGBA16F),
 }};
 constexpr std::array<RenderPassResourceRead, 4> kSsaoReads = {{
     required(Id::GBufferNormal),
