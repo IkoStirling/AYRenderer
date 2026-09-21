@@ -146,7 +146,14 @@ R6-3c 验证：FrameGraph 可裁剪 slot 不进入 `execute()`；禁用、正常
 - 保留既有 view 245 的 TAA Final、History rejection、History weight、Clipping difference、Motion 与 Reprojected history 模式，原始 history 通道用于补齐资源级观察，不复制 resolve 诊断。
 - Phoskia IR 与 Windows D3D11 `s_5_0` 生产编译定向回归通过；全量 `AYRenderer_Test` 为 4694/4694，`AYEditorShell_Demo` 链接通过。Noop 空后处理图的诊断预期同步修正为 declared/live 0/0，不把 CPU-only 管线节点伪装成 FrameGraph 节点。
 
-下一步：按 [`d3d11-capture-checklist.md`](d3d11-capture-checklist.md) 执行固定场景 capture，并记录 MRT、Shadow、Bloom、Haze、SSAO、TAA、透明与 resize 的资源/时序证据。本机当前未安装 RenderDoc，因此 R6-6 真 GPU 门禁仍保持开放，不以 shader 编译、Noop 单测或普通截图代替。
+D3D11 基线 capture（2026-09-21，部分完成）：
+
+- RenderDoc 1.46 在 1536×912 窗口、1083×594 视口和 4×MSAA 下连续捕获三个正常帧；主链覆盖 Shadow、Skybox、GBuffer、MotionVector、SSAO、Lighting、DepthHaze、Transparent、Bloom、PostProcess、TAA、Present 与 Editor/UI overlay。
+- 抓帧确认 MRT/Depth、Motion、SSAO、HDR scene、Bloom、FinalLdr 与 TAA history 的尺寸和格式符合契约；生产者先写、消费者后读，没有发现主链倒序。
+- TAA history 在 frame 24490/24663/24686 依次执行 A←B、B←A、A←B，且 Present 读取同帧 resolve 输出；静态 history ping-pong 门禁已关闭。
+- 完整证据见 [`d3d11-capture-report-2026-09-21.md`](d3d11-capture-report-2026-09-21.md)。resize、camera cut、效果关闭/重开、diagnostic channels、raw texture 像素内容及多灯 Shadow 尚未 capture，因此 R6-6 真 GPU 门禁仍保持开放。
+
+下一步：按 [`d3d11-capture-checklist.md`](d3d11-capture-checklist.md) 补齐动态/失效场景 capture；D3D12 仍只要求启动失败可报告且不闪退，不以本次 D3D11 正常帧替代后端专项验证。
 
 ## 4. 新画质能力的恢复顺序
 

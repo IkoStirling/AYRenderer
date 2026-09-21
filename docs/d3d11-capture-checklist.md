@@ -37,4 +37,9 @@ For each item, save the capture filename, commit, backend, dimensions, relevant 
 - resize, camera cut, toggles, and missing resources fail safely without stale output;
 - the final image and diagnostic views agree with the documented resource semantics.
 
-RenderDoc was not installed on the development machine when this checklist was added. The code and automated checks prepare the capture points, but the gate remains open until a real capture is attached to this record.
+The first real baseline capture is recorded in
+[`d3d11-capture-report-2026-09-21.md`](d3d11-capture-report-2026-09-21.md).
+It closes the normal-frame ordering, format, binding, and static TAA ping-pong
+checks. Resize, camera cut, disabled/re-enabled effects, diagnostic views, raw
+resource pixel inspection, and multi-light Shadow remain open, so the overall
+R6-6 D3D11 gate is not yet closed.

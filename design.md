@@ -1,5 +1,14 @@
 # AYRenderer Design
 
+## 2026-09-21 — R6-6 D3D11 基线抓帧（部分门禁通过）
+
+- 使用 RenderDoc 1.46 对 Renderer `dd6599d` / root `9ab3998` 的 `AYEditorShell_Demo --renderer d3d11` 连续捕获 frame 24490、24663、24686。最后一帧窗口为 1536×912、编辑视口为 1083×594、swapchain 为 RGBA8 4×MSAA；捕获可解码并导出结构化 XML，最终缩略图完整。
+- GPU 事件顺序为 Shadow atlas clear/caster → Skybox → GBuffer → MotionVector → SSAO → Lighting → DepthHaze → Transparent → selection mask → Bloom extract/H/V → PostProcess → TAA → Present → selection composite/editor overlay/UI。主链未发现 producer/consumer 倒序。
+- 实际格式与契约一致：四 MRT 为 RGBA8、RGBA8、RGBA16F、RGBA8，Depth 为 R24G8 typeless/D24S8；Motion RGBA16F、SSAO RGBA8、Lighting/Haze/Bloom RGBA16F、FinalLdr RGBA8、TAA history RGBA16F。
+- 三帧直接证明 TAA 双 history 正确 ping-pong：24490 写 3632/读 3636，24663 写 3636/读 3632，24686 写 3632/读 3636；Present 每帧采样刚写完的 history target，没有 history 自读自写。
+- 本次只关闭正常主链的顺序、格式、绑定和静态 TAA ping-pong。resize、camera cut、效果关闭/重开、diagnostic channel、raw texture 像素内容和多灯 Shadow 仍需后续 capture，R6-6 总门禁保持开放。证据与逐 Pass 表见 [`docs/d3d11-capture-report-2026-09-21.md`](docs/d3d11-capture-report-2026-09-21.md)。
+- bgfx 会把 RenderDoc 热键覆盖为 F11、关闭 in-app overlay，并把输出模板覆盖为工作目录下 `temp/bgfx`；F12 无响应是既定集成行为，不是注入失败。
+
 ## 2026-09-21 — R6-6 第二刀：延迟纹理调试入口
 
 - 复用现有 view 250 的 `GBufferDebugPass`，保留 0–5 的 GBuffer 通道数值并 append-only 增加 6 MotionVectors、7 SSAO Occlusion、8 TAA History、9 Shadow Atlas；公开 byte channel API 不变，旧宿主不会发生枚举重排。
