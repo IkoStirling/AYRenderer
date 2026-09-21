@@ -8,6 +8,7 @@
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
+#include "detail/RenderResourceBlackboard.h"
 #include "detail/SceneColorPipeline.h"
 
 #include <cstdio>
@@ -66,6 +67,11 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
     if (!BGFXAdapter::isValid(target)) {
         return 0;
     }
+    const bgfx::TextureHandle outputTexture =
+        adapter.getFboAttachment(target, 0);
+    if (!BGFXAdapter::isValid(outputTexture)) {
+        return 0;
+    }
 
     // resetFrameState() makes the shared selector return the underlying scene;
     // later consumers select HazeSource only after this submit succeeds.
@@ -76,16 +82,23 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
     }
     const bgfx::TextureHandle sceneColor =
         adapter.getFboAttachment(sourceFbo, 0);
+    BlackboardGBufferView blackboardGBuffer;
+    const bool useBlackboard = ctx.resourceBlackboard != nullptr;
+    const bool blackboardReady = useBlackboard
+        && ctx.resourceBlackboard->resolveGBuffer(blackboardGBuffer);
+    const bool legacyReady = !useBlackboard && ctx.gbufferPass != nullptr
+        && ctx.gbufferPass->producedThisFrame();
     if (!BGFXAdapter::isValid(sceneColor)
-        || ctx.gbufferPass == nullptr
-        || !ctx.gbufferPass->producedThisFrame()) {
+        || (!blackboardReady && !legacyReady)) {
         return 0;
     }
 
-    const bgfx::TextureHandle worldPosition =
-        ctx.gbufferPass->gbufferWorldPositionRt();
-    const bgfx::TextureHandle geometryCoverage =
-        ctx.gbufferPass->gbufferMaterialRt();
+    const bgfx::TextureHandle worldPosition = blackboardReady
+        ? blackboardGBuffer.worldPosition
+        : ctx.gbufferPass->gbufferWorldPositionRt();
+    const bgfx::TextureHandle geometryCoverage = blackboardReady
+        ? blackboardGBuffer.material
+        : ctx.gbufferPass->gbufferMaterialRt();
     if (!BGFXAdapter::isValid(worldPosition)
         || !BGFXAdapter::isValid(geometryCoverage)) {
         return 0;
@@ -146,6 +159,13 @@ uint32_t DepthHazePass::execute(PassExecContext& ctx)
     submit.state = 0;
     _program.submit(submit);
     _producedThisFrame = true;
+    ctx.frameGraph->markProduced(FgResourceId::HazeColor);
+    if (ctx.resourceBlackboard != nullptr) {
+        ctx.resourceBlackboard->publishProduced(
+            BlackboardResourceId::DepthHazeColor,
+            BlackboardResourceLifetime::Transient,
+            target, outputTexture, ctx.viewportWidth, ctx.viewportHeight, 0);
+    }
     return 1;
 }
 

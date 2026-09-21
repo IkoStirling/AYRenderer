@@ -693,6 +693,8 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
 
     invalidateTemporalResources(
         detail::ResourceInvalidationReason::PipelineRebuild);
+    resourceBlackboard.invalidateFrameOutputs(
+        detail::ResourceInvalidationReason::PipelineRebuild);
 
     UIRenderBackend* retainedUi = nullptr;
     if (detail::UIPass* uiPass = pipeline.findPass<detail::UIPass>()) {
@@ -1456,6 +1458,16 @@ void Renderer::render(const RenderScene& scene)
         _impl->pipeline.findPass<detail::GBufferPass>();
     if (gbufferPassPtr != nullptr) {
         gbufferPassPtr->resetFrameState();
+        _impl->resourceBlackboard.publishGBuffer(
+            gbufferPassPtr->gbufferFbo(),
+            gbufferPassPtr->gbufferAlbedoRt(),
+            gbufferPassPtr->gbufferNormalRt(),
+            gbufferPassPtr->gbufferWorldPositionRt(),
+            gbufferPassPtr->gbufferMaterialRt(),
+            gbufferPassPtr->gbufferDepthRt(),
+            gbufferPassPtr->gbufferWidth(),
+            gbufferPassPtr->gbufferHeight(),
+            gbufferPassPtr->targetGeneration(), false);
     }
 
     detail::MotionVectorPass* motionVectorPassPtr =
@@ -1654,7 +1666,12 @@ void Renderer::render(const RenderScene& scene)
         graphInput.taaReadHistory = taaRead != nullptr
             ? taaRead->framebuffer
             : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
-        graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
+        const detail::BlackboardResourceEntry* gbuffer =
+            _impl->resourceBlackboard.find(
+                detail::BlackboardResourceId::GBufferAlbedo);
+        graphInput.gbuffer = gbuffer != nullptr
+            ? gbuffer->framebuffer
+            : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
         const detail::BlackboardResourceEntry* motion =
             _impl->resourceBlackboard.find(
                 detail::BlackboardResourceId::MotionVectors);
@@ -1840,6 +1857,8 @@ void Renderer::resize(uint32_t width, uint32_t height)
     }
 
     _impl->invalidateTemporalResources(
+        detail::ResourceInvalidationReason::Resize);
+    _impl->resourceBlackboard.invalidateFrameOutputs(
         detail::ResourceInvalidationReason::Resize);
 
     // Destroy offscreen RTs before bgfx::reset. Orphaning handles
@@ -2409,6 +2428,8 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
     // cannot keep a numerically-valid but device-stale handle afterward.
     if (before != requestedSamples) {
         _impl->invalidateTemporalResources(
+            detail::ResourceInvalidationReason::BackendReset);
+        _impl->resourceBlackboard.invalidateFrameOutputs(
             detail::ResourceInvalidationReason::BackendReset);
         if (detail::BGFXAdapter::isValid(_impl->sceneFbo)) {
             _impl->adapter.destroy(_impl->sceneFbo);

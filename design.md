@@ -1,5 +1,13 @@
 # AYRenderer Design
 
+## 2026-09-21 — R6-4 资源黑板第二刀
+
+- 黑板扩展到 GBuffer 五附件、SSAO occlusion 和 DepthHaze color。GBuffer 使用原子资源视图：任一附件未在当帧产出，或 FBO、尺寸、generation 不一致，整组就 fail-close，防止 resize/重建边界混用附件。
+- GBufferPass 在成功完成 MRT clear/draw 后发布五附件；SSAOPass 与 DepthHazePass 在成功 submit 后发布 FrameGraph-owned `Transient` 输出，并补齐 FrameGraph 的 current-frame production latch。
+- Lighting、MotionVector、TAA、SSAO、DepthHaze、Transparent、SceneColor routing 和 GBufferDebug 的生产路径已优先使用黑板。旧 `gbufferPass/ssaoPass/depthHazePass` 字段暂不从 `PassExecContext` 中删除：它们位于聚合中部，直接删除会改变大量旧 brace initializer 的字段映射；空黑板下仅作直接单测兼容。
+- pipeline rebuild、resize 和 backend reset 会失效所有已登记当帧输出；每帧边界自动清除 External/Transient 的内容有效性。新增原子组、混合 generation 拒绝与 transient 跨帧失效测试，全量 4638/4638 通过。
+- GPU 句柄所有权仍未迁移：GBufferPass 继续拥有 MRT，FrameGraph 继续拥有 SSAO/Haze target。下一刀候选是 Lighting/Skybox/Bloom logical output；Shadow 的 atlas 和光源矩阵元数据单独处理。
+
 ## 2026-09-21 — R6-4 资源黑板第一刀
 
 - 新增 renderer 内部 `RenderResourceBlackboard`，首批覆盖 MotionVector 与 TAA read/write history。黑板为每个资源记录 borrowed framebuffer/texture、尺寸、generation、`External/Transient/PersistentHistory` lifetime、当帧产出状态与内容有效性。

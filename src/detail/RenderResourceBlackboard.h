@@ -16,6 +16,13 @@ enum class BlackboardResourceId : uint8_t {
     MotionVectors = 0,
     TaaHistoryRead,
     TaaHistoryWrite,
+    GBufferAlbedo,
+    GBufferNormal,
+    GBufferWorldPosition,
+    GBufferMaterial,
+    GBufferDepth,
+    SsaoOcclusion,
+    DepthHazeColor,
     Count,
 };
 
@@ -58,10 +65,22 @@ struct BlackboardResourceEntry final {
     bool producedThisFrame = false;
 };
 
-// Read-mostly per-renderer registry. It does not own GPU handles in R6-4's
-// first cut; owners publish borrowed handles and remain responsible for
-// destruction. The registry is the single source for temporal validity and
-// current-frame production state.
+struct BlackboardGBufferView final {
+    bgfx::FrameBufferHandle framebuffer = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle albedo = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle normal = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle worldPosition = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle material = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle depth = BGFX_INVALID_HANDLE;
+    uint16_t width = 0;
+    uint16_t height = 0;
+    uint32_t generation = 0;
+};
+
+// Read-mostly per-renderer registry. It does not own GPU handles in R6-4;
+// pass/FrameGraph owners publish borrowed handles and remain responsible for
+// destruction. The registry is the single source for temporal validity,
+// coherent GBuffer attachment groups, and current-frame production state.
 class RenderResourceBlackboard final {
 public:
     void beginFrame() noexcept;
@@ -77,14 +96,37 @@ public:
                  ResourceInvalidationReason invalidReason =
                      ResourceInvalidationReason::AwaitingProducer) noexcept;
 
+    void publishProduced(BlackboardResourceId id,
+                         BlackboardResourceLifetime lifetime,
+                         bgfx::FrameBufferHandle framebuffer,
+                         bgfx::TextureHandle texture,
+                         uint16_t width,
+                         uint16_t height,
+                         uint32_t generation) noexcept;
+
+    void publishGBuffer(bgfx::FrameBufferHandle framebuffer,
+                        bgfx::TextureHandle albedo,
+                        bgfx::TextureHandle normal,
+                        bgfx::TextureHandle worldPosition,
+                        bgfx::TextureHandle material,
+                        bgfx::TextureHandle depth,
+                        uint16_t width,
+                        uint16_t height,
+                        uint32_t generation,
+                        bool produced) noexcept;
+
     void markProduced(BlackboardResourceId id) noexcept;
     void invalidate(BlackboardResourceId id,
                     ResourceInvalidationReason reason) noexcept;
     void invalidateTemporal(ResourceInvalidationReason reason) noexcept;
+    void invalidateFrameOutputs(ResourceInvalidationReason reason) noexcept;
     void clear(ResourceInvalidationReason reason) noexcept;
 
     const BlackboardResourceEntry* find(
         BlackboardResourceId id) const noexcept;
+    const BlackboardResourceEntry* findProduced(
+        BlackboardResourceId id) const noexcept;
+    bool resolveGBuffer(BlackboardGBufferView& view) const noexcept;
     bool producedThisFrame(BlackboardResourceId id) const noexcept;
     uint64_t frameNumber() const noexcept { return _frameNumber; }
 

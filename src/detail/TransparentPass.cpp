@@ -7,6 +7,7 @@
 #include "detail/SkyboxPass.h"
 #include "detail/DepthHazePass.h"
 #include "detail/FrameDrawLists.h"
+#include "detail/RenderResourceBlackboard.h"
 #include "detail/SceneColorPipeline.h"
 
 #include "AYRenderer/RenderTypes.h"
@@ -390,8 +391,11 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
     // Built-in PBR transparents evaluate fog from their own fragment world
     // position after opaque haze has completed. Optional bindings keep custom
     // shaders source-compatible; an absent uniform simply skips this feature.
-    const bool hazeActive = ctx.depthHazePass != nullptr
-        && ctx.depthHazePass->producedThisFrame();
+    const bool hazeActive = ctx.resourceBlackboard != nullptr
+        ? ctx.resourceBlackboard->findProduced(
+              BlackboardResourceId::DepthHazeColor) != nullptr
+        : ctx.depthHazePass != nullptr
+            && ctx.depthHazePass->producedThisFrame();
     const float depthHaze[4] = {
         frame.hazeDensity,
         hazeActive ? frame.hazeStrength : 0.0f,
@@ -579,10 +583,15 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         return 0;
     }
 
+    BlackboardGBufferView blackboardGBuffer;
+    const bool gbufferProduced = ctx.resourceBlackboard != nullptr
+        ? ctx.resourceBlackboard->resolveGBuffer(blackboardGBuffer)
+        : ctx.gbufferPass != nullptr
+            && ctx.gbufferPass->producedThisFrame();
     const TransparentRoute route = selectTransparentRoute(
         ctx.gbufferPass != nullptr,
         ctx.lightingPass != nullptr,
-        ctx.gbufferPass != nullptr && ctx.gbufferPass->producedThisFrame(),
+        gbufferProduced,
         ctx.lightingPass != nullptr && ctx.lightingPass->producedThisFrame(),
         ctx.lightingPass != nullptr
             && BGFXAdapter::isValid(ctx.lightingPass->lightingOutputFbo()));
@@ -623,7 +632,8 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
             selectSceneColorSourceFbo(ctx);
         const bgfx::TextureHandle color =
             adapter.getFboAttachment(lightingFbo, 0);
-        const bgfx::TextureHandle depth = ctx.gbufferPass->gbufferDepthRt();
+        const bgfx::TextureHandle depth = ctx.resourceBlackboard != nullptr
+            ? blackboardGBuffer.depth : ctx.gbufferPass->gbufferDepthRt();
         compositeFbo = ensureDeferredCompositeFbo(adapter, color, depth);
         borrowedDepth = BGFXAdapter::isValid(compositeFbo);
         if (!borrowedDepth) {

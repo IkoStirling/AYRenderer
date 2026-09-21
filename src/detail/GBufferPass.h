@@ -6,9 +6,9 @@
 //   RT2 RGBA16F world position.xyz, packed(AO, material model).a
 //   RT3 RGBA8   emissive.rgb, independent geometry coverage.a
 //   D24S8       opaque/cutout depth
-// Consumers borrow attachment handles through PassExecContext. Allocation
-// readiness and current-frame production are separate contracts so stale
-// attachments never masquerade as fresh pass output.
+// Production consumers resolve one coherent attachment set through the
+// renderer resource blackboard. Direct pass tests retain the legacy
+// PassExecContext producer pointer as a compatibility path.
 
 #include "detail/BGFXAdapter.h"
 #include "detail/GBufferLayout.h"
@@ -82,6 +82,9 @@ public:
     bgfx::TextureHandle     gbufferDepthRt()  const noexcept { return _gbufferDepthRt; }
     uint16_t                gbufferWidth() const noexcept { return _gbufferW; }
     uint16_t                gbufferHeight() const noexcept { return _gbufferH; }
+    uint32_t                targetGeneration() const noexcept {
+        return _targetGeneration;
+    }
 
     // §P5 B4a (2026-07-22) �?build stamp pointer (mirror
     // ShadowMapResources.h:55 `const char* _buildStamp` shape).
@@ -146,6 +149,7 @@ private:
     uint16_t                _gbufferH         = 0;
     uint16_t                _allocatedW       = 0;
     uint16_t                _allocatedH       = 0;
+    uint32_t                _targetGeneration = 0;
 
     // §P5 B4a (2026-07-22) �?internal ensure (mirror
     // ShadowMapResources::ensure shape). Calls

@@ -474,9 +474,18 @@ bgfx::FrameBufferHandle TAAPass::writeHistoryFbo() const noexcept
 uint32_t TAAPass::execute(PassExecContext& ctx)
 {
     if (!_preparedThisFrame || ctx.frameGraph == nullptr
-        || ctx.gbufferPass == nullptr
-        || !ctx.gbufferPass->producedThisFrame()
         || !ctx.frameGraph->semanticProducedThisFrame(FgSemantic::PresentSource)) {
+        return 0;
+    }
+
+    BlackboardGBufferView blackboardGBuffer;
+    const bool useBlackboard = ctx.resourceBlackboard != nullptr;
+    const bool blackboardGBufferReady = useBlackboard
+        && ctx.resourceBlackboard->resolveGBuffer(blackboardGBuffer);
+    const bool legacyGBufferReady = !useBlackboard
+        && ctx.gbufferPass != nullptr
+        && ctx.gbufferPass->producedThisFrame();
+    if (!blackboardGBufferReady && !legacyGBufferReady) {
         return 0;
     }
 
@@ -508,11 +517,13 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
     const bgfx::TextureHandle currentColor = adapter.getFboAttachment(source, 0);
     const bgfx::TextureHandle historyColor =
         adapter.getFboAttachment(readHistory, 0);
-    const bgfx::TextureHandle worldPosition =
-        ctx.gbufferPass->gbufferWorldPositionRt();
-    const bgfx::TextureHandle geometryData =
-        ctx.gbufferPass->gbufferMaterialRt();
-    const bgfx::TextureHandle sceneDepth = ctx.gbufferPass->gbufferDepthRt();
+    const bgfx::TextureHandle worldPosition = blackboardGBufferReady
+        ? blackboardGBuffer.worldPosition
+        : ctx.gbufferPass->gbufferWorldPositionRt();
+    const bgfx::TextureHandle geometryData = blackboardGBufferReady
+        ? blackboardGBuffer.material : ctx.gbufferPass->gbufferMaterialRt();
+    const bgfx::TextureHandle sceneDepth = blackboardGBufferReady
+        ? blackboardGBuffer.depth : ctx.gbufferPass->gbufferDepthRt();
     const BlackboardResourceEntry* motionEntry = ctx.resourceBlackboard
         ? ctx.resourceBlackboard->find(BlackboardResourceId::MotionVectors)
         : nullptr;

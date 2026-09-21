@@ -82,4 +82,75 @@ TEST_CASE(temporal_invalidation_records_one_explicit_reason)
               ResourceInvalidationReason::Resize)) == "resize");
 }
 
+TEST_CASE(gbuffer_resolves_only_as_one_coherent_current_frame_set)
+{
+    RenderResourceBlackboard blackboard;
+    blackboard.beginFrame();
+    blackboard.publishGBuffer(
+        bgfx::FrameBufferHandle{20},
+        bgfx::TextureHandle{21}, bgfx::TextureHandle{22},
+        bgfx::TextureHandle{23}, bgfx::TextureHandle{24},
+        bgfx::TextureHandle{25}, 1280, 720, 6, true);
+
+    BlackboardGBufferView view;
+    CHECK(blackboard.resolveGBuffer(view));
+    CHECK(view.framebuffer.idx == 20u);
+    CHECK(view.albedo.idx == 21u);
+    CHECK(view.normal.idx == 22u);
+    CHECK(view.worldPosition.idx == 23u);
+    CHECK(view.material.idx == 24u);
+    CHECK(view.depth.idx == 25u);
+    CHECK(view.width == 1280u);
+    CHECK(view.height == 720u);
+    CHECK(view.generation == 6u);
+
+    blackboard.beginFrame();
+    CHECK_FALSE(blackboard.resolveGBuffer(view));
+}
+
+TEST_CASE(gbuffer_rejects_mixed_generation_attachments)
+{
+    RenderResourceBlackboard blackboard;
+    blackboard.beginFrame();
+    blackboard.publishGBuffer(
+        bgfx::FrameBufferHandle{30},
+        bgfx::TextureHandle{31}, bgfx::TextureHandle{32},
+        bgfx::TextureHandle{33}, bgfx::TextureHandle{34},
+        bgfx::TextureHandle{35}, 800, 600, 9, true);
+    blackboard.publishProduced(
+        BlackboardResourceId::GBufferDepth,
+        BlackboardResourceLifetime::External,
+        bgfx::FrameBufferHandle{30}, bgfx::TextureHandle{35},
+        800, 600, 10);
+
+    BlackboardGBufferView view;
+    CHECK_FALSE(blackboard.resolveGBuffer(view));
+}
+
+TEST_CASE(transient_ssao_and_haze_expire_at_frame_boundary)
+{
+    RenderResourceBlackboard blackboard;
+    blackboard.beginFrame();
+    blackboard.publishProduced(
+        BlackboardResourceId::SsaoOcclusion,
+        BlackboardResourceLifetime::Transient,
+        bgfx::FrameBufferHandle{40}, bgfx::TextureHandle{41},
+        640, 360, 0);
+    blackboard.publishProduced(
+        BlackboardResourceId::DepthHazeColor,
+        BlackboardResourceLifetime::Transient,
+        bgfx::FrameBufferHandle{42}, bgfx::TextureHandle{43},
+        640, 360, 0);
+    CHECK(blackboard.findProduced(
+        BlackboardResourceId::SsaoOcclusion) != nullptr);
+    CHECK(blackboard.findProduced(
+        BlackboardResourceId::DepthHazeColor) != nullptr);
+
+    blackboard.beginFrame();
+    CHECK(blackboard.findProduced(
+        BlackboardResourceId::SsaoOcclusion) == nullptr);
+    CHECK(blackboard.findProduced(
+        BlackboardResourceId::DepthHazeColor) == nullptr);
+}
+
 TEST_SUITE_END

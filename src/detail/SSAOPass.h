@@ -18,8 +18,9 @@ namespace ayt::render::detail
 //   - FrameGraph owns SSAOTexture;
 //   - GBuffer owns world-position, normal and geometry-coverage inputs.
 //
-// Execution order is GBuffer -> SSAO -> Lighting. Lighting consumes the
-// current-frame SSAO latch and applies it to StandardLit ambient/IBL only.
+// Execution order is GBuffer -> SSAO -> Lighting. A successful submit
+// publishes the transient occlusion texture through the resource blackboard;
+// Lighting applies it to StandardLit ambient/IBL only.
 class SSAOPass final : public RenderPass {
 public:
     // Stable ABI/debug id. RenderViewOrder places this between GBuffer view 7

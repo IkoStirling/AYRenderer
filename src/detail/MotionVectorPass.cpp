@@ -489,14 +489,20 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
         rateLimitedEarlyReturn("MotionVectorPass", "backend unavailable");
         return 0u;
     }
-    if (ctx.gbufferPass == nullptr
-        || !ctx.gbufferPass->producedThisFrame()
-        || !ctx.gbufferPass->hasValidAttachments()) {
+    BlackboardGBufferView blackboardGBuffer;
+    const bool useBlackboard = ctx.resourceBlackboard != nullptr;
+    const bool blackboardReady = useBlackboard
+        && ctx.resourceBlackboard->resolveGBuffer(blackboardGBuffer);
+    const bool legacyReady = !useBlackboard && ctx.gbufferPass != nullptr
+        && ctx.gbufferPass->producedThisFrame()
+        && ctx.gbufferPass->hasValidAttachments();
+    if (!blackboardReady && !legacyReady) {
         rateLimitedEarlyReturn("MotionVectorPass", "current GBuffer unavailable");
         return 0u;
     }
 
-    const bgfx::TextureHandle gbufferDepth = ctx.gbufferPass->gbufferDepthRt();
+    const bgfx::TextureHandle gbufferDepth = blackboardReady
+        ? blackboardGBuffer.depth : ctx.gbufferPass->gbufferDepthRt();
     ensureResources(ctx.adapter, gbufferDepth);
     ensurePrograms(ctx.pool);
     if (!BGFXAdapter::isValid(_velocityTexture)

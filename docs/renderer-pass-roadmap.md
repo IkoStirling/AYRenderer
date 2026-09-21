@@ -7,7 +7,7 @@
 
 | 阶段 | 文档 | 状态 |
 |------|------|------|
-| **R6（正在做）** | [`render-architecture-r6.md`](render-architecture-r6.md) | **唯一开工清单** — R6-1/R6-2/R6-3、R6-4 第一刀与 R6-5 第一阶段已完成 |
+| **R6（正在做）** | [`render-architecture-r6.md`](render-architecture-r6.md) | **唯一开工清单** — R6-1/R6-2/R6-3、R6-4 第一/二刀与 R6-5 第一阶段已完成 |
 | **历史 cutsheet** | [`short-term-plan.md`](short-term-plan.md)、[`frame-graph-mvp.md`](frame-graph-mvp.md) | Bloom/Haze/SSAO/FrameGraph MVP 已落地，仅供追溯 |
 | **Deferred 验收锁** | [`deferred-acceptance.md`](deferred-acceptance.md) | 已钉；回归先查此表 |
 
@@ -49,7 +49,7 @@ Deferred: Shadow → Skybox → GBuffer → MotionVector(on demand) → SSAO
 
 1. **R6-1 FrameGraph 编译契约（已完成）** — 结构校验、semantic roots、终端反向裁剪已落地。
 2. **R6-2 图计划外移（已完成）** — 后处理图声明已提取为不持有具体 Pass 的 `PostProcessGraphPlan`。
-3. **R6-4 资源黑板与历史资源（第一刀完成）** — MotionVector 和 TAA 双 history 已集中登记句柄、尺寸、generation、当帧产出与失效原因；下一步扩展到 GBuffer/SSAO/DepthHaze 等 logical output，再缩减具体 Pass 指针。
+3. **R6-4 资源黑板与历史资源（第一、二刀完成）** — MotionVector/TAA history 以及 GBuffer/SSAO/DepthHaze 已集中登记；GBuffer 五附件作为同 FBO/尺寸/generation 的原子组验证。下一步扩展 Lighting/Skybox/Bloom 的 logical output。
 4. **R6-5 DrawListBuilder（第一阶段完成）** — 几何 Pass 已共享每帧分类与稳定排序；可靠 bounds/frustum cull 和 instancing 留在后续阶段。
 5. **R6-6 诊断与 D3D11 capture** — 完成后再恢复新画质 Pass。
 

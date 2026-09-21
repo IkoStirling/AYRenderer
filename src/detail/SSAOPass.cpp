@@ -10,6 +10,7 @@
 #include "detail/LightingPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
+#include "detail/RenderResourceBlackboard.h"
 #include "detail/SSAOPipeline.h"
 
 #include <cstdio>
@@ -90,19 +91,33 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
         rateLimitedEarlyReturn("SSAOPass", "SSAOTexture resolve invalid");
         return 0;
     }
+    const bgfx::TextureHandle outputTexture =
+        adapter.getFboAttachment(target, 0);
+    if (!BGFXAdapter::isValid(outputTexture)) {
+        rateLimitedEarlyReturn("SSAOPass", "SSAOTexture attachment invalid");
+        return 0;
+    }
 
-    if (ctx.gbufferPass == nullptr
-        || !ctx.gbufferPass->producedThisFrame()) {
+    BlackboardGBufferView blackboardGBuffer;
+    const bool useBlackboard = ctx.resourceBlackboard != nullptr;
+    const bool blackboardReady = useBlackboard
+        && ctx.resourceBlackboard->resolveGBuffer(blackboardGBuffer);
+    const bool legacyReady = !useBlackboard && ctx.gbufferPass != nullptr
+        && ctx.gbufferPass->producedThisFrame();
+    if (!blackboardReady && !legacyReady) {
         rateLimitedEarlyReturn("SSAOPass", "gbuffer not produced this frame");
         return 0;
     }
 
-    const bgfx::TextureHandle worldPosRt =
-        ctx.gbufferPass->gbufferWorldPositionRt();
-    const bgfx::TextureHandle worldNrmRt =
-        ctx.gbufferPass->gbufferNormalRt();
-    const bgfx::TextureHandle coverageRt =
-        ctx.gbufferPass->gbufferMaterialRt();
+    const bgfx::TextureHandle worldPosRt = blackboardReady
+        ? blackboardGBuffer.worldPosition
+        : ctx.gbufferPass->gbufferWorldPositionRt();
+    const bgfx::TextureHandle worldNrmRt = blackboardReady
+        ? blackboardGBuffer.normal
+        : ctx.gbufferPass->gbufferNormalRt();
+    const bgfx::TextureHandle coverageRt = blackboardReady
+        ? blackboardGBuffer.material
+        : ctx.gbufferPass->gbufferMaterialRt();
     if (!BGFXAdapter::isValid(worldPosRt)
         || !BGFXAdapter::isValid(worldNrmRt)
         || !BGFXAdapter::isValid(coverageRt)) {
@@ -167,6 +182,13 @@ uint32_t SSAOPass::execute(PassExecContext& ctx)
     adapter.setStateDepthTestAlways();
     _program.submit(sub);
     _producedThisFrame = true;
+    ctx.frameGraph->markProduced(FgResourceId::SSAOTexture);
+    if (ctx.resourceBlackboard != nullptr) {
+        ctx.resourceBlackboard->publishProduced(
+            BlackboardResourceId::SsaoOcclusion,
+            BlackboardResourceLifetime::Transient,
+            target, outputTexture, viewportWidth, viewportHeight, 0);
+    }
 
     static bool s_loggedFirstDispatch = false;
     if (!s_loggedFirstDispatch) {

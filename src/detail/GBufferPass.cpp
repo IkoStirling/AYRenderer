@@ -8,6 +8,7 @@
 #include "detail/GBufferLayout.h"
 #include "detail/RasterConvention.h"
 #include "detail/RenderPass.h"
+#include "detail/RenderResourceBlackboard.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -926,6 +927,12 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     }
 
     _producedThisFrame = true;
+    if (ctx.resourceBlackboard != nullptr) {
+        ctx.resourceBlackboard->publishGBuffer(
+            _gbufferFbo, _gbufferAlbedoRt, _gbufferNormalRt,
+            _gbufferWorldPositionRt, _gbufferMaterialRt, _gbufferDepthRt,
+            _allocatedW, _allocatedH, _targetGeneration, true);
+    }
     return drawCount;
 }
 
@@ -1025,6 +1032,10 @@ void GBufferPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
         _gbufferW = width;
         _gbufferH = height;
         cacheAttachments(adapter);
+        ++_targetGeneration;
+        if (_targetGeneration == 0) {
+            ++_targetGeneration;
+        }
     }
 }
 

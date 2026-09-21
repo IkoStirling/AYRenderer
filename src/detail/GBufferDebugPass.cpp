@@ -5,6 +5,7 @@
 #include "detail/GBufferPass.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
+#include "detail/RenderResourceBlackboard.h"
 #include "detail/RenderPass.h"
 
 #include <cstdio>
@@ -114,19 +115,29 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    if (ctx.gbufferPass == nullptr
-        || !ctx.gbufferPass->producedThisFrame()
-        || !ctx.gbufferPass->hasValidAttachments()) {
+    BlackboardGBufferView blackboardGBuffer;
+    const bool useBlackboard = ctx.resourceBlackboard != nullptr;
+    const bool blackboardReady = useBlackboard
+        && ctx.resourceBlackboard->resolveGBuffer(blackboardGBuffer);
+    const bool legacyReady = !useBlackboard && ctx.gbufferPass != nullptr
+        && ctx.gbufferPass->producedThisFrame()
+        && ctx.gbufferPass->hasValidAttachments();
+    if (!blackboardReady && !legacyReady) {
         rateLimitedEarlyReturn("GBufferDebugPass", "gbuffer not produced this frame");
         return 0;
     }
 
-    const bgfx::TextureHandle albedoRt = ctx.gbufferPass->gbufferAlbedoRt();
-    const bgfx::TextureHandle normalRt = ctx.gbufferPass->gbufferNormalRt();
-    const bgfx::TextureHandle worldPosRt =
-        ctx.gbufferPass->gbufferWorldPositionRt();
-    const bgfx::TextureHandle materialRt = ctx.gbufferPass->gbufferMaterialRt();
-    const bgfx::TextureHandle depthRt = ctx.gbufferPass->gbufferDepthRt();
+    const bgfx::TextureHandle albedoRt = blackboardReady
+        ? blackboardGBuffer.albedo : ctx.gbufferPass->gbufferAlbedoRt();
+    const bgfx::TextureHandle normalRt = blackboardReady
+        ? blackboardGBuffer.normal : ctx.gbufferPass->gbufferNormalRt();
+    const bgfx::TextureHandle worldPosRt = blackboardReady
+        ? blackboardGBuffer.worldPosition
+        : ctx.gbufferPass->gbufferWorldPositionRt();
+    const bgfx::TextureHandle materialRt = blackboardReady
+        ? blackboardGBuffer.material : ctx.gbufferPass->gbufferMaterialRt();
+    const bgfx::TextureHandle depthRt = blackboardReady
+        ? blackboardGBuffer.depth : ctx.gbufferPass->gbufferDepthRt();
 
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)

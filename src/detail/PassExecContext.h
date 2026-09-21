@@ -337,8 +337,8 @@ struct PassExecContext {
 
     const BloomBlurPass* bloomBlurPass = nullptr;
 
-    // Borrowed haze producer. Consumers promote HazeSource only when this
-    // producer submitted in the current frame; nullptr fails closed.
+    // Legacy direct-test compatibility. Production consumers use the resource
+    // blackboard's DepthHazeColor entry for current-frame freshness.
     const DepthHazePass* depthHazePass = nullptr;
 
     // §F2 (2026-07-24, mid-term FG MVP F2) — borrowed, non-owning
@@ -364,6 +364,8 @@ struct PassExecContext {
     float                bloomSoftKnee  = 0.5f;
 
     // Appended to preserve every existing aggregate initializer's mapping.
+    // Production Lighting reads SsaoOcclusion from resourceBlackboard; this
+    // pointer remains for direct contexts that intentionally omit it.
     const SSAOPass*      ssaoPass       = nullptr;
 
     // Tail-appended borrowed producer pointer. MotionVectorPass executes

@@ -6,6 +6,7 @@
 #include "detail/GBufferPass.h"
 #include "detail/GpuResources.h"
 #include "detail/RenderPass.h"
+#include "detail/RenderResourceBlackboard.h"
 #include "detail/SceneLighting.h"
 #include "detail/ShadowPass.h"
 #include "detail/SSAOPass.h"
@@ -1247,11 +1248,26 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // allocating/dispatching consumers so a failed GBuffer compile, disabled
     // pass, zero viewport, or caught exception cannot feed stale MRT contents
     // into the lighting fullscreen draw.
-    if (ctx.gbufferPass == nullptr
-        || !ctx.gbufferPass->producedThisFrame()
-        || !ctx.gbufferPass->hasValidAttachments()) {
+    BlackboardGBufferView blackboardGBuffer;
+    const bool useBlackboard = ctx.resourceBlackboard != nullptr;
+    const bool blackboardGBufferReady = useBlackboard
+        && ctx.resourceBlackboard->resolveGBuffer(blackboardGBuffer);
+    const bool legacyGBufferReady = !useBlackboard
+        && ctx.gbufferPass != nullptr
+        && ctx.gbufferPass->producedThisFrame()
+        && ctx.gbufferPass->hasValidAttachments();
+    if (!blackboardGBufferReady && !legacyGBufferReady) {
         return 0;
     }
+    const bgfx::TextureHandle gbufferAlbedo = blackboardGBufferReady
+        ? blackboardGBuffer.albedo : ctx.gbufferPass->gbufferAlbedoRt();
+    const bgfx::TextureHandle gbufferNormal = blackboardGBufferReady
+        ? blackboardGBuffer.normal : ctx.gbufferPass->gbufferNormalRt();
+    const bgfx::TextureHandle gbufferWorldPosition = blackboardGBufferReady
+        ? blackboardGBuffer.worldPosition
+        : ctx.gbufferPass->gbufferWorldPositionRt();
+    const bgfx::TextureHandle gbufferMaterial = blackboardGBufferReady
+        ? blackboardGBuffer.material : ctx.gbufferPass->gbufferMaterialRt();
 
     ensure(ctx.adapter, _lightingW, _lightingH);
     if (!bgfx::isValid(_lightingFbo)) {
@@ -1314,18 +1330,15 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // WRITE_RGB | WRITE_A | DEPTH_TEST_ALWAYS + no face culling.
     ctx.adapter.setStateDepthTestAlways();
 
-    // �P5 B5 (2026-07-22) ??BIND 3 GBuffer samplers via borrowed
-    // pointer to ctx.gbufferPass. The handles come from the
-    // producer (B4a GBufferPass cacheAttachments) ??we just read
-    // them. Falls through cleanly if any is invalid (cutsheet
-    // �1.7 "no work" signal ??but B5 draws 1 submit regardless;
-    // missing samplers surface as visual artifacts, not crashes).
-    if (ctx.gbufferPass != nullptr) {
+    // Production dispatch resolves the coherent MRT set from the resource
+    // blackboard. Direct pass tests without a blackboard retain the legacy
+    // borrowed-pointer path above.
+    {
         // albedo sampler ??stage from compiled Phoskia
         const shader::BindingId albedoBinding =
             _program.getTextureBinding("gbufferAlbedo");
         if (albedoBinding != shader::InvalidBinding) {
-            bgfx::TextureHandle albedoHandle = ctx.gbufferPass->gbufferAlbedoRt();
+            const bgfx::TextureHandle albedoHandle = gbufferAlbedo;
             if (bgfx::isValid(albedoHandle)) {
                 const uint8_t stage = _program.getTextureStage(albedoBinding);
                 _program.setTexture(stage, albedoBinding,
@@ -1336,7 +1349,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         const shader::BindingId normalBinding =
             _program.getTextureBinding("gbufferNormal");
         if (normalBinding != shader::InvalidBinding) {
-            bgfx::TextureHandle normalHandle = ctx.gbufferPass->gbufferNormalRt();
+            const bgfx::TextureHandle normalHandle = gbufferNormal;
             if (bgfx::isValid(normalHandle)) {
                 const uint8_t stage = _program.getTextureStage(normalBinding);
                 _program.setTexture(stage, normalBinding,
@@ -1347,7 +1360,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             _program.getTextureBinding("gbufferWorldPosition");
         if (worldPositionBinding != shader::InvalidBinding) {
             const bgfx::TextureHandle worldPositionHandle =
-                ctx.gbufferPass->gbufferWorldPositionRt();
+                gbufferWorldPosition;
             if (bgfx::isValid(worldPositionHandle)) {
                 const uint8_t stage =
                     _program.getTextureStage(worldPositionBinding);
@@ -1358,8 +1371,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         const shader::BindingId materialBinding =
             _program.getTextureBinding("gbufferMaterial");
         if (materialBinding != shader::InvalidBinding) {
-            const bgfx::TextureHandle materialHandle =
-                ctx.gbufferPass->gbufferMaterialRt();
+            const bgfx::TextureHandle materialHandle = gbufferMaterial;
             if (bgfx::isValid(materialHandle)) {
                 const uint8_t stage = _program.getTextureStage(materialBinding);
                 _program.setTexture(stage, materialBinding,
@@ -1374,7 +1386,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         if (skyBinding != shader::InvalidBinding) {
             // Always bind a defined sampler. The finite RGBA8 fallback is
             // multiplied by zero below when no current-frame sky exists.
-            bgfx::TextureHandle skyHandle = ctx.gbufferPass->gbufferMaterialRt();
+            bgfx::TextureHandle skyHandle = gbufferMaterial;
             if (skyReady) {
                 skyHandle = ctx.skyboxPass->skyRt();
             }
@@ -1396,11 +1408,19 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // producer latch and FrameGraph semantic refer to this frame. A valid
     // persistent attachment alone is never considered sufficient.
     bgfx::TextureHandle ssaoTexture =
-        ctx.gbufferPass->gbufferMaterialRt(); // always-valid fallback sampler
+        gbufferMaterial; // always-valid fallback sampler
     bool ssaoReady = false;
-    if (ctx.ssaoPass != nullptr
-        && ctx.ssaoPass->producedThisFrame()
-        && ctx.frameGraph != nullptr) {
+    if (useBlackboard) {
+        const BlackboardResourceEntry* ssao =
+            ctx.resourceBlackboard->findProduced(
+                BlackboardResourceId::SsaoOcclusion);
+        if (ssao != nullptr && BGFXAdapter::isValid(ssao->texture)) {
+            ssaoTexture = ssao->texture;
+            ssaoReady = true;
+        }
+    } else if (ctx.ssaoPass != nullptr
+               && ctx.ssaoPass->producedThisFrame()
+               && ctx.frameGraph != nullptr) {
         const bgfx::FrameBufferHandle ssaoFbo =
             ctx.frameGraph->resolveSemantic(FgSemantic::SSAOSource);
         if (BGFXAdapter::isValid(ssaoFbo)) {

@@ -11,7 +11,8 @@
 namespace ayt::render::detail
 {
 
-// Deferred opaque haze produces a full-resolution scene-linear color target.
+// Deferred opaque haze produces and publishes a full-resolution scene-linear
+// color target through the renderer resource blackboard.
 // Stable view/resource numeric ids remain unchanged; explicit view ordering
 // places Lighting before this pass and transparent/bloom after it.
 class DepthHazePass final : public RenderPass {

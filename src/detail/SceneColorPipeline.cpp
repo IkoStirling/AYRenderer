@@ -6,6 +6,7 @@
 #include "detail/GBufferPass.h"
 #include "detail/LightingPass.h"
 #include "detail/PassExecContext.h"
+#include "detail/RenderResourceBlackboard.h"
 
 namespace ayt::render::detail
 {
@@ -15,9 +16,13 @@ bgfx::FrameBufferHandle selectSceneColorSourceFbo(
 {
     const bool deferredPath = ctx.gbufferPass != nullptr
         && ctx.lightingPass != nullptr;
+    BlackboardGBufferView blackboardGBuffer;
+    const bool gbufferProduced = ctx.resourceBlackboard != nullptr
+        ? ctx.resourceBlackboard->resolveGBuffer(blackboardGBuffer)
+        : ctx.gbufferPass != nullptr
+            && ctx.gbufferPass->producedThisFrame();
     if (deferredPath
-        && (!ctx.gbufferPass->producedThisFrame()
-            || !ctx.lightingPass->producedThisFrame())) {
+        && (!gbufferProduced || !ctx.lightingPass->producedThisFrame())) {
         // A mounted deferred path must fail closed. Falling back to sceneFbo
         // would expose an unwritten/stale forward target and hide a producer
         // failure.
@@ -26,9 +31,16 @@ bgfx::FrameBufferHandle selectSceneColorSourceFbo(
 
     // Haze becomes authoritative only after a successful current-frame
     // submit. Persistent FrameGraph handles alone do not prove freshness.
-    if (ctx.depthHazePass != nullptr
-        && ctx.depthHazePass->producedThisFrame()
-        && ctx.frameGraph != nullptr) {
+    if (ctx.resourceBlackboard != nullptr) {
+        const BlackboardResourceEntry* haze =
+            ctx.resourceBlackboard->findProduced(
+                BlackboardResourceId::DepthHazeColor);
+        if (haze != nullptr && BGFXAdapter::isValid(haze->framebuffer)) {
+            return haze->framebuffer;
+        }
+    } else if (ctx.depthHazePass != nullptr
+               && ctx.depthHazePass->producedThisFrame()
+               && ctx.frameGraph != nullptr) {
         const bgfx::FrameBufferHandle hazeSource =
             ctx.frameGraph->resolveSemantic(FgSemantic::HazeSource);
         if (BGFXAdapter::isValid(hazeSource)) {
