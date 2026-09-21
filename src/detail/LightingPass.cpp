@@ -1096,6 +1096,10 @@ void LightingPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
         _allocatedH = height;
         _lightingW = width;
         _lightingH = height;
+        ++_targetGeneration;
+        if (_targetGeneration == 0) {
+            ++_targetGeneration;
+        }
     }
 }
 
@@ -1273,6 +1277,11 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     if (!bgfx::isValid(_lightingFbo)) {
         return 0;
     }
+    const bgfx::TextureHandle lightingColor =
+        ctx.adapter.getFboAttachment(_lightingFbo, 0);
+    if (!BGFXAdapter::isValid(lightingColor)) {
+        return 0;
+    }
 
     ensureFullscreenQuad(ctx.adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
@@ -1295,10 +1304,16 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     }
 
     const FrameContext& frame = ctx.frame;
-    const bool skyReady = ctx.skyboxPass != nullptr
-        && ctx.skyboxPass->isEnabled()
-        && ctx.skyboxPass->producedThisFrame()
-        && bgfx::isValid(ctx.skyboxPass->skyRt());
+    const BlackboardResourceEntry* skyEntry = useBlackboard
+        ? ctx.resourceBlackboard->findProduced(
+              BlackboardResourceId::SkyboxColor)
+        : nullptr;
+    const bool skyReady = useBlackboard
+        ? skyEntry != nullptr && bgfx::isValid(skyEntry->texture)
+        : ctx.skyboxPass != nullptr
+            && ctx.skyboxPass->isEnabled()
+            && ctx.skyboxPass->producedThisFrame()
+            && bgfx::isValid(ctx.skyboxPass->skyRt());
 
     // View 8 wiring: bind LightingOutput FBO, set rect to viewport
     // size, clear, dispatch fullscreen triangle. Mirror GBufferPass
@@ -1388,7 +1403,8 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             // multiplied by zero below when no current-frame sky exists.
             bgfx::TextureHandle skyHandle = gbufferMaterial;
             if (skyReady) {
-                skyHandle = ctx.skyboxPass->skyRt();
+                skyHandle = useBlackboard
+                    ? skyEntry->texture : ctx.skyboxPass->skyRt();
             }
             if (bgfx::isValid(skyHandle)) {
                 const uint8_t stage = _program.getTextureStage(skyBinding);
@@ -1692,6 +1708,13 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     _program.submit(submitCtx);
 
     _producedThisFrame = true;
+    if (ctx.resourceBlackboard != nullptr) {
+        ctx.resourceBlackboard->publishProduced(
+            BlackboardResourceId::LightingColor,
+            BlackboardResourceLifetime::External,
+            _lightingFbo, lightingColor, _allocatedW, _allocatedH,
+            _targetGeneration);
+    }
     return 1;  // B5 ships exactly 1 draw (fullscreen triangle)
 }
 

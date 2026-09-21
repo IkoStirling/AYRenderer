@@ -153,4 +153,71 @@ TEST_CASE(transient_ssao_and_haze_expire_at_frame_boundary)
         BlackboardResourceId::DepthHazeColor) == nullptr);
 }
 
+TEST_CASE(scene_color_and_bloom_outputs_share_current_frame_contract)
+{
+    RenderResourceBlackboard blackboard;
+    blackboard.beginFrame();
+    const struct Output final {
+        BlackboardResourceId id;
+        BlackboardResourceLifetime lifetime;
+        uint16_t framebuffer;
+        uint16_t texture;
+    } outputs[] = {
+        {BlackboardResourceId::LightingColor,
+         BlackboardResourceLifetime::External, 50, 51},
+        {BlackboardResourceId::SkyboxColor,
+         BlackboardResourceLifetime::External, 52, 53},
+        {BlackboardResourceId::BloomBright,
+         BlackboardResourceLifetime::Transient, 54, 55},
+        {BlackboardResourceId::BloomBlurA,
+         BlackboardResourceLifetime::Transient, 56, 57},
+        {BlackboardResourceId::BloomBlurB,
+         BlackboardResourceLifetime::Transient, 58, 59},
+    };
+    for (const Output& output : outputs) {
+        blackboard.publishProduced(
+            output.id, output.lifetime,
+            bgfx::FrameBufferHandle{output.framebuffer},
+            bgfx::TextureHandle{output.texture},
+            640, 360, 2);
+        CHECK(blackboard.findProduced(output.id) != nullptr);
+    }
+
+    blackboard.beginFrame();
+    for (const Output& output : outputs) {
+        CHECK(blackboard.findProduced(output.id) == nullptr);
+    }
+}
+
+TEST_CASE(frame_output_invalidation_covers_scene_color_and_bloom)
+{
+    RenderResourceBlackboard blackboard;
+    blackboard.beginFrame();
+    for (const BlackboardResourceId id : {
+             BlackboardResourceId::LightingColor,
+             BlackboardResourceId::SkyboxColor,
+             BlackboardResourceId::BloomBright,
+             BlackboardResourceId::BloomBlurA,
+             BlackboardResourceId::BloomBlurB}) {
+        blackboard.publishProduced(
+            id, BlackboardResourceLifetime::Transient,
+            bgfx::FrameBufferHandle{60}, bgfx::TextureHandle{61},
+            320, 180, 0);
+    }
+
+    blackboard.invalidateFrameOutputs(ResourceInvalidationReason::Resize);
+    for (const BlackboardResourceId id : {
+             BlackboardResourceId::LightingColor,
+             BlackboardResourceId::SkyboxColor,
+             BlackboardResourceId::BloomBright,
+             BlackboardResourceId::BloomBlurA,
+             BlackboardResourceId::BloomBlurB}) {
+        const BlackboardResourceEntry* entry = blackboard.find(id);
+        CHECK(entry != nullptr);
+        CHECK_FALSE(entry->contentValid);
+        CHECK(entry->invalidationReason
+              == ResourceInvalidationReason::Resize);
+    }
+}
+
 TEST_SUITE_END

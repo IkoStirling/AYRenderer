@@ -165,7 +165,12 @@ void RenderResourceBlackboard::invalidateFrameOutputs(
              BlackboardResourceId::GBufferMaterial,
              BlackboardResourceId::GBufferDepth,
              BlackboardResourceId::SsaoOcclusion,
-             BlackboardResourceId::DepthHazeColor}) {
+             BlackboardResourceId::DepthHazeColor,
+             BlackboardResourceId::LightingColor,
+             BlackboardResourceId::SkyboxColor,
+             BlackboardResourceId::BloomBright,
+             BlackboardResourceId::BloomBlurA,
+             BlackboardResourceId::BloomBlurB}) {
         invalidate(id, reason);
     }
 }
@@ -275,6 +280,11 @@ const char* blackboardResourceName(BlackboardResourceId id) noexcept
     case BlackboardResourceId::GBufferDepth: return "GBufferDepth";
     case BlackboardResourceId::SsaoOcclusion: return "SsaoOcclusion";
     case BlackboardResourceId::DepthHazeColor: return "DepthHazeColor";
+    case BlackboardResourceId::LightingColor: return "LightingColor";
+    case BlackboardResourceId::SkyboxColor: return "SkyboxColor";
+    case BlackboardResourceId::BloomBright: return "BloomBright";
+    case BlackboardResourceId::BloomBlurA: return "BloomBlurA";
+    case BlackboardResourceId::BloomBlurB: return "BloomBlurB";
     case BlackboardResourceId::Count: break;
     }
     return "Unknown";

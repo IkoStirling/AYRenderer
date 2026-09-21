@@ -7,6 +7,7 @@
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
+#include "detail/RenderResourceBlackboard.h"
 #include "detail/SceneColorPipeline.h"
 
 #include "AYRenderer/BloomShaderSources.h"
@@ -90,6 +91,11 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
     if (!BGFXAdapter::isValid(target)) {
         return 0;
     }
+    const bgfx::TextureHandle outputTexture =
+        adapter.getFboAttachment(target, 0);
+    if (!BGFXAdapter::isValid(outputTexture)) {
+        return 0;
+    }
 
     // Half-resolution size uses the same round-up convention as FrameGraph.
     const uint16_t halfW = static_cast<uint16_t>((viewportWidth  + 1u) / 2u);
@@ -154,6 +160,13 @@ uint32_t BloomExtractPass::execute(PassExecContext& ctx)
     adapter.setStateDepthTestAlways();  // mirror PostProcessPass
     _program.submit(sub);
     _producedThisFrame = true;
+    ctx.frameGraph->markProduced(FgResourceId::BloomBright);
+    if (ctx.resourceBlackboard != nullptr) {
+        ctx.resourceBlackboard->publishProduced(
+            BlackboardResourceId::BloomBright,
+            BlackboardResourceLifetime::Transient,
+            target, outputTexture, halfW, halfH, 0);
+    }
 
     // Do NOT setViewFrameBuffer(viewId, INVALID) after submit — in bgfx
     // the last bind wins for the whole view this frame, which would

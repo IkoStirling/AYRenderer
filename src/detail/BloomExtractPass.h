@@ -8,8 +8,8 @@
 //
 // The renderer treats Extract + Blur as one capability: an incomplete or
 // disabled chain is not declared, and strength <= 0 allocates no bloom RTs.
-// `producedThisFrame()` is reset before every dispatch and becomes true only
-// after a successful submit, so downstream passes cannot consume stale data.
+// Production freshness is published as BloomBright on the resource blackboard.
+// `producedThisFrame()` remains the direct-context compatibility latch.
 //
 // Explicit view order follows dependencies: SSAO=14, Lighting=8,
 // DepthHaze=13, Transparent=9, Extract=10, BlurH=11, BlurV=12,
@@ -47,7 +47,8 @@ public:
     uint32_t execute(PassExecContext& ctx) override;
 
     // Program readiness is separate from per-frame production and FG target
-    // validity; consumers must use producedThisFrame().
+    // validity. Production consumers use the resource blackboard; the latch is
+    // retained for direct contexts that intentionally omit it.
     bool isReady() const noexcept { return _program.isValid(); }
     bool producedThisFrame() const noexcept { return _producedThisFrame; }
     void resetFrameState() noexcept { _producedThisFrame = false; }

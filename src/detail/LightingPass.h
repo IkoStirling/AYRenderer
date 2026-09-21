@@ -6,12 +6,10 @@
 //
 // Mirrors GBufferPass's plumbing shape (PR-§P5 B2, 2026-07-22):
 // a derived RenderPass that owns its producer state (the lighting
-// output FBO + sampler bindings to the GBuffer MRT) and exposes
-// them via non-owning accessors that downstream consumers (future
-// B7+ multi-light consumers; B6 PostProcessPass will consume via
-// `ctx.gbufferPass->lightingOutputFbo()` instead of `ctx.sceneFbo`
-// per `pass-lessons-from-deferred.md:169` "B6 must change PP source
-// priority") read through `PassExecContext::lightingPass`.
+// output FBO + sampler bindings to the GBuffer MRT). Production
+// consumers resolve LightingColor through RenderResourceBlackboard;
+// accessors and PassExecContext::lightingPass remain for metadata and
+// direct contexts that intentionally omit the blackboard.
 //
 // B5 ships:
 //   - LightingOutput FBO (lightingFbo, RGBA16F, viewport size — 1×
@@ -107,6 +105,9 @@ public:
     bgfx::FrameBufferHandle lightingOutputFbo()  const noexcept { return _lightingFbo; }
     uint16_t                lightingWidth()      const noexcept { return _lightingW; }
     uint16_t                lightingHeight()     const noexcept { return _lightingH; }
+    uint32_t                targetGeneration() const noexcept {
+        return _targetGeneration;
+    }
 
     // B5 mirrors GBufferPass B4b's public plumbing shape: setOutputSize
     // stays as a host-driven store-only call (no adapter access),
@@ -178,6 +179,7 @@ private:
     uint16_t                _lightingH       = 0;
     uint16_t                _allocatedW      = 0;
     uint16_t                _allocatedH      = 0;
+    uint32_t                _targetGeneration = 0;
     const char*             _buildStamp      = "";
 
     // §P5 B5 (2026-07-22) — Phoskia Lighting VS/FS program (mirror

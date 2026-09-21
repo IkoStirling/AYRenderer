@@ -23,6 +23,11 @@ enum class BlackboardResourceId : uint8_t {
     GBufferDepth,
     SsaoOcclusion,
     DepthHazeColor,
+    LightingColor,
+    SkyboxColor,
+    BloomBright,
+    BloomBlurA,
+    BloomBlurB,
     Count,
 };
 

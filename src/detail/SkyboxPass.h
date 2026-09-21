@@ -8,10 +8,10 @@
 //
 // Mirrors GBufferPass / LightingPass plumbing shape: a derived
 // RenderPass that owns its producer state (the sky FBO + the
-// fullscreen triangle VB/IB + the Phoskia program) and exposes
-// them via non-owning accessors that downstream consumers
-// (LightingPass, read through `PassExecContext::skyboxPass`)
-// borrow.
+// fullscreen triangle VB/IB + the Phoskia program). Production
+// consumers resolve SkyboxColor through RenderResourceBlackboard;
+// accessors and PassExecContext::skyboxPass remain for sky metadata
+// and direct contexts that intentionally omit the blackboard.
 //
 // Cutsheet §5.3 / §5.5 red lines preserved:
 //   - NO FrameContext field additions
@@ -107,6 +107,9 @@ public:
     bool producedThisFrame() const noexcept { return _producedThisFrame; }
     uint16_t                skyWidth()  const noexcept { return _skyW; }
     uint16_t                skyHeight() const noexcept { return _skyH; }
+    uint32_t                targetGeneration() const noexcept {
+        return _targetGeneration;
+    }
 
     // §P5.5 D (2026-07-23) — host-uploaded cube map handle for IBL
     // MVP. Lives on the SkyboxPass producer state (mirror shadowFbo
@@ -220,6 +223,7 @@ private:
     uint16_t                _skyH          = 0;
     uint16_t                _allocatedW    = 0;
     uint16_t                _allocatedH    = 0;
+    uint32_t                _targetGeneration = 0;
     const char*             _buildStamp    = "";
 
     // §Skybox0 (2026-07-23) — Phoskia Skybox VS/FS program

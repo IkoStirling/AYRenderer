@@ -21,8 +21,17 @@ bgfx::FrameBufferHandle selectSceneColorSourceFbo(
         ? ctx.resourceBlackboard->resolveGBuffer(blackboardGBuffer)
         : ctx.gbufferPass != nullptr
             && ctx.gbufferPass->producedThisFrame();
+    const BlackboardResourceEntry* lighting =
+        ctx.resourceBlackboard != nullptr
+            ? ctx.resourceBlackboard->findProduced(
+                  BlackboardResourceId::LightingColor)
+            : nullptr;
+    const bool lightingProduced = ctx.resourceBlackboard != nullptr
+        ? lighting != nullptr
+        : ctx.lightingPass != nullptr
+            && ctx.lightingPass->producedThisFrame();
     if (deferredPath
-        && (!gbufferProduced || !ctx.lightingPass->producedThisFrame())) {
+        && (!gbufferProduced || !lightingProduced)) {
         // A mounted deferred path must fail closed. Falling back to sceneFbo
         // would expose an unwritten/stale forward target and hide a producer
         // failure.
@@ -46,6 +55,11 @@ bgfx::FrameBufferHandle selectSceneColorSourceFbo(
         if (BGFXAdapter::isValid(hazeSource)) {
             return hazeSource;
         }
+    }
+
+    if (deferredPath && lighting != nullptr
+        && BGFXAdapter::isValid(lighting->framebuffer)) {
+        return lighting->framebuffer;
     }
 
     if (ctx.frameGraph != nullptr) {

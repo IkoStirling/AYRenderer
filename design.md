@@ -1,5 +1,13 @@
 # AYRenderer Design
 
+## 2026-09-21 — R6-4 资源黑板第三刀（logical output 迁移完成）
+
+- LightingColor 与 SkyboxColor 作为 pass-owned `External` 输出发布，带尺寸与 generation。SceneColor routing、Transparent 与 Lighting backdrop 的生产路径不再用具体 Pass 的 `producedThisFrame()` 判断纹理新鲜度。
+- BloomExtract 发布 `BloomBright`，BloomBlur 从黑板读取 bright 并发布 `BloomBlurA/B`，PostProcess 从黑板读取最终 blur texture。成功 submit 后同时设置 FrameGraph production latch，使图状态和执行状态不再分裂。
+- SkyboxPass 指针仍用于 cube texture 资源 ID，LightingPass 指针仍用于 transparent ambient strength，ShadowPass 指针仍承载 atlas/矩阵/bias 元数据。这些不是可由单一 logical texture 表达的生产者输出，本刀不强行塞入黑板。
+- `bloomExtractPass/bloomBlurPass/ssaoPass/depthHazePass` 等旧中部字段不删除，以保护旧 `PassExecContext` brace initializer 映射；生产路径在黑板存在时严格 fail-close，不会悄悄回退到旧 latch。
+- 新增场景颜色/Bloom 跨帧失效和 lifecycle invalidation 测试；全量 `AYRenderer_Test` 4663/4663 通过。R6-4 完成，下一阶段是 R6-6 诊断与 D3D11 capture 门禁。
+
 ## 2026-09-21 — R6-4 资源黑板第二刀
 
 - 黑板扩展到 GBuffer 五附件、SSAO occlusion 和 DepthHaze color。GBuffer 使用原子资源视图：任一附件未在当帧产出，或 FBO、尺寸、generation 不一致，整组就 fail-close，防止 resize/重建边界混用附件。

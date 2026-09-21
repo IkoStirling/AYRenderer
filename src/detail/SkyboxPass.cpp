@@ -4,6 +4,7 @@
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
 #include "detail/RenderPass.h"
+#include "detail/RenderResourceBlackboard.h"
 #include "detail/SkySource.h"
 
 #include <cstdio>
@@ -255,6 +256,10 @@ void SkyboxPass::ensure(BGFXAdapter& adapter, uint16_t width, uint16_t height)
         _skyW = width;
         _skyH = height;
         cacheAttachments(adapter);
+        ++_targetGeneration;
+        if (_targetGeneration == 0) {
+            ++_targetGeneration;
+        }
     }
 }
 
@@ -548,6 +553,13 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
     submitCtx.state  = 0;  // state owned by Adapter
     _program.submit(submitCtx);
     _producedThisFrame = true;
+    if (ctx.resourceBlackboard != nullptr) {
+        ctx.resourceBlackboard->publishProduced(
+            BlackboardResourceId::SkyboxColor,
+            BlackboardResourceLifetime::External,
+            _skyFbo, _skyRt, _allocatedW, _allocatedH,
+            _targetGeneration);
+    }
 
     return 1;  // Skybox ships exactly 1 draw (fullscreen triangle)
 }

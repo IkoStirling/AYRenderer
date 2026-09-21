@@ -8,6 +8,7 @@
 #include "detail/PassExecContext.h"
 #include "detail/PostProcessPass.h"
 #include "detail/RenderPass.h"
+#include "detail/RenderResourceBlackboard.h"
 
 #include "AYRenderer/BloomShaderSources.h"
 #include "AYShader/ShaderResource.h"
@@ -64,13 +65,21 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    // FrameGraph owns every bloom target; the producer pointer supplies only
-    // the current-frame completion latch.
+    // FrameGraph owns every bloom target. Production uses the blackboard's
+    // BloomBright entry; direct contexts retain the legacy producer latch.
     if (ctx.frameGraph == nullptr) {
         return 0;
     }
-    if (ctx.bloomExtractPass == nullptr
-        || !ctx.bloomExtractPass->producedThisFrame()) {
+    const BlackboardResourceEntry* bloomBright =
+        ctx.resourceBlackboard != nullptr
+            ? ctx.resourceBlackboard->findProduced(
+                  BlackboardResourceId::BloomBright)
+            : nullptr;
+    const bool extractReady = ctx.resourceBlackboard != nullptr
+        ? bloomBright != nullptr
+        : ctx.bloomExtractPass != nullptr
+            && ctx.bloomExtractPass->producedThisFrame();
+    if (!extractReady) {
         return 0;
     }
 
@@ -97,11 +106,14 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
     // FG too); we sample it as a texture but never bind it as our
     // draw target (would clear/black the upstream buffer).
     const bgfx::FrameBufferHandle sourceFbo =
-        ctx.frameGraph->resolve(FgResourceId::BloomBright);
+        ctx.resourceBlackboard != nullptr
+            ? bloomBright->framebuffer
+            : ctx.frameGraph->resolve(FgResourceId::BloomBright);
     if (!BGFXAdapter::isValid(sourceFbo)) {
         return 0;
     }
-    _sourceRt = adapter.getFboAttachment(sourceFbo, 0);
+    _sourceRt = ctx.resourceBlackboard != nullptr
+        ? bloomBright->texture : adapter.getFboAttachment(sourceFbo, 0);
     if (!BGFXAdapter::isValid(_sourceRt)) {
         return 0;
     }
@@ -110,6 +122,12 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
     // ::cacheAttachments pattern). Cheap; cache only invalidates
     // when FG recreates the RT after a size change.
     _pingRt = adapter.getFboAttachment(pp.first, 0);
+    const bgfx::TextureHandle pongRt =
+        adapter.getFboAttachment(pp.second, 0);
+    if (!BGFXAdapter::isValid(_pingRt)
+        || !BGFXAdapter::isValid(pongRt)) {
+        return 0;
+    }
 
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
@@ -195,6 +213,18 @@ uint32_t BloomBlurPass::execute(PassExecContext& ctx)
     subV.state  = 0;
     _program.submit(subV);
     _producedThisFrame = true;
+    ctx.frameGraph->markProduced(FgResourceId::BloomBlurA);
+    ctx.frameGraph->markProduced(FgResourceId::BloomBlurB);
+    if (ctx.resourceBlackboard != nullptr) {
+        ctx.resourceBlackboard->publishProduced(
+            BlackboardResourceId::BloomBlurA,
+            BlackboardResourceLifetime::Transient,
+            pp.first, _pingRt, halfW, halfH, 0);
+        ctx.resourceBlackboard->publishProduced(
+            BlackboardResourceId::BloomBlurB,
+            BlackboardResourceLifetime::Transient,
+            pp.second, pongRt, halfW, halfH, 0);
+    }
 
     // Do NOT restore views to INVALID after submit — last
     // setViewFrameBuffer wins per view for the frame and would paint

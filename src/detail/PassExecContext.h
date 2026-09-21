@@ -62,8 +62,9 @@ class ShadowPass;
 class GBufferPass;
 
 // LightingPass produces scene-linear RGBA16F color from the GBuffer,
-// scene lights, shadows, sky, and IBL. Consumers borrow it through this
-// context without pulling the complete pass definition into every TU.
+// scene lights, shadows, sky, and IBL. Production color dependencies resolve
+// through the blackboard; the forward declaration keeps metadata fallback
+// users from pulling the complete pass definition into every TU.
 class LightingPass;
 
 // §Skybox0 (2026-07-23) — SkyboxPass writes the equirect-panorama
@@ -73,25 +74,23 @@ class LightingPass;
 // includes PassExecContext.h.
 class SkyboxPass;
 
-// BloomExtract writes BloomBright and publishes a current-frame production
-// latch. BloomBlur consumes both the FrameGraph resource and that latch.
+// BloomExtract writes BloomBright and publishes it to the resource blackboard.
+// The pass pointer below is retained only for direct-context compatibility.
 class BloomExtractPass;
 
-// BloomBlur writes BloomBlurB and publishes its own production latch.
-// PostProcess resolves the texture through FgSemantic::BloomSource only when
-// the latch says the complete chain submitted this frame.
+// BloomBlur writes BloomBlurA/B and publishes both to the resource blackboard.
+// Its pass pointer is retained only for direct-context compatibility.
 class BloomBlurPass;
 
-// SSAO publishes a current-frame latch. Lighting consumes AO only after that
-// latch is set, never from a persistent but stale FG handle.
+// SSAO publishes current-frame AO to the resource blackboard. Its pass pointer
+// is retained only for direct contexts that intentionally omit the blackboard.
 class SSAOPass;
 
 // Deferred RG16F velocity producer consumed by TAA and future temporal passes.
 class MotionVectorPass;
 
-// DepthHaze publishes a current-frame latch for the FrameGraph-owned,
-// full-resolution HazeColor result. Transparent, Bloom and PostProcess use the
-// latch to reject persistent-but-stale handles.
+// DepthHaze publishes the FrameGraph-owned, full-resolution HazeColor result
+// to the resource blackboard. Its pointer is a direct-context fallback.
 class DepthHazePass;
 
 // §F2 (2026-07-24, mid-term cutsheet `docs/frame-graph-mvp.md`
@@ -211,13 +210,10 @@ struct PassExecContext {
 
     // §P5 B3 (2026-07-22) — borrowed, non-owning pointer to the
     // LightingPass that consumes the GBuffer MRT + produces scene-
-    // shaded color. Mirrors gbufferPass pattern. B5's LightingPass
-    // itself doesn't read this (LightingPass *is* the dispatch
-    // endpoint); future B7+ multi-light consumers (e.g. a second
-    // lighting pass for second bounce, or post-Lighting tone mapping)
-    // can read the producer pointer here. nullptr ⇒ no LightingPass
-    // mounted (e.g. host on Forward path) — same shape as shadowPass
-    // / gbufferPass.
+    // shaded color. Production consumers resolve LightingColor through
+    // resourceBlackboard; this pointer remains for pass metadata and
+    // direct contexts that intentionally omit the blackboard. nullptr
+    // means no LightingPass is mounted (for example the Forward path).
     //
     // Lifetime: pointer must remain valid for the duration of
     // pipeline::executeAll(ctx). The LightingPass is owned by the
@@ -284,13 +280,11 @@ struct PassExecContext {
     const ayt::render::SkySource* skySource = nullptr;
 
     // §Skybox0 (2026-07-23) — borrowed, non-owning pointer to the
-    // SkyboxPass that produced the active sky FBO this frame.
-    // LightingPass reads `ctx.skyboxPass->skyRt()` to bind the
-    // gbufferSky backdrop sampler. Mirrors the gbufferPass /
-    // lightingPass / shadowPass borrowed-pointer pattern; same
-    // lifetime contract. Forward-declared at the top of this
-    // header (mirror LightingPass forward-decl at the top of
-    // PassExecContext.h).
+    // SkyboxPass that owns the active sky source metadata. Production
+    // consumers resolve SkyboxColor through resourceBlackboard; this
+    // pointer remains for cube/equirect metadata and direct contexts that
+    // intentionally omit the blackboard. It follows the same borrowed
+    // lifetime contract as the other pass pointers.
     //
     // Default-init = nullptr ⇒ LightingPass binds no gbufferSky
     // sampler (FS `sample(gbufferSky, ...)` returns black; the
@@ -330,9 +324,9 @@ struct PassExecContext {
     // via C++14 trailing-default behavior.
     const ayt::render::SceneLights* perLightShadows = nullptr;
 
-    // Borrowed producer pointers. They are valid for executeAll(ctx) and are
-    // used only for current-frame production latches; texture handles resolve
-    // through FrameGraph. nullptr always fails closed.
+    // Legacy direct-context compatibility. Production Bloom dependencies and
+    // current-frame freshness resolve through resourceBlackboard; these
+    // borrowed pointers preserve focused tests and custom callers that omit it.
     const BloomExtractPass* bloomExtractPass = nullptr;
 
     const BloomBlurPass* bloomBlurPass = nullptr;

@@ -1,14 +1,14 @@
 # AYRenderer R6 架构收口计划
 
 > 日期：2026-09-09
-> 状态：R6-0、R6-1、R6-2、R6-3 已落地；R6-5 第一阶段已落地；R6-4 第一、二刀已落地。
+> 状态：R6-0、R6-1、R6-2、R6-3、R6-4 已落地；R6-5 第一阶段已落地；下一阶段 R6-6。
 > 范围：在不重写 bgfx/RHI、不改变 Forward/Deferred 画面顺序的前提下，收口 Pass 描述、资源依赖、诊断和场景提交。
 
 ## 1. 当前真实基线
 
 当前功能链已经覆盖 Shadow、GBuffer、MotionVector、SSAO、Lighting、DepthHaze、Transparent、Camera Overlay 2D、Bloom、PostProcess、TAA/FXAA/SMAA、ColorGrading、Present、Editor Overlay 与 UI。继续直接增加效果会放大以下结构问题：
 
-- `RenderPipeline` 仍按注册顺序执行 `RenderPass`，但带 slot 的 Pass 已由编译后的 `FrameGraph` live decision 控制是否 dispatch；资源黑板已覆盖 MotionVector/TAA history 与 GBuffer/SSAO/DepthHaze 输出，其余 Pass 仍待迁移。
+- `RenderPipeline` 仍按注册顺序执行 `RenderPass`，但带 slot 的 Pass 已由编译后的 `FrameGraph` live decision 控制是否 dispatch；资源黑板已覆盖时域历史、Deferred 主链与 Bloom 链的可消费输出。
 - `Renderer::render()` 同时负责 Pass 查找、状态预备、效果门禁、资源声明、semantic 选择和执行上下文拼装。
 - `PassExecContext` 通过多个具体 Pass 指针传递生产者状态，新增效果容易继续增加横向耦合。
 - 几何 Pass 已复用每帧一次生成的共享 DrawList 做领域分桶与稳定排序；保守起见尚未启用 frustum cull、状态排序合批与 instancing。
@@ -83,7 +83,7 @@ R6-3c 验证：FrameGraph 可裁剪 slot 不进入 `execute()`；禁用、正常
 
 验证：VS 2026 Insider x64 Debug 完整重编；`AYRenderer_Test` 全量 4603/4603。真实 D3D11 capture 与性能对比仍属于 R6-6。
 
-### R6-4：资源黑板与历史资源（第一、二刀已完成）
+### R6-4：资源黑板与历史资源（已完成）
 
 - 用 renderer-internal resource blackboard 替代 `PassExecContext` 中可由 logical resource 表达的生产者指针。
 - 明确 External、Transient、PersistentHistory 三类所有权。
@@ -104,7 +104,14 @@ R6-3c 验证：FrameGraph 可裁剪 slot 不进入 `execute()`；禁用、正常
 - Lighting、MotionVector、TAA、DepthHaze、SSAO、Transparent、SceneColor routing 与 GBufferDebug 的生产路径已优先从黑板读取上述资源；只有不提供黑板的直接 Pass 单测使用旧指针兼容路径。
 - pipeline rebuild、resize 和 backend reset 会联动失效所有已登记当帧输出。全量 `AYRenderer_Test` 为 4638/4638。
 
-后续刀：把 Lighting/Skybox/Bloom 的 logical output 扩入黑板，继续取消生产路径对具体 Pass latch 的依赖。Shadow 指针还承载光源矩阵与 atlas 元数据，不与纯纹理输出强行合并；对象骨骼历史继续留在 MotionVector 专用缓存。
+第三刀完成项（2026-09-21）：
+
+- Lighting 与 Skybox 在成功 submit 后发布 pass-owned `External` color target，并以 generation 区分 resize/重建前后的物理资源。SceneColor routing 和 Transparent 不再以 LightingPass latch 判断画面新鲜度，Lighting 也不再以 SkyboxPass latch 判断 backdrop 是否可采样。
+- BloomExtract 发布 `BloomBright`，BloomBlur 从黑板消费它并发布 `BloomBlurA/B`，PostProcess 直接消费 `BloomBlurB`。三个 FrameGraph resource 同时补齐 current-frame production latch。
+- `lightingPass/skyboxPass` 指针仍承载 ambient strength、cube texture 等非纹理元数据；`bloomExtractPass/bloomBlurPass` 等旧字段仅保留给无黑板直接单测。中部聚合字段不物理删除，避免破坏旧 brace initializer 映射。
+- 全量 `AYRenderer_Test` 为 4663/4663。R6-4 所定义的纯纹理 logical output 与 TAA history 迁移至此完成。
+
+明确不并入 R6-4 的状态：Shadow 指针还承载光源矩阵、atlas rect 与 bias 元数据；Skybox/Lighting 指针的 cube/ambient 元数据也不是 logical texture output；对象骨骼历史继续留在 MotionVector 专用缓存。后续转入 R6-6 诊断与真 GPU 门禁。
 
 验收：关闭、resize、管线切换和 shader 失败均不会让消费者读取 stale handle。
 

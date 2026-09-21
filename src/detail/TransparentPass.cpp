@@ -588,13 +588,26 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         ? ctx.resourceBlackboard->resolveGBuffer(blackboardGBuffer)
         : ctx.gbufferPass != nullptr
             && ctx.gbufferPass->producedThisFrame();
+    const BlackboardResourceEntry* lighting =
+        ctx.resourceBlackboard != nullptr
+            ? ctx.resourceBlackboard->findProduced(
+                  BlackboardResourceId::LightingColor)
+            : nullptr;
+    const bool lightingProduced = ctx.resourceBlackboard != nullptr
+        ? lighting != nullptr
+        : ctx.lightingPass != nullptr
+            && ctx.lightingPass->producedThisFrame();
+    const bool lightingTargetValid = ctx.resourceBlackboard != nullptr
+        ? lighting != nullptr
+            && BGFXAdapter::isValid(lighting->framebuffer)
+        : ctx.lightingPass != nullptr
+            && BGFXAdapter::isValid(ctx.lightingPass->lightingOutputFbo());
     const TransparentRoute route = selectTransparentRoute(
         ctx.gbufferPass != nullptr,
         ctx.lightingPass != nullptr,
         gbufferProduced,
-        ctx.lightingPass != nullptr && ctx.lightingPass->producedThisFrame(),
-        ctx.lightingPass != nullptr
-            && BGFXAdapter::isValid(ctx.lightingPass->lightingOutputFbo()));
+        lightingProduced,
+        lightingTargetValid);
     if (route == TransparentRoute::Skip) {
         rateLimitedEarlyReturn(
             "TransparentPass",

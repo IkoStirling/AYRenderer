@@ -1498,6 +1498,20 @@ void Renderer::render(const RenderScene& scene)
         _impl->pipeline.findPass<detail::LightingPass>();
     if (lightingPassPtr != nullptr) {
         lightingPassPtr->resetFrameState();
+        const bgfx::FrameBufferHandle lightingFbo =
+            lightingPassPtr->lightingOutputFbo();
+        const bgfx::TextureHandle lightingTexture =
+            detail::BGFXAdapter::isValid(lightingFbo)
+                ? _impl->adapter.getFboAttachment(lightingFbo, 0)
+                : bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+        _impl->resourceBlackboard.publish(
+            detail::BlackboardResourceId::LightingColor,
+            detail::BlackboardResourceLifetime::External,
+            lightingFbo, lightingTexture,
+            lightingPassPtr->lightingWidth(),
+            lightingPassPtr->lightingHeight(),
+            lightingPassPtr->targetGeneration(), false,
+            detail::ResourceInvalidationReason::AwaitingProducer);
     }
 
     // §Skybox0 (2026-07-23) — borrowed pointer to the SkyboxPass in
@@ -1507,6 +1521,13 @@ void Renderer::render(const RenderScene& scene)
         _impl->pipeline.findPass<detail::SkyboxPass>();
     if (skyboxPassPtr != nullptr) {
         skyboxPassPtr->resetFrameState();
+        _impl->resourceBlackboard.publish(
+            detail::BlackboardResourceId::SkyboxColor,
+            detail::BlackboardResourceLifetime::External,
+            skyboxPassPtr->skyFbo(), skyboxPassPtr->skyRt(),
+            skyboxPassPtr->skyWidth(), skyboxPassPtr->skyHeight(),
+            skyboxPassPtr->targetGeneration(), false,
+            detail::ResourceInvalidationReason::AwaitingProducer);
     }
 
     // Borrow both bloom passes and clear their production latches before graph
@@ -1592,9 +1613,12 @@ void Renderer::render(const RenderScene& scene)
     // SceneColor is borrowed. Deferred uses Lighting output; Forward uses the
     // renderer-owned scene target.
     bgfx::FrameBufferHandle sceneColorHandle = sceneFbo;
-    if (lightingPassPtr != nullptr
-        && detail::BGFXAdapter::isValid(lightingPassPtr->lightingOutputFbo())) {
-        sceneColorHandle = lightingPassPtr->lightingOutputFbo();
+    const detail::BlackboardResourceEntry* lightingColor =
+        _impl->resourceBlackboard.find(
+            detail::BlackboardResourceId::LightingColor);
+    if (lightingPassPtr != nullptr && lightingColor != nullptr
+        && detail::BGFXAdapter::isValid(lightingColor->framebuffer)) {
+        sceneColorHandle = lightingColor->framebuffer;
     }
     const bool backendReady = _impl->adapter.isInitialized()
         && !_impl->adapter.isNoopBackend();

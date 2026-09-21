@@ -8,7 +8,8 @@
 // FrameGraph owns all three RGBA16F targets. BloomBlurA and BloomBlurB cannot
 // alias because the vertical pass reads A while writing B. This pass owns only
 // fullscreen geometry, temporary attachment handles, and the shader program.
-// `producedThisFrame()` becomes true only after both submits complete.
+// Production publishes BloomBlurA/B through the resource blackboard after both
+// submits complete; `producedThisFrame()` is the direct-context fallback.
 
 #include "AYShader/ShaderResource.h"
 
@@ -42,7 +43,8 @@ public:
     uint32_t execute(PassExecContext& ctx) override;
 
     // Program readiness is separate from current-frame production and target
-    // validity; consumers must use producedThisFrame().
+    // validity. Production consumers use the resource blackboard; the latch is
+    // retained for direct contexts that intentionally omit it.
     bool isReady() const noexcept { return _program.isValid(); }
     bool producedThisFrame() const noexcept { return _producedThisFrame; }
     void resetFrameState() noexcept { _producedThisFrame = false; }

@@ -1,11 +1,12 @@
 #include "detail/PostProcessPass.h"
 
-#include "detail/BloomBlurPass.h"  // Current-frame production latch.
+#include "detail/BloomBlurPass.h"  // Legacy direct-context fallback.
 #include "detail/BloomPipeline.h"
 #include "detail/FgResource.h"
 #include "detail/GpuResources.h"
 #include "detail/PostProcessPipeline.h"
 #include "detail/RenderPass.h"     // §P5 (2026-08-24) — rateLimitedEarlyReturn helper
+#include "detail/RenderResourceBlackboard.h"
 #include "detail/SceneColorPipeline.h"
 
 #include "AYShader/ShaderResource.h"
@@ -21,9 +22,10 @@ namespace {
 
 // Post-process: sample sceneColor and the FrameGraph BloomSource, apply
 // exposure to both scene-linear inputs, then tonemap (None / Reinhard /
-// ACES) and display gamma. Bloom is accepted only when BloomBlur reports
-// production in the current frame and the resolved attachment is valid;
-// otherwise execute() binds a safe texture and uploads zero strength.
+// ACES) and display gamma. Production Bloom is accepted only when the current
+// frame's BloomBlurB blackboard entry is valid. Direct contexts retain the
+// BloomBlur latch fallback; otherwise execute() binds a safe texture and
+// uploads zero strength.
 // Knobs are vec4 (.x) for bgfx Vec4 upload ABI — see
 // docs/pass-lessons-from-shadow.md §3.1. tonemapMode.x: 0=None,
 // 1=Reinhard, 2=ACES (Narkowicz fitted). Select via
@@ -273,13 +275,27 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     bgfx::FrameBufferHandle bloomSourceFbo = BGFX_INVALID_HANDLE;
     bool bloomSourceReady = false;
     if (primaryProgramReady) {
-        const bool blurProduced = ctx.bloomBlurPass != nullptr
-            && ctx.bloomBlurPass->producedThisFrame();
-        if (blurProduced && ctx.frameGraph != nullptr) {
+        const BlackboardResourceEntry* bloom =
+            ctx.resourceBlackboard != nullptr
+                ? ctx.resourceBlackboard->findProduced(
+                      BlackboardResourceId::BloomBlurB)
+                : nullptr;
+        const bool blurProduced = ctx.resourceBlackboard != nullptr
+            ? bloom != nullptr
+            : ctx.bloomBlurPass != nullptr
+                && ctx.bloomBlurPass->producedThisFrame();
+        if (bloom != nullptr) {
+            bloomSourceFbo = bloom->framebuffer;
+            if (BGFXAdapter::isValid(bloom->texture)) {
+                bloomTexHandle =
+                    ayt::render::detail::toShaderTexture(bloom->texture);
+                bloomSourceReady = true;
+            }
+        } else if (blurProduced && ctx.frameGraph != nullptr) {
             bloomSourceFbo = ctx.frameGraph->resolveSemantic(
                 ayt::render::detail::FgSemantic::BloomSource);
         }
-        if (BGFXAdapter::isValid(bloomSourceFbo)) {
+        if (!bloomSourceReady && BGFXAdapter::isValid(bloomSourceFbo)) {
             const bgfx::TextureHandle bloomColor =
                 adapter.getFboAttachment(bloomSourceFbo, 0);
             if (BGFXAdapter::isValid(bloomColor)) {
