@@ -116,6 +116,7 @@ class DepthHazePass;
 // one at a time; F1 leaves everything nullptr-compatible).
 class FrameGraph;
 struct FrameDrawLists;
+class RenderResourceBlackboard;
 
 
 
@@ -379,6 +380,11 @@ struct PassExecContext {
     // immutable pointers into RenderScene instead of independently scanning
     // and routing every item. nullptr preserves hand-built legacy test paths.
     const FrameDrawLists* drawLists = nullptr;
+
+    // Renderer-owned registry for pass outputs and temporal history. Tail
+    // placement preserves legacy aggregate initializers. nullptr keeps direct
+    // unit contexts on their compatibility path.
+    RenderResourceBlackboard* resourceBlackboard = nullptr;
 
 };
 

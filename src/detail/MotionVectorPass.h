@@ -100,6 +100,7 @@ public:
     }
     uint16_t width() const noexcept { return _allocatedWidth; }
     uint16_t height() const noexcept { return _allocatedHeight; }
+    uint32_t targetGeneration() const noexcept { return _targetGeneration; }
     const MotionHistoryCache& historyForTests() const noexcept {
         return _history;
     }
@@ -123,6 +124,7 @@ private:
     uint16_t _requestedHeight = 0;
     uint16_t _allocatedWidth = 0;
     uint16_t _allocatedHeight = 0;
+    uint32_t _targetGeneration = 0;
 
     MotionHistoryCache _history;
     ayt::math::Float4x4 _previousViewProjection =

@@ -7,6 +7,7 @@
 #include "detail/GBufferPass.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
+#include "detail/RenderResourceBlackboard.h"
 #include "detail/RasterConvention.h"
 
 #include <algorithm>
@@ -467,6 +468,10 @@ void MotionVectorPass::ensureResources(BGFXAdapter& adapter,
     _borrowedDepth = gbufferDepth;
     _allocatedWidth = _requestedWidth;
     _allocatedHeight = _requestedHeight;
+    ++_targetGeneration;
+    if (_targetGeneration == 0) {
+        ++_targetGeneration;
+    }
     invalidateHistory();
 }
 
@@ -668,6 +673,16 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
     _previousJitterY = _currentJitterY;
     _hasPreviousFrame = true;
     _producedThisFrame = true;
+    if (ctx.resourceBlackboard != nullptr) {
+        ctx.resourceBlackboard->publish(
+            BlackboardResourceId::MotionVectors,
+            BlackboardResourceLifetime::External,
+            _velocityFbo, _velocityTexture,
+            _allocatedWidth, _allocatedHeight,
+            _targetGeneration, false);
+        ctx.resourceBlackboard->markProduced(
+            BlackboardResourceId::MotionVectors);
+    }
 
     if (!_firstDispatchLogged) {
         std::fprintf(stderr,

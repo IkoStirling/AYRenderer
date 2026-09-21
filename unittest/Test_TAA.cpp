@@ -366,6 +366,27 @@ TEST_CASE(taa_failed_resolve_discards_motion_snapshots)
     taa.finishFrame(nullptr);
 }
 
+TEST_CASE(taa_failed_resolve_invalidates_blackboard_with_producer_reason)
+{
+    ayt::render::detail::TAAPass taa;
+    ayt::render::detail::MotionVectorPass motion;
+    ayt::render::detail::RenderResourceBlackboard blackboard;
+    blackboard.beginFrame();
+    blackboard.publish(
+        ayt::render::detail::BlackboardResourceId::TaaHistoryRead,
+        ayt::render::detail::BlackboardResourceLifetime::PersistentHistory,
+        bgfx::FrameBufferHandle{7}, BGFX_INVALID_HANDLE,
+        640, 360, 1, true);
+
+    taa.finishFrame(&motion, &blackboard);
+    const auto* history = blackboard.find(
+        ayt::render::detail::BlackboardResourceId::TaaHistoryRead);
+    CHECK(history != nullptr);
+    CHECK_FALSE(history->contentValid);
+    CHECK(history->invalidationReason
+          == ayt::render::detail::ResourceInvalidationReason::ProducerFailure);
+}
+
 TEST_CASE(taa_phoskia_source_compiles_for_d3d11_and_d3d12)
 {
     if (!taaFileExists(AY_SHADER_SHADERC_HINT)) {

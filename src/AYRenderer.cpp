@@ -36,6 +36,7 @@
 #include "detail/SSAOPass.h"        // §A1 SSAO MVP (2026-07-24) — SSAOPass factory + FrameGraph SSAOTexture resolve gate.
 #include "detail/SSAOPipeline.h"
 #include "detail/RenderResourceManager.h"
+#include "detail/RenderResourceBlackboard.h"
 #include "detail/ScreenshotSidecar.h"
 #include "detail/ShaderPoolSetup.h"
 #include "detail/ShadowPass.h"
@@ -367,6 +368,7 @@ struct Renderer::Impl {
     // Constructed with the adapter reference (it queries the
     // adapter's isInitialized/isNoopBackend per-frame).
     detail::FrameGraph            frameGraph{adapter, renderTargetPool};
+    detail::RenderResourceBlackboard resourceBlackboard;
     detail::FrameDrawLists        frameDrawLists;
 
     detail::RenderResourceManager resources;
@@ -506,6 +508,19 @@ struct Renderer::Impl {
         }
     }
 
+    void invalidateTemporalResources(
+        detail::ResourceInvalidationReason reason)
+    {
+        resourceBlackboard.invalidateTemporal(reason);
+        if (detail::TAAPass* taa = pipeline.findPass<detail::TAAPass>()) {
+            taa->invalidateHistory(reason);
+        }
+        if (detail::MotionVectorPass* motion =
+                pipeline.findPass<detail::MotionVectorPass>()) {
+            motion->invalidateHistory();
+        }
+    }
+
     void applyAntiAliasingKnobs()
     {
         if (detail::FXAAPass* fxaa = pipeline.findPass<detail::FXAAPass>()) {
@@ -518,7 +533,8 @@ struct Renderer::Impl {
             taa->setEnabled(taaEnabled);
             taa->setDebugView(taaDebugView);
             if (!taaEnabled) {
-                taa->invalidateHistory();
+                invalidateTemporalResources(
+                    detail::ResourceInvalidationReason::FeatureDisabled);
             }
         }
     }
@@ -674,6 +690,9 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
         return;
     }
+
+    invalidateTemporalResources(
+        detail::ResourceInvalidationReason::PipelineRebuild);
 
     UIRenderBackend* retainedUi = nullptr;
     if (detail::UIPass* uiPass = pipeline.findPass<detail::UIPass>()) {
@@ -987,6 +1006,9 @@ void Renderer::shutdown()
         return;
     }
 
+    _impl->invalidateTemporalResources(
+        detail::ResourceInvalidationReason::Shutdown);
+
     // §P1 H3 (2026-08-24) — flip the alive flag FIRST so any hot-reload
     // callback racing past setOnHotReload({}) sees the dead state. Must
     // run before any bgfx resource destruction so the callback never
@@ -1143,6 +1165,8 @@ void Renderer::shutdown()
     // above. fg.shutdown() iterates all owned resources and
     // destroys each (externals are skipped). Idempotent.
     _impl->frameGraph.shutdown();
+    _impl->resourceBlackboard.clear(
+        detail::ResourceInvalidationReason::Shutdown);
     _impl->renderTargetPool.shutdown();
 
     ayt::resource::ResourceManager::instance().setOnHotReload({});
@@ -1166,6 +1190,7 @@ void Renderer::beginFrame(const ClearDesc& clear)
     _impl->pipeline.resetFrameStats();
     _impl->debugOverlay.onBeginFrame();
     _impl->renderTargetPool.beginFrame();
+    _impl->resourceBlackboard.beginFrame();
     _impl->adapter.beginFrame();
     _impl->adapter.setViewClear(detail::ForwardOpaquePass::kMainViewId, clear);
 }
@@ -1178,6 +1203,7 @@ void Renderer::beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uin
     _impl->pipeline.resetFrameStats();
     _impl->debugOverlay.onBeginFrame();
     _impl->renderTargetPool.beginFrame();
+    _impl->resourceBlackboard.beginFrame();
 
     // View 0: full-window clear only (never shrink this rect to the 3D hole).
     _impl->adapter.setViewRect(0, 0, 0, fbWidth, fbHeight);
@@ -1227,8 +1253,34 @@ void Renderer::render(const RenderScene& scene)
                 _impl->viewportH);
         }
         if (!taaPrepared) {
-            taaPassPtr->invalidateHistory();
+            const detail::ResourceInvalidationReason reason =
+                taaPassPtr->isEnabled()
+                    ? detail::ResourceInvalidationReason::PreparationFailed
+                    : detail::ResourceInvalidationReason::FeatureDisabled;
+            taaPassPtr->invalidateHistory(reason);
+            _impl->resourceBlackboard.invalidateTemporal(reason);
         }
+    }
+
+    if (taaPassPtr != nullptr) {
+        const detail::ResourceInvalidationReason historyReason =
+            taaPassPtr->historyValid()
+                ? detail::ResourceInvalidationReason::None
+                : taaPassPtr->historyInvalidationReason();
+        _impl->resourceBlackboard.publish(
+            detail::BlackboardResourceId::TaaHistoryRead,
+            detail::BlackboardResourceLifetime::PersistentHistory,
+            taaPassPtr->readHistoryFbo(), BGFX_INVALID_HANDLE,
+            _impl->viewportW, _impl->viewportH,
+            taaPassPtr->historyGeneration(),
+            taaPassPtr->historyValid(), historyReason);
+        _impl->resourceBlackboard.publish(
+            detail::BlackboardResourceId::TaaHistoryWrite,
+            detail::BlackboardResourceLifetime::PersistentHistory,
+            taaPassPtr->writeHistoryFbo(), BGFX_INVALID_HANDLE,
+            _impl->viewportW, _impl->viewportH,
+            taaPassPtr->historyGeneration(), false,
+            detail::ResourceInvalidationReason::AwaitingProducer);
     }
 
     detail::FrameContext frame;
@@ -1410,6 +1462,14 @@ void Renderer::render(const RenderScene& scene)
         _impl->pipeline.findPass<detail::MotionVectorPass>();
     if (motionVectorPassPtr != nullptr) {
         motionVectorPassPtr->resetFrameState();
+        _impl->resourceBlackboard.publish(
+            detail::BlackboardResourceId::MotionVectors,
+            detail::BlackboardResourceLifetime::External,
+            motionVectorPassPtr->velocityFbo(),
+            motionVectorPassPtr->velocityTexture(),
+            motionVectorPassPtr->width(), motionVectorPassPtr->height(),
+            motionVectorPassPtr->targetGeneration(), false,
+            detail::ResourceInvalidationReason::AwaitingProducer);
     }
 
     // §P5 B3 (2026-07-22) — when Lighting is in the configured
@@ -1582,11 +1642,24 @@ void Renderer::render(const RenderScene& scene)
     graphInput.height = fgH;
     graphInput.sceneColor = sceneColorHandle;
     if (taaStageEnabled) {
-        graphInput.taaWriteTarget = taaPassPtr->writeHistoryFbo();
-        graphInput.taaReadHistory = taaPassPtr->readHistoryFbo();
+        const detail::BlackboardResourceEntry* taaWrite =
+            _impl->resourceBlackboard.find(
+                detail::BlackboardResourceId::TaaHistoryWrite);
+        const detail::BlackboardResourceEntry* taaRead =
+            _impl->resourceBlackboard.find(
+                detail::BlackboardResourceId::TaaHistoryRead);
+        graphInput.taaWriteTarget = taaWrite != nullptr
+            ? taaWrite->framebuffer
+            : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+        graphInput.taaReadHistory = taaRead != nullptr
+            ? taaRead->framebuffer
+            : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
-        graphInput.motionVectors = motionVectorPassPtr != nullptr
-            ? motionVectorPassPtr->velocityFbo()
+        const detail::BlackboardResourceEntry* motion =
+            _impl->resourceBlackboard.find(
+                detail::BlackboardResourceId::MotionVectors);
+        graphInput.motionVectors = motion != nullptr
+            ? motion->framebuffer
             : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
     graphInput.ssao = ssaoPassEnabled;
@@ -1687,6 +1760,7 @@ void Renderer::render(const RenderScene& scene)
         motionVectorPassPtr,
         _impl->wireframeEnabled,
         &_impl->frameDrawLists,
+        &_impl->resourceBlackboard,
     };
 
     static uint32_t s_compositeLog = 0;
@@ -1737,7 +1811,8 @@ void Renderer::render(const RenderScene& scene)
     // must likewise never reuse its old object snapshots on the next frame.
     if (taaPassPtr != nullptr) {
         taaPassPtr->finishFrame(
-            _impl->pipeline.findPass<detail::MotionVectorPass>());
+            _impl->pipeline.findPass<detail::MotionVectorPass>(),
+            &_impl->resourceBlackboard);
     }
 
     // §5.5 cleanup (2026-07-22) — the F1-diagnostic lastFrameShadowFbo
@@ -1763,6 +1838,9 @@ void Renderer::resize(uint32_t width, uint32_t height)
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+
+    _impl->invalidateTemporalResources(
+        detail::ResourceInvalidationReason::Resize);
 
     // Destroy offscreen RTs before bgfx::reset. Orphaning handles
     // (INVALID without destroy) leaks memory; deferred GBuffer/Lighting
@@ -2330,6 +2408,8 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
     // Release every framebuffer owner first so retained UI/FrameGraph leases
     // cannot keep a numerically-valid but device-stale handle afterward.
     if (before != requestedSamples) {
+        _impl->invalidateTemporalResources(
+            detail::ResourceInvalidationReason::BackendReset);
         if (detail::BGFXAdapter::isValid(_impl->sceneFbo)) {
             _impl->adapter.destroy(_impl->sceneFbo);
             _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
@@ -2625,13 +2705,9 @@ void Renderer::setTaaEnabled(bool enabled)
         _impl->fxaaEnabled = false;
         _impl->smaaEnabled = false;
     }
-    if (detail::RenderPass* taa = _impl->pipeline.findPass("TAA")) {
-        static_cast<detail::TAAPass*>(taa)->invalidateHistory();
-    }
-    if (detail::RenderPass* motion =
-            _impl->pipeline.findPass("MotionVector")) {
-        static_cast<detail::MotionVectorPass*>(motion)->invalidateHistory();
-    }
+    _impl->invalidateTemporalResources(
+        enabled ? detail::ResourceInvalidationReason::Manual
+                : detail::ResourceInvalidationReason::FeatureDisabled);
     _impl->applyAntiAliasingKnobs();
 }
 

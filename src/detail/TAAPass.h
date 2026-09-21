@@ -3,6 +3,7 @@
 #include "detail/FullscreenPassGeometry.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
+#include "detail/RenderResourceBlackboard.h"
 
 #include "AYMath/MathTypes.h"
 #include "AYShader/ShaderResource.h"
@@ -74,11 +75,18 @@ public:
     bool historyValid() const noexcept { return _historyValid; }
     bool preparedThisFrame() const noexcept { return _preparedThisFrame; }
     bool producedThisFrame() const noexcept { return _producedThisFrame; }
+    uint32_t historyGeneration() const noexcept { return _historyGeneration; }
+    ResourceInvalidationReason historyInvalidationReason() const noexcept {
+        return _historyInvalidationReason;
+    }
     uint32_t jitterSampleIndex() const noexcept { return _jitterSampleIndex; }
     TaaJitter currentJitter() const noexcept { return _currentJitter; }
 
-    void invalidateHistory() noexcept;
-    void finishFrame(MotionVectorPass* motion) noexcept;
+    void invalidateHistory(
+        ResourceInvalidationReason reason =
+            ResourceInvalidationReason::Manual) noexcept;
+    void finishFrame(MotionVectorPass* motion,
+                     RenderResourceBlackboard* blackboard = nullptr) noexcept;
     void destroyResources(BGFXAdapter& adapter);
 
 private:
@@ -114,11 +122,14 @@ private:
     uint8_t _writeHistoryIndex = 1;
     uint32_t _jitterSampleIndex = 0;
     uint32_t _stableFrameCount = 0;
+    uint32_t _historyGeneration = 0;
     bool _historyValid = false;
     bool _preparedThisFrame = false;
     bool _producedThisFrame = false;
     bool _hasPreviousCamera = false;
     bool _backgroundHistoryValid = false;
+    ResourceInvalidationReason _historyInvalidationReason =
+        ResourceInvalidationReason::Manual;
     TaaJitter _currentJitter{};
 
     ayt::math::Float4x4 _jitteredProjection =

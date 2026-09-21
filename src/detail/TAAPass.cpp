@@ -410,7 +410,7 @@ bool TAAPass::prepareFrame(BGFXAdapter& adapter,
 {
     // A prepared frame without a completed resolve cannot remain temporal history.
     if (_preparedThisFrame) {
-        invalidateHistory();
+        invalidateHistory(ResourceInvalidationReason::ProducerFailure);
     }
     _producedThisFrame = false;
     _preparedThisFrame = false;
@@ -441,7 +441,7 @@ bool TAAPass::prepareFrame(BGFXAdapter& adapter,
     const bool cameraCut = detectCameraCut(view, projection, cameraPosition);
     _backgroundHistoryValid = cameraStable && !cameraCut;
     if (cameraCut) {
-        invalidateHistory();
+        invalidateHistory(ResourceInvalidationReason::CameraCut);
     }
     _stableFrameCount = _historyValid && !cameraCut
         ? std::min(_stableFrameCount + 1u, kJitterRampFrameCount)
@@ -485,25 +485,48 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
         ctx.frameGraph->resolveSemantic(FgSemantic::PresentSource);
     const bgfx::FrameBufferHandle target =
         ctx.frameGraph->resolve(FgResourceId::TaaColor);
+    const BlackboardResourceEntry* historyRead = ctx.resourceBlackboard
+        ? ctx.resourceBlackboard->find(
+              BlackboardResourceId::TaaHistoryRead)
+        : nullptr;
+    const BlackboardResourceEntry* historyWrite = ctx.resourceBlackboard
+        ? ctx.resourceBlackboard->find(
+              BlackboardResourceId::TaaHistoryWrite)
+        : nullptr;
+    const bgfx::FrameBufferHandle readHistory = historyRead != nullptr
+        ? historyRead->framebuffer : _history[_readHistoryIndex];
+    const bgfx::FrameBufferHandle writeHistory = historyWrite != nullptr
+        ? historyWrite->framebuffer : writeHistoryFbo();
     if (!BGFXAdapter::isValid(source) || !BGFXAdapter::isValid(target)
-        || target.idx != writeHistoryFbo().idx) {
+        || !BGFXAdapter::isValid(readHistory)
+        || !BGFXAdapter::isValid(writeHistory)
+        || target.idx != writeHistory.idx) {
         rateLimitedEarlyReturn("TAAPass", "FrameGraph source/history target invalid");
         return 0;
     }
 
     const bgfx::TextureHandle currentColor = adapter.getFboAttachment(source, 0);
     const bgfx::TextureHandle historyColor =
-        adapter.getFboAttachment(_history[_readHistoryIndex], 0);
+        adapter.getFboAttachment(readHistory, 0);
     const bgfx::TextureHandle worldPosition =
         ctx.gbufferPass->gbufferWorldPositionRt();
     const bgfx::TextureHandle geometryData =
         ctx.gbufferPass->gbufferMaterialRt();
     const bgfx::TextureHandle sceneDepth = ctx.gbufferPass->gbufferDepthRt();
-    const bool motionAvailable = ctx.motionVectorPass != nullptr
-        && ctx.motionVectorPass->producedThisFrame()
-        && BGFXAdapter::isValid(ctx.motionVectorPass->velocityTexture());
+    const BlackboardResourceEntry* motionEntry = ctx.resourceBlackboard
+        ? ctx.resourceBlackboard->find(BlackboardResourceId::MotionVectors)
+        : nullptr;
+    const bool motionAvailable = motionEntry != nullptr
+        ? ctx.resourceBlackboard->producedThisFrame(
+              BlackboardResourceId::MotionVectors)
+              && BGFXAdapter::isValid(motionEntry->texture)
+        : ctx.motionVectorPass != nullptr
+              && ctx.motionVectorPass->producedThisFrame()
+              && BGFXAdapter::isValid(
+                     ctx.motionVectorPass->velocityTexture());
     const bgfx::TextureHandle motionVectors = motionAvailable
-        ? ctx.motionVectorPass->velocityTexture()
+        ? (motionEntry != nullptr ? motionEntry->texture
+                                  : ctx.motionVectorPass->velocityTexture())
         : worldPosition;
     if (!BGFXAdapter::isValid(currentColor)
         || !BGFXAdapter::isValid(historyColor)
@@ -529,11 +552,17 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
         static_cast<float>(ctx.viewportWidth),
         static_cast<float>(ctx.viewportHeight),
     };
+    const bool historyContentValid = historyRead != nullptr
+        ? historyRead->contentValid
+              && historyRead->generation == _historyGeneration
+              && historyRead->width == ctx.viewportWidth
+              && historyRead->height == ctx.viewportHeight
+        : _historyValid;
     const float params[4] = {
         kStaticHistoryWeight,
         kMovingHistoryWeight,
         kNeighborhoodExpansion,
-        _historyValid ? 1.0f : 0.0f,
+        historyContentValid ? 1.0f : 0.0f,
     };
     _program.setUniform(_uTaaMetrics, metrics, sizeof(metrics));
     _program.setUniform(_uTaaParams, params, sizeof(params));
@@ -592,7 +621,12 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
                                         FgResourceId::TaaColor);
     _readHistoryIndex = _writeHistoryIndex;
     _historyValid = true;
+    _historyInvalidationReason = ResourceInvalidationReason::None;
     _producedThisFrame = true;
+    if (ctx.resourceBlackboard != nullptr) {
+        ctx.resourceBlackboard->markProduced(
+            BlackboardResourceId::TaaHistoryWrite);
+    }
     _previousBaseView = _currentBaseView;
     _previousBaseProjection = _currentBaseProjection;
     _previousCameraPosition = _currentCameraPosition;
@@ -642,7 +676,11 @@ bool TAAPass::ensureHistory(BGFXAdapter& adapter,
     }
     _historyWidth = width;
     _historyHeight = height;
-    invalidateHistory();
+    ++_historyGeneration;
+    if (_historyGeneration == 0) {
+        ++_historyGeneration;
+    }
+    invalidateHistory(ResourceInvalidationReason::ResourceRecreated);
     return true;
 }
 
@@ -714,19 +752,29 @@ void TAAPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     _programRetryFrames = 0;
 }
 
-void TAAPass::finishFrame(MotionVectorPass* motion) noexcept
+void TAAPass::finishFrame(MotionVectorPass* motion,
+                          RenderResourceBlackboard* blackboard) noexcept
 {
     if (!_producedThisFrame) {
-        invalidateHistory();
+        invalidateHistory(ResourceInvalidationReason::ProducerFailure);
+        if (blackboard != nullptr) {
+            blackboard->invalidateTemporal(
+                ResourceInvalidationReason::ProducerFailure);
+        }
         if (motion != nullptr) {
             motion->invalidateHistory();
         }
     } else if (motion != nullptr && !motion->producedThisFrame()) {
         motion->invalidateHistory();
+        if (blackboard != nullptr) {
+            blackboard->invalidate(
+                BlackboardResourceId::MotionVectors,
+                ResourceInvalidationReason::ProducerFailure);
+        }
     }
 }
 
-void TAAPass::invalidateHistory() noexcept
+void TAAPass::invalidateHistory(ResourceInvalidationReason reason) noexcept
 {
     _historyValid = false;
     _producedThisFrame = false;
@@ -738,6 +786,7 @@ void TAAPass::invalidateHistory() noexcept
     _hasPreviousCamera = false;
     _backgroundHistoryValid = false;
     _currentJitter = {};
+    _historyInvalidationReason = reason;
 }
 
 void TAAPass::destroyHistory(BGFXAdapter& adapter)

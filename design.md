@@ -1,5 +1,13 @@
 # AYRenderer Design
 
+## 2026-09-21 — R6-4 资源黑板第一刀
+
+- 新增 renderer 内部 `RenderResourceBlackboard`，首批覆盖 MotionVector 与 TAA read/write history。黑板为每个资源记录 borrowed framebuffer/texture、尺寸、generation、`External/Transient/PersistentHistory` lifetime、当帧产出状态与内容有效性。
+- TAA 生产路径通过黑板读取 history 和 motion，FrameGraph plan 的对应 imported handle 也改由黑板解析。`PassExecContext` 尾部增加可空黑板指针，保留直接 Pass 单测的兼容路径，避免再次引入聚合初始化 ABI 风险。
+- resize、camera cut、pipeline rebuild、backend reset、feature disable、资源重建、prepare/producer failure 和 shutdown 均使用显式失效原因；MotionVector 的当帧内容不再跨帧沿用，TAA history 则保留到显式失效。
+- 本刀不迁移 GPU 句柄所有权：MotionVectorPass/TAAPass 仍负责创建和销毁，黑板只是状态与诊断的单一入口。后续再扩展 GBuffer/SSAO/DepthHaze 等 logical output，不把对象骨骼历史缓存强行并入。
+- 新增黑板生命期/失效原因单测，并覆盖 TAA resolve 失败后以 `ProducerFailure` 联动失效。
+
 ## 2026-09-21 — TAA 诊断层纹与透明边缘异常观察（开放风险，暂缓处理）
 
 **跟踪项：TAA-TRANSPARENCY-01。状态：已记录、未关闭，按用户决定暂缓进一步修复。** 当前用户观察到 Final image 干净，继续追查的即时视觉收益有限；这不意味着透明时域处理已经完整，也不能把潜在问题当作“诊断图正常闪动”直接忽略。本轮只记录现象与追查边界，不改算法、参数或渲染架构。
