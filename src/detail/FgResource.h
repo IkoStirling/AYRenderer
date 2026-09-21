@@ -207,6 +207,14 @@ struct FgCompileStats {
     uint16_t aliasHits        = 0;
 };
 
+struct FgRetentionStats {
+    uint16_t retainedResources = 0;
+    uint16_t leasedTargets = 0;
+    uint16_t idleResources = 0;
+    uint16_t releasedTargets = 0;
+    uint16_t releaseAfterFrames = 0;
+};
+
 // Ping-pong pair ── F3 接入;BloomBlur H/V 两段共享资源对。
 struct FgPingPong {
     bgfx::FrameBufferHandle first;
@@ -240,8 +248,8 @@ public:
 
     // ─── 帧头 / 帧尾 ─────────────────────────────────────────────
     // 每帧调用一次。清空上一帧的 resource / pass / semantic 声明;
-    // 重置 availability / stats。物理 owned RT 保留到 resize 或
-    // shutdown。
+    // 重置 availability / stats。物理 owned RT 短期保留复用，持续
+    // inactive 达到 idle 阈值后在 compile() 归还共享池。
     void beginFrame(uint16_t width, uint16_t height);
 
     // ─── 声明 ──────────────────────────────────────────────────
@@ -309,6 +317,11 @@ public:
     void shutdown();
 
     const FgCompileStats& stats() const noexcept { return _stats; }
+    FgRetentionStats retentionStats() const noexcept;
+    void setIdleReleaseFrames(uint16_t frames) noexcept {
+        _idleReleaseFrames = frames == 0 ? 1 : frames;
+    }
+    uint16_t idleReleaseFrames() const noexcept { return _idleReleaseFrames; }
     const std::vector<FgCompileError>& compileErrors() const noexcept {
         return _compileErrors;
     }
@@ -323,6 +336,9 @@ private:
     uint16_t        _viewportW   = 0;
     uint16_t        _viewportH   = 0;
     bool            _compiled    = false;
+    static constexpr uint16_t kDefaultIdleReleaseFrames = 120;
+    uint16_t        _idleReleaseFrames = kDefaultIdleReleaseFrames;
+    uint16_t        _releasedIdleTargets = 0;
 
     FgCompileStats  _stats{};
     std::vector<FgCompileError> _compileErrors;
@@ -336,6 +352,8 @@ private:
         bool                      isExternal  = false;
         bool                      live        = false;
         bool                      producedThisFrame = false;
+        bool                      retentionTracked = false;
+        uint16_t                  inactiveFrames = 0;
         // `mutable` 因为 resolve() 是 const 成员,但 lazy
         // create-on-first-resolve 路径必须能写 physical。
         mutable bgfx::FrameBufferHandle physical =
@@ -374,6 +392,8 @@ private:
         bgfx::FrameBufferHandle    physical   = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     };
     SemanticEntry _semantics[static_cast<size_t>(FgSemantic::Count)];
+
+    void updateIdleRetention() noexcept;
 };
 
 } // namespace ayt::render::detail

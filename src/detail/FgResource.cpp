@@ -82,6 +82,7 @@ void FrameGraph::beginFrame(uint16_t width, uint16_t height)
     _viewportH = height;
     _compiled  = false;
     _stats     = FgCompileStats{};
+    _releasedIdleTargets = 0;
     _compileErrors.clear();
 
     // 清空 logical 声明。但 ── F6 ── 物理 RT (aliasGroup /
@@ -121,6 +122,8 @@ void FrameGraph::importExternal(FgResourceId id, bgfx::FrameBufferHandle handle)
         _targetPool->release(r.pooled);
         r.pooled = {};
     }
+    r.retentionTracked = false;
+    r.inactiveFrames = 0;
     r.declared   = true;
     r.isExternal = true;
     r.physical   = handle;  // 借用 ── FG 不 own,resize/shutdown 不动。
@@ -143,6 +146,7 @@ void FrameGraph::addResource(FgResourceId id, const FgTextureDesc& desc)
     r.declared   = true;
     r.isExternal = false;  // 即使前一次是 external,这次声明覆盖所有权
     r.desc       = desc;
+    r.retentionTracked = true;
     // physical 保留 ── 若已 lazy 创建且尺寸匹配则复用;否则由
     // resolve() 检测尺寸变化重建。
 }
@@ -285,6 +289,7 @@ bool FrameGraph::compile()
     }
 
     if (!_compileErrors.empty()) {
+        updateIdleRetention();
         return false;
     }
 
@@ -413,7 +418,60 @@ bool FrameGraph::compile()
     }
 
     _compiled = true;
+    updateIdleRetention();
     return true;
+}
+
+void FrameGraph::updateIdleRetention() noexcept
+{
+    if (_targetPool == nullptr) {
+        return;
+    }
+    for (ResourceEntry& resource : _resources) {
+        if (resource.isExternal || !resource.retentionTracked) {
+            continue;
+        }
+        if (resource.live) {
+            resource.inactiveFrames = 0;
+            continue;
+        }
+        if (resource.inactiveFrames < std::numeric_limits<uint16_t>::max()) {
+            ++resource.inactiveFrames;
+        }
+        if (resource.inactiveFrames < _idleReleaseFrames) {
+            continue;
+        }
+        if (resource.pooled.isValid()) {
+            _targetPool->release(resource.pooled);
+            ++_releasedIdleTargets;
+        }
+        resource.pooled = {};
+        resource.physical = BGFX_INVALID_HANDLE;
+        resource.physicalW = 0;
+        resource.physicalH = 0;
+        resource.retentionTracked = false;
+        resource.inactiveFrames = 0;
+    }
+}
+
+FgRetentionStats FrameGraph::retentionStats() const noexcept
+{
+    FgRetentionStats result{};
+    result.releasedTargets = _releasedIdleTargets;
+    result.releaseAfterFrames = _idleReleaseFrames;
+    for (const ResourceEntry& resource : _resources) {
+        if (resource.isExternal || !resource.retentionTracked) {
+            continue;
+        }
+        ++result.retainedResources;
+        if (resource.pooled.isValid()) {
+            ++result.leasedTargets;
+        }
+        if (!resource.live && resource.inactiveFrames != 0) {
+            ++result.idleResources;
+        }
+    }
+    return result;
 }
 
 // ─── resolve ─────────────────────────────────────────────────
@@ -533,6 +591,8 @@ void FrameGraph::resize(uint16_t width, uint16_t height)
             r.physical = BGFX_INVALID_HANDLE;
             r.physicalW = 0;
             r.physicalH = 0;
+            r.retentionTracked = false;
+            r.inactiveFrames = 0;
         }
     }
     if (_ownedTargetPool != nullptr) {
@@ -557,6 +617,8 @@ void FrameGraph::shutdown()
         r.declared   = false;
         r.live       = false;
         r.producedThisFrame = false;
+        r.retentionTracked = false;
+        r.inactiveFrames = 0;
         r.isExternal = false;
         r.aliasGroup = -1;
     }
@@ -572,6 +634,7 @@ void FrameGraph::shutdown()
     _viewportH = 0;
     _compiled  = false;
     _stats     = FgCompileStats{};
+    _releasedIdleTargets = 0;
     _compileErrors.clear();
     if (_ownedTargetPool != nullptr) {
         _ownedTargetPool->shutdown();

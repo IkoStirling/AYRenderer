@@ -196,4 +196,51 @@ TEST_CASE(compiled_liveness_becomes_a_pipeline_execution_decision)
     CHECK(graph.shouldExecute(ayt::render::RenderPassSlot::Present));
 }
 
+TEST_CASE(inactive_owned_resources_expire_after_a_controlled_grace_period)
+{
+    BGFXAdapter adapter;
+    FrameGraph graph(adapter);
+    graph.setIdleReleaseFrames(2);
+
+    graph.beginFrame(1280, 720);
+    addFullColor(graph, FgResourceId::BloomBright);
+    graph.addPass({"Bloom", {}, {FgResourceId::BloomBright}, true});
+    CHECK(graph.compile());
+    CHECK(graph.retentionStats().retainedResources == 1u);
+    CHECK(graph.retentionStats().idleResources == 0u);
+
+    graph.beginFrame(1280, 720);
+    CHECK(graph.compile());
+    CHECK(graph.retentionStats().retainedResources == 1u);
+    CHECK(graph.retentionStats().idleResources == 1u);
+
+    graph.beginFrame(1280, 720);
+    CHECK(graph.compile());
+    CHECK(graph.retentionStats().retainedResources == 0u);
+    CHECK(graph.retentionStats().releaseAfterFrames == 2u);
+}
+
+TEST_CASE(reenabled_resource_cancels_pending_idle_release)
+{
+    BGFXAdapter adapter;
+    FrameGraph graph(adapter);
+    graph.setIdleReleaseFrames(2);
+
+    graph.beginFrame(1280, 720);
+    addFullColor(graph, FgResourceId::BloomBright);
+    graph.addPass({"Bloom", {}, {FgResourceId::BloomBright}, true});
+    CHECK(graph.compile());
+
+    graph.beginFrame(1280, 720);
+    CHECK(graph.compile());
+    CHECK(graph.retentionStats().idleResources == 1u);
+
+    graph.beginFrame(1280, 720);
+    addFullColor(graph, FgResourceId::BloomBright);
+    graph.addPass({"Bloom", {}, {FgResourceId::BloomBright}, true});
+    CHECK(graph.compile());
+    CHECK(graph.retentionStats().retainedResources == 1u);
+    CHECK(graph.retentionStats().idleResources == 0u);
+}
+
 TEST_SUITE_END
