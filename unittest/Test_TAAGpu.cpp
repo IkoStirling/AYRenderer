@@ -1,6 +1,7 @@
 #include "AYTest.h"
 #include "detail/TAAPass.h"
 #include "detail/MotionVectorPass.h"
+#include "detail/GBufferPass.h"
 #include "detail/BgfxMatrix.h"
 #include "AYShader/ShaderResourcePool.h"
 
@@ -38,6 +39,7 @@ struct TaaGpuFixture {
     bgfx::TextureHandle targetTexture = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle readback = BGFX_INVALID_HANDLE;
     bool productionPrecision = false;
+    uint16_t extent = kSize;
 
     ~TaaGpuFixture() {
         if (adapter.isInitialized()) {
@@ -51,8 +53,9 @@ struct TaaGpuFixture {
         if (window) DestroyWindow(window);
     }
 
-    bool initialize(const char* backend, bool halfPrecision = false) {
+    bool initialize(const char* backend, bool halfPrecision = false, uint16_t size = kSize) {
         productionPrecision = halfPrecision;
+        extent = size;
         window = CreateWindowExW(0, L"STATIC", L"TAA GPU regression",
             WS_OVERLAPPED, 0, 0, 64, 64, nullptr, nullptr,
             GetModuleHandleW(nullptr), nullptr);
@@ -77,13 +80,13 @@ struct TaaGpuFixture {
             return false;
         }
         if (!geometry.ensure(adapter)) return false;
-        targetTexture = bgfx::createTexture2D(kSize, kSize, false, 1,
+        targetTexture = bgfx::createTexture2D(extent, extent, false, 1,
             halfPrecision ? bgfx::TextureFormat::RGBA16F : bgfx::TextureFormat::RGBA32F,
             BGFX_TEXTURE_RT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_POINT);
         if (!bgfx::isValid(targetTexture)) return false;
         textures.push_back(targetTexture);
         target = bgfx::createFrameBuffer(1, &targetTexture, false);
-        readback = bgfx::createTexture2D(kSize, kSize, false, 1,
+        readback = bgfx::createTexture2D(extent, extent, false, 1,
             halfPrecision ? bgfx::TextureFormat::RGBA16F : bgfx::TextureFormat::RGBA32F,
             BGFX_TEXTURE_READ_BACK | BGFX_TEXTURE_BLIT_DST);
         if (!bgfx::isValid(readback)) return false;
@@ -112,7 +115,7 @@ struct TaaGpuFixture {
         } else {
             memory = bgfx::copy(pixels.data(), static_cast<uint32_t>(pixels.size() * sizeof(Pixel)));
         }
-        auto texture = bgfx::createTexture2D(kSize, kSize, false, 1, format, flags, memory);
+        auto texture = bgfx::createTexture2D(extent, extent, false, 1, format, flags, memory);
         if (bgfx::isValid(texture)) textures.push_back(texture);
         return texture;
     }
@@ -169,13 +172,13 @@ struct TaaGpuFixture {
                        bool historyValid, float debugMode, bgfx::FrameBufferHandle output) {
         const std::array<const char*, 6> names = {
             "currentColor", "historyColor", "worldPosition", "geometryData", "motionVectors", "sceneDepth"};
-        configureFullscreenPassView(adapter, 0, output, 0, 0, kSize, kSize);
+        configureFullscreenPassView(adapter, 0, output, 0, 0, extent, extent);
         geometry.bind(adapter);
         for (uint8_t i=0;i<bindings.size();++i)
             program.setTexture(i, program.getTextureBinding(names[i]), toShaderTexture(bindings[i]));
-        const float metrics[4] = {1.0f / kSize, 1.0f / kSize, kSize, kSize};
+        const float metrics[4] = {1.0f / extent, 1.0f / extent, float(extent), float(extent)};
         const float params[4] = {0.92f, 0.65f, 0.025f, historyValid ? 1.0f : 0.0f};
-        const float offset[4] = {jitter.x / kSize, jitter.y / kSize, 1, 1};
+        const float offset[4] = {jitter.x / extent, jitter.y / extent, 1, 1};
         const float depth[4] = {TAAPass::kHistoryDepthTolerance, debugMode, 0, 0};
         const float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
         program.setUniform(program.getUniformBinding("taaMetrics"), metrics, sizeof(metrics));
@@ -187,9 +190,9 @@ struct TaaGpuFixture {
         program.submit({0, 0});
     }
 
-    std::vector<Pixel> readTarget() {
-        bgfx::blit(1, readback, 0, 0, targetTexture);
-        std::vector<Pixel> result(kSize*kSize);
+    std::vector<Pixel> readTarget(uint8_t blitView = 1) {
+        bgfx::blit(blitView, readback, 0, 0, targetTexture);
+        std::vector<Pixel> result(size_t(extent)*extent);
         std::vector<uint16_t> halves(result.size() * 4);
         const auto ready = bgfx::readTexture(readback,
             productionPrecision ? static_cast<void*>(halves.data()) : static_cast<void*>(result.data()));
@@ -426,6 +429,268 @@ TEST_CASE(taa_gpu_resident_ping_pong_uses_immediately_previous_frame)
     }
     std::cout << "[TAA resident] frames=" << frames << " maxRecurrenceError=" << worstError << '\n';
     fixture.adapter.destroy(second);
+#endif
+}
+
+TEST_SUITE_END
+
+TEST_SUITE(AYRenderer_TAARejectionGpu)
+
+// Diagnostic integration probe: production GBuffer -> borrowed D24 Motion ->
+// production Resolve. No editor settings or production shader are changed.
+TEST_CASE(taa_rejection_probe_with_real_gbuffer_depth_replay)
+{
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend) { std::cout << "[SKIP] Set AY_TAA_GPU_TEST for rejection probe.\n"; return; }
+    const char* sizeSetting=std::getenv("AY_TAA_PROBE_SIZE");
+    const uint16_t kSize=uint16_t(sizeSetting?std::clamp(std::atoi(sizeSetting),32,256):32);
+    TaaGpuFixture f;
+    const bool ready=f.initialize(backend,true,kSize);
+    CHECK(ready);
+    if(!ready) return;
+    auto fill=f.pool.acquire(kGBufferPhoskiaSourceCStr);
+    auto motion=f.pool.acquire(motionVectorPhoskiaSourceForTests());
+    std::string resolveSource=taaPhoskiaSourceForTests();
+    const bool rejectTiny=std::getenv("AY_TAA_PROBE_REJECT_TINY_TAPS")!=nullptr;
+    if(rejectTiny) {
+        // Counterfactual experiment ONLY: retain all other production logic.
+        const auto gate=resolveSource.find("historyWeight > 0.00001");
+        CHECK(gate!=std::string::npos);
+        if(gate==std::string::npos) return;
+        resolveSource.replace(gate,std::string("historyWeight > 0.00001").size(),"historyWeight > 0.5");
+        f.program=f.pool.acquire(resolveSource);
+        CHECK(f.program.isValid());
+        if(!f.program.isValid()) return;
+    }
+    // Instrument a TEST-ONLY copy after the original resolve has executed.
+    // codes: 1 no history, 2 motion invalid, 3 extreme gradient,
+    // 4 previous clip depth invalid, 5 no compatible history tap,
+    // 6 another validity gate (including the optional tiny-tap experiment);
+    // zero means history was accepted. Priority: no history > motion > taps.
+    std::string probeSource=resolveSource;
+    const auto returnAt=probeSource.find("        return outputColor");
+    CHECK(returnAt!=std::string::npos);
+    if(returnAt==std::string::npos) return;
+    probeSource.insert(returnAt,R"(
+        if (debugMode > 5.5) {
+            let reason = 0.0
+            if (!validHistory) { reason = 6.0 }
+            if (historyWeight < 0.00001) { reason = 5.0 }
+            if (coverage > 0.5) {
+                let probeMotion = sample(motionVectors, surfaceUv)
+                if (probeMotion.z < 0.0 || probeMotion.z > 1.0) { reason = 4.0 }
+                if (probeMotion.w > 1.0499) { reason = 3.0 }
+                if (probeMotion.w < 0.5) { reason = 2.0 }
+            }
+            if (taaParams.w < 0.5) { reason = 1.0 }
+            outputColor = vec4(reason, effectiveFeedback, currentHistoryDepth, expectedPreviousDepth)
+        }
+        if (debugMode > 6.5 && debugMode < 7.5) { outputColor = vec4(surfaceUv, historyRgb.x, current.x) }
+        if (debugMode > 7.5 && debugMode < 8.5) { outputColor = vec4(h0.w, h1.w, h2.w, h3.w) }
+        if (debugMode > 8.5) { outputColor = vec4(historyFraction, historyDepthTolerance, historyWeight) }
+)");
+    auto probe=f.pool.acquire(probeSource);
+    auto copy=f.pool.acquire(R"(
+material ProbeCopy {
+    texture2d sourceColor
+    vertex {
+        in pos : position
+        in uv : texcoord
+        out vUv : texcoord = uv
+        return vec4(pos.x, pos.y, 0.0, 1.0)
+    }
+    fragment { in vUv : texcoord
+        return sample(sourceColor, vUv)
+    }
+}
+)");
+    CHECK(fill.isValid() && motion.isValid() && probe.isValid() && copy.isValid());
+    if(!fill.isValid() || !motion.isValid() || !probe.isValid() || !copy.isValid()) return;
+    const auto gbuffer=f.adapter.createGbufferFrameBuffer(kSize,kSize);
+    CHECK(bgfx::isValid(gbuffer));
+    if(!bgfx::isValid(gbuffer)) return;
+    const auto motionTex=f.adapter.createRenderTargetTexture2D(kSize,kSize,
+        bgfx::TextureFormat::RGBA16F,BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP);
+    const auto motionFbo=f.adapter.createBorrowedColorDepthFrameBuffer(motionTex,
+        f.adapter.getFboAttachment(gbuffer,4));
+    const auto colorFbo=f.adapter.createFrameBuffer(kSize,kSize,bgfx::TextureFormat::RGBA8,false,false);
+    CHECK(bgfx::isValid(motionFbo) && bgfx::isValid(colorFbo));
+    if(!bgfx::isValid(motionFbo) || !bgfx::isValid(colorFbo)) {
+        if(bgfx::isValid(motionFbo)) bgfx::destroy(motionFbo);
+        if(bgfx::isValid(colorFbo)) bgfx::destroy(colorFbo);
+        if(bgfx::isValid(motionTex)) bgfx::destroy(motionTex);
+        bgfx::destroy(gbuffer); return;
+    }
+    struct Vertex { float p[3], n[3], t[4], uv[2], ids[4], weights[4]; };
+    std::vector<Vertex> vertices;
+    const auto quad=[&](std::array<std::array<float,3>,4> points) {
+        for(int i:{0,1,2,0,2,3}) {
+            const auto p=points[i];
+            vertices.push_back({{p[0],p[1],p[2]},{0,0,-1},{1,0,0,1},{0,0},{0,0,0,0},{1,0,0,0}});
+        }
+    };
+    quad({{{-24,-24,8},{24,-24,8},{24,24,8},{-24,24,8}}});
+    // One planar near surface, with a slanted silhouette and depth gradient.
+    quad({{{-2,-2,.3f},{-.20f,-2,.57f},{.28f,2,1.442f},{-2,2,1.1f}}});
+    const std::array<std::array<float,3>,8> corners={{{-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},
+        {-1,-1,1},{1,-1,1},{1,1,1},{-1,1,1}}};
+    const int faces[6][4]={{0,1,2,3},{1,5,6,2},{5,4,7,6},{4,0,3,7},{3,2,6,7},{4,5,1,0}};
+    for(int close=0;close<2;++close) for(const auto& face:faces) {
+        std::array<std::array<float,3>,4> points{};
+        for(int i=0;i<4;++i) {
+            const auto p=corners[face[i]];
+            const float x=.9063078f*p[0]+.4226183f*p[2], z=-.4226183f*p[0]+.9063078f*p[2];
+            const float rx=.9238795f*x-.3826834f*p[1], ry=.3826834f*x+.9238795f*p[1];
+            const float scale=close?.16f:.45f;
+            points[i]={rx*scale+.13f,ry*scale,z*scale+(close?.28f:1.1f)};
+        }
+        quad(points);
+    }
+    bgfx::VertexLayout layout;
+    layout.begin().add(bgfx::Attrib::Position,3,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Normal,3,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Tangent,4,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::TexCoord0,2,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Indices,4,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Weight,4,bgfx::AttribType::Float).end();
+    const auto vb=bgfx::createVertexBuffer(bgfx::copy(vertices.data(),uint32_t(vertices.size()*sizeof(Vertex))),layout);
+    CHECK(bgfx::isValid(vb));
+    if(!bgfx::isValid(vb)) {
+        bgfx::destroy(motionFbo); bgfx::destroy(motionTex);
+        bgfx::destroy(colorFbo); bgfx::destroy(gbuffer); return;
+    }
+    const auto white=f.input(std::vector<Pixel>(kSize*kSize,Pixel{1,1,1,1}),true,true);
+    const auto normal=f.input(std::vector<Pixel>(kSize*kSize,Pixel{.5f,.5f,1,1}),true,true);
+    const auto identity=ayt::math::Float4x4::identity();
+    float identityData[16]; toBgfxColumnMajor(identity,identityData);
+    std::array<float,128*16> bones{};
+    for(int i=0;i<128;++i) std::copy(identityData,identityData+16,bones.data()+i*16);
+    auto base=identity; base(2,2)=100.0f/99.9f; base(2,3)=-10.0f/99.9f; base(3,2)=1; base(3,3)=0;
+    auto uniform=[](const ayt::shader::ShaderResource& p,const char* name,const void* value,size_t size) {
+        p.setUniform(p.getUniformBinding(name),value,size);
+    };
+    auto copyDraw=[&](uint8_t view,bgfx::TextureHandle tex,bgfx::FrameBufferHandle target) {
+        configureFullscreenPassView(f.adapter,view,target,0,0,kSize,kSize);
+        f.geometry.bind(f.adapter); f.adapter.setStateDepthTestAlways();
+        copy.setTexture(0,copy.getTextureBinding("sourceColor"),toShaderTexture(tex));
+        copy.submit({view,0});
+    };
+    const auto resolve=f.program;
+    for(int shape=0;shape<3;++shape) for(int background=0;background<2;++background) {
+        std::vector<Pixel> history(kSize*kSize,Pixel{0,0,0,-1}), previous;
+        unsigned missingMotion=0; std::array<unsigned,7> reasons{};
+        float rejectJump=0,acceptedJump=0; unsigned rejectedChangedPixels=0;
+        bool detailed=false;
+        for(int frame=0;frame<40;++frame) {
+            const auto jitter=taaHaltonJitter(frame%8), oldJitter=taaHaltonJitter((frame+7)%8);
+            const auto projection=taaApplyProjectionJitter(base,jitter,kSize,kSize);
+            const auto oldProjection=taaApplyProjectionJitter(base,oldJitter,kSize,kSize);
+            float oldData[16]; toBgfxColumnMajor(oldProjection,oldData);
+            for(uint8_t view=0;view<2;++view) {
+                f.adapter.setViewMode(view,bgfx::ViewMode::Sequential);
+                f.adapter.setViewFrameBuffer(view,view==0?gbuffer:motionFbo);
+                f.adapter.setViewRect(view,0,0,kSize,kSize);
+                f.adapter.setViewTransform(view,identity,projection);
+                f.adapter.setViewClearRaw(view,view==0?BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH:BGFX_CLEAR_COLOR,0,1,0);
+                f.adapter.touch(view);
+                for(int object=background?0:1;object<2;++object) {
+                    f.adapter.setTransform(identity);
+                    bgfx::setVertexBuffer(0,vb,object?(shape==0?6:12+(shape-1)*36):0,
+                        object && shape!=0?36:6);
+                    const float zero[4]={0,0,0,0},one[4]={1,0,0,0};
+                    if(view==0) {
+                        const float color[4]={object?1.0f:0.0f,0,object?0.0f:1.0f,1};
+                        uniform(fill,"baseColor",color,sizeof(color));
+                        for(const char* name:{"metallic","emissive","castSkinned","materialModel","doubleSided"}) uniform(fill,name,zero,sizeof(zero));
+                        for(const char* name:{"ao","roughness","normalYSign"}) uniform(fill,name,one,sizeof(one));
+                        uniform(fill,"u_normalMatrix",identityData,sizeof(identityData));
+                        uniform(fill,"cameraPos",zero,sizeof(zero));
+                        uniform(fill,"bones",bones.data(),sizeof(bones));
+                        const char* names[]={"albedoMap","normalMap","metallicMap","roughnessMap","aoMap","emissiveMap"};
+                        for(uint8_t i=0;i<6;++i) fill.setTexture(i,fill.getTextureBinding(names[i]),toShaderTexture(i==1?normal:white));
+                        f.adapter.setStateOpaqueLEQUAL(true); fill.submit({view,0});
+                    } else {
+                        const float params[4]={0,1,0,0}, offsets[4]={jitter.x/kSize,jitter.y/kSize,oldJitter.x/kSize,oldJitter.y/kSize};
+                        uniform(motion,"motionParams",params,sizeof(params)); uniform(motion,"motionJitter",offsets,sizeof(offsets));
+                        uniform(motion,"previousWorld",identityData,sizeof(identityData)); uniform(motion,"previousViewProjection",oldData,sizeof(oldData));
+                        uniform(motion,"bones",bones.data(),sizeof(bones)); uniform(motion,"previousBones",bones.data(),sizeof(bones));
+                        f.adapter.setStateColorLEQUAL(true); motion.submit({view,0});
+                    }
+                }
+            }
+            copyDraw(2,f.adapter.getFboAttachment(gbuffer,0),colorFbo);
+            copyDraw(3,motionTex,f.target);
+            const auto velocities=f.readTarget(4);
+            // Later readback uses view 1; do not let its previous Motion
+            // clear erase the input while diagnosing Resolve in a new frame.
+            f.adapter.setViewClearNone(1);
+            copyDraw(0,f.adapter.getFboAttachment(gbuffer,3),f.target);
+            const auto coverage=f.readTarget();
+            for(size_t i=0;i<coverage.size();++i) if(coverage[i][3]>.5f && velocities[i][3]<.5f) ++missingMotion;
+            const auto historyTex=f.input(history,true);
+            const std::array<bgfx::TextureHandle,6> bindings={f.adapter.getFboAttachment(colorFbo,0),historyTex,
+                f.adapter.getFboAttachment(gbuffer,2),f.adapter.getFboAttachment(gbuffer,3),motionTex,f.adapter.getFboAttachment(gbuffer,4)};
+            f.program=probe; f.submitResolve(jitter,bindings,frame>0,6,f.target);
+            const auto diagnostic=f.readTarget();
+            if(kSize==127 && shape==1 && background==1 && frame>=6 && frame<16) {
+                const size_t watched=108*kSize+90;
+                std::cout << "[TAA watched] tinyGuard=" << rejectTiny << " frame=" << frame << " old=" << history[watched][0]
+                          << " reason=" << diagnostic[watched][0] << " feedback=" << diagnostic[watched][1];
+                for(int mode:{7,9}) {
+                    f.submitResolve(jitter,bindings,frame>0,float(mode),f.target);
+                    const auto detail=f.readTarget();
+                    std::cout << " mode" << mode << '=';
+                    for(float v:detail[watched]) std::cout << v << ',';
+                }
+                std::cout << '\n';
+            }
+            f.program=resolve; f.submitResolve(jitter,bindings,frame>0,0,f.target);
+            history=f.readTarget();
+            if(frame>=8) for(int y=4;y<kSize-4;++y) for(int x=4;x<kSize-4;++x) {
+                const auto i=y*kSize+x; const int reason=std::clamp(int(diagnostic[i][0]+.5f),0,6);
+                ++reasons[reason]; const float jump=std::abs(history[i][0]-previous[i][0]);
+                if(reason) {
+                    rejectJump=std::max(rejectJump,jump); if(jump>.05f) ++rejectedChangedPixels;
+                    if(jump>.1f && !detailed) {
+                        detailed=true;
+                        std::cout << "[TAA rejected pixel] shape=" << shape << " bg=" << background << " frame=" << frame
+                                  << " xy=" << x << ',' << y << " old=";
+                        for(float v:previous[i]) std::cout << v << ',';
+                        std::cout << " new="; for(float v:history[i]) std::cout << v << ',';
+                        std::cout << " diagnostic="; for(float v:diagnostic[i]) std::cout << v << ',';
+                        std::cout << '\n';
+                        for(int mode=7;mode<=9;++mode) {
+                            f.program=probe; f.submitResolve(jitter,bindings,true,float(mode),f.target);
+                            const auto details=f.readTarget();
+                            std::cout << "[TAA detail] mode=" << mode << " values=";
+                            for(float v:details[i]) std::cout << v << ',';
+                            std::cout << '\n';
+                        }
+                        f.program=resolve;
+                    }
+                }
+                else acceptedJump=std::max(acceptedJump,jump);
+            }
+            previous=history;
+        }
+        std::cout << "[TAA rejection probe] tinyGuard=" << rejectTiny << " size=" << kSize << " shape=" << shape << " background=" << background << " missingMotion=" << missingMotion
+                  << " reasons="; for(auto n:reasons) std::cout << n << ',';
+        std::cout << " rejectedJump=" << rejectJump << " acceptedJump=" << acceptedJump
+                  << " rejectedChangedPixels=" << rejectedChangedPixels << '\n';
+        CHECK(missingMotion==0u);
+        CHECK(reasons[0]>0u); // The scene must actually accumulate history.
+        // Diagnostic A/B, not a production fix or a general visual threshold.
+        // At 127, baseline must reproduce abrupt resets; changing ONLY the
+        // surviving-tap gate must eliminate >0.05 reset steps in these scenes.
+        if(kSize==127) {
+            if(rejectTiny) { CHECK(rejectedChangedPixels==0u); }
+            else if(shape<2) { CHECK(rejectedChangedPixels>0u); }
+        }
+    }
+    f.program=resolve;
+    bgfx::destroy(vb); bgfx::destroy(motionFbo); bgfx::destroy(motionTex);
+    bgfx::destroy(colorFbo); bgfx::destroy(gbuffer);
 #endif
 }
 
