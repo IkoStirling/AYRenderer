@@ -15,12 +15,12 @@ inline constexpr std::size_t kRenderViewCapacity = 256u;
 // actual data dependencies. SSAO consumes GBuffer and completes before
 // Lighting, which applies AO only to ambient/IBL. Opaque haze then completes
 // before transparent composition, and Bloom consumes the resulting HDR color.
-inline constexpr std::array<bgfx::ViewId, 35> kRenderViewOrder = {
+inline constexpr std::array<bgfx::ViewId, 36> kRenderViewOrder = {
     1, 18, 19, 20, 21, 22, 23, 24, 25,
     2, 0,
     6, 7, 3, 14,
     8, 13, 9, 253, 246, 10, 11, 12,
-    15, 5, 17, 247, 248, 249, 4, 16, 250, 254, 251, 252
+    15, 5, 17, 247, 248, 249, 4, 16, 245, 250, 254, 251, 252
 };
 
 // bgfx::setViewOrder does not accept a sparse execution list. Its remap table

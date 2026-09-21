@@ -167,7 +167,7 @@ TEST_CASE(deferred_pipeline_matches_data_dependencies) {
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 35u);
+    CHECK(order.size() == 36u);
     CHECK(order[14] == 14u);  // SSAO
     CHECK(order[15] == 8u);   // Lighting
     CHECK(order[16] == 13u);  // DepthHaze
@@ -185,10 +185,11 @@ TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     CHECK(order[28] == 249u); // SMAA neighborhood blend
     CHECK(order[29] == 4u);   // ColorGrading
     CHECK(order[30] == 16u);  // Present
-    CHECK(order[31] == 250u); // GBufferDebug
-    CHECK(order[32] == 254u); // Selection screen-space composite
-    CHECK(order[33] == 251u); // Editor orientation axis
-    CHECK(order[34] == 252u); // Transform gizmo
+    CHECK(order[31] == 245u); // Optional TAA diagnostics, never history
+    CHECK(order[32] == 250u); // GBufferDebug
+    CHECK(order[33] == 254u); // Selection screen-space composite
+    CHECK(order[34] == 251u); // Editor orientation axis
+    CHECK(order[35] == 252u); // Transform gizmo
 }
 
 TEST_CASE(forward_pipeline_keeps_haze_as_safe_noop_before_transparent) {

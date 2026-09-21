@@ -24,6 +24,7 @@ material TemporalAA {
     texture2d worldPosition
     texture2d geometryData
     texture2d motionVectors
+    texture2d sceneDepth
     uniform vec4 taaMetrics
     uniform vec4 taaParams
     uniform vec4 taaJitter
@@ -43,23 +44,27 @@ material TemporalAA {
         let uv = vec2(clamp(outputUv.x + taaJitter.x, texel.x * 0.5, 1.0 - texel.x * 0.5),
                       clamp(outputUv.y + taaJitter.y, texel.y * 0.5, 1.0 - texel.y * 0.5))
         let current = sample(currentColor, uv)
+        // Bounds come from actual raw samples. Bilinear-filtered bounds can
+        // shrink as jitter changes and repeatedly clip valid thin-edge history.
+        let rawUv = (vec2(floor(uv.x * taaMetrics.z), floor(uv.y * taaMetrics.w))
+                     + vec2(0.5, 0.5)) * texel
 
         // 3x3 current-frame neighborhood converted to YCoCg inline. Phoskia
         // intentionally has no user functions yet, so production Passes keep
         // all behavior visible to its type checker and disk cache.
-        let uv0 = vec2(clamp(uv.x - texel.x, 0.0, 1.0), clamp(uv.y - texel.y, 0.0, 1.0))
-        let uv1 = vec2(clamp(uv.x,           0.0, 1.0), clamp(uv.y - texel.y, 0.0, 1.0))
-        let uv2 = vec2(clamp(uv.x + texel.x, 0.0, 1.0), clamp(uv.y - texel.y, 0.0, 1.0))
-        let uv3 = vec2(clamp(uv.x - texel.x, 0.0, 1.0), clamp(uv.y,           0.0, 1.0))
-        let uv5 = vec2(clamp(uv.x + texel.x, 0.0, 1.0), clamp(uv.y,           0.0, 1.0))
-        let uv6 = vec2(clamp(uv.x - texel.x, 0.0, 1.0), clamp(uv.y + texel.y, 0.0, 1.0))
-        let uv7 = vec2(clamp(uv.x,           0.0, 1.0), clamp(uv.y + texel.y, 0.0, 1.0))
-        let uv8 = vec2(clamp(uv.x + texel.x, 0.0, 1.0), clamp(uv.y + texel.y, 0.0, 1.0))
+        let uv0 = vec2(clamp(rawUv.x - texel.x, 0.0, 1.0), clamp(rawUv.y - texel.y, 0.0, 1.0))
+        let uv1 = vec2(clamp(rawUv.x,           0.0, 1.0), clamp(rawUv.y - texel.y, 0.0, 1.0))
+        let uv2 = vec2(clamp(rawUv.x + texel.x, 0.0, 1.0), clamp(rawUv.y - texel.y, 0.0, 1.0))
+        let uv3 = vec2(clamp(rawUv.x - texel.x, 0.0, 1.0), clamp(rawUv.y,           0.0, 1.0))
+        let uv5 = vec2(clamp(rawUv.x + texel.x, 0.0, 1.0), clamp(rawUv.y,           0.0, 1.0))
+        let uv6 = vec2(clamp(rawUv.x - texel.x, 0.0, 1.0), clamp(rawUv.y + texel.y, 0.0, 1.0))
+        let uv7 = vec2(clamp(rawUv.x,           0.0, 1.0), clamp(rawUv.y + texel.y, 0.0, 1.0))
+        let uv8 = vec2(clamp(rawUv.x + texel.x, 0.0, 1.0), clamp(rawUv.y + texel.y, 0.0, 1.0))
         let c0 = sample(currentColor, uv0).xyz
         let c1 = sample(currentColor, uv1).xyz
         let c2 = sample(currentColor, uv2).xyz
         let c3 = sample(currentColor, uv3).xyz
-        let c4 = current.xyz
+        let c4 = sample(currentColor, rawUv).xyz
         let c5 = sample(currentColor, uv5).xyz
         let c6 = sample(currentColor, uv6).xyz
         let c7 = sample(currentColor, uv7).xyz
@@ -81,13 +86,58 @@ material TemporalAA {
             max(max(max(n0.x, n1.x), max(n2.x, n3.x)), max(max(n4.x, n5.x), max(n6.x, max(n7.x, n8.x)))),
             max(max(max(n0.y, n1.y), max(n2.y, n3.y)), max(max(n4.y, n5.y), max(n6.y, max(n7.y, n8.y)))),
             max(max(max(n0.z, n1.z), max(n2.z, n3.z)), max(max(n4.z, n5.z), max(n6.z, max(n7.z, n8.z)))))
-        let localLumaSpan = max(neighborhoodMax.x - neighborhoodMin.x, 0.0)
         let expansion = (neighborhoodMax - neighborhoodMin) * taaParams.z
                       + vec3(taaParams.z * 0.01, taaParams.z * 0.01, taaParams.z * 0.01)
         neighborhoodMin = neighborhoodMin - expansion
         neighborhoodMax = neighborhoodMax + expansion
 
-        let coverage = sample(geometryData, uv).w
+        // Current RGB represents a footprint, not the center surface alone.
+        // Dilate the nearest surface over 3x3 (standard non-reversed depth).
+        // Read ALL temporal attributes from the chosen point, never average
+        // foreground/background velocity or classify from a different point.
+        let surfaceUv = uv
+        let selectedDepth = sample(sceneDepth, uv).x
+        let candidateDepth0 = sample(sceneDepth, uv0).x
+        if (candidateDepth0 < selectedDepth) {
+            selectedDepth = candidateDepth0
+            surfaceUv = uv0
+        }
+        let candidateDepth1 = sample(sceneDepth, uv1).x
+        if (candidateDepth1 < selectedDepth) {
+            selectedDepth = candidateDepth1
+            surfaceUv = uv1
+        }
+        let candidateDepth2 = sample(sceneDepth, uv2).x
+        if (candidateDepth2 < selectedDepth) {
+            selectedDepth = candidateDepth2
+            surfaceUv = uv2
+        }
+        let candidateDepth3 = sample(sceneDepth, uv3).x
+        if (candidateDepth3 < selectedDepth) {
+            selectedDepth = candidateDepth3
+            surfaceUv = uv3
+        }
+        let candidateDepth5 = sample(sceneDepth, uv5).x
+        if (candidateDepth5 < selectedDepth) {
+            selectedDepth = candidateDepth5
+            surfaceUv = uv5
+        }
+        let candidateDepth6 = sample(sceneDepth, uv6).x
+        if (candidateDepth6 < selectedDepth) {
+            selectedDepth = candidateDepth6
+            surfaceUv = uv6
+        }
+        let candidateDepth7 = sample(sceneDepth, uv7).x
+        if (candidateDepth7 < selectedDepth) {
+            selectedDepth = candidateDepth7
+            surfaceUv = uv7
+        }
+        let candidateDepth8 = sample(sceneDepth, uv8).x
+        if (candidateDepth8 < selectedDepth) {
+            selectedDepth = candidateDepth8
+            surfaceUv = uv8
+        }
+        let coverage = sample(geometryData, surfaceUv).w
         let validHistory = taaParams.w > 0.5
         let previousUv = outputUv
         // History alpha is private to TAA. Geometry stores its projected
@@ -96,7 +146,7 @@ material TemporalAA {
         let currentHistoryDepth = -1.0
         let expectedPreviousDepth = -1.0
         if (coverage > 0.5) {
-            let world = sample(worldPosition, uv).xyz
+            let world = sample(worldPosition, surfaceUv).xyz
             let currentClip = currentViewProjection * vec4(world, 1.0)
             validHistory = validHistory && currentClip.w > 0.00001
             currentHistoryDepth = currentClip.z / max(currentClip.w, 0.00001)
@@ -104,7 +154,7 @@ material TemporalAA {
             // failed/new draws must never consume an unrelated surface's history.
             validHistory = validHistory && taaJitter.w > 0.5
             if (taaJitter.w > 0.5) {
-                let motion = sample(motionVectors, uv)
+                let motion = sample(motionVectors, surfaceUv)
                 validHistory = validHistory && motion.w > 0.5
                 previousUv = outputUv - motion.xy
                 expectedPreviousDepth = motion.z
@@ -147,44 +197,76 @@ material TemporalAA {
         let historyRgb = (h0.xyz * w0 + h1.xyz * w1 + h2.xyz * w2 + h3.xyz * w3)
                          / max(historyWeight, 0.00001)
         let outputColor = vec4(current.xyz, currentHistoryDepth)
+        let effectiveFeedback = 0.0
+        let clipDifference = 0.0
         if (validHistory) {
             let history = vec3(
                 dot(historyRgb, vec3(0.25, 0.50, 0.25)),
                 dot(historyRgb, vec3(0.50, 0.00, -0.50)),
                 dot(historyRgb, vec3(-0.25, 0.50, -0.25)))
-            let historyDifference = vec3(abs(history.x - n4.x),
-                                         abs(history.y - n4.y),
-                                         abs(history.z - n4.z))
+            let unclippedHistory = history
             history = vec3(clamp(history.x, neighborhoodMin.x, neighborhoodMax.x),
                            clamp(history.y, neighborhoodMin.y, neighborhoodMax.y),
                            clamp(history.z, neighborhoodMin.z, neighborhoodMax.z))
+            // In-neighborhood chroma/brightness changes can be pure coverage
+            // changes under jitter. React only to history outside the box.
+            let historyDifference = vec3(abs(unclippedHistory.x - history.x),
+                                         abs(unclippedHistory.y - history.y),
+                                         abs(unclippedHistory.z - history.z))
+            clipDifference = length(historyDifference)
             let motionPixels = (previousUv - outputUv) * taaMetrics.zw
             let motionAmount = clamp(length(motionPixels) / 16.0, 0.0, 1.0)
             let feedback = mix(taaParams.x, taaParams.y, motionAmount)
-            let unexpectedMismatch = max(historyDifference.x
-                                       - localLumaSpan * 0.5, 0.0)
+            let unexpectedMismatch = historyDifference.x
             let luminanceMismatch = clamp(unexpectedMismatch * 4.0, 0.0, 1.0)
             let chromaMismatch = clamp(length(historyDifference.yz) * 2.0,
                                        0.0, 1.0)
             let reactiveMismatch = max(luminanceMismatch * 0.85,
                                        chromaMismatch * 0.65)
             feedback = feedback * (1.0 - reactiveMismatch)
-            let resolved = mix(n4, history, clamp(feedback, 0.0, 0.95))
-            let resolvedRgb = vec3(resolved.x + resolved.y - resolved.z,
+            effectiveFeedback = clamp(feedback, 0.0, 0.95)
+            let currentYCoCg = vec3(dot(current.xyz, vec3(0.25, 0.50, 0.25)),
+                                    dot(current.xyz, vec3(0.50, 0.00, -0.50)),
+                                    dot(current.xyz, vec3(-0.25, 0.50, -0.25)))
+            let resolved = mix(currentYCoCg, history, effectiveFeedback)
+            // Explicit grouping: Phoskia currently parses a-b-c as a-(b-c).
+            // Losing the second minus destroys saturated blue history while
+            // grayscale tests remain unchanged (Co=Cg=0).
+            let resolvedRgb = vec3((resolved.x + resolved.y) - resolved.z,
                                    resolved.x + resolved.z,
-                                   resolved.x - resolved.y - resolved.z)
+                                   (resolved.x - resolved.y) - resolved.z)
             outputColor = vec4(clamp(resolvedRgb.x, 0.0, 1.0),
                                clamp(resolvedRgb.y, 0.0, 1.0),
                                clamp(resolvedRgb.z, 0.0, 1.0),
                                currentHistoryDepth)
         }
+        // Optional second draw only; production history ALWAYS uses mode 0.
+        // These outputs must never feed next frame's history.
+        let debugMode = taaDepthParams.y
+        if (debugMode > 0.5 && debugMode < 1.5) {
+            outputColor = vec4(1.0, 0.0, 0.0, 1.0)
+            if (validHistory) { outputColor = vec4(0.0, 1.0, 0.0, 1.0) }
+        }
+        if (debugMode > 1.5 && debugMode < 2.5) {
+            outputColor = vec4(effectiveFeedback, effectiveFeedback, effectiveFeedback, 1.0)
+        }
+        if (debugMode > 2.5 && debugMode < 3.5) {
+            let difference = clamp(clipDifference * 8.0, 0.0, 1.0)
+            outputColor = vec4(difference, difference, difference, 1.0)
+        }
+        if (debugMode > 3.5 && debugMode < 4.5) {
+            let velocityPixels = (outputUv - previousUv) * taaMetrics.zw
+            outputColor = vec4(clamp(velocityPixels.x / 16.0 + 0.5, 0.0, 1.0),
+                               clamp(velocityPixels.y / 16.0 + 0.5, 0.0, 1.0), 0.5, 1.0)
+        }
+        if (debugMode > 4.5) { outputColor = vec4(historyRgb, 1.0) }
         return outputColor
     }
 }
 )";
 
 constexpr const char* kTaaCacheKey =
-    "taa_phoskia_fixed_grid_surface_history_v7";
+    "taa_phoskia_dilated_surface_history_v8";
 
 float halton(uint32_t index, uint32_t base) noexcept
 {
@@ -273,6 +355,7 @@ bool TAAPass::isReady() const noexcept
         && _tWorldPosition != ayt::shader::InvalidBinding
         && _tGeometryData != ayt::shader::InvalidBinding
         && _tMotionVectors != ayt::shader::InvalidBinding
+        && _tSceneDepth != ayt::shader::InvalidBinding
         && _uTaaMetrics != ayt::shader::InvalidBinding
         && _uTaaParams != ayt::shader::InvalidBinding
         && _uTaaJitter != ayt::shader::InvalidBinding
@@ -397,6 +480,7 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
         ctx.gbufferPass->gbufferWorldPositionRt();
     const bgfx::TextureHandle geometryData =
         ctx.gbufferPass->gbufferMaterialRt();
+    const bgfx::TextureHandle sceneDepth = ctx.gbufferPass->gbufferDepthRt();
     const bool motionAvailable = ctx.motionVectorPass != nullptr
         && ctx.motionVectorPass->producedThisFrame()
         && BGFXAdapter::isValid(ctx.motionVectorPass->velocityTexture());
@@ -406,7 +490,8 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
     if (!BGFXAdapter::isValid(currentColor)
         || !BGFXAdapter::isValid(historyColor)
         || !BGFXAdapter::isValid(worldPosition)
-        || !BGFXAdapter::isValid(geometryData)) {
+        || !BGFXAdapter::isValid(geometryData)
+        || !BGFXAdapter::isValid(sceneDepth)) {
         rateLimitedEarlyReturn("TAAPass", "current/history/GBuffer attachment invalid");
         return 0;
     }
@@ -419,6 +504,7 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
     _program.setTexture(2, _tWorldPosition, toShaderTexture(worldPosition));
     _program.setTexture(3, _tGeometryData, toShaderTexture(geometryData));
     _program.setTexture(4, _tMotionVectors, toShaderTexture(motionVectors));
+    _program.setTexture(5, _tSceneDepth, toShaderTexture(sceneDepth));
     const float metrics[4] = {
         1.0f / static_cast<float>(ctx.viewportWidth),
         1.0f / static_cast<float>(ctx.viewportHeight),
@@ -458,6 +544,31 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
     draw.state = 0;
     _program.submit(draw);
 
+    if (_debugView != 0) {
+        // Re-evaluate with the SAME old history/input bindings, to a late
+        // backbuffer view. submit() discards textures and pending uniforms:
+        // explicitly rebind every input, never rely on previous draw state.
+        configureFullscreenPassView(adapter, kDebugViewId, BGFX_INVALID_HANDLE,
+            ctx.viewportX, ctx.viewportY, ctx.viewportWidth, ctx.viewportHeight);
+        _geometry.bind(adapter);
+        _program.setTexture(0, _tCurrentColor, toShaderTexture(currentColor));
+        _program.setTexture(1, _tHistoryColor, toShaderTexture(historyColor));
+        _program.setTexture(2, _tWorldPosition, toShaderTexture(worldPosition));
+        _program.setTexture(3, _tGeometryData, toShaderTexture(geometryData));
+        _program.setTexture(4, _tMotionVectors, toShaderTexture(motionVectors));
+        _program.setTexture(5, _tSceneDepth, toShaderTexture(sceneDepth));
+        _program.setUniform(_uTaaMetrics, metrics, sizeof(metrics));
+        _program.setUniform(_uTaaParams, params, sizeof(params));
+        _program.setUniform(_uTaaJitter, jitter, sizeof(jitter));
+        _program.setUniform(_uCurrentViewProjection, currentVp, sizeof(currentVp));
+        const float diagnosticParams[4] = {
+            kHistoryDepthTolerance, static_cast<float>(_debugView), 0.0f, 0.0f};
+        _program.setUniform(_uTaaDepthParams, diagnosticParams, sizeof(diagnosticParams));
+        adapter.setStateDepthTestAlways();
+        draw.viewId = kDebugViewId;
+        _program.submit(draw);
+    }
+
     ctx.frameGraph->markProduced(FgResourceId::TaaColor);
     ctx.frameGraph->setResolvedSemantic(FgSemantic::PresentSource,
                                         FgResourceId::TaaColor);
@@ -485,7 +596,7 @@ uint32_t TAAPass::execute(PassExecContext& ctx)
                      static_cast<unsigned>(ctx.viewportHeight));
         _firstDispatchLogged = true;
     }
-    return 1;
+    return _debugView != 0 ? 2u : 1u;
 }
 
 bool TAAPass::ensureHistory(BGFXAdapter& adapter,
@@ -539,6 +650,7 @@ void TAAPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     const auto world = texture("worldPosition");
     const auto geometry = texture("geometryData");
     const auto motion = texture("motionVectors");
+    const auto sceneDepth = texture("sceneDepth");
     const auto metrics = uniform("taaMetrics");
     const auto params = uniform("taaParams");
     const auto jitter = uniform("taaJitter");
@@ -550,6 +662,7 @@ void TAAPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
         || world == ayt::shader::InvalidBinding
         || geometry == ayt::shader::InvalidBinding
         || motion == ayt::shader::InvalidBinding
+        || sceneDepth == ayt::shader::InvalidBinding
         || metrics == ayt::shader::InvalidBinding
         || params == ayt::shader::InvalidBinding
         || jitter == ayt::shader::InvalidBinding
@@ -572,6 +685,7 @@ void TAAPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
     _tWorldPosition = world;
     _tGeometryData = geometry;
     _tMotionVectors = motion;
+    _tSceneDepth = sceneDepth;
     _uTaaMetrics = metrics;
     _uTaaParams = params;
     _uTaaJitter = jitter;
@@ -629,6 +743,7 @@ void TAAPass::destroyResources(BGFXAdapter& adapter)
     _tWorldPosition = ayt::shader::InvalidBinding;
     _tGeometryData = ayt::shader::InvalidBinding;
     _tMotionVectors = ayt::shader::InvalidBinding;
+    _tSceneDepth = ayt::shader::InvalidBinding;
     _uTaaMetrics = ayt::shader::InvalidBinding;
     _uTaaParams = ayt::shader::InvalidBinding;
     _uTaaJitter = ayt::shader::InvalidBinding;

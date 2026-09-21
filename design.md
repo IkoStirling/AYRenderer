@@ -1,5 +1,17 @@
 # AYRenderer Design
 
+## 2026-09-21 — TAA v8：静止彩色轮廓闪烁、递归 GPU 回归与诊断
+
+- 验证结果：VS 2026 Insider x64 Debug 构建；Renderer 全量 **4474/4474**、TAA 专项 **203/203**、Editor Shell **1180/1180**；独立 D3D11/D3D12 固定网格 GPU 读回各 **178/178**，新增递归彩色/硬边/运动/诊断 GPU 用例各 **2604/2604**。可执行程序与内置 UI 同步打包，视觉验收仍交由用户。
+- 用户确认「相机静止且未选中仍闪烁」，因此本轮针对场景 Resolve，不归因于选中描边，也不以降低 jitter 或增大历史权重掩盖问题。静态/运动权重仍为 0.92/0.65，jitter spread 仍为 0.5。
+- **确定的颜色错误**：实际 Phoskia 输出把 `resolved.x - resolved.y - resolved.z` 生成为 `resolved.x - (resolved.y - resolved.z)`，破坏 YCoCg→RGB 的蓝通道。灰度的 Co/Cg 为零，上一轮灰度用例无法发现。本轮显式写成 `(Y-Co)-Cg`，R 同样明确括号；增加生成源码括号断言和饱和彩色递归 GPU 保真检查。没有手写旁路 `.sc`。Phoskia 通用二元运算结合性问题仍需 AYShader 独立审计，本轮不全局改变语言解析语义。
+- **统一 temporal surface**：在非 Reverse-Z 的 3×3 point depth 邻域选择最近表面，并从同一 UV 读取 coverage、world position、velocity/previous-depth/validity；同深度保持中心优先。不将前后景运动向量平均。新增 `sceneDepth` 绑定和必需的 GBufferDepth/GBufferSurface 契约；缺失输入继续 fail-close。
+- **分离重建与裁剪**：输出颜色仍在固定网格用 `outputUV + currentJitterUV` 重建；裁剪盒改为原始 texel-center 的 3×3 YCoCg 范围，避免双线性过滤范围随相位缩小而截断细线历史。反应性降权依据历史超出裁剪盒的量，不再把盒内的正常覆盖率/色度变化当作突然变化。遮挡深度拒绝、缺失 velocity 拒绝和无历史回退保留。
+- **验证方法**：新增独立 `AYRenderer_TAAEdgeGpu`，32×32 的竖边、约 22.5° 斜边、0.8px 细线，运行 96 帧；上一帧 GPU Resolve 输出作为下一帧历史，统计最后 32 帧中央区域 RGB 最大峰峰值。使用 RGBA8 当前颜色/coverage 和 RGBA16F 历史/运动输入；depth 由合成表面上传为浮点纹理，不是假装已覆盖真实 D24/几何光栅化。v7 D3D11 基线依次 **0.9375 / 0.91748 / 0.995605**，v8 D3D11/D3D12 均约 **0.04150 / 0.07422 / 0.08105**，门限 0.10。并检查红蓝覆盖的能量守恒、纯 RGB/混合色连续保真、8px 平移、遮挡消失、重置和全部诊断输出。
+- **RenderSettings → TAA Diagnostics**：0 Final image；1 History rejection（红拒绝/绿接受）；2 History weight（灰度实际历史权重）；3 Clipping difference（YCoCg 裁剪距离×8）；4 Motion (pixels)（RG=xy/16+0.5，静止灰）；5 Reprojected history（深度筛选后、裁剪前颜色）。仅会话状态，不写入用户偏好；禁用 TAA 时不绘制。诊断模式不改变正常历史，独立的 view 245 在 Present 后、GBufferDebug/选择框/Gizmo/UI 前覆盖视口；同帧重绑全部输入和 uniform，不能依赖 submit 已丢弃的状态。切回 Final image 不必重置历史，重复设置相同 TAA enable 状态也不再重置。
+- **成本与边界**：正常 Resolve 新增 9 次点深度读取和 1 次原始中心颜色读取，无新增历史 RT；调试开启才额外执行一次 Resolve 绘制，默认零额外调试 draw/RT（同一 shader 内保留诊断 uniform 分支）。静态契约同时修正 TaaColor 为 RGBA16F，并标明可选诊断 side effect。当前仍是 LDR TAA；没有声称消除所有亚像素波动、实现天空旋转重投影或透明/WorldLit2D 多层运动。编辑器真实画面、真实 MotionVector 几何光栅化与 WASD 崩溃仍需各自验收，合成 GPU 测试不能代替。
+- 诊断的晚读目前依赖 FrameGraph 已有的 never-share RT 策略及 GBuffer/历史的整帧存活。将来启用瞬态 alias 前，必须把诊断 draw 的晚读范围纳入图的资源生命周期；不能仅按普通 TAA Resolve 的 view 5 作为 FinalLdr 的最后使用点。
+
 ## 2026-09-21 — TAA 固定输出网格与历史表面验证修正
 
 - v7 明确区分原始 jitter 输入与固定输出/history 网格：当前颜色及几何输入在 `outputUv + currentJitterUv` 查询，历史在 `outputUv - unjitteredVelocity` 查询；3×3 YCoCg 邻域限制不再被当作当前颜色重建。当前重建以双线性为基线，后续锐利滤波另行验收。

@@ -484,6 +484,7 @@ struct Renderer::Impl {
     bool                           fxaaEnabled = true;
     bool                           smaaEnabled = false;
     bool                           taaEnabled = false;
+    uint8_t                        taaDebugView = 0;
 
     // Optional display-referred LUT grading. Disabled by default so all
     // pre-grading hosts retain a zero-allocation, byte-identical path.
@@ -513,6 +514,7 @@ struct Renderer::Impl {
         }
         if (detail::TAAPass* taa = pipeline.findPass<detail::TAAPass>()) {
             taa->setEnabled(taaEnabled);
+            taa->setDebugView(taaDebugView);
             if (!taaEnabled) {
                 taa->invalidateHistory();
             }
@@ -2595,7 +2597,7 @@ bool Renderer::smaaEnabled() const noexcept
 
 void Renderer::setTaaEnabled(bool enabled)
 {
-    if (!_impl) {
+    if (!_impl || _impl->taaEnabled == enabled) {
         return;
     }
     _impl->taaEnabled = enabled;
@@ -2616,6 +2618,20 @@ void Renderer::setTaaEnabled(bool enabled)
 bool Renderer::taaEnabled() const noexcept
 {
     return _impl != nullptr && _impl->taaEnabled;
+}
+
+void Renderer::setTaaDebugView(uint8_t mode)
+{
+    if (!_impl) return;
+    _impl->taaDebugView = mode <= 5 ? mode : 0;
+    if (auto* taa = _impl->pipeline.findPass<detail::TAAPass>()) {
+        taa->setDebugView(_impl->taaDebugView);
+    }
+}
+
+uint8_t Renderer::taaDebugView() const noexcept
+{
+    return _impl ? _impl->taaDebugView : 0;
 }
 
 void Renderer::setColorGradingEnabled(bool enabled)

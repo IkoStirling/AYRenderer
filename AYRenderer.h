@@ -351,6 +351,10 @@ public:
     // disables both spatial AA alternatives; Forward pipelines ignore it.
     void setTaaEnabled(bool enabled);
     bool taaEnabled() const noexcept;
+    // Session-only diagnostics: 0 final, 1 rejection, 2 feedback, 3 clipping,
+    // 4 motion in pixels, 5 reprojected history. Never written into history.
+    void setTaaDebugView(uint8_t mode);
+    uint8_t taaDebugView() const noexcept;
 
     // Display-referred 32^3 LUT grading after FXAA. The LUT is represented as
     // a portable 2D strip so D3D11/D3D12 share one shader/resource path.

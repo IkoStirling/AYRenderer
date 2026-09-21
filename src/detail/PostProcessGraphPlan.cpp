@@ -173,7 +173,8 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
         graph.addPass({contractName(RenderPassSlot::TAA),
                        {FgResourceId::FinalLdrColor},
                        {FgResourceId::TaaColor},
-                       true});
+                       true,
+                       contractSideEffect(RenderPassSlot::TAA)});
     }
     if (input.fxaa) {
         graph.addResource(FgResourceId::FxaaColor,

@@ -138,13 +138,15 @@ constexpr std::array<RenderPassResourceRead, 3> kPostProcessReads = {{
 constexpr std::array<RenderPassResourceWrite, 1> kPostProcessWrites = {{
     output(Id::FinalLdrColor, Life::Transient, Format::RGBA8),
 }};
-constexpr std::array<RenderPassResourceRead, 3> kTaaReads = {{
+constexpr std::array<RenderPassResourceRead, 5> kTaaReads = {{
     required(Id::FinalLdrColor),
     required(Id::GBufferWorldPosition),
     optional(Id::MotionVectors),
+    required(Id::GBufferDepth),
+    required(Id::GBufferSurface),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kTaaWrites = {{
-    output(Id::TaaColor, Life::PersistentHistory, Format::RGBA8),
+    output(Id::TaaColor, Life::PersistentHistory, Format::RGBA16F),
 }};
 constexpr std::array<RenderPassResourceRead, 1> kFxaaReads = {{
     required(Id::FinalLdrColor),
@@ -238,7 +240,9 @@ const std::array<RenderPassContract, 21>& contracts() noexcept
         {RenderPassSlot::ColorGrading, "ColorGrading", kGradingReads,
          kGradingWrites, false},
         {RenderPassSlot::SMAA, "SMAA", kSmaaReads, kSmaaWrites, false},
-        {RenderPassSlot::TAA, "TAA", kTaaReads, kTaaWrites, false},
+        // Optional diagnostic draw writes the backbuffer after Present;
+        // the ordinary resolve only writes the persistent history target.
+        {RenderPassSlot::TAA, "TAA", kTaaReads, kTaaWrites, true},
         {RenderPassSlot::MotionVector, "MotionVector", kMotionVectorReads,
          kMotionVectorWrites, false},
     }};

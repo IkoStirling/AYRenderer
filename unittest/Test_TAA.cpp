@@ -122,6 +122,28 @@ TEST_CASE(taa_view_executes_after_postprocess_before_spatial_aa)
     CHECK(taa == post + 1);
     CHECK(fxaa == taa + 1);
     CHECK(smaa == fxaa + 1);
+    const auto present = std::find(order.begin(), order.end(),
+        ayt::render::detail::PresentPass::kPresentViewId);
+    const auto debug = std::find(order.begin(), order.end(),
+        ayt::render::detail::TAAPass::kDebugViewId);
+    CHECK(present != order.end());
+    CHECK(debug == present + 1);
+}
+
+TEST_CASE(taa_debug_view_is_validated_and_survives_pipeline_rebuild)
+{
+    ayt::render::Renderer renderer;
+    CHECK(renderer.taaDebugView() == 0u);
+    renderer.setTaaDebugView(3);
+    renderer.setTaaEnabled(true);
+    renderer.configurePipeline(RenderPipelineDesc::makeDeferred());
+    CHECK(renderer.taaDebugView() == 3u);
+    CHECK(renderer.taaEnabled());
+    renderer.setTaaDebugView(5);
+    CHECK(renderer.taaDebugView() == 5u);
+    renderer.setTaaDebugView(255);
+    CHECK(renderer.taaDebugView() == 0u);
+    CHECK(renderer.taaEnabled());
 }
 
 TEST_CASE(taa_fxaa_and_smaa_are_mutually_exclusive_and_survive_rebuild)
@@ -306,7 +328,11 @@ TEST_CASE(taa_shader_contract_has_reprojection_neighborhood_clamp_and_motion_fee
     CHECK(source.find("outputUv.y + taaJitter.y") != std::string::npos);
     CHECK(source.find("taaJitter.z > 0.5") != std::string::npos);
     CHECK(source.find("motionAmount") != std::string::npos);
-    CHECK(source.find("localLumaSpan") != std::string::npos);
+    CHECK(source.find("sample(sceneDepth, uv)") != std::string::npos);
+    CHECK(source.find("sample(geometryData, surfaceUv)") != std::string::npos);
+    CHECK(source.find("sample(worldPosition, surfaceUv)") != std::string::npos);
+    CHECK(source.find("sample(motionVectors, surfaceUv)") != std::string::npos);
+    CHECK(source.find("abs(unclippedHistory.y - history.y)") != std::string::npos);
     CHECK(source.find("unexpectedMismatch") != std::string::npos);
     CHECK(source.find("luminanceMismatch") != std::string::npos);
     CHECK(source.find("currentHistoryDepth") != std::string::npos);
@@ -316,7 +342,7 @@ TEST_CASE(taa_shader_contract_has_reprojection_neighborhood_clamp_and_motion_fee
     CHECK(source.find("h3.w >= 0.0") != std::string::npos);
     CHECK(source.find("reactiveMismatch") != std::string::npos);
     CHECK(std::string(ayt::render::detail::kTaaCacheKeyCStr)
-          == "taa_phoskia_fixed_grid_surface_history_v7");
+          == "taa_phoskia_dilated_surface_history_v8");
 }
 
 TEST_CASE(taa_failed_resolve_discards_motion_snapshots)
@@ -346,6 +372,7 @@ TEST_CASE(taa_phoskia_source_compiles_for_d3d11_and_d3d12)
         AY_SHADER_SHADERC_HINT);
     ayt::shader::phoskia::Compiler compiler;
     ayt::shader::phoskia::CompileOptions options;
+    options.keepSources = true;
     ayt::shader::BGFXCompileOptions bgfxOptions;
     bgfxOptions.shadercPath = AY_SHADER_SHADERC_HINT;
     bgfxOptions.platform = "windows";
@@ -360,6 +387,12 @@ TEST_CASE(taa_phoskia_source_compiles_for_d3d11_and_d3d12)
     compiler.compileToProgram(
         ayt::render::detail::taaPhoskiaSourceForTests(),
         options, bgfxOptions, program);
+    bool correctInverseGrouping = false;
+    for (const auto& source : program.sources) {
+        correctInverseGrouping = correctInverseGrouping || source.second.find(
+            "((resolved.x - resolved.y) - resolved.z)") != std::string::npos;
+    }
+    CHECK(correctInverseGrouping);
     if (!program.success) {
         std::cerr << "[TAAPass test] Phoskia compile failed:\n";
         for (const std::string& error : program.errors) {

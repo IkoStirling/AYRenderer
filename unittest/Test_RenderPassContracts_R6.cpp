@@ -75,6 +75,8 @@ TEST_CASE(output_contracts_pin_transient_and_history_lifetimes)
     CHECK(taaColor != nullptr);
     CHECK(taaColor->lifetime ==
           RenderPassResourceLifetime::PersistentHistory);
+    CHECK(taaColor->format == ayt::render::detail::RenderPassResourceFormat::RGBA16F);
+    CHECK(taa->sideEffect); // Optional late diagnostic output.
     CHECK(presented != nullptr);
     CHECK(presented->lifetime == RenderPassResourceLifetime::External);
     CHECK(present->sideEffect);

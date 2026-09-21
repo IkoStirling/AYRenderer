@@ -3,6 +3,11 @@ set(TEST_NAME AYRenderer_Test)
 file(GLOB TEST_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 
 add_executable(${TEST_NAME} ${TEST_FILES})
+if(MSVC)
+    # bx half conversion used by production-precision GPU readback tests.
+    set_source_files_properties(Test_TAAGpu.cpp PROPERTIES
+        COMPILE_OPTIONS "/Zc:__cplusplus;/Zc:preprocessor")
+endif()
 
 target_link_libraries(${TEST_NAME} PRIVATE
     AYRenderer

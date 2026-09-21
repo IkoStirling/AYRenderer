@@ -37,6 +37,7 @@ ayt::math::Float4x4 taaApplyProjectionJitter(
 class TAAPass final : public RenderPass {
 public:
     static constexpr uint8_t kTaaViewId = 5;
+    static constexpr uint8_t kDebugViewId = 245;
     static constexpr uint32_t kJitterSampleCount = 8;
     static constexpr uint32_t kJitterRampFrameCount = 4;
     // Editor viewports are often substantially smaller than the host window.
@@ -50,6 +51,7 @@ public:
 
     std::string_view name() const override { return "TAA"; }
     uint32_t execute(PassExecContext& ctx) override;
+    void setDebugView(uint8_t mode) noexcept { _debugView = mode <= 5 ? mode : 0; }
 
     // Called before scene submission after Renderer gates the enabled chain.
     // Checks this pass's shader/geometry/history allocation. Upstream execution
@@ -92,6 +94,7 @@ private:
     ayt::shader::BindingId _tWorldPosition = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _tGeometryData = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _tMotionVectors = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _tSceneDepth = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uTaaMetrics = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uTaaParams = ayt::shader::InvalidBinding;
     ayt::shader::BindingId _uTaaJitter = ayt::shader::InvalidBinding;
@@ -132,6 +135,7 @@ private:
 
     uint16_t _programRetryFrames = 0;
     bool _firstDispatchLogged = false;
+    uint8_t _debugView = 0;
 };
 
 extern const char* const kTaaCacheKeyCStr;
