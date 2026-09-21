@@ -1,5 +1,15 @@
 # AYRenderer Design
 
+## 2026-09-21 — Motion Vector v5：去除假运动与 GPU 常驻历史验证
+
+- 验证结果：VS 2026 Insider x64 Debug 构建；Renderer 全量 **4481/4481**、MotionVector 专项 **57/57**；旧 TAA GPU 固定网格/递归边缘测试在 D3D11/D3D12 仍分别为 **178/178**、**2604/2604**。Editor 验证程序已重新链接，生产缓存键 v5 强制重新编译修正后的运动 shader。
+- 用户进一步确认静止画面呈固定 A/B 交替；另已通过阴影 bias 消除表面层纹，因此阴影自遮挡与剩余 temporal 闪烁分开记录。本轮不改 shadow bias、TAA jitter、历史权重、裁剪阈值或输出顺序。
+- **已复现的错误**：Opaque/Cutout Motion Vector 均使用 `currentUv - previousUv - currentJitter + previousJitter`；Phoskia 的同级算术右结合将它解析成 `currentUv - (previousUv - (currentJitter + previousJitter))`。静止几何因而残留约 `2 * currentJitter` 的假运动。v8 的灰度/彩色 Resolve 测试上传理想零 velocity，无法覆盖生产运动着色器；这是上一轮的验证缺口。
+- 两个变体均先分别计算 `unjitteredCurrentUv = currentUv - currentJitter`、`unjitteredPreviousUv = previousUv - previousJitter`，再相减。仍经 Phoskia 生成，缓存键同时升级 v5，不复用旧错误着色器。本轮局部明确表达式语义，**没有全局修复 Phoskia Parser 的结合性错误**，编译器修复仍应独立审计其他既有 shader 的行为变化。
+- 新增 `AYRenderer_MotionVectorGpu`：隐藏测试窗口、实际生产 Opaque/Cutout shader 和真实三角形光栅化；透视/正交 × 刚体/骨骼 × 8 个 Halton 相位，分别检查静止零运动及 2px 的刚体/骨骼位移，同时验证上一帧深度和 valid。旧公式 D3D11 **128 个检查失败**，两种材质的静止/移动最大误差均为 **0.4375px**；修复后 D3D11/D3D12 均约 **0.000002861px**，各 **388/388** 通过。运动读回 RT 用 RGBA32F 隔离公式误差，不冒充真实 GBuffer 借用深度及完整场景提交验收。
+- 新增 `AYRenderer_TAAResidentGpu`：两张 RGBA16F history 在 GPU 上逐帧交换，40 帧连续提交，每帧仅 blit 到独立捕获纹理，全部提交结束后才读回；历史从不读回 CPU 再上传，不插入逐帧读回等待。bootstrap 灰色 + 固定棋盘格邻域在黑像素应满足 `(191/255) * 0.92^N`，能检查读到 t-2、奇偶历史分裂、目标复用错误及意外重置。D3D11/D3D12 各 **163/163**，最大递推误差 **0.00124061**，低于 RGBA8 输入/RGBA16F 累积门限 0.004。
+- 两项 GPU 验证均须独立进程设置 `AY_TAA_GPU_TEST=d3d11` 或 `d3d12` 后指定 suite；常规全量明确跳过。常驻历史测试使用生产 Resolve shader 和实际双缓冲，但不经过 Editor/TAAPass 的整条宿主提交，因此不能单凭通过就宣布用户所见的 A/B 闪烁已全部消失。最后仍需用户在同机位、静止、未选中状态验收 Final image 与 Motion 视图。
+
 ## 2026-09-21 — TAA v8：静止彩色轮廓闪烁、递归 GPU 回归与诊断
 
 - 验证结果：VS 2026 Insider x64 Debug 构建；Renderer 全量 **4474/4474**、TAA 专项 **203/203**、Editor Shell **1180/1180**；独立 D3D11/D3D12 固定网格 GPU 读回各 **178/178**，新增递归彩色/硬边/运动/诊断 GPU 用例各 **2604/2604**。可执行程序与内置 UI 同步打包，视觉验收仍交由用户。

@@ -1,5 +1,7 @@
 #include "AYTest.h"
 #include "detail/TAAPass.h"
+#include "detail/MotionVectorPass.h"
+#include "detail/BgfxMatrix.h"
 #include "AYShader/ShaderResourcePool.h"
 
 #include <array>
@@ -148,18 +150,29 @@ struct TaaGpuFixture {
         std::vector<Pixel> sceneDepth(current.size());
         for (size_t i = 0; i < sceneDepth.size(); ++i)
             sceneDepth[i] = {surface[i][3] > .5f ? world[i][2] : 1.0f, 0, 0, 0};
-        const std::array<const char*, 6> names = {
-            "currentColor", "historyColor", "worldPosition", "geometryData", "motionVectors", "sceneDepth"};
         const std::array<const std::vector<Pixel>*, 6> inputs = {
             &current, &history, &world, &surface, &velocity, &sceneDepth};
         const auto firstInput = textures.size();
-        configureFullscreenPassView(adapter, 0, target, 0, 0, kSize, kSize);
-        geometry.bind(adapter);
+        std::array<bgfx::TextureHandle,6> bindings;
         for (uint8_t i = 0; i < inputs.size(); ++i) {
-            const auto texture = input(*inputs[i], i >= 2, i == 0 || i == 3);
-            CHECK(bgfx::isValid(texture));
-            program.setTexture(i, program.getTextureBinding(names[i]), toShaderTexture(texture));
+            bindings[i] = input(*inputs[i], i >= 2, i == 0 || i == 3);
+            CHECK(bgfx::isValid(bindings[i]));
         }
+        submitResolve(jitter,bindings,historyValid,debugMode,target);
+        auto result = readTarget();
+        for (auto i = firstInput; i < textures.size(); ++i) bgfx::destroy(textures[i]);
+        textures.resize(firstInput);
+        return result;
+    }
+
+    void submitResolve(TaaJitter jitter, const std::array<bgfx::TextureHandle,6>& bindings,
+                       bool historyValid, float debugMode, bgfx::FrameBufferHandle output) {
+        const std::array<const char*, 6> names = {
+            "currentColor", "historyColor", "worldPosition", "geometryData", "motionVectors", "sceneDepth"};
+        configureFullscreenPassView(adapter, 0, output, 0, 0, kSize, kSize);
+        geometry.bind(adapter);
+        for (uint8_t i=0;i<bindings.size();++i)
+            program.setTexture(i, program.getTextureBinding(names[i]), toShaderTexture(bindings[i]));
         const float metrics[4] = {1.0f / kSize, 1.0f / kSize, kSize, kSize};
         const float params[4] = {0.92f, 0.65f, 0.025f, historyValid ? 1.0f : 0.0f};
         const float offset[4] = {jitter.x / kSize, jitter.y / kSize, 1, 1};
@@ -172,8 +185,11 @@ struct TaaGpuFixture {
         program.setUniform(program.getUniformBinding("currentViewProjection"), identity, sizeof(identity));
         adapter.setStateDepthTestAlways();
         program.submit({0, 0});
+    }
+
+    std::vector<Pixel> readTarget() {
         bgfx::blit(1, readback, 0, 0, targetTexture);
-        std::vector<Pixel> result(current.size());
+        std::vector<Pixel> result(kSize*kSize);
         std::vector<uint16_t> halves(result.size() * 4);
         const auto ready = bgfx::readTexture(readback,
             productionPrecision ? static_cast<void*>(halves.data()) : static_cast<void*>(result.data()));
@@ -183,8 +199,6 @@ struct TaaGpuFixture {
             for (size_t i = 0; i < result.size(); ++i)
                 for (size_t c = 0; c < 4; ++c) result[i][c] = bx::halfToFloat(halves[i * 4 + c]);
         }
-        for (auto i = firstInput; i < textures.size(); ++i) bgfx::destroy(textures[i]);
-        textures.resize(firstInput);
         return result;
     }
 };
@@ -231,6 +245,182 @@ TEST_CASE(taa_production_shader_fixed_grid_depth_and_missing_velocity)
     CHECK(std::abs(outside[y * kSize + x][0] - expected) < 0.0001f);
 #else
     std::cout << "[SKIP] Windows D3D GPU regression.\n";
+#endif
+}
+
+TEST_SUITE_END
+
+TEST_SUITE(AYRenderer_MotionVectorGpu)
+
+TEST_CASE(motion_rasterized_geometry_removes_jitter_without_removing_real_motion)
+{
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend) { std::cout << "[SKIP] Isolated GPU suite requires AY_TAA_GPU_TEST.\n"; return; }
+    TaaGpuFixture fixture;
+    const bool ready = fixture.initialize(backend);
+    CHECK(ready);
+    if (!ready) return;
+    struct Vertex { float p[3], uv[2], indices[4], weights[4]; };
+    const Vertex vertices[] = {
+        {{-1,-1,1},{0,1},{0,0,0,0},{1,0,0,0}},
+        {{ 3,-1,1},{2,1},{0,0,0,0},{1,0,0,0}},
+        {{-1, 3,1},{0,-1},{0,0,0,0},{1,0,0,0}}
+    };
+    bgfx::VertexLayout layout;
+    layout.begin().add(bgfx::Attrib::Position,3,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::TexCoord0,2,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Indices,4,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Weight,4,bgfx::AttribType::Float).end();
+    const auto vb = bgfx::createVertexBuffer(bgfx::copy(vertices,sizeof(vertices)),layout);
+    CHECK(bgfx::isValid(vb));
+    if (!bgfx::isValid(vb)) return;
+    const auto white = fixture.input(std::vector<Pixel>(kSize*kSize,Pixel{1,1,1,1}),true);
+    const auto identity = ayt::math::Float4x4::identity();
+    float identityData[16];
+    toBgfxColumnMajor(identity,identityData);
+    std::array<float,128*16> bones{};
+    for (size_t i=0;i<128;++i) std::copy(identityData,identityData+16,bones.data()+16*i);
+    for (int cutout=0;cutout<2;++cutout) {
+        auto motion = fixture.pool.acquire(cutout ? motionVectorCutoutPhoskiaSourceForTests()
+                                                 : motionVectorPhoskiaSourceForTests());
+        CHECK(motion.isValid());
+        if (!motion.isValid()) continue;
+        float worstStatic=0, worstMoving=0;
+        // Both projection types and rigid/skinned geometry, all eight phases.
+        for (int perspective=0;perspective<2;++perspective)
+        for (int skinned=0;skinned<2;++skinned)
+        for (int phase=0;phase<8;++phase)
+        for (int moving=0;moving<2;++moving) {
+            auto base=identity;
+            base(2,2)=.5f;
+            if (perspective) { base(3,2)=1; base(3,3)=0; }
+            const auto jitter=taaHaltonJitter(phase);
+            const auto previousJitter=taaHaltonJitter((phase+7)%8);
+            const auto projection=taaApplyProjectionJitter(base,jitter,kSize,kSize);
+            const auto previousProjection=taaApplyProjectionJitter(base,previousJitter,kSize,kSize);
+            float previousData[16]; toBgfxColumnMajor(previousProjection,previousData);
+            auto world=identity;
+            world(0,3)=moving && !skinned ? 4.0f/kSize : 0;
+            auto currentBones=bones;
+            // A 2-pixel rigid translation or a 2-pixel bone translation.
+            currentBones[12]=moving && skinned ? 4.0f/kSize : 0;
+            fixture.adapter.setViewFrameBuffer(0,fixture.target);
+            fixture.adapter.setViewRect(0,0,0,kSize,kSize);
+            fixture.adapter.setViewTransform(0,identity,projection);
+            fixture.adapter.setViewClearRaw(0,BGFX_CLEAR_COLOR,0);
+            fixture.adapter.setTransform(world);
+            bgfx::setVertexBuffer(0,vb);
+            auto uniform=[&](const char* name,const void* data,size_t size) {
+                motion.setUniform(motion.getUniformBinding(name),data,size);
+            };
+            uniform("previousWorld",identityData,sizeof(identityData));
+            uniform("previousViewProjection",previousData,sizeof(previousData));
+            uniform("bones",currentBones.data(),sizeof(currentBones));
+            uniform("previousBones",bones.data(),sizeof(bones));
+            const float params[4]={float(skinned),1,0,0};
+            const float offsets[4]={jitter.x/kSize,jitter.y/kSize,previousJitter.x/kSize,previousJitter.y/kSize};
+            uniform("motionParams",params,sizeof(params));
+            uniform("motionJitter",offsets,sizeof(offsets));
+            if(cutout) {
+                const float color[4]={1,1,1,1}, opacity[4]={1,0,0,0}, cutoff[4]={.5f,0,0,0}, source[4]={0,0,0,0};
+                motion.setTexture(0,motion.getTextureBinding("albedoMap"),toShaderTexture(white));
+                motion.setTexture(1,motion.getTextureBinding("opacityMap"),toShaderTexture(white));
+                uniform("baseColor",color,sizeof(color));
+                uniform("opacity",opacity,sizeof(opacity));
+                uniform("alphaCutoff",cutoff,sizeof(cutoff));
+                uniform("opacitySource",source,sizeof(source));
+            }
+            fixture.adapter.setStateDepthTestAlways();
+            motion.submit({0,0});
+            const auto pixels=fixture.readTarget();
+            float error=0; bool valid=true;
+            for(int y=10;y<22;++y) for(int x=10;x<22;++x) {
+                const auto& p=pixels[y*kSize+x];
+                valid=valid && p[3]>.99f && std::abs(p[2]-.5f)<.0001f;
+                error=std::max(error,std::max(std::abs(p[0]*kSize-(moving?2.0f:0)),std::abs(p[1]*kSize)));
+            }
+            CHECK(valid);
+            CHECK(error < .001f);
+            if(moving) worstMoving=std::max(worstMoving,error);
+            else worstStatic=std::max(worstStatic,error);
+        }
+        std::cout << "[Motion GPU] cutout=" << cutout << " staticErrorPixels=" << worstStatic
+                  << " movingErrorPixels=" << worstMoving << '\n';
+    }
+    bgfx::destroy(vb);
+#endif
+}
+
+TEST_SUITE_END
+
+TEST_SUITE(AYRenderer_TAAResidentGpu)
+
+TEST_CASE(taa_gpu_resident_ping_pong_uses_immediately_previous_frame)
+{
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend) { std::cout << "[SKIP] Isolated resident-history GPU suite requires AY_TAA_GPU_TEST.\n"; return; }
+    TaaGpuFixture fixture;
+    const bool ready=fixture.initialize(backend,true);
+    CHECK(ready);
+    if(!ready) return;
+    constexpr int frames=40;
+    // Keep both RGBA16F histories on GPU. No per-frame readback, CPU history
+    // upload or extra empty frame: this exercises actual queued ping-pong.
+    const auto second=fixture.adapter.createFrameBuffer(kSize,kSize,bgfx::TextureFormat::RGBA16F,false,false);
+    CHECK(bgfx::isValid(second));
+    if(!bgfx::isValid(second)) return;
+    const std::array<bgfx::FrameBufferHandle,2> targets={fixture.target,second};
+    const std::array<bgfx::TextureHandle,2> colors={fixture.targetTexture,fixture.adapter.getFboAttachment(second,0)};
+    std::vector<Pixel> checker(kSize*kSize);
+    for(int y=0;y<kSize;++y) for(int x=0;x<kSize;++x) {
+        const float c=float((x+y)%2);
+        checker[y*kSize+x]={c,c,c,1};
+    }
+    // The checker provides a wide clipping box. A distinct bootstrap image
+    // gives a known .75*.92^N recurrence at black pixels, exposing split
+    // odd/even histories, stale targets and accidental history resets.
+    const auto seed=fixture.input(std::vector<Pixel>(kSize*kSize,Pixel{.75f,.75f,.75f,1}),true,true);
+    const auto current=fixture.input(checker,false,true);
+    const auto world=fixture.input(std::vector<Pixel>(kSize*kSize,Pixel{0,0,.2f,1}),true);
+    const auto surface=fixture.input(std::vector<Pixel>(kSize*kSize,Pixel{0,0,0,1}),true,true);
+    const auto velocity=fixture.input(std::vector<Pixel>(kSize*kSize,Pixel{0,0,.2f,1}),true);
+    const auto depth=fixture.input(std::vector<Pixel>(kSize*kSize,Pixel{.2f,0,0,0}),true);
+    std::array<bgfx::TextureHandle,frames> snapshots;
+    for(auto& snapshot:snapshots) {
+        snapshot=bgfx::createTexture2D(kSize,kSize,false,1,bgfx::TextureFormat::RGBA16F,
+            BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
+        CHECK(bgfx::isValid(snapshot));
+        if(bgfx::isValid(snapshot)) fixture.textures.push_back(snapshot);
+    }
+    for(int frame=0;frame<frames;++frame) {
+        const unsigned write=frame%2, read=1-write;
+        CHECK(colors[write].idx!=colors[read].idx);
+        const std::array<bgfx::TextureHandle,6> bindings={frame?current:seed,colors[read],world,surface,velocity,depth};
+        fixture.submitResolve({},bindings,frame!=0,0,targets[write]);
+        bgfx::blit(1,snapshots[frame],0,0,colors[write]);
+        fixture.adapter.endFrame();
+    }
+    std::array<std::vector<uint16_t>,frames> pixels;
+    uint32_t lastReady=0;
+    for(int frame=0;frame<frames;++frame) {
+        pixels[frame].resize(kSize*kSize*4);
+        lastReady=std::max(lastReady,bgfx::readTexture(snapshots[frame],pixels[frame].data()));
+    }
+    for(int i=0;i<120 && fixture.adapter.gpuFrameCounter()<lastReady;++i) fixture.adapter.endFrame();
+    CHECK(fixture.adapter.gpuFrameCounter()>=lastReady);
+    float worstError=0;
+    for(int frame=0;frame<frames;++frame) {
+        const size_t center=(16*kSize+16)*4;
+        const float actual=bx::halfToFloat(pixels[frame][center]);
+        const float expected=(191.0f/255.0f)*std::pow(.92f,float(frame));
+        worstError=std::max(worstError,std::abs(actual-expected));
+        CHECK(std::abs(actual-expected)<.004f);
+        CHECK(std::abs(bx::halfToFloat(pixels[frame][center+3])-.2f)<.001f);
+    }
+    std::cout << "[TAA resident] frames=" << frames << " maxRecurrenceError=" << worstError << '\n';
+    fixture.adapter.destroy(second);
 #endif
 }
 

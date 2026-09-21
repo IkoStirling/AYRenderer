@@ -156,8 +156,11 @@ TEST_CASE(motion_vector_shader_contract_covers_rigid_skin_cutout_and_sentinel)
           != std::string::npos);
     CHECK(opaque.find("let velocity = vec2(2.0, 2.0)")
           != std::string::npos);
-    CHECK(opaque.find("velocity = currentUv - previousUv - motionJitter.xy + motionJitter.zw")
-          != std::string::npos);
+    for (const auto& source : {opaque, cutout}) {
+        CHECK(source.find("let unjitteredCurrentUv = currentUv - motionJitter.xy") != std::string::npos);
+        CHECK(source.find("let unjitteredPreviousUv = previousUv - motionJitter.zw") != std::string::npos);
+        CHECK(source.find("velocity = unjitteredCurrentUv - unjitteredPreviousUv") != std::string::npos);
+    }
     CHECK(opaque.find("previousClip.z / max(previousClip.w, 0.00001), valid")
           != std::string::npos);
     CHECK(cutout.find("previousClip.z / max(previousClip.w, 0.00001), valid")
@@ -165,7 +168,7 @@ TEST_CASE(motion_vector_shader_contract_covers_rigid_skin_cutout_and_sentinel)
     CHECK(cutout.find("texture2d opacityMap") != std::string::npos);
     CHECK(cutout.find("discard") != std::string::npos);
     CHECK(std::string(ayt::render::detail::kMotionVectorCacheKeyCStr)
-          == "motion_vector_phoskia_rgba16f_unjittered_depth_v4");
+          == "motion_vector_phoskia_rgba16f_unjittered_depth_v5");
 }
 
 TEST_CASE(motion_vector_noop_backend_returns_zero_and_lifecycle_is_idempotent)
@@ -203,6 +206,7 @@ TEST_CASE(motion_vector_phoskia_sources_compile_for_d3d11_and_d3d12)
     auto compileSource = [](const char* source, const char* label) {
         ayt::shader::phoskia::Compiler compiler;
         ayt::shader::phoskia::CompileOptions options;
+        options.keepSources = true;
         ayt::shader::BGFXCompileOptions bgfxOptions;
         bgfxOptions.shadercPath = AY_SHADER_SHADERC_HINT;
         bgfxOptions.platform = "windows";
@@ -215,6 +219,15 @@ TEST_CASE(motion_vector_phoskia_sources_compile_for_d3d11_and_d3d12)
 #endif
         ayt::shader::CompiledShaderProgram program;
         compiler.compileToProgram(source, options, bgfxOptions, program);
+        bool correctJitterRemoval = false;
+        for (const auto& generated : program.sources) {
+            const auto& code = generated.second;
+            correctJitterRemoval = correctJitterRemoval || (
+                code.find("unjitteredCurrentUv = (currentUv - motionJitter.xy)") != std::string::npos
+                && code.find("unjitteredPreviousUv = (previousUv - motionJitter.zw)") != std::string::npos
+                && code.find("velocity = (unjitteredCurrentUv - unjitteredPreviousUv)") != std::string::npos);
+        }
+        CHECK(correctJitterRemoval);
         if (!program.success) {
             std::cerr << "[MotionVectorPass test] Phoskia " << label
                       << " failed:\n";

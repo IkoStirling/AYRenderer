@@ -66,7 +66,12 @@ material MotionVector {
         let velocity = vec2(2.0, 2.0)
         let valid = 0.0
         if (motionParams.y > 0.5 && previousClip.w > 0.00001) {
-            velocity = currentUv - previousUv - motionJitter.xy + motionJitter.zw
+            // Keep each subtraction explicit: Phoskia currently associates
+            // an unparenthesized a-b-c+d chain from the right. That leaves
+            // twice the current jitter in a stationary surface's velocity.
+            let unjitteredCurrentUv = currentUv - motionJitter.xy
+            let unjitteredPreviousUv = previousUv - motionJitter.zw
+            velocity = unjitteredCurrentUv - unjitteredPreviousUv
             valid = 1.0
         }
         return vec4(velocity, previousClip.z / max(previousClip.w, 0.00001), valid)
@@ -132,7 +137,9 @@ material MotionVectorCutout {
         let velocity = vec2(2.0, 2.0)
         let valid = 0.0
         if (motionParams.y > 0.5 && previousClip.w > 0.00001) {
-            velocity = currentUv - previousUv - motionJitter.xy + motionJitter.zw
+            let unjitteredCurrentUv = currentUv - motionJitter.xy
+            let unjitteredPreviousUv = previousUv - motionJitter.zw
+            velocity = unjitteredCurrentUv - unjitteredPreviousUv
             valid = 1.0
         }
         return vec4(velocity, previousClip.z / max(previousClip.w, 0.00001), valid)
@@ -141,9 +148,9 @@ material MotionVectorCutout {
 )";
 
 constexpr const char* kMotionVectorCacheKey =
-    "motion_vector_phoskia_rgba16f_unjittered_depth_v4";
+    "motion_vector_phoskia_rgba16f_unjittered_depth_v5";
 constexpr const char* kMotionVectorCutoutCacheKey =
-    "motion_vector_phoskia_rgba16f_unjittered_depth_cutout_v4";
+    "motion_vector_phoskia_rgba16f_unjittered_depth_cutout_v5";
 
 struct CommitKey final {
     uint64_t objectId = 0;
