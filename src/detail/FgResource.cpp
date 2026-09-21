@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <iterator>
 #include <limits>
 
 namespace ayt::render::detail
@@ -98,6 +99,9 @@ void FrameGraph::beginFrame(uint16_t width, uint16_t height)
         // 指向同一物理 handle。shutdown 时一次性 destroy。
     }
     _passes.clear();
+    std::fill(std::begin(_executionTracked), std::end(_executionTracked), false);
+    std::fill(std::begin(_executionEligible), std::end(_executionEligible), false);
+    std::fill(std::begin(_executionLive), std::end(_executionLive), false);
 
     for (size_t i = 0; i < static_cast<size_t>(FgSemantic::Count); ++i) {
         _semantics[i].hasLogical = false;
@@ -152,6 +156,26 @@ void FrameGraph::addPass(const FgPassDesc& desc)
     _passes.push_back(p);
 }
 
+void FrameGraph::setExecutionEligibility(RenderPassSlot slot,
+                                         bool enabled) noexcept
+{
+    const size_t index = static_cast<size_t>(static_cast<uint8_t>(slot));
+    _executionTracked[index] = true;
+    _executionEligible[index] = enabled;
+}
+
+bool FrameGraph::hasExecutionDecision(RenderPassSlot slot) const noexcept
+{
+    const size_t index = static_cast<size_t>(static_cast<uint8_t>(slot));
+    return _executionTracked[index];
+}
+
+bool FrameGraph::shouldExecute(RenderPassSlot slot) const noexcept
+{
+    const size_t index = static_cast<size_t>(static_cast<uint8_t>(slot));
+    return _executionTracked[index] && _compiled && _executionLive[index];
+}
+
 void FrameGraph::setResolvedSemantic(FgSemantic sem, FgResourceId logicalId)
 {
     if (static_cast<size_t>(sem) >= static_cast<size_t>(FgSemantic::Count)) {
@@ -173,6 +197,7 @@ bool FrameGraph::compile()
     _stats.declaredPasses = static_cast<uint16_t>(_passes.size());
     _compileErrors.clear();
     _compiled = false;
+    std::fill(std::begin(_executionLive), std::end(_executionLive), false);
 
     constexpr size_t kResourceCount =
         static_cast<size_t>(FgResourceId::Count);
@@ -340,6 +365,14 @@ bool FrameGraph::compile()
     for (PassEntry& pass : _passes) {
         if (!pass.live) {
             continue;
+        }
+        if (pass.desc.executionSlot >= 0
+            && pass.desc.executionSlot
+                < static_cast<int16_t>(kExecutionSlotCount)) {
+            const size_t slot = static_cast<size_t>(pass.desc.executionSlot);
+            if (_executionTracked[slot] && _executionEligible[slot]) {
+                _executionLive[slot] = true;
+            }
         }
         ++_stats.livePasses;
         for (FgResourceId id : pass.desc.reads) {
@@ -528,6 +561,9 @@ void FrameGraph::shutdown()
         r.aliasGroup = -1;
     }
     _passes.clear();
+    std::fill(std::begin(_executionTracked), std::end(_executionTracked), false);
+    std::fill(std::begin(_executionEligible), std::end(_executionEligible), false);
+    std::fill(std::begin(_executionLive), std::end(_executionLive), false);
     for (size_t i = 0; i < static_cast<size_t>(FgSemantic::Count); ++i) {
         _semantics[i].hasLogical = false;
         _semantics[i].physical   = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};

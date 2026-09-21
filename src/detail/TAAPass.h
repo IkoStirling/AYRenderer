@@ -68,6 +68,9 @@ public:
         return _jitteredProjection;
     }
     bgfx::FrameBufferHandle writeHistoryFbo() const noexcept;
+    bgfx::FrameBufferHandle readHistoryFbo() const noexcept {
+        return _history[_readHistoryIndex];
+    }
     bool historyValid() const noexcept { return _historyValid; }
     bool preparedThisFrame() const noexcept { return _preparedThisFrame; }
     bool producedThisFrame() const noexcept { return _producedThisFrame; }

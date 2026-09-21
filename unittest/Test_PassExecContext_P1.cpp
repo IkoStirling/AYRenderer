@@ -24,6 +24,7 @@
 
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
+#include "detail/FgResource.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
@@ -222,6 +223,30 @@ TEST_CASE(ctx_executes_through_pipeline_with_disabled_pass) {
     CHECK(draws == 1u);
     // The enabled pass still saw ctx with viewId=0 (default).
     CHECK(CapturingPass::lastViewId == 0);
+}
+
+TEST_CASE(compiled_frame_graph_culls_registered_pipeline_slot) {
+    BGFXAdapter adapter;
+    ayt::shader::ShaderResourcePool pool;
+    RenderScene scene;
+    std::unordered_map<uint64_t, GpuMesh> meshes;
+    std::unordered_map<uint64_t, GpuTexture> textures;
+    std::unordered_map<uint64_t, GpuMaterial> materials;
+    FrameContext frame;
+    PassExecContext ctx{adapter, pool, scene, meshes, textures, materials,
+                        0, 0, 1280, 720, frame, 0};
+
+    ayt::render::detail::FrameGraph graph(adapter);
+    graph.beginFrame(1280, 720);
+    graph.setExecutionEligibility(ayt::render::RenderPassSlot::PostProcess,
+                                  false);
+    CHECK(graph.compile());
+    ctx.frameGraph = &graph;
+
+    RenderPipeline pipe;
+    pipe.addPass(ayt::render::RenderPassSlot::PostProcess,
+                 std::make_unique<CapturingPass>());
+    CHECK(pipe.executeAll(ctx) == 0u);
 }
 
 TEST_SUITE_END

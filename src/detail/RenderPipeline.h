@@ -44,6 +44,7 @@ public:
     // insert points (R5+) should be appended in the same order
     // design.md / RenderPipelineDesc prescribe.
     void addPass(std::unique_ptr<RenderPass> pass);
+    void addPass(RenderPassSlot slot, std::unique_ptr<RenderPass> pass);
 
     // Drop all owned passes. Callers that hold ShadowPass GPU resources
     // must destroyResources() first when the adapter is live.
@@ -106,6 +107,9 @@ private:
     // growth does not move its pointee. try_emplace keeps the first instance
     // if a pipeline intentionally registers the same concrete type twice.
     std::unordered_map<std::type_index, RenderPass*> _passesByType;
+    // Parallel to _passes. Negative entries are legacy/test passes that are
+    // intentionally not governed by the renderer-owned FrameGraph.
+    std::vector<int16_t> _passSlots;
     std::vector<RenderPassFrameStats>         _lastPassStats;
 };
 

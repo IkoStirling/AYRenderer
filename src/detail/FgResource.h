@@ -35,6 +35,7 @@
 
 #include <bgfx/bgfx.h>
 
+#include "AYRenderer/RenderTypes.h"
 #include "detail/RenderTargetPool.h"
 
 #include <cstdint>
@@ -92,8 +93,17 @@ enum class FgResourceId : uint8_t {
     // Persistent display-referred TAA history/output. The physical FBO is
     // imported from TAAPass because it must survive beginFrame/compile.
     TaaColor         = 12,
+    // External deferred inputs used by SSAO/TAA. They remain pass-owned, but
+    // declaring them here makes temporal dependencies visible to the graph
+    // instead of hiding them behind PassExecContext producer pointers.
+    GBufferNormal        = 13,
+    GBufferWorldPosition = 14,
+    GBufferSurface       = 15,
+    GBufferDepth         = 16,
+    MotionVectors        = 17,
+    TaaHistory           = 18,
     // Sentinel ── 测试和实现都靠它做数组大小 / 上界判断。
-    Count        = 13,
+    Count        = 19,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。
@@ -134,6 +144,11 @@ struct FgPassDesc {
     // output consumed by another graph pass. Passes with an empty writes list
     // are also treated as roots for backward compatibility (Present/Consumer).
     bool                              sideEffect = false;
+    // Optional bridge to the concrete RenderPipeline slot. A negative value
+    // keeps standalone/tests source-compatible and leaves execution solely to
+    // RenderPipeline. Product graph nodes set this so compile-time liveness
+    // becomes an actual dispatch decision rather than diagnostics only.
+    int16_t                           executionSlot = -1;
 };
 
 // Compile diagnostics are deliberately structural rather than textual so
@@ -243,6 +258,14 @@ public:
     // terminal/side-effect pass 与 semantic 输出作为反向活跃性根。
     void addPass(const FgPassDesc& desc);
 
+    // Registers the runtime eligibility of a concrete pipeline slot. Compile
+    // intersects this state with graph liveness; RenderPipeline then queries
+    // shouldExecute() before dispatch. This separates "mounted" (pipeline),
+    // "enabled" (eligibility), and "live this frame" (compiled graph).
+    void setExecutionEligibility(RenderPassSlot slot, bool enabled) noexcept;
+    bool hasExecutionDecision(RenderPassSlot slot) const noexcept;
+    bool shouldExecute(RenderPassSlot slot) const noexcept;
+
     // F5 ── 设置 semantic 指向哪个 logical 资源。FG compile 时
     // 解析成物理 handle;若该 logical 不 live ⇒ resolveSemantic 返
     // invalid。
@@ -335,6 +358,11 @@ private:
         bool                        live     = false;
     };
     std::vector<PassEntry> _passes;
+
+    static constexpr size_t kExecutionSlotCount = 256;
+    bool _executionTracked[kExecutionSlotCount]{};
+    bool _executionEligible[kExecutionSlotCount]{};
+    bool _executionLive[kExecutionSlotCount]{};
 
     // F5 ── 每个 semantic 指向哪个 logical。physical 字段保留但
     // F6.1 起不再由 compile 缓存 —— resolveSemantic() 直接

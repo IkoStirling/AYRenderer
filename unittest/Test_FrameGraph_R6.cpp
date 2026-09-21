@@ -169,4 +169,31 @@ TEST_CASE(compile_rejects_semantic_without_owned_producer)
           == FgCompileErrorCode::MissingSemanticProducer);
 }
 
+TEST_CASE(compiled_liveness_becomes_a_pipeline_execution_decision)
+{
+    BGFXAdapter adapter;
+    FrameGraph graph(adapter);
+    graph.beginFrame(1280, 720);
+    graph.importExternal(FgResourceId::SceneColor, fakeHandle(0x50));
+    addFullColor(graph, FgResourceId::FinalLdrColor);
+    addFullColor(graph, FgResourceId::FxaaColor);
+    graph.setExecutionEligibility(ayt::render::RenderPassSlot::PostProcess,
+                                  true);
+    graph.setExecutionEligibility(ayt::render::RenderPassSlot::FXAA, true);
+    graph.setExecutionEligibility(ayt::render::RenderPassSlot::Present, true);
+    graph.addPass({"PostProcess", {FgResourceId::SceneColor},
+                   {FgResourceId::FinalLdrColor}, true, false,
+                   static_cast<int16_t>(ayt::render::RenderPassSlot::PostProcess)});
+    graph.addPass({"DisconnectedFxaa", {FgResourceId::FinalLdrColor},
+                   {FgResourceId::FxaaColor}, true, false,
+                   static_cast<int16_t>(ayt::render::RenderPassSlot::FXAA)});
+    graph.addPass({"Present", {FgResourceId::FinalLdrColor}, {}, true, true,
+                   static_cast<int16_t>(ayt::render::RenderPassSlot::Present)});
+
+    CHECK(graph.compile());
+    CHECK(graph.shouldExecute(ayt::render::RenderPassSlot::PostProcess));
+    CHECK_FALSE(graph.shouldExecute(ayt::render::RenderPassSlot::FXAA));
+    CHECK(graph.shouldExecute(ayt::render::RenderPassSlot::Present));
+}
+
 TEST_SUITE_END

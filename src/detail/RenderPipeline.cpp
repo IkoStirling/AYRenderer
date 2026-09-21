@@ -1,4 +1,5 @@
 #include "detail/RenderPipeline.h"
+#include "detail/FgResource.h"
 
 #include <chrono>
 #include <cstdio>
@@ -12,12 +13,25 @@ void RenderPipeline::addPass(std::unique_ptr<RenderPass> pass)
         _passesByType.try_emplace(std::type_index(typeid(*pass)), pass.get());
     }
     _passes.push_back(std::move(pass));
+    _passSlots.push_back(-1);
+}
+
+void RenderPipeline::addPass(RenderPassSlot slot,
+                             std::unique_ptr<RenderPass> pass)
+{
+    if (pass) {
+        _passesByType.try_emplace(std::type_index(typeid(*pass)), pass.get());
+    }
+    _passes.push_back(std::move(pass));
+    _passSlots.push_back(
+        static_cast<int16_t>(static_cast<uint8_t>(slot)));
 }
 
 void RenderPipeline::clear()
 {
     _passesByType.clear();
     _passes.clear();
+    _passSlots.clear();
     _lastPassStats.clear();
 }
 
@@ -48,9 +62,19 @@ uint32_t RenderPipeline::executeAll(PassExecContext& ctx)
     uint32_t total = 0;
     _lastPassStats.clear();
     _lastPassStats.reserve(_passes.size());
-    for (auto& pass : _passes) {
+    for (size_t passIndex = 0; passIndex < _passes.size(); ++passIndex) {
+        auto& pass = _passes[passIndex];
         if (!pass || !pass->isEnabled()) {
             continue;
+        }
+        const int16_t slot = passIndex < _passSlots.size()
+            ? _passSlots[passIndex] : -1;
+        if (slot >= 0 && ctx.frameGraph != nullptr) {
+            const RenderPassSlot passSlot = static_cast<RenderPassSlot>(slot);
+            if (ctx.frameGraph->hasExecutionDecision(passSlot)
+                && !ctx.frameGraph->shouldExecute(passSlot)) {
+                continue;
+            }
         }
         const std::string_view passName = pass->name();
         const auto begin = Clock::now();

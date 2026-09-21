@@ -28,6 +28,9 @@ PostProcessGraphPlanInput baseInput()
     input.width = 1280;
     input.height = 720;
     input.sceneColor = fakeHandle(0x70);
+    input.gbuffer = fakeHandle(0x73);
+    input.motionVectors = fakeHandle(0x74);
+    input.taaReadHistory = fakeHandle(0x75);
     input.smaaIntermediatePointSampled = true;
     return input;
 }
@@ -64,6 +67,7 @@ TEST_CASE(full_temporal_chain_preserves_every_required_dependency)
     input.bloomExtract = true;
     input.bloomBlur = true;
     input.finalLdr = true;
+    input.motionVector = true;
     input.taa = true;
     input.colorGrading = true;
 
@@ -72,14 +76,16 @@ TEST_CASE(full_temporal_chain_preserves_every_required_dependency)
 
     CHECK(result.compileSucceeded);
     CHECK(graph.compileErrors().empty());
-    CHECK(graph.stats().declaredPasses == 9u);
-    CHECK(graph.stats().livePasses == 9u);
-    CHECK(graph.stats().logicalResources == 9u);
+    CHECK(graph.stats().declaredPasses == 10u);
+    CHECK(graph.stats().livePasses == 10u);
+    CHECK(graph.stats().logicalResources == 15u);
     CHECK(graph.stats().physicalTargets == 7u);
     CHECK(result.hdrSceneSource == FgResourceId::HazeColor);
     CHECK(result.antialiasingSource == FgResourceId::TaaColor);
     CHECK(result.presentationSource == FgResourceId::ColorGradedColor);
     CHECK(graph.resolve(FgResourceId::TaaColor).idx == 0x71u);
+    CHECK(graph.shouldExecute(ayt::render::RenderPassSlot::MotionVector));
+    CHECK(graph.shouldExecute(ayt::render::RenderPassSlot::TAA));
 }
 
 TEST_CASE(spatial_chain_orders_fxaa_before_smaa)
@@ -109,6 +115,7 @@ TEST_CASE(temporal_priority_culls_a_disconnected_spatial_branch)
     PostProcessGraphPlanInput input = baseInput();
     input.taaWriteTarget = fakeHandle(0x72);
     input.finalLdr = true;
+    input.motionVector = true;
     input.taa = true;
     input.fxaa = true;
 
@@ -116,10 +123,11 @@ TEST_CASE(temporal_priority_culls_a_disconnected_spatial_branch)
         buildPostProcessGraphPlan(graph, input);
 
     CHECK(result.compileSucceeded);
-    CHECK(graph.stats().declaredPasses == 4u);
-    CHECK(graph.stats().livePasses == 3u);
+    CHECK(graph.stats().declaredPasses == 5u);
+    CHECK(graph.stats().livePasses == 4u);
     CHECK(graph.stats().physicalTargets == 1u);
     CHECK(result.antialiasingSource == FgResourceId::TaaColor);
+    CHECK_FALSE(graph.shouldExecute(ayt::render::RenderPassSlot::FXAA));
 }
 
 TEST_CASE(invalid_bloom_partial_chain_fails_closed_at_compile)

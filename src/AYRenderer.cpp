@@ -851,7 +851,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // FrameContext.
     for (const RenderPassSlot slot : resolved.passes) {
         if (auto pass = makePassForSlot(slot)) {
-            pipeline.addPass(std::move(pass));
+            pipeline.addPass(slot, std::move(pass));
         }
     }
     pipelineDesc = std::move(resolved);
@@ -1581,12 +1581,20 @@ void Renderer::render(const RenderScene& scene)
     graphInput.sceneColor = sceneColorHandle;
     if (taaStageEnabled) {
         graphInput.taaWriteTarget = taaPassPtr->writeHistoryFbo();
+        graphInput.taaReadHistory = taaPassPtr->readHistoryFbo();
+        graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
+        graphInput.motionVectors = motionVectorPassPtr != nullptr
+            ? motionVectorPassPtr->velocityFbo()
+            : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
     graphInput.ssao = ssaoPassEnabled;
     graphInput.haze = hazePassEnabled;
     graphInput.bloomExtract = bloomStages.extract;
     graphInput.bloomBlur = bloomStages.blur;
     graphInput.finalLdr = finalLdrStageEnabled;
+    graphInput.motionVector = taaStageEnabled
+        && motionVectorPassPtr != nullptr
+        && motionVectorPassPtr->isEnabled();
     graphInput.taa = taaStageEnabled;
     graphInput.fxaa = fxaaStageEnabled;
     graphInput.smaa = smaaStageEnabled;

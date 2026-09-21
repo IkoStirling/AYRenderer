@@ -18,12 +18,16 @@ struct PostProcessGraphPlanInput {
 
     bgfx::FrameBufferHandle sceneColor = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle taaWriteTarget = BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle taaReadHistory = BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle gbuffer = BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle motionVectors = BGFX_INVALID_HANDLE;
 
     bool ssao = false;
     bool haze = false;
     bool bloomExtract = false;
     bool bloomBlur = false;
     bool finalLdr = false;
+    bool motionVector = false;
     bool taa = false;
     bool fxaa = false;
     bool smaa = false;

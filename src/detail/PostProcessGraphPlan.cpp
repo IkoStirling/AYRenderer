@@ -81,6 +81,11 @@ bool contractSideEffect(RenderPassSlot slot)
     return contractFor(slot).sideEffect;
 }
 
+int16_t executionSlot(RenderPassSlot slot) noexcept
+{
+    return static_cast<int16_t>(static_cast<uint8_t>(slot));
+}
+
 } // namespace
 
 PostProcessGraphPlanResult buildPostProcessGraphPlan(
@@ -92,6 +97,47 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     graph.beginFrame(input.width, input.height);
     graph.importExternal(FgResourceId::SceneColor, input.sceneColor);
 
+    // Runtime eligibility is distinct from pipeline mounting and graph
+    // liveness. Recording every graph-managed slot here lets the compiled
+    // plan actively suppress disabled or disconnected concrete passes.
+    graph.setExecutionEligibility(RenderPassSlot::SSAO, input.ssao);
+    graph.setExecutionEligibility(RenderPassSlot::DepthHaze, input.haze);
+    graph.setExecutionEligibility(RenderPassSlot::BloomExtract,
+                                  input.bloomExtract);
+    graph.setExecutionEligibility(RenderPassSlot::BloomBlur, input.bloomBlur);
+    graph.setExecutionEligibility(RenderPassSlot::PostProcess, input.finalLdr);
+    graph.setExecutionEligibility(RenderPassSlot::MotionVector,
+                                  input.motionVector);
+    graph.setExecutionEligibility(RenderPassSlot::TAA, input.taa);
+    graph.setExecutionEligibility(RenderPassSlot::FXAA, input.fxaa);
+    graph.setExecutionEligibility(RenderPassSlot::SMAA, input.smaa);
+    graph.setExecutionEligibility(RenderPassSlot::ColorGrading,
+                                  input.colorGrading);
+    graph.setExecutionEligibility(RenderPassSlot::Present, input.finalLdr);
+
+    if (input.ssao || input.taa) {
+        // These are multiple logical views of one pass-owned MRT. FrameGraph
+        // borrows the FBO only for dependency/lifetime description; concrete
+        // passes continue binding the individual attachments directly.
+        graph.importExternal(FgResourceId::GBufferNormal, input.gbuffer);
+        graph.importExternal(FgResourceId::GBufferWorldPosition,
+                             input.gbuffer);
+        graph.importExternal(FgResourceId::GBufferSurface, input.gbuffer);
+        graph.importExternal(FgResourceId::GBufferDepth, input.gbuffer);
+    }
+    if (input.taa) {
+        graph.importExternal(FgResourceId::MotionVectors,
+                             input.motionVectors);
+        graph.importExternal(FgResourceId::TaaHistory,
+                             input.taaReadHistory);
+        graph.addPass({contractName(RenderPassSlot::MotionVector),
+                       {FgResourceId::GBufferDepth},
+                       {FgResourceId::MotionVectors},
+                       input.motionVector,
+                       contractSideEffect(RenderPassSlot::MotionVector),
+                       executionSlot(RenderPassSlot::MotionVector)});
+    }
+
     // SSAO is consumed by Lighting outside this MVP graph, so its semantic is
     // also a liveness root. Runtime eligibility already guarantees the full
     // GBuffer -> SSAO -> Lighting chain exists.
@@ -100,7 +146,12 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
                           graphTextureDesc(RenderPassSlot::SSAO,
                                            RenderPassResourceId::SSAO));
         graph.addPass({contractName(RenderPassSlot::SSAO),
-                       {}, {FgResourceId::SSAOTexture}, true});
+                       {FgResourceId::GBufferNormal,
+                        FgResourceId::GBufferWorldPosition,
+                        FgResourceId::GBufferSurface,
+                        FgResourceId::GBufferDepth},
+                       {FgResourceId::SSAOTexture}, true, false,
+                       executionSlot(RenderPassSlot::SSAO)});
         graph.setResolvedSemantic(FgSemantic::SSAOSource,
                                   FgResourceId::SSAOTexture);
     }
@@ -112,7 +163,8 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
         graph.addPass({contractName(RenderPassSlot::DepthHaze),
                        {FgResourceId::SceneColor},
                        {FgResourceId::HazeColor},
-                       true});
+                       true, false,
+                       executionSlot(RenderPassSlot::DepthHaze)});
         graph.setResolvedSemantic(FgSemantic::HazeSource,
                                   FgResourceId::HazeColor);
         result.hdrSceneSource = FgResourceId::HazeColor;
@@ -125,7 +177,8 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
         graph.addPass({contractName(RenderPassSlot::BloomExtract),
                        {result.hdrSceneSource},
                        {FgResourceId::BloomBright},
-                       true});
+                       true, false,
+                       executionSlot(RenderPassSlot::BloomExtract)});
     }
     if (input.bloomBlur) {
         graph.addResource(FgResourceId::BloomBlurA,
@@ -137,11 +190,13 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
         graph.addPass({"BloomBlurH",
                        {FgResourceId::BloomBright},
                        {FgResourceId::BloomBlurA},
-                       true});
+                       true, false,
+                       executionSlot(RenderPassSlot::BloomBlur)});
         graph.addPass({"BloomBlurV",
                        {FgResourceId::BloomBlurA},
                        {FgResourceId::BloomBlurB},
-                       true});
+                       true, false,
+                       executionSlot(RenderPassSlot::BloomBlur)});
         graph.setResolvedSemantic(FgSemantic::BloomSource,
                                   FgResourceId::BloomBlurB);
     }
@@ -166,15 +221,22 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     graph.addPass({contractName(RenderPassSlot::PostProcess),
                    std::move(postProcessReads),
                    {FgResourceId::FinalLdrColor},
-                   true});
+                   true, false,
+                   executionSlot(RenderPassSlot::PostProcess)});
 
     if (input.taa) {
         graph.importExternal(FgResourceId::TaaColor, input.taaWriteTarget);
         graph.addPass({contractName(RenderPassSlot::TAA),
-                       {FgResourceId::FinalLdrColor},
+                       {FgResourceId::FinalLdrColor,
+                        FgResourceId::GBufferWorldPosition,
+                        FgResourceId::GBufferSurface,
+                        FgResourceId::GBufferDepth,
+                        FgResourceId::MotionVectors,
+                        FgResourceId::TaaHistory},
                        {FgResourceId::TaaColor},
                        true,
-                       contractSideEffect(RenderPassSlot::TAA)});
+                       contractSideEffect(RenderPassSlot::TAA),
+                       executionSlot(RenderPassSlot::TAA)});
     }
     if (input.fxaa) {
         graph.addResource(FgResourceId::FxaaColor,
@@ -183,7 +245,8 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
         graph.addPass({contractName(RenderPassSlot::FXAA),
                        {FgResourceId::FinalLdrColor},
                        {FgResourceId::FxaaColor},
-                       true});
+                       true, false,
+                       executionSlot(RenderPassSlot::FXAA)});
     }
     if (input.smaa) {
         graph.addResource(FgResourceId::SmaaEdges,
@@ -206,7 +269,8 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
                        {FgResourceId::SmaaEdges,
                         FgResourceId::SmaaBlendWeights,
                         FgResourceId::SmaaColor},
-                       true});
+                       true, false,
+                       executionSlot(RenderPassSlot::SMAA)});
     }
 
     // Public settings normally make these modes exclusive. Keeping an
@@ -229,13 +293,15 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
         graph.addPass({contractName(RenderPassSlot::ColorGrading),
                        {result.antialiasingSource},
                        {FgResourceId::ColorGradedColor},
-                       true});
+                       true, false,
+                       executionSlot(RenderPassSlot::ColorGrading)});
         result.presentationSource = FgResourceId::ColorGradedColor;
     }
 
     graph.addPass({contractName(RenderPassSlot::Present),
                    {result.presentationSource}, {}, true,
-                   contractSideEffect(RenderPassSlot::Present)});
+                   contractSideEffect(RenderPassSlot::Present),
+                   executionSlot(RenderPassSlot::Present)});
     // Later stages promote PresentSource only after successful submission.
     graph.setResolvedSemantic(FgSemantic::PresentSource,
                               FgResourceId::FinalLdrColor);
