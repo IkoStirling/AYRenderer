@@ -93,20 +93,29 @@ std::string_view passNameForView(uint16_t view,
                                  const std::vector<RenderPassFrameStats>& passes)
 {
     switch (view) {
-    case 1: case 2:   return "Shadow";
+    case 1: case 2:
+    case 18: case 19: case 20: case 21:
+    case 22: case 23: case 24: case 25: return "Shadow";
+    case 3:          return "MotionVector";
+    case 4:          return "ColorGrading";
+    case 5: case 245: return "TAA";
     case 6:           return "Skybox";
     case 7:           return "GBuffer";
     case 8:           return "Lighting";
-    case 9:           return "Transparent";
+    case 9: case 253: case 254: return "Transparent";
     case 10:          return "BloomExtract";
     case 11: case 12: return "BloomBlur";
     case 13:          return "DepthHaze";
     case 14:          return "SSAO";
     case 15:          return "PostProcess";
-    case 16: case 17: return "EditorOverlay";
+    case 16:         return "Present";
+    case 17:         return "FXAA";
+    case 246:        return "Forward2DOpaque";
+    case 247: case 248: case 249: return "SMAA";
+    case 251: case 252: return "EditorOverlay";
     case 250:         return "GBufferDebug";
     case 255:         return "UI";
-    case 0: case 3:
+    case 0:
         for (const auto& pass : passes) {
             if (pass.name == "ForwardOpaque") return "ForwardOpaque";
             if (pass.name == "Forward2DOpaque") return "Forward2DOpaque";
@@ -128,9 +137,21 @@ float ticksToMs(int64_t begin, int64_t end, int64_t frequency)
 
 } // namespace
 
-void DebugOverlay::sampleBgfxStats()
+void DebugOverlay::updateFrameStats(
+    uint32_t drawCalls, uint32_t sceneItems,
+    const std::vector<RenderPassFrameStats>& passStats,
+    const bgfx::Stats* bgfxStats)
 {
-    const bgfx::Stats* bgfxStats = bgfx::getStats();
+    _stats.drawCalls = drawCalls;
+    _stats.sceneItems = sceneItems;
+    _stats.passes = passStats;
+    _stats.gpuFrameTimeMs = 0.0f;
+    _stats.backendDrawCalls = 0;
+    _stats.backendBlitCalls = 0;
+    _stats.gpuFrameNumber = 0;
+    for (auto& pass : _stats.passes) {
+        pass.gpuTimeMs = 0.0f;
+    }
     // §P5 M5 (2026-08-24) — cache the pointer so onEndFrame()
     // can read triPrims (and any future stats) without a second
     // bgfx::getStats() call. bgfx::getStats() is cheap but the
@@ -148,9 +169,6 @@ void DebugOverlay::sampleBgfxStats()
                                       bgfxStats->gpuTimeEnd,
                                       bgfxStats->gpuTimerFreq);
 
-    for (auto& pass : _stats.passes) {
-        pass.gpuTimeMs = 0.0f;
-    }
     for (uint16_t i = 0; i < bgfxStats->numViews; ++i) {
         const bgfx::ViewStats& view = bgfxStats->viewStats[i];
         const std::string_view passName = passNameForView(view.view, _stats.passes);
@@ -173,13 +191,10 @@ void DebugOverlay::onEndFrame(uint32_t drawCalls, uint32_t sceneItems,
                               uint16_t viewportX, uint16_t viewportY,
                               uint16_t width, uint16_t height)
 {
-    // Capture the latest completed bgfx frame immediately before consuming
-    // the cache. Sampling from onFrameSubmitted() happens after this method
-    // and adds an avoidable extra frame of latency to the overlay.
-    sampleBgfxStats();
-    _stats.drawCalls   = drawCalls;
-    _stats.sceneItems  = sceneItems;
-    _stats.passes      = passStats;
+    // CPU counters describe the current dispatch; GPU counters describe the
+    // latest completed backend frame (identified by gpuFrameNumber).
+    const bgfx::Stats* gpuSample = bgfx::getStats();
+    updateFrameStats(drawCalls, sceneItems, passStats, gpuSample);
 
     bgfx::dbgTextClear();
 
@@ -195,7 +210,7 @@ void DebugOverlay::onEndFrame(uint32_t drawCalls, uint32_t sceneItems,
 
     uint32_t triPrims = 0;
     // §P5 M5 (2026-08-24) — read from cached pointer set by
-    // sampleBgfxStats() (called from onFrameSubmitted earlier in
+    // updateFrameStats() (called from onEndFrame earlier in
     // the frame). Avoids a second bgfx::getStats() call.
     const bgfx::Stats* bgfxStats = _lastBgfxStats;
     if (bgfxStats != nullptr) {

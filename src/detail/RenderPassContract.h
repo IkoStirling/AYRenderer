@@ -95,6 +95,7 @@ enum class RenderPipelineContractErrorCode : uint8_t {
     UnknownSlot = 0,
     DuplicateSlot,
     MissingRequiredResource,
+    OptionalProducerAfterConsumer,
 };
 
 inline constexpr uint16_t kRenderPassNoIndex = 0xffffu;
@@ -116,6 +117,7 @@ struct RenderPipelineContractValidation {
 // SceneColor/SceneDepth are imported from Renderer::sceneFbo and the
 // backbuffer is an external sink. All other required reads must have an
 // earlier writer in the supplied dispatch order.
+// Optional reads may omit their producer; if mounted, it must run earlier too.
 RenderPipelineContractValidation validateRenderPipelineContracts(
     std::span<const RenderPassSlot> slots);
 

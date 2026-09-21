@@ -103,6 +103,8 @@ public:
     // ensure() + ensureProgram() wire real GPU state.
     bgfx::FrameBufferHandle skyFbo()   const noexcept { return _skyFbo; }
     bgfx::TextureHandle     skyRt()    const noexcept { return _skyRt; }
+    void resetFrameState() noexcept { _producedThisFrame = false; }
+    bool producedThisFrame() const noexcept { return _producedThisFrame; }
     uint16_t                skyWidth()  const noexcept { return _skyW; }
     uint16_t                skyHeight() const noexcept { return _skyH; }
 
@@ -177,6 +179,7 @@ public:
     const char* buildStamp() const noexcept { return _buildStamp; }
 
 private:
+    bool _producedThisFrame = false;
     // §Skybox0 (2026-07-23) — internal ensure path (mirror
     // LightingPass::ensure at LightingPass.cpp:294-337 + GBufferPass
     // ::ensure at GBufferPass.cpp:385-433). Called from execute()

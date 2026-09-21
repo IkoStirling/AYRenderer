@@ -189,6 +189,7 @@ void SkyboxPass::destroyResources(BGFXAdapter& adapter)
         adapter.destroy(_fullscreenIB);
         _fullscreenIB = bgfx::IndexBufferHandle{BGFX_INVALID_HANDLE};
     }
+    _producedThisFrame = false;
     _skyRt       = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     _skyW        = 0;
     _skyH        = 0;
@@ -350,6 +351,7 @@ void SkyboxPass::ensureProgram(ayt::shader::ShaderResourcePool& pool)
 
 uint32_t SkyboxPass::execute(PassExecContext& ctx)
 {
+    _producedThisFrame = false;
     // §Skybox0 (2026-07-23) — first GPU work in the SkyboxPass.
     // Phoskia VS/FS acquires, binds view 6 to the SkyOutput FBO,
     // dispatches a fullscreen triangle that samples the host's
@@ -545,6 +547,7 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
     submitCtx.viewId = viewId;
     submitCtx.state  = 0;  // state owned by Adapter
     _program.submit(submitCtx);
+    _producedThisFrame = true;
 
     return 1;  // Skybox ships exactly 1 draw (fullscreen triangle)
 }

@@ -1,5 +1,15 @@
 # AYRenderer Design
 
+## 2026-09-21 — 架构审核已暴露问题修复（不扩展架构）
+
+- **可选依赖顺序**：契约校验预扫描挂载输出；可选生产者可以缺席，但已挂载时必须先于消费者执行。错误使用 `optional-producer-after-consumer` 定位资源，保持拒绝错误描述且不拆除原管线。覆盖 Present→FXAA、ColorGrading→SMAA、Lighting→SSAO/Skybox、TAA→Motion 的倒序组合，以及缺席/正确排序的合法配置。
+- **Skybox 本帧产出**：与 GBuffer/SSAO 一致，帧头、execute 入口及销毁清除 production latch，仅成功 submit 后置位。Lighting 同时检查 enabled、本帧产出和有效附件；失败时绑定已验证的 RGBA8 fallback 并上传零 skyMix，不再假定未绑定 sampler 为黑色，也不复用旧天空。新增 `AYRenderer_SkyOutputGpu`，实际 Skybox→空场景 GBuffer→Lighting 验证有效、禁用、恢复、inactive source、丢失纹理和销毁；D3D11/D3D12 各 **50/50**。
+- **GPU 统计**：先复制 CPU pass counters，再合并最新完成 GPU 帧的计时，避免整体赋值覆盖 GPU 数值；纠正 Present/FXAA/Motion/TAA/ColorGrading/SMAA、阴影 atlas、透明选中绘制和 EditorOverlay 的 View 归属。CPU 当前提交和 GPU 最近完成帧仍不是同一时间点，保留 `gpuFrameNumber` 区分。本轮不实现完整历史帧统计关联。
+- **Phoskia**：通用左结合修复落在 AYShader；TAA/Motion 先前的显式括号与分步表达式保留。编译缓存 schema 升至 `aybgfx-v4-left-associative`。真实 GBuffer 验证另暴露 raw-SC 编译入口先默认构造 driver 的异常问题，已在 AYShader 修正为保护内按资源池路径直接构造；没有新增绕开 Phoskia 的生产 shader。
+- **验证**：VS 2026 Insider x64 Debug 构建 Renderer/Shader/Editor Demo。Renderer 常规 **4556/4556**，Shader **1466/1466**。D3D11/D3D12 独立 GPU 各 **6255/6255**：Sky 50、TAA 固定网格 178、有效支持权重 682、Motion 772、常驻历史 163、拒绝联合查证 1004、边缘递归 3406。GPU suite 必须独立进程设置 `AY_TAA_GPU_TEST=d3d11` 或 `d3d12` 后执行同名 suite；常规 Noop 总数不算 GPU 验证。
+- **用户视觉反馈**：History 调试画面仍在两幅画面间交替闪烁，但最终画面已几乎不可见闪烁。这是此前 TAA 修复的用户反馈，不能表述为调试闪烁完全消除，也不能当作本轮架构问题修复的视觉验收。
+- **延后**：统一 FrameGraph 执行与完整读写依赖、统一 Pass 结果状态、共享 DrawList、闲置 RT 回收和自动 alias 均不在本轮实现。
+
 ## 2026-09-21 — TAA v10：按有效历史贡献连续降权
 
 - 已修复前一轮查证的极小历史 tap 放大：四 tap 深度筛选后的权重和保留为 `historyConfidence=clamp(historyWeight,0,1)`，最终历史反馈乘以该可信度。RGB 仍归一化重建颜色，但不再把归一化误当作完整可信度。保留原 `0.00001` 数值安全门限，不引入实验性的 0.5 硬拒绝阈值，不修改深度容差、jitter、静态/运动基础反馈或颜色裁剪。

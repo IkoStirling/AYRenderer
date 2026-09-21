@@ -232,7 +232,7 @@ TEST_CASE(debug_overlay_source_uses_cached_pointer_in_on_end_frame) {
     // consumed; sampling later from onFrameSubmitted adds another frame of
     // latency to the displayed counters.
     const std::size_t onEnd = src.find("void DebugOverlay::onEndFrame");
-    const std::size_t sample = src.find("sampleBgfxStats();", onEnd);
+    const std::size_t sample = src.find("updateFrameStats(drawCalls, sceneItems, passStats, gpuSample);", onEnd);
     const std::size_t consume = src.find(
         "const bgfx::Stats* bgfxStats = _lastBgfxStats", onEnd);
     const std::size_t submitted = src.find("void DebugOverlay::onFrameSubmitted");

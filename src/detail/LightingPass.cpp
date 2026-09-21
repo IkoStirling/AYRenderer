@@ -1279,6 +1279,10 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     }
 
     const FrameContext& frame = ctx.frame;
+    const bool skyReady = ctx.skyboxPass != nullptr
+        && ctx.skyboxPass->isEnabled()
+        && ctx.skyboxPass->producedThisFrame()
+        && bgfx::isValid(ctx.skyboxPass->skyRt());
 
     // View 8 wiring: bind LightingOutput FBO, set rect to viewport
     // size, clear, dispatch fullscreen triangle. Mirror GBufferPass
@@ -1363,19 +1367,17 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             }
         }
         // �Skybox0 (2026-07-23) ??gbufferSky backdrop sampler.
-        // Mirror the other borrowed GBuffer attachment bindings.
-        // shape: lazy-resolve binding, bind from ctx.skyboxPass
-        // (SkyboxPass-borrowed-pointer mirror), cache the handle in
-        // `_gbufferSkyRt` for symmetry with the other GBuffer RTs.
-        // When ctx.skyboxPass == nullptr (Forward path / no sky
-        // mounted) the sampler stays unbound and
-        // `sample(gbufferSky, baseUv)` returns black, collapsing
-        // the backdrop blend to `lit` (pre-�Skybox0 behavior).
+        // Only this frame's successful sky submission may feed Lighting.
+        // An inactive/failed producer must not expose a retained attachment.
         const shader::BindingId skyBinding =
             _program.getTextureBinding("gbufferSky");
-        if (skyBinding != shader::InvalidBinding
-            && ctx.skyboxPass != nullptr) {
-            bgfx::TextureHandle skyHandle = ctx.skyboxPass->skyRt();
+        if (skyBinding != shader::InvalidBinding) {
+            // Always bind a defined sampler. The finite RGBA8 fallback is
+            // multiplied by zero below when no current-frame sky exists.
+            bgfx::TextureHandle skyHandle = ctx.gbufferPass->gbufferMaterialRt();
+            if (skyReady) {
+                skyHandle = ctx.skyboxPass->skyRt();
+            }
             if (bgfx::isValid(skyHandle)) {
                 const uint8_t stage = _program.getTextureStage(skyBinding);
                 _program.setTexture(stage, skyBinding,
@@ -1428,13 +1430,13 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // acquired here; this constant is the in-pass default, not an override. Phoskia
     // Vec4 ABI (bgfx Vec4 slot, see docs/pass-lessons-from-shadow.md
     // �3.1) ??scalar in .x, pad .yzw = 0. Bound unconditionally ??
-    // when the gbufferSky sampler is unbound the skyMix value has
-    // no observable effect (the `sample` returns black regardless),
-    // so this upload is safe on both Forward and Deferred paths.
+    // Inactive sky uses a defined fallback sampler and zero skyMix; do not
+    // assume an unbound sampler is black on every backend.
     const shader::BindingId skyMixBinding =
         _program.getUniformBinding("skyMix");
     if (skyMixBinding != shader::InvalidBinding) {
-        const float skyMixPad[4] = { ayt::render::kDefaultSkyMix, 0.0f, 0.0f, 0.0f };
+        const float skyMixPad[4] = {
+            skyReady ? ayt::render::kDefaultSkyMix : 0.0f, 0.0f, 0.0f, 0.0f };
         _program.setUniform(skyMixBinding, skyMixPad, sizeof(skyMixPad));
     }
 

@@ -267,6 +267,14 @@ RenderPipelineContractValidation validateRenderPipelineContracts(
     RenderPipelineContractValidation result;
     std::array<bool, 256> seenSlots{};
     std::array<bool, static_cast<std::size_t>(Id::Count)> available{};
+    std::array<bool, static_cast<std::size_t>(Id::Count)> mountedOutputs{};
+    for (const RenderPassSlot slot : slots) {
+        if (const auto* contract = renderPassContract(slot)) {
+            for (const auto& write : contract->writes) {
+                mountedOutputs[static_cast<std::size_t>(write.resource)] = true;
+            }
+        }
+    }
 
     // Renderer owns and clears the forward scene target independently of the
     // mounted geometry pass. This preserves valid post-only custom pipelines.
@@ -298,6 +306,13 @@ RenderPipelineContractValidation validateRenderPipelineContracts(
                 result.errors.push_back({
                     RenderPipelineContractErrorCode::MissingRequiredResource,
                     static_cast<uint16_t>(passIndex), slot, read.resource});
+            } else if (!read.required && mountedOutputs[resourceIndex]
+                       && !available[resourceIndex]) {
+                // An absent optional producer is legal; a mounted producer
+                // executing after its consumer silently disables the effect.
+                result.errors.push_back({
+                    RenderPipelineContractErrorCode::OptionalProducerAfterConsumer,
+                    static_cast<uint16_t>(passIndex), slot, read.resource});
             }
         }
         for (const RenderPassResourceWrite& write : contract->writes) {
@@ -318,6 +333,8 @@ const char* renderPipelineContractErrorName(
         return "duplicate-slot";
     case RenderPipelineContractErrorCode::MissingRequiredResource:
         return "missing-required-resource";
+    case RenderPipelineContractErrorCode::OptionalProducerAfterConsumer:
+        return "optional-producer-after-consumer";
     }
     return "unknown-error";
 }

@@ -178,4 +178,34 @@ TEST_CASE(renderer_rejects_invalid_descriptor_without_tearing_down_baseline)
     CHECK(renderer.pipelineDesc().passes == baseline);
 }
 
+TEST_CASE(optional_producers_may_be_absent_but_must_not_execute_late)
+{
+    const std::vector<std::vector<RenderPassSlot>> invalid = {
+        {RenderPassSlot::PostProcess, RenderPassSlot::Present, RenderPassSlot::FXAA},
+        {RenderPassSlot::PostProcess, RenderPassSlot::ColorGrading,
+         RenderPassSlot::SMAA, RenderPassSlot::Present},
+        {RenderPassSlot::GBuffer, RenderPassSlot::Lighting, RenderPassSlot::SSAO},
+        {RenderPassSlot::GBuffer, RenderPassSlot::Lighting, RenderPassSlot::Skybox},
+        {RenderPassSlot::GBuffer, RenderPassSlot::PostProcess,
+         RenderPassSlot::TAA, RenderPassSlot::MotionVector, RenderPassSlot::Present},
+    };
+    for (const auto& slots : invalid) {
+        const auto result = validateRenderPipelineContracts(slots);
+        CHECK(!result.valid());
+        CHECK(std::any_of(result.errors.begin(), result.errors.end(), [](const auto& e) {
+            return e.code == RenderPipelineContractErrorCode::OptionalProducerAfterConsumer;
+        }));
+        Renderer renderer;
+        const auto baseline = renderer.pipelineDesc().passes;
+        renderer.configurePipeline(RenderPipelineDesc{slots});
+        CHECK(renderer.pipelineDesc().passes == baseline);
+    }
+    const std::array absent = {RenderPassSlot::PostProcess, RenderPassSlot::Present};
+    CHECK(validateRenderPipelineContracts(absent).valid());
+    const std::array ordered = {RenderPassSlot::GBuffer, RenderPassSlot::Skybox,
+        RenderPassSlot::SSAO, RenderPassSlot::Lighting,
+        RenderPassSlot::PostProcess, RenderPassSlot::FXAA, RenderPassSlot::Present};
+    CHECK(validateRenderPipelineContracts(ordered).valid());
+}
+
 TEST_SUITE_END

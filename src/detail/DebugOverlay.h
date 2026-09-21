@@ -27,13 +27,17 @@ public:
                     uint16_t width, uint16_t height);
     void onFrameSubmitted();
     void resetStats();
+    // Merge current CPU counters with the latest completed GPU sample.
+    // Kept independent of bgfx calls so nonzero timings can be regression-tested.
+    void updateFrameStats(uint32_t drawCalls, uint32_t sceneItems,
+                          const std::vector<RenderPassFrameStats>& passStats,
+                          const bgfx::Stats* gpuStats);
 
     const RenderFrameStats& stats() const noexcept { return _stats; }
 
 private:
     void applyDebugMode();
     void pushFrameCadence(float frameMs);
-    void sampleBgfxStats();
 
     bool              _enabled     = false;
     bool              _suppressed  = false;
@@ -45,7 +49,7 @@ private:
     size_t _frameTimeCount = 0;
     size_t _frameTimeCursor = 0;
     // §P5 M5 (2026-08-24) — cached bgfx::Stats pointer set by
-    // sampleBgfxStats() (called at the start of onEndFrame). Used by
+    // updateFrameStats() (called at the start of onEndFrame). Used by
     // onEndFrame() to read triPrims without a second
     // bgfx::getStats() call (bgfx::getStats() is cheap but the
     // duplicated call was untidy and the cache makes the "stats

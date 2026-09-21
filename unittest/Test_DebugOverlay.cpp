@@ -2,6 +2,7 @@
 
 #include "AYRenderer.h"
 #include "AYTest.h"
+#include "detail/DebugOverlay.h"
 
 #include <sys/stat.h>
 
@@ -169,6 +170,45 @@ TEST_CASE(empty_scene_still_dispatches_deferred_screen_passes)
     CHECK(dispatched("UI"));
 
     renderer.shutdown();
+}
+
+TEST_CASE(nonzero_gpu_timings_survive_cpu_merge_and_map_to_current_passes)
+{
+    ayt::render::detail::DebugOverlay overlay;
+    std::vector<ayt::render::RenderPassFrameStats> cpu;
+    const char* names[] = {"Shadow", "MotionVector", "ColorGrading", "TAA",
+        "Present", "FXAA", "SMAA", "EditorOverlay", "Transparent", "Forward2DOpaque"};
+    for (const auto* name : names) cpu.push_back({name, 3u, 1.5f, 99.0f});
+    const uint16_t ids[] = {18, 25, 3, 4, 5, 245, 16, 17, 247, 248, 249,
+                           251, 252, 9, 253, 254, 246};
+    std::vector<bgfx::ViewStats> views(std::size(ids));
+    for (size_t i = 0; i < views.size(); ++i) {
+        views[i].view = ids[i];
+        views[i].gpuTimeBegin = 100;
+        views[i].gpuTimeEnd = 102; // 2ms at 1000 ticks/sec.
+    }
+    bgfx::Stats gpu{};
+    gpu.gpuTimerFreq = 1000;
+    gpu.gpuTimeBegin = 100;
+    gpu.gpuTimeEnd = 120;
+    gpu.gpuFrameNum = 7;
+    gpu.numViews = static_cast<uint16_t>(views.size());
+    gpu.viewStats = views.data();
+    overlay.updateFrameStats(30, 10, cpu, &gpu);
+    const float expected[] = {4, 2, 2, 4, 2, 2, 6, 4, 6, 2};
+    CHECK(overlay.stats().gpuFrameTimeMs == 20.0f);
+    CHECK(overlay.stats().gpuFrameNumber == 7u);
+    for (size_t i = 0; i < cpu.size(); ++i) {
+        CHECK(overlay.stats().passes[i].gpuTimeMs == expected[i]);
+        CHECK(overlay.stats().passes[i].cpuTimeMs == 1.5f);
+        CHECK(overlay.stats().passes[i].drawCalls == 3u);
+    }
+    gpu.gpuTimerFreq = 0;
+    overlay.updateFrameStats(0, 0, cpu, &gpu);
+    for (const auto& pass : overlay.stats().passes) CHECK(pass.gpuTimeMs == 0.0f);
+    overlay.updateFrameStats(0, 0, cpu, nullptr);
+    CHECK(overlay.stats().gpuFrameTimeMs == 0.0f);
+    for (const auto& pass : overlay.stats().passes) CHECK(pass.gpuTimeMs == 0.0f);
 }
 
 TEST_SUITE_END

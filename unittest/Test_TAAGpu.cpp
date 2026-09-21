@@ -2,6 +2,9 @@
 #include "detail/TAAPass.h"
 #include "detail/MotionVectorPass.h"
 #include "detail/GBufferPass.h"
+#include "detail/SkyboxPass.h"
+#include "detail/LightingPass.h"
+#include "detail/PassExecContext.h"
 #include "detail/BgfxMatrix.h"
 #include "AYShader/ShaderResourcePool.h"
 
@@ -208,6 +211,76 @@ struct TaaGpuFixture {
 
 } // namespace
 #endif
+
+TEST_SUITE(AYRenderer_SkyOutputGpu)
+
+TEST_CASE(sky_output_is_current_frame_only_and_lighting_falls_back_to_black)
+{
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend) return; // Opt-in isolated real-device suite, like TAA below.
+    TaaGpuFixture fixture;
+    const bool ready = fixture.initialize(backend, true);
+    CHECK(ready);
+    if (!ready) return;
+    ayt::render::RenderScene scene;
+    std::unordered_map<uint64_t, GpuMesh> meshes;
+    std::unordered_map<uint64_t, GpuTexture> textures;
+    std::unordered_map<uint64_t, GpuMaterial> materials;
+    FrameContext frame;
+    SkyboxPass sky;
+    GBufferPass gbuffer;
+    LightingPass lighting;
+    sky.setOutputSize(kSize, kSize);
+    gbuffer.setGbufferSize(kSize, kSize);
+    lighting.setOutputSize(kSize, kSize);
+    ayt::render::SkySource source;
+    source.equirect.id = 1;
+    textures[1].handle = fixture.input(
+        std::vector<Pixel>(kSize*kSize, Pixel{1,.25f,.5f,1}), true, true);
+    PassExecContext ctx{fixture.adapter, fixture.pool, scene, meshes, textures,
+                        materials, 0, 0, kSize, kSize, frame, 0};
+    ctx.skySource = &source;
+    ctx.skyboxPass = &sky;
+    ctx.gbufferPass = &gbuffer;
+    CHECK(!sky.producedThisFrame());
+    // Valid -> disabled dispatch -> restored -> inactive source -> restored
+    // -> missing input texture. A cached RT survives all failure cases.
+    for (int phase = 0; phase < 6; ++phase) {
+        sky.resetFrameState();
+        sky.setEnabled(phase != 1);
+        source.equirect.id = phase == 3 ? 0 : 1;
+        if (phase == 5) textures.clear();
+        if (sky.isEnabled()) {
+            const auto draws = sky.execute(ctx);
+            CHECK(draws == ((phase == 3 || phase == 5) ? 0u : 1u));
+        }
+        const bool expectedSky = phase == 0 || phase == 2 || phase == 4;
+        CHECK(sky.producedThisFrame() == expectedSky);
+        CHECK(bgfx::isValid(sky.skyRt()));
+        gbuffer.execute(ctx);
+        CHECK(gbuffer.producedThisFrame());
+        CHECK(lighting.execute(ctx) == 1u);
+        const auto originalTarget = fixture.targetTexture;
+        fixture.targetTexture = fixture.adapter.getFboAttachment(lighting.lightingOutputFbo(), 0);
+        const auto pixels = fixture.readTarget(200);
+        fixture.targetTexture = originalTarget;
+        const auto& center = pixels[(kSize/2)*kSize+kSize/2];
+        if (expectedSky) CHECK(center[0] > .9f);
+        else {
+            CHECK(std::abs(center[0]) < .001f);
+            CHECK(std::abs(center[1]) < .001f);
+            CHECK(std::abs(center[2]) < .001f);
+        }
+    }
+    lighting.destroyResources(fixture.adapter);
+    gbuffer.destroyResources(fixture.adapter);
+    sky.destroyResources(fixture.adapter);
+    CHECK(!sky.producedThisFrame());
+#endif
+}
+
+TEST_SUITE_END
 
 TEST_SUITE(AYRenderer_TAAGpu)
 

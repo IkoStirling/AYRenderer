@@ -665,6 +665,8 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
                              : "<unknown>",
                          error.code == detail::RenderPipelineContractErrorCode::
                                            MissingRequiredResource
+                             || error.code == detail::RenderPipelineContractErrorCode::
+                                                  OptionalProducerAfterConsumer
                              ? detail::renderPassResourceName(error.resource)
                              : "<none>");
         }
@@ -1427,8 +1429,11 @@ void Renderer::render(const RenderScene& scene)
     // §Skybox0 (2026-07-23) — borrowed pointer to the SkyboxPass in
     // the pipeline. nullptr when the host did not opt in via
     // `configurePipeline(makeDeferred())` (Forward / no skybox path).
-    const detail::SkyboxPass* skyboxPassPtr =
+    detail::SkyboxPass* skyboxPassPtr =
         _impl->pipeline.findPass<detail::SkyboxPass>();
+    if (skyboxPassPtr != nullptr) {
+        skyboxPassPtr->resetFrameState();
+    }
 
     // Borrow both bloom passes and clear their production latches before graph
     // compilation. Downstream consumers require a successful submit from this
