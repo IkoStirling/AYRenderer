@@ -1,10 +1,31 @@
 # TAA history rejection investigation — 2026-09-21
 
-Status: **cause reproduced; production fix not applied in this round**.
+Status: **cause reproduced; v10 production fix implemented and GPU-verified;
+user-camera visual acceptance pending**.
+
+## v10 resolution
+
+The original investigation below describes v9. Production now preserves
+`clamp(historyWeight, 0, 1)` as history confidence and multiplies the final
+feedback by it. RGB normalization remains separate. The epsilon guard and all
+depth rejection rules are unchanged; the experimental 0.5 hard gate was not
+adopted. Full valid support retains the previous feedback; partial support
+reduces it continuously rather than discontinuously at a new threshold.
+
+D3D11/D3D12 support regression: 682 checks each, covering positive/negative
+subpixel motion, tiny surviving support, values around 0.5, RGBA32F/RGBA16F,
+full-support real motion and depth disocclusion. The default 127x127 integrated
+probe passes 1004 checks per backend: near-cube rejection steps fall from
+0.425537 to 0.0273438; all six scenes have zero steps above 0.05 on rejected
+pixels. D3D11 32x32 and 128x128 also show no such steps. Full Renderer: 4486
+checks. GPU resident history and existing edge/motion regressions still pass.
+
+This is a confidence fix, not a claim of zero normal temporal ripple. It adds
+no RT, draw or sample. Cache key: `taa_phoskia_supported_history_v10`.
 
 ## Question and scope
 
-The user accepts small temporal ripple, but not abrupt dots/protrusions at a
+During the original investigation, the user accepted small temporal ripple, but not abrupt dots/protrusions at a
 stationary silhouette. This investigation isolates history rejection from the
 ordinary 8-phase/0.92-feedback ripple. Editor settings, production shaders,
 feedback, depth tolerance and installed binaries are unchanged.
@@ -78,29 +99,30 @@ Run each suite in a fresh process, not after the full Noop test suite:
 ```powershell
 $env:AY_TAA_GPU_TEST = 'd3d11' # Repeat with d3d12.
 $env:AY_TAA_PROBE_SIZE = '127' # Also inspected 32 and 128.
-Remove-Item Env:AY_TAA_PROBE_REJECT_TINY_TAPS -ErrorAction SilentlyContinue
+Remove-Item Env:AY_TAA_PROBE_LEGACY_FEEDBACK -ErrorAction SilentlyContinue
 & .\out\build\windows-debug-vs2026-insider\AYRuntime\AYRenderer\unittest\AYRenderer_Test.exe AYRenderer_TAARejectionGpu
-$env:AY_TAA_PROBE_REJECT_TINY_TAPS = '1'
+# Test-only v9 control: remove the confidence multiplier to reproduce the bug.
+$env:AY_TAA_PROBE_LEGACY_FEEDBACK = '1'
 & .\out\build\windows-debug-vs2026-insider\AYRuntime\AYRenderer\unittest\AYRenderer_Test.exe AYRenderer_TAARejectionGpu
 ```
 
 Output `reasons` bins: accepted, no history, invalid Motion, extreme footprint,
 previous depth outside clip range, no compatible history support, other gate
-(including the test-only support guard). Watched-pixel detail mode 7 reports
+(not a production 0.5 support guard). Watched-pixel detail mode 7 reports
 surface UV / reconstructed history red / current red; mode 9 reports history
 fraction / depth tolerance / surviving support. Detail output is RGBA16F.
 
-The tests intentionally characterize the known baseline failure at 127x127.
-When production is fixed, replace those baseline-failure assertions with the
-new invariant; do not preserve the bug to satisfy the characterization.
+The default tests now assert the corrected behavior. Only the explicit legacy
+control asserts the known baseline failure at 127x127.
 
-## Next fix boundaries
+## Original fix constraints and remaining acceptance
 
-Preserve surviving tap support as history confidence instead of converting any
+The implemented fix preserves surviving tap support as history confidence instead of converting any
 nonzero support into full confidence. Verify tiny-support handling and gradual
 feedback separately from depth rejection; do not globally relax depth checks.
-Check true subpixel motion, disocclusion and thin geometry before adopting a
-hard support threshold. Complete user-camera verification after implementation.
+True subpixel motion, disocclusion and the existing thin-geometry regression
+are verified. No hard support threshold was adopted. User-camera verification
+remains necessary after implementation.
 
 The probe reads back between stages and uploads recursive history. It does not
 replace the separate GPU-resident ping-pong test or Editor end-to-end capture.

@@ -253,6 +253,60 @@ TEST_CASE(taa_production_shader_fixed_grid_depth_and_missing_velocity)
 
 TEST_SUITE_END
 
+TEST_SUITE(AYRenderer_TAASupportGpu)
+
+TEST_CASE(taa_valid_history_support_controls_feedback_continuously)
+{
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend) { std::cout << "[SKIP] Set AY_TAA_GPU_TEST for support regression.\n"; return; }
+    // RGBA32F isolates tiny fractional coordinates; production RGBA16F also
+    // verifies quantized motion/history without expecting sub-ULP precision.
+    for(bool half:{false,true}) {
+        TaaGpuFixture f;
+        const bool ready=f.initialize(backend,half);
+        CHECK(ready); if(!ready) return;
+        const size_t center=16*kSize+16;
+        std::vector<Pixel> current(kSize*kSize),history(kSize*kSize);
+        std::vector<Pixel> world(kSize*kSize,Pixel{0,0,.2f,1});
+        std::vector<Pixel> surface(kSize*kSize,Pixel{0,0,0,1});
+        for(int y=0;y<kSize;++y) for(int x=0;x<kSize;++x) {
+            const float c=float((x+y)&1);
+            current[y*kSize+x]={c,c,c,1};
+            // Odd columns are incompatible foreground/sky history; their
+            // saturated red must not leak through a valid gray neighbor.
+            history[y*kSize+x]=(x&1)?Pixel{1,0,0,-1}:Pixel{.75f,.75f,.75f,.2f};
+        }
+        for(float direction:{-1.0f,1.0f})
+        for(float distance:{0.0f,.00002f,.25f,.4999f,.5f,.5001f,.75f,.99998f,1.0f}) {
+            const float requested=direction*distance/kSize;
+            const float stored=half?bx::halfToFloat(bx::halfFromFloat(requested)):requested;
+            const float pixels=std::abs(stored)*kSize;
+            const float support=std::clamp(1.0f-pixels,0.0f,1.0f);
+            const float base=.92f+(.65f-.92f)*(pixels/16.0f);
+            const float expected=support>1e-5f?base*support:0.0f;
+            const std::vector<Pixel> velocity(kSize*kSize,Pixel{requested,0,.2f,1});
+            const auto weights=f.dispatch({},current,history,world,surface,velocity,true,2);
+            const auto result=f.dispatch({},current,history,world,surface,velocity,true);
+            const float tolerance=half?.0015f:.00002f;
+            CHECK(std::abs(weights[center][0]-expected)<tolerance);
+            for(int c=0;c<3;++c) CHECK(std::abs(result[center][c]-.75f*expected)<tolerance);
+        }
+        // Real 2.25px motion with all taps valid keeps the original feedback.
+        for(auto& p:history) p={.75f,.75f,.75f,.2f};
+        std::vector<Pixel> velocity(kSize*kSize,Pixel{2.25f/kSize,0,.2f,1});
+        const auto full=f.dispatch({},current,history,world,surface,velocity,true,2);
+        CHECK(std::abs(full[center][0]-(.92f+(.65f-.92f)*2.25f/16))<.0015f);
+        // A newly exposed surface still rejects every mismatching depth.
+        for(auto& p:history) p[3]=.8f;
+        const auto disoccluded=f.dispatch({},current,history,world,surface,velocity,true,2);
+        CHECK(disoccluded[center][0]==0);
+    }
+#endif
+}
+
+TEST_SUITE_END
+
 TEST_SUITE(AYRenderer_MotionVectorGpu)
 
 TEST_CASE(motion_rasterized_geometry_removes_jitter_without_removing_real_motion)
@@ -444,7 +498,7 @@ TEST_CASE(taa_rejection_probe_with_real_gbuffer_depth_replay)
     const char* backend=std::getenv("AY_TAA_GPU_TEST");
     if(!backend) { std::cout << "[SKIP] Set AY_TAA_GPU_TEST for rejection probe.\n"; return; }
     const char* sizeSetting=std::getenv("AY_TAA_PROBE_SIZE");
-    const uint16_t kSize=uint16_t(sizeSetting?std::clamp(std::atoi(sizeSetting),32,256):32);
+    const uint16_t kSize=uint16_t(sizeSetting?std::clamp(std::atoi(sizeSetting),32,256):127);
     TaaGpuFixture f;
     const bool ready=f.initialize(backend,true,kSize);
     CHECK(ready);
@@ -452,13 +506,14 @@ TEST_CASE(taa_rejection_probe_with_real_gbuffer_depth_replay)
     auto fill=f.pool.acquire(kGBufferPhoskiaSourceCStr);
     auto motion=f.pool.acquire(motionVectorPhoskiaSourceForTests());
     std::string resolveSource=taaPhoskiaSourceForTests();
-    const bool rejectTiny=std::getenv("AY_TAA_PROBE_REJECT_TINY_TAPS")!=nullptr;
-    if(rejectTiny) {
-        // Counterfactual experiment ONLY: retain all other production logic.
-        const auto gate=resolveSource.find("historyWeight > 0.00001");
+    const bool legacyFeedback=std::getenv("AY_TAA_PROBE_LEGACY_FEEDBACK")!=nullptr;
+    if(legacyFeedback) {
+        // Test-only v9 control: reproduce loss of support confidence without
+        // reverting any production code or weakening depth rejection.
+        const auto gate=resolveSource.find(" * historyConfidence");
         CHECK(gate!=std::string::npos);
         if(gate==std::string::npos) return;
-        resolveSource.replace(gate,std::string("historyWeight > 0.00001").size(),"historyWeight > 0.5");
+        resolveSource.erase(gate,std::string(" * historyConfidence").size());
         f.program=f.pool.acquire(resolveSource);
         CHECK(f.program.isValid());
         if(!f.program.isValid()) return;
@@ -466,7 +521,7 @@ TEST_CASE(taa_rejection_probe_with_real_gbuffer_depth_replay)
     // Instrument a TEST-ONLY copy after the original resolve has executed.
     // codes: 1 no history, 2 motion invalid, 3 extreme gradient,
     // 4 previous clip depth invalid, 5 no compatible history tap,
-    // 6 another validity gate (including the optional tiny-tap experiment);
+    // 6 another validity gate;
     // zero means history was accepted. Priority: no history > motion > taps.
     std::string probeSource=resolveSource;
     const auto returnAt=probeSource.find("        return outputColor");
@@ -635,7 +690,7 @@ material ProbeCopy {
             const auto diagnostic=f.readTarget();
             if(kSize==127 && shape==1 && background==1 && frame>=6 && frame<16) {
                 const size_t watched=108*kSize+90;
-                std::cout << "[TAA watched] tinyGuard=" << rejectTiny << " frame=" << frame << " old=" << history[watched][0]
+                std::cout << "[TAA watched] legacy=" << legacyFeedback << " frame=" << frame << " old=" << history[watched][0]
                           << " reason=" << diagnostic[watched][0] << " feedback=" << diagnostic[watched][1];
                 for(int mode:{7,9}) {
                     f.submitResolve(jitter,bindings,frame>0,float(mode),f.target);
@@ -674,17 +729,16 @@ material ProbeCopy {
             }
             previous=history;
         }
-        std::cout << "[TAA rejection probe] tinyGuard=" << rejectTiny << " size=" << kSize << " shape=" << shape << " background=" << background << " missingMotion=" << missingMotion
+        std::cout << "[TAA rejection probe] legacy=" << legacyFeedback << " size=" << kSize << " shape=" << shape << " background=" << background << " missingMotion=" << missingMotion
                   << " reasons="; for(auto n:reasons) std::cout << n << ',';
         std::cout << " rejectedJump=" << rejectJump << " acceptedJump=" << acceptedJump
                   << " rejectedChangedPixels=" << rejectedChangedPixels << '\n';
         CHECK(missingMotion==0u);
         CHECK(reasons[0]>0u); // The scene must actually accumulate history.
-        // Diagnostic A/B, not a production fix or a general visual threshold.
-        // At 127, baseline must reproduce abrupt resets; changing ONLY the
-        // surviving-tap gate must eliminate >0.05 reset steps in these scenes.
+        // A/B control: v9 must reproduce abrupt resets; production support
+        // confidence must prevent >0.05 reset steps in these static scenes.
         if(kSize==127) {
-            if(rejectTiny) { CHECK(rejectedChangedPixels==0u); }
+            if(!legacyFeedback) { CHECK(rejectedChangedPixels==0u); }
             else if(shape<2) { CHECK(rejectedChangedPixels>0u); }
         }
     }

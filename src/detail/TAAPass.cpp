@@ -207,6 +207,11 @@ material TemporalAA {
         }
         let historyWeight = w0 + w1 + w2 + w3
         validHistory = validHistory && historyWeight > 0.00001
+        // RGB normalization reconstructs a color, not confidence. After depth
+        // rejection a tiny neighboring tap must not regain full temporal
+        // influence just because we divide by its tiny surviving weight.
+        // Keep support continuous: real fractional motion is not a hard cut.
+        let historyConfidence = clamp(historyWeight, 0.0, 1.0)
         let historyRgb = (h0.xyz * w0 + h1.xyz * w1 + h2.xyz * w2 + h3.xyz * w3)
                          / max(historyWeight, 0.00001)
         let outputColor = vec4(current.xyz, currentHistoryDepth)
@@ -237,7 +242,7 @@ material TemporalAA {
             let reactiveMismatch = max(luminanceMismatch * 0.85,
                                        chromaMismatch * 0.65)
             feedback = feedback * (1.0 - reactiveMismatch)
-            effectiveFeedback = clamp(feedback, 0.0, 0.95)
+            effectiveFeedback = clamp(feedback, 0.0, 0.95) * historyConfidence
             let currentYCoCg = vec3(dot(current.xyz, vec3(0.25, 0.50, 0.25)),
                                     dot(current.xyz, vec3(0.50, 0.00, -0.50)),
                                     dot(current.xyz, vec3(-0.25, 0.50, -0.25)))
@@ -279,7 +284,7 @@ material TemporalAA {
 )";
 
 constexpr const char* kTaaCacheKey =
-    "taa_phoskia_surface_footprint_history_v9";
+    "taa_phoskia_supported_history_v10";
 
 float halton(uint32_t index, uint32_t base) noexcept
 {

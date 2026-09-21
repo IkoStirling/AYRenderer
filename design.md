@@ -1,5 +1,14 @@
 # AYRenderer Design
 
+## 2026-09-21 — TAA v10：按有效历史贡献连续降权
+
+- 已修复前一轮查证的极小历史 tap 放大：四 tap 深度筛选后的权重和保留为 `historyConfidence=clamp(historyWeight,0,1)`，最终历史反馈乘以该可信度。RGB 仍归一化重建颜色，但不再把归一化误当作完整可信度。保留原 `0.00001` 数值安全门限，不引入实验性的 0.5 硬拒绝阈值，不修改深度容差、jitter、静态/运动基础反馈或颜色裁剪。
+- 新增 `AYRenderer_TAASupportGpu`：RGBA32F 与生产 RGBA16F 两档，正负亚像素移动、极小剩余贡献、0.5 两侧连续性、完整有效历史下的 2.25px 移动，以及全部深度不匹配的遮挡回退。实际 GPU 像素验证反馈为 `baseFeedback * survivingSupport`；D3D11/D3D12 各 **682/682**。
+- `AYRenderer_TAARejectionGpu` 默认改为 127×127，并把已知错误断言改为生产版不再出现 >0.05 的拒绝跳变。保留仅测试的 `AY_TAA_PROBE_LEGACY_FEEDBACK=1` 对照，移除历史可信度乘项即可重新复现旧错误，不保留 0.5 实验逻辑。
+- D3D11/D3D12 默认联合查证各 **1004/1004**；实体背景近景立方体的拒绝步长由 **0.425537 降至 0.0273438**，六组场景均无 >0.05 的拒绝跳变。D3D11 另复核 32×32、128×128，均没有明显拒绝跳变；不是专门对奇数尺寸打补丁。
+- VS 2026 Insider x64 Debug 构建 Renderer 与 Editor Demo；Renderer 全量 **4486/4486**。两后端原边缘、固定网格、常驻 history、Motion GPU 分别为 **3406/3406、178/178、163/163、772/772**。Shader 继续走 Phoskia，缓存键升级 `taa_phoskia_supported_history_v10`，不复用旧二进制；无新增纹理、draw、采样或公开 ABI，仅增加可信度 clamp/乘法。
+- 按用户授权关闭当前验证进程并更新安装包，用户资源/配置保留。真实 Editor 原机位仍由用户视觉验收；测试不宣称所有亚像素波动消失，也不覆盖透明多层运动、全部材质或宿主提交情况。完整原因与复现命令见 [查证记录](docs/taa-history-rejection-investigation.md)。
+
 ## 2026-09-21 — TAA 突变查证：极小历史 tap 被放大（尚未修复生产代码）
 
 - 新增仅测试的生产 GBuffer/D24 → 借用深度 Motion → Resolve 联合查证。32×32 未复现明显突变；127×127 和 128×128 均复现，不能归因为“只有奇数分辨率有问题”。所测几何没有 Motion 漏写。
