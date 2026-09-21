@@ -79,7 +79,7 @@ TEST_CASE(taa_append_only_abi_resource_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::TAA) == 19u);
     CHECK(static_cast<uint8_t>(FgResourceId::TaaColor) == 12u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 13u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 19u);
     CHECK(ayt::render::detail::TAAPass::kTaaViewId == 5u);
     CHECK(std::is_final_v<ayt::render::detail::TAAPass>);
 }

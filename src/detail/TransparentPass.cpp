@@ -6,6 +6,7 @@
 #include "detail/GBufferPass.h"
 #include "detail/SkyboxPass.h"
 #include "detail/DepthHazePass.h"
+#include "detail/FrameDrawLists.h"
 #include "detail/SceneColorPipeline.h"
 
 #include "AYRenderer/RenderTypes.h"
@@ -601,36 +602,19 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         ayt::io::env::get("AY_EDITOR_OUTLINE").value_or("");
     const bool outlineEnabled = outlineEnv.empty() || outlineEnv != "0";
 
-    // Filter Alpha-only before sorting, but never remove a selected Alpha
-    // surface from its normal draw. Selection is an additional silhouette
-    // mask, not a replacement material pass.
-    std::vector<TransparentSortEntry> sortedItems;
-    std::vector<const DrawItem*> outlineItems;
-    sortedItems.reserve(items.size());
-    outlineItems.reserve(items.size());
-    for (const DrawItem& item : items) {
-        if (item.payload != nullptr) {
-            continue;
-        }
-        if (outlineEnabled && item.outlineHull) {
-            outlineItems.push_back(&item);
-        }
-        const auto matIt = ctx.materials.find(item.material.id);
-        if (matIt == ctx.materials.end()) {
-            continue;
-        }
-        if (!ayt::render::isTransparentBlendMode(matIt->second.blendMode)) {
-            continue;
-        }
-        sortedItems.push_back({
-            &item, transparentDistanceSquared(item, frame.cameraPosition)
-        });
-    }
+    // Classification and sorting are shared with all other geometry passes.
+    // Selection remains an additional silhouette draw, never a replacement.
+    FrameDrawLists fallbackDrawLists;
+    const FrameDrawLists& drawLists =
+        resolveFrameDrawLists(ctx, fallbackDrawLists);
+    const auto& sortedItems = drawLists.transparent3D;
+    const auto& allOutlineItems = drawLists.selectionOutlines;
+    static const std::vector<const DrawItem*> kNoOutlineItems;
+    const auto& outlineItems = outlineEnabled
+        ? allOutlineItems : kNoOutlineItems;
     if (sortedItems.empty() && outlineItems.empty()) {
         return 0;
     }
-    std::stable_sort(sortedItems.begin(), sortedItems.end(),
-                     transparentSortBefore);
 
     bgfx::FrameBufferHandle compositeFbo = ctx.sceneFbo;
     bool borrowedDepth = false;
@@ -665,7 +649,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     static uint32_t s_orderLogFrames = 0;
     if (s_orderLogFrames < 3) {
         uint32_t rank = 0;
-        for (const TransparentSortEntry& entry : sortedItems) {
+        for (const SortedTransparentItem& entry : sortedItems) {
             const DrawItem* item = entry.item;
             std::fprintf(stderr,
                          "[TransparentOrder] frame=%u rank=%u material=%llu "
@@ -685,7 +669,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     const PackedShadowAtlas litFallbackShadows =
         packShadowAtlas(nullptr, false);
 
-    for (const TransparentSortEntry& entry : sortedItems) {
+    for (const SortedTransparentItem& entry : sortedItems) {
         const DrawItem* pItem = entry.item;
         const auto matIt = ctx.materials.find(pItem->material.id);
         if (matIt == ctx.materials.end()) {

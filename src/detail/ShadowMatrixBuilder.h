@@ -6,6 +6,7 @@
 #include "AYMath/MathTypes.h"
 
 #include <unordered_map>
+#include <vector>
 
 namespace ayt::render::detail
 {
@@ -23,11 +24,24 @@ struct ShadowSceneBounds {
 ShadowSceneBounds computeShadowSceneBounds(
     const RenderScene& scene,
     const std::unordered_map<uint64_t, GpuMesh>& meshes);
+ShadowSceneBounds computeShadowSceneBounds(
+    const std::vector<const DrawItem*>& items,
+    const std::unordered_map<uint64_t, GpuMesh>& meshes);
 
 // Scene-fitted directional shadow matrices (AYMath lh:: — engine LH
 // convention, [0,1] depth clip space).
 void buildDirectionalShadowMatricesForScene(
     const RenderScene& scene,
+    const std::unordered_map<uint64_t, GpuMesh>& meshes,
+    const ayt::math::FVector3& lightDirection,
+    ayt::math::Float4x4& outView,
+    ayt::math::Float4x4& outProj,
+    ayt::math::Float4x4& outViewProj,
+    float outViewColMajor[16],
+    float outProjColMajor[16],
+    float outViewProjColMajor[16]);
+void buildDirectionalShadowMatricesForItems(
+    const std::vector<const DrawItem*>& items,
     const std::unordered_map<uint64_t, GpuMesh>& meshes,
     const ayt::math::FVector3& lightDirection,
     ayt::math::Float4x4& outView,

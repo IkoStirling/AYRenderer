@@ -210,10 +210,32 @@ uint32_t ShadowCaster::drawCasters(
     const std::unordered_map<uint64_t, GpuTexture>& textures,
     const std::unordered_map<uint64_t, GpuMaterial>& materials)
 {
+    std::vector<const DrawItem*> items;
+    items.reserve(scene.items().size());
+    for (const DrawItem& item : scene.items()) {
+        items.push_back(&item);
+    }
+    return drawCasters(adapter, viewId, casterState, items, meshes,
+                       textures, materials);
+}
+
+uint32_t ShadowCaster::drawCasters(
+    BGFXAdapter& adapter,
+    const uint8_t viewId,
+    const uint64_t casterState,
+    const std::vector<const DrawItem*>& items,
+    const std::unordered_map<uint64_t, GpuMesh>& meshes,
+    const std::unordered_map<uint64_t, GpuTexture>& textures,
+    const std::unordered_map<uint64_t, GpuMaterial>& materials)
+{
     const bool casterReady = _program.isValid();
     uint32_t drawCount = 0;
 
-    for (const DrawItem& item : scene.items()) {
+    for (const DrawItem* itemPtr : items) {
+        if (itemPtr == nullptr) {
+            continue;
+        }
+        const DrawItem& item = *itemPtr;
         if (!castsShadow(item.shadowFlags)) {
             continue;
         }

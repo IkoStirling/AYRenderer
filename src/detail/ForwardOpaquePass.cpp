@@ -3,6 +3,7 @@
 
 #include "AYRenderer/RenderTypes.h"
 #include "detail/FrameContext.h"
+#include "detail/FrameDrawLists.h"
 #include "detail/ShadowPass.h"
 
 #include <AYIO/Env.h>
@@ -280,16 +281,11 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
 
     uint32_t drawCount = 0;
 
-    for (const DrawItem& item : scene.items()) {
-        // CM-1 (2026-08-11) — 2D lane discriminator: items carrying a
-        // DrawPayload2D belong to Forward2DOpaquePass. Drawing them
-        // here with 3D state (depth write, no blend) would double-draw
-        // AND pollute the depth buffer with ortho z=0. The payload
-        // pointer is the lane contract — pre-CM-1 items always have
-        // payload == nullptr, so 3D hosts see zero behavior change.
-        if (item.payload != nullptr) {
-            continue;
-        }
+    FrameDrawLists fallbackDrawLists;
+    const FrameDrawLists& drawLists =
+        resolveFrameDrawLists(ctx, fallbackDrawLists);
+    for (const DrawItem* itemPtr : drawLists.opaque3D) {
+        const DrawItem& item = *itemPtr;
         if (!item.mesh.isValid() || !item.material.isValid()) {
             continue;
         }
@@ -345,9 +341,7 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         //      on real GPU backends and pinches throughput on all.
         // ForwardOpaquePass owns Opaque only; the pass name is the
         // contract. See docs/execution-plan.md §1.2 + §P0.4.
-        if (ayt::render::isTransparentBlendMode(material.blendMode)) {
-            continue;
-        }
+        // Blend/domain routing was completed once by FrameDrawLists.
 
         const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
         if (drawRange.indexCount == 0) {

@@ -138,7 +138,7 @@ TEST_CASE(debug_overlay_reports_draw_count)
     renderer.shutdown();
 }
 
-TEST_CASE(empty_scene_still_dispatches_deferred_screen_passes)
+TEST_CASE(noop_backend_graph_culls_gpu_postprocess_but_keeps_cpu_visible_passes)
 {
     ayt::render::Renderer renderer;
     ayt::render::InitDesc desc;
@@ -166,7 +166,10 @@ TEST_CASE(empty_scene_still_dispatches_deferred_screen_passes)
     };
     CHECK(dispatched("GBuffer"));
     CHECK(dispatched("Lighting"));
-    CHECK(dispatched("PostProcess"));
+    // Noop has no usable render target. The compiled FrameGraph now owns the
+    // execution decision, so PostProcess is graph-culled instead of entering
+    // execute() only to return zero.
+    CHECK(!dispatched("PostProcess"));
     CHECK(dispatched("UI"));
 
     renderer.shutdown();

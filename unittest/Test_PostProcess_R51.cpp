@@ -209,7 +209,7 @@ TEST_CASE(r51_forward_clear_is_touched_before_draw_iteration)
     const std::size_t clear = source.find("adapter.setViewClearRaw(");
     const std::size_t touch = source.find("adapter.touch(viewId);", clear);
     const std::size_t loop = source.find(
-        "for (const DrawItem& item : scene.items())", touch);
+        "for (const DrawItem* itemPtr : drawLists.opaque3D)", touch);
     CHECK(clear != std::string::npos);
     CHECK(touch != std::string::npos);
     CHECK(loop != std::string::npos);

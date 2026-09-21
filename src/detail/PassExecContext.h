@@ -115,6 +115,7 @@ class DepthHazePass;
 // DepthHaze / PostProcess consume paths (F2-F5 migrate those
 // one at a time; F1 leaves everything nullptr-compatible).
 class FrameGraph;
+struct FrameDrawLists;
 
 
 
@@ -373,6 +374,11 @@ struct PassExecContext {
     // through BGFX_DEBUG_WIREFRAME because that flag affects every view,
     // including the editor UI.
     bool wireframe = false;
+
+    // One classification/sort per Renderer::render(). Geometry passes borrow
+    // immutable pointers into RenderScene instead of independently scanning
+    // and routing every item. nullptr preserves hand-built legacy test paths.
+    const FrameDrawLists* drawLists = nullptr;
 
 };
 

@@ -3,6 +3,7 @@
 #include "AYRenderer/RenderTypes.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/Draw2D.h"
+#include "detail/FrameDrawLists.h"
 #include "detail/FrameContext.h"
 #include "detail/GBufferLayout.h"
 #include "detail/RasterConvention.h"
@@ -565,17 +566,17 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     uint32_t skippedMissingResource = 0;
     uint32_t skippedInvalidBuffer = 0;
     uint32_t skippedInvalidShader = 0;
-    uint32_t skippedTransparent = 0;
-    uint32_t skippedOverlay2D = 0;
+    FrameDrawLists fallbackDrawLists;
+    const FrameDrawLists& drawLists =
+        resolveFrameDrawLists(ctx, fallbackDrawLists);
+    uint32_t skippedTransparent = drawLists.stats.transparent3D;
+    uint32_t skippedOverlay2D = drawLists.stats.overlay2D;
     uint32_t skippedEmptyRange = 0;
     uint32_t alphaCutoutCount = 0;
     uint32_t worldLit2DCount = 0;
-    for (const DrawItem& item : ctx.scene.items()) {
+    for (const DrawItem* itemPtr : drawLists.gbufferOpaque) {
+        const DrawItem& item = *itemPtr;
         const bool worldLit2D = isWorldLit2DItem(item);
-        if (item.payload != nullptr && !worldLit2D) {
-            ++skippedOverlay2D;
-            continue;
-        }
         if (!item.mesh.isValid() || !item.material.isValid()) {
             ++skippedInvalidHandle;
             continue;
@@ -601,10 +602,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // Alpha glass must not write albedo/depth here — otherwise it
         // shows as solid cyan and steals depth from real opaques.
         // TransparentPass composites Alpha after Lighting.
-        if (ayt::render::isTransparentBlendMode(material.blendMode)) {
-            ++skippedTransparent;
-            continue;
-        }
+        // Blend/domain routing was completed once by FrameDrawLists.
 
         const bool needsAlphaCutout = material.alphaCutout;
         alphaCutoutCount += needsAlphaCutout ? 1u : 0u;

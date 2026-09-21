@@ -35,7 +35,16 @@
 - **Phoskia**：通用左结合修复落在 AYShader；TAA/Motion 先前的显式括号与分步表达式保留。编译缓存 schema 升至 `aybgfx-v4-left-associative`。真实 GBuffer 验证另暴露 raw-SC 编译入口先默认构造 driver 的异常问题，已在 AYShader 修正为保护内按资源池路径直接构造；没有新增绕开 Phoskia 的生产 shader。
 - **验证**：VS 2026 Insider x64 Debug 构建 Renderer/Shader/Editor Demo。Renderer 常规 **4556/4556**，Shader **1466/1466**。D3D11/D3D12 独立 GPU 各 **6255/6255**：Sky 50、TAA 固定网格 178、有效支持权重 682、Motion 772、常驻历史 163、拒绝联合查证 1004、边缘递归 3406。GPU suite 必须独立进程设置 `AY_TAA_GPU_TEST=d3d11` 或 `d3d12` 后执行同名 suite；常规 Noop 总数不算 GPU 验证。
 - **用户视觉反馈**：History 调试画面仍在两幅画面间交替闪烁，但最终画面已几乎不可见闪烁。这是此前 TAA 修复的用户反馈，不能表述为调试闪烁完全消除，也不能当作本轮架构问题修复的视觉验收。
-- **延后**：统一 FrameGraph 执行与完整读写依赖、统一 Pass 结果状态、共享 DrawList、闲置 RT 回收和自动 alias 均不在本轮实现。
+- **后续收口**：本节当时延后的 FrameGraph 执行门禁、统一 Pass 结果状态、共享 DrawList 与闲置 RT 回收，已由下节的架构审核 5/6/7 完成；自动 alias 和完整资源黑板仍未实现。
+
+## 2026-09-21 — 架构审核 5/6/7 收口
+
+- 编译后的 FrameGraph liveness 已成为带 slot Pass 的实际 dispatch 门禁；TAA 图依赖补齐 GBuffer、MotionVector 和双 history。它仍保留既有 Pass 注册顺序，不等同于自动调度器。
+- FrameGraph owned target 连续 120 帧 inactive 后释放 pool lease，避免关闭效果后永久保留 RT；再次启用时按正常路径重新申请。
+- `FrameDrawLists` 每帧单次扫描并生成 opaque、GBuffer、transparent、WorldLit2D、Overlay2D、shadow caster/bounds 与 selection outline 列表。GBuffer、MotionVector、ForwardOpaque、Forward2DOpaque、Transparent、Shadow 均已迁移；透明与 Overlay 保持稳定排序，仍逐对象 submit。
+- `RenderPipeline` 内部执行结果明确区分提交成功、正常零绘制、禁用、图裁剪和失败，消除 `execute()==0` 的语义混叠；公开 ABI 未增加字段。
+- 本刀不启用 frustum cull：蒙皮、透明描边和阴影参与者需要先有统一可靠 bounds；也未实现 instancing、自动 RT alias 或 R6-4 资源黑板。
+- VS 2026 Insider x64 Debug 完整重编后，`AYRenderer_Test` 全量 **4603/4603**；共享 DrawList、Pass outcome、FrameGraph retention/liveness 与阴影矩阵均有定向覆盖。真实 D3D11 画面和 CPU/GPU capture 仍归 R6-6，不以 Noop 单测替代视觉验收。
 
 ## 2026-09-21 — TAA v10：按有效历史贡献连续降权
 

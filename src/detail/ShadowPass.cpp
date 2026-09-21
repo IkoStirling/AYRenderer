@@ -1,6 +1,7 @@
 #include "detail/ShadowPass.h"
 
 #include "AYRenderer/ShadowConfig.h"
+#include "detail/FrameDrawLists.h"
 #include "detail/ShadowDebug.h"
 #include "detail/ShadowDiagnostics.h"
 #include "detail/ShadowMatrixBuilder.h"
@@ -31,7 +32,9 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     const auto& meshes    = ctx.meshes;
     const auto& textures  = ctx.textures;
     const auto& materials = ctx.materials;
-    const RenderScene& scene = ctx.scene;
+    FrameDrawLists fallbackDrawLists;
+    const FrameDrawLists& drawLists =
+        resolveFrameDrawLists(ctx, fallbackDrawLists);
 
     if (!adapter.isInitialized() || adapter.isNoopBackend()) {
         // §P4 M1 (2026-08-24) — rate-limited early-return diagnostic
@@ -229,8 +232,8 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             for (uint32_t c = 0; c < 4; ++c) {
                 _shadowSampleRects[slot][c] = _atlasLayout.subRects[slot][c];
             }
-            buildDirectionalShadowMatricesForScene(
-                scene,
+            buildDirectionalShadowMatricesForItems(
+                drawLists.shadowBoundsItems,
                 meshes,
                 L.type == ayt::render::LightType::Spot
                     ? L.spotDirection
@@ -258,8 +261,8 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
         _shadowSampleRects[0][1] = 0.0f;
         _shadowSampleRects[0][2] = 1.0f;
         _shadowSampleRects[0][3] = 1.0f;
-        buildDirectionalShadowMatricesForScene(
-            scene,
+        buildDirectionalShadowMatricesForItems(
+            drawLists.shadowBoundsItems,
             meshes,
             ctx.frame.lightDirection,
             _lightView,
@@ -317,7 +320,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             adapter.setStateDepthOnlyWrite();
             casterDrawCount += _shadowCaster.drawCasters(
                 adapter, slotViewId, casterState,
-                scene, meshes, textures, materials);
+                drawLists.shadowCasters, meshes, textures, materials);
         }
     } else {
         _mapResources.bindShadowView(adapter, viewId, effectiveSize);
@@ -352,7 +355,8 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
         }
 
         casterDrawCount = _shadowCaster.drawCasters(
-            adapter, viewId, casterState, scene, meshes, textures, materials);
+            adapter, viewId, casterState, drawLists.shadowCasters,
+            meshes, textures, materials);
     }
 
     // A touched shadow view clears the map even when there are no drawable

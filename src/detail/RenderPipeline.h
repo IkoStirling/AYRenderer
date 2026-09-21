@@ -3,6 +3,7 @@
 #include "detail/RenderPass.h"
 
 #include <memory>
+#include <string>
 #include <string_view>
 #include <typeindex>
 #include <type_traits>
@@ -11,6 +12,21 @@
 
 namespace ayt::render::detail
 {
+
+enum class PassExecutionState : uint8_t {
+    Submitted = 0,
+    CompletedNoDraws,
+    Disabled,
+    GraphCulled,
+    Failed,
+};
+
+struct PassExecutionOutcome {
+    std::string name;
+    PassExecutionState state = PassExecutionState::CompletedNoDraws;
+    uint32_t drawCalls = 0;
+    std::string detail;
+};
 
 // U1+ — owns the ordered list of RenderPass subclasses and dispatches
 // them via executeAll(). Renderer::render iterates pipeline.passes()
@@ -99,7 +115,13 @@ public:
     const std::vector<RenderPassFrameStats>& lastPassStats() const noexcept {
         return _lastPassStats;
     }
-    void resetFrameStats() { _lastPassStats.clear(); }
+    const std::vector<PassExecutionOutcome>& lastPassOutcomes() const noexcept {
+        return _lastPassOutcomes;
+    }
+    void resetFrameStats() {
+        _lastPassStats.clear();
+        _lastPassOutcomes.clear();
+    }
 
 private:
     std::vector<std::unique_ptr<RenderPass>> _passes;
@@ -111,6 +133,7 @@ private:
     // intentionally not governed by the renderer-owned FrameGraph.
     std::vector<int16_t> _passSlots;
     std::vector<RenderPassFrameStats>         _lastPassStats;
+    std::vector<PassExecutionOutcome>         _lastPassOutcomes;
 };
 
 } // namespace ayt::render::detail

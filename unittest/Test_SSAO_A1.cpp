@@ -138,7 +138,7 @@ TEST_CASE(a1_fg_resource_id_ssao_texture_is_5) {
     // Sentinel must bump to 6 (post-A1).
     CHECK(static_cast<uint8_t>(FgResourceId::FinalLdrColor) == 6u);
     CHECK(static_cast<uint8_t>(FgResourceId::FxaaColor) == 7u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 13u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 19u);
 }
 
 TEST_CASE(a1_fg_semantic_ssao_source_is_3) {

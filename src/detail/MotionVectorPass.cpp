@@ -3,6 +3,7 @@
 #include "AYRenderer/RenderTypes.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/FrameContext.h"
+#include "detail/FrameDrawLists.h"
 #include "detail/GBufferPass.h"
 #include "detail/GpuResources.h"
 #include "detail/PassExecContext.h"
@@ -526,11 +527,11 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
 
     std::unordered_map<CommitKey, const DrawItem*, CommitKeyHash> commits;
     uint32_t drawCount = 0u;
-    for (const DrawItem& item : ctx.scene.items()) {
-        if (item.payload != nullptr || !item.mesh.isValid()
-            || !item.material.isValid()) {
-            continue;
-        }
+    FrameDrawLists fallbackDrawLists;
+    const FrameDrawLists& drawLists =
+        resolveFrameDrawLists(ctx, fallbackDrawLists);
+    for (const DrawItem* itemPtr : drawLists.opaque3D) {
+        const DrawItem& item = *itemPtr;
         const auto meshIt = ctx.meshes.find(item.mesh.id);
         const auto materialIt = ctx.materials.find(item.material.id);
         if (meshIt == ctx.meshes.end() || materialIt == ctx.materials.end()) {
@@ -540,8 +541,7 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
         const GpuMaterial& material = materialIt->second;
         if (!BGFXAdapter::isValid(mesh.vertexBuffer)
             || !BGFXAdapter::isValid(mesh.indexBuffer)
-            || !material.shader.isValid()
-            || ayt::render::isTransparentBlendMode(material.blendMode)) {
+            || !material.shader.isValid()) {
             continue;
         }
         const DrawIndexRange range = resolveDrawIndexRange(item, mesh);

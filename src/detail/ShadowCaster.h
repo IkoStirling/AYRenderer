@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <unordered_map>
+#include <vector>
 
 namespace ayt::render::detail
 {
@@ -23,6 +24,13 @@ public:
                          uint8_t viewId,
                          uint64_t casterState,
                          const RenderScene& scene,
+                         const std::unordered_map<uint64_t, GpuMesh>& meshes,
+                         const std::unordered_map<uint64_t, GpuTexture>& textures,
+                         const std::unordered_map<uint64_t, GpuMaterial>& materials);
+    uint32_t drawCasters(BGFXAdapter& adapter,
+                         uint8_t viewId,
+                         uint64_t casterState,
+                         const std::vector<const DrawItem*>& items,
                          const std::unordered_map<uint64_t, GpuMesh>& meshes,
                          const std::unordered_map<uint64_t, GpuTexture>& textures,
                          const std::unordered_map<uint64_t, GpuMaterial>& materials);

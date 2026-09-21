@@ -2,6 +2,7 @@
 
 #include "detail/Draw2D.h"
 #include "detail/FrameContext.h"
+#include "detail/FrameDrawLists.h"
 #include "detail/SceneColorPipeline.h"
 
 #include <algorithm>
@@ -76,8 +77,10 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
 
     uint32_t drawCount = 0;
 
-    const std::vector<const DrawItem*> sortedItems =
-        collectSortedOverlay2DItems(scene);
+    FrameDrawLists fallbackDrawLists;
+    const FrameDrawLists& drawLists =
+        resolveFrameDrawLists(ctx, fallbackDrawLists);
+    const std::vector<const DrawItem*>& sortedItems = drawLists.overlay2D;
 
     for (const DrawItem* itemPtr : sortedItems) {
         const DrawItem& item = *itemPtr;

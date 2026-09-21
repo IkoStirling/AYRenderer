@@ -1,17 +1,17 @@
 # AYRenderer R6 架构收口计划
 
 > 日期：2026-09-09
-> 状态：R6-0、R6-1、R6-2、R6-3a、R6-3b 已落地；下一刀 R6-3c。
+> 状态：R6-0、R6-1、R6-2、R6-3 已落地；R6-5 第一阶段已落地；下一刀 R6-4。
 > 范围：在不重写 bgfx/RHI、不改变 Forward/Deferred 画面顺序的前提下，收口 Pass 描述、资源依赖、诊断和场景提交。
 
 ## 1. 当前真实基线
 
 当前功能链已经覆盖 Shadow、GBuffer、MotionVector、SSAO、Lighting、DepthHaze、Transparent、Camera Overlay 2D、Bloom、PostProcess、TAA/FXAA/SMAA、ColorGrading、Present、Editor Overlay 与 UI。继续直接增加效果会放大以下结构问题：
 
-- `RenderPipeline` 按注册顺序执行 `RenderPass`，`FrameGraph` 只管理部分逻辑资源；两者尚未形成单一编译计划。
+- `RenderPipeline` 仍按注册顺序执行 `RenderPass`，但带 slot 的 Pass 已由编译后的 `FrameGraph` live decision 控制是否 dispatch；完整资源黑板尚未建立。
 - `Renderer::render()` 同时负责 Pass 查找、状态预备、效果门禁、资源声明、semantic 选择和执行上下文拼装。
 - `PassExecContext` 通过多个具体 Pass 指针传递生产者状态，新增效果容易继续增加横向耦合。
-- 3D Pass 仍各自遍历 `RenderScene`，缺少共享可见集、分桶、状态排序与 instancing。
+- 几何 Pass 已复用每帧一次生成的共享 DrawList 做领域分桶与稳定排序；保守起见尚未启用 frustum cull、状态排序合批与 instancing。
 - 自动化测试已覆盖契约与 shader 编译，但真实 D3D11 capture、GPU 时间和资源带宽基线仍不完整；D3D12 完整恢复可延后，但必须保持可诊断、失败不闪退。
 
 因此 R6 期间默认不新增独立画质 Pass。例外仅限修复现有 Pass、诊断视图和为架构收口服务的内部节点。
@@ -61,17 +61,27 @@ R6 明确不做：
 
 验收：后处理图声明已从 `Renderer::render()` 移除；定向 FrameGraph/后处理/AA 回归通过，全量 `AYRenderer_Test` 为 4119/4119，`AYRenderer_Demo` 链接通过。R6-2 当时被 AYEditor 并行编译错误阻断的 `AYEditorShell_Demo` 门禁已在 R6-3a 补跑通过。真 GPU 画面仍归 R6-6 capture 门禁。
 
-### R6-3：Pass 契约与类型安全注册（进行中）
+### R6-3：Pass 契约与类型安全注册（已完成）
 
 - **R6-3a（已完成）**：`RenderPipeline` 在 `addPass/clear` 时维护 exact-type 索引，生产路径改用 O(1) `findPass<ConcretePass>()`；移除 `AYRenderer.cpp` 中字符串查找后直接 `static_cast` 的组合。诊断名称仍可重复，重复具体类型保持“第一次注册优先”。
 - **R6-3b（已完成）**：为 21 个公开 Pass slot 建立静态 `reads/writes/output format/extent/lifetime/side-effect` 契约；管线重建前验证未知/重复 slot 和 required resource 的缺失、错序，失败时保留上一条有效管线。后处理图的 transient RT 格式与尺寸直接从同一契约生成，动态输入选择仍由 `PostProcessGraphPlan` 决定。
-- **R6-3c（下一刀）**：把“是否挂载”“是否启用”“是否本帧生产”拆成三个明确状态，并向诊断层提供只读快照。
+- **R6-3c（已完成）**：挂载由 slot 注册表示，启用由 `RenderPass::isEnabled()` 表示，本帧资源生产继续由 FrameGraph production latch 表示；编译后的 slot liveness 直接约束 dispatch。`RenderPipeline` 为每个已挂载 Pass 保留只读执行结果，明确区分 `Submitted`、`CompletedNoDraws`、`Disabled`、`GraphCulled` 与 `Failed`，不再用返回值 0 同时表达所有情况。
 
 验收：缺 Pass、错顺序和错资源在 plan compile 阶段报告，不等到 GPU submit 才表现为黑屏。
 
 R6-3a 验证：类型查找、重复注册、`clear()` 失效和 const lookup 共 11 项断言通过。
 
 R6-3b 验证：21 个 slot 契约覆盖、四条 canonical pipeline、资源 lifetime、缺生产者、错序、重复/未知 slot、TAA/Overlay 前置条件和“拒绝后不破坏基线”共 96 项断言通过；FrameGraph/PostProcessGraphPlan/PipelineConfig 定向回归通过；全量 `AYRenderer_Test` 为 4226/4226。
+
+R6-3c 验证：FrameGraph 可裁剪 slot 不进入 `execute()`；禁用、正常提交、正常零绘制、图裁剪与异常五种状态均有定向覆盖。TAA 图声明补齐 GBuffer、MotionVector 与双 history 读写，避免执行依赖存在而图依赖缺失。
+
+### 架构审核 5/6/7 收口（2026-09-21）
+
+- **5 — 图编译与实际执行脱节**：带 slot 的 Pass 注册进入统一执行门禁，FrameGraph compile 的 liveness 结果会真实裁掉 dispatch；现阶段仍保留既有注册顺序，不声称已经实现自动调度或完整资源黑板。
+- **6 — 关闭效果仍长期占用 RT**：FrameGraph owned resource 在连续 120 帧 inactive 后归还 pool lease；重新启用会重新申请并清零 idle 状态。窗口可配置，并提供 retained/released 统计用于后续诊断。
+- **7 — 几何 Pass 重复扫描与零返回值歧义**：`FrameDrawLists` 每帧一次分类 opaque、GBuffer、transparent、WorldLit2D、Overlay2D、shadow caster/bounds 与 selection outline；透明和 Overlay 保持稳定排序。各几何 Pass 复用该结果，阴影多灯矩阵也不再逐灯扫描 `RenderScene`。Pass outcome 单独表达正常零绘制和失败。
+
+验证：VS 2026 Insider x64 Debug 完整重编；`AYRenderer_Test` 全量 4603/4603。真实 D3D11 capture 与性能对比仍属于 R6-6。
 
 ### R6-4：资源黑板与历史资源
 
@@ -81,10 +91,11 @@ R6-3b 验证：21 个 slot 契约覆盖、四条 canonical pipeline、资源 lif
 
 验收：关闭、resize、管线切换和 shader 失败均不会让消费者读取 stale handle。
 
-### R6-5：DrawListBuilder
+### R6-5：DrawListBuilder（第一阶段已完成）
 
-- 每帧一次完成 frustum cull、opaque/cutout/transparent/shadow/overlay 分桶和稳定排序。
-- 第一阶段只复用过滤结果，仍逐对象 submit；先消除每个几何 Pass 重复扫描。
+- 每帧一次完成 opaque/cutout/transparent/shadow/overlay 分桶和稳定排序。
+- 第一阶段已复用过滤结果，仍逐对象 submit；GBuffer、MotionVector、ForwardOpaque、Forward2DOpaque、Transparent 与 Shadow 共用同一份分类结果。
+- frustum cull 暂缓：必须先统一静态、蒙皮、透明描边和阴影接收体的可靠 bounds 策略，避免以 CPU 优化引入物体错误消失。
 - 第二阶段再对相同 mesh/material/state 的非蒙皮对象启用 bgfx instancing。
 
 验收：画面与 draw 顺序不变；CPU pass 时间下降；透明排序和 MotionVector stable id 不回归。

@@ -12,6 +12,7 @@
 #include "detail/DepthHazePipeline.h"
 #include "detail/DebugOverlay.h"
 #include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
+#include "detail/FrameDrawLists.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FXAAPass.h"
 #include "detail/SMAAPass.h"
@@ -366,6 +367,7 @@ struct Renderer::Impl {
     // Constructed with the adapter reference (it queries the
     // adapter's isInitialized/isNoopBackend per-frame).
     detail::FrameGraph            frameGraph{adapter, renderTargetPool};
+    detail::FrameDrawLists        frameDrawLists;
 
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
@@ -1605,6 +1607,10 @@ void Renderer::render(const RenderScene& scene)
     const detail::PostProcessGraphPlanResult graphPlan =
         detail::buildPostProcessGraphPlan(fg, graphInput);
 
+    detail::buildFrameDrawLists(
+        scene, _impl->resources.meshes(), _impl->resources.materials(),
+        frame, _impl->frameDrawLists);
+
     // GBufferDebug now overlays the selected attachment directly into the
     // game viewport on view 250. No hidden host-owned FBO is allocated; UI
     // view 255 still renders afterwards, so Editor chrome remains intact.
@@ -1680,6 +1686,7 @@ void Renderer::render(const RenderScene& scene)
         ssaoPassPtr,
         motionVectorPassPtr,
         _impl->wireframeEnabled,
+        &_impl->frameDrawLists,
     };
 
     static uint32_t s_compositeLog = 0;

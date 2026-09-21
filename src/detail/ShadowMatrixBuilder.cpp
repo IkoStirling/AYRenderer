@@ -219,9 +219,23 @@ ShadowSceneBounds computeShadowSceneBounds(
     const RenderScene& scene,
     const std::unordered_map<uint64_t, GpuMesh>& meshes)
 {
-    ShadowSceneBounds bounds{};
+    std::vector<const DrawItem*> items;
+    items.reserve(scene.items().size());
     for (const DrawItem& item : scene.items()) {
-        expandItemBounds(bounds, item, meshes);
+        items.push_back(&item);
+    }
+    return computeShadowSceneBounds(items, meshes);
+}
+
+ShadowSceneBounds computeShadowSceneBounds(
+    const std::vector<const DrawItem*>& items,
+    const std::unordered_map<uint64_t, GpuMesh>& meshes)
+{
+    ShadowSceneBounds bounds{};
+    for (const DrawItem* item : items) {
+        if (item != nullptr) {
+            expandItemBounds(bounds, *item, meshes);
+        }
     }
     return bounds;
 }
@@ -238,6 +252,31 @@ void buildDirectionalShadowMatricesForScene(
     float outViewProjColMajor[16])
 {
     ShadowSceneBounds bounds = computeShadowSceneBounds(scene, meshes);
+    if (!bounds.valid) {
+        bounds = defaultEditorPlayBounds();
+    }
+    buildFromBoundsInternal(bounds,
+                            lightDirection,
+                            outView,
+                            outProj,
+                            outViewProj,
+                            outViewColMajor,
+                            outProjColMajor,
+                            outViewProjColMajor);
+}
+
+void buildDirectionalShadowMatricesForItems(
+    const std::vector<const DrawItem*>& items,
+    const std::unordered_map<uint64_t, GpuMesh>& meshes,
+    const ayt::math::FVector3& lightDirection,
+    ayt::math::Float4x4& outView,
+    ayt::math::Float4x4& outProj,
+    ayt::math::Float4x4& outViewProj,
+    float outViewColMajor[16],
+    float outProjColMajor[16],
+    float outViewProjColMajor[16])
+{
+    ShadowSceneBounds bounds = computeShadowSceneBounds(items, meshes);
     if (!bounds.valid) {
         bounds = defaultEditorPlayBounds();
     }

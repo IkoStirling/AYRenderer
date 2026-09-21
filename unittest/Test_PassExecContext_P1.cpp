@@ -31,6 +31,7 @@
 #include "detail/RenderPipeline.h"
 
 #include <cstdint>
+#include <stdexcept>
 #include <unordered_map>
 
 using ayt::render::detail::BGFXAdapter;
@@ -39,6 +40,7 @@ using ayt::render::detail::GpuMaterial;
 using ayt::render::detail::GpuMesh;
 using ayt::render::detail::GpuTexture;
 using ayt::render::detail::PassExecContext;
+using ayt::render::detail::PassExecutionState;
 using ayt::render::detail::RenderPass;
 using ayt::render::detail::RenderPipeline;
 using ayt::render::RenderScene;
@@ -85,6 +87,20 @@ public:
             lastMaterialsMutated = true;
         }
         return 1;
+    }
+};
+
+class NoDrawPass final : public RenderPass {
+public:
+    std::string_view name() const override { return "NoDraw"; }
+    uint32_t execute(PassExecContext&) override { return 0; }
+};
+
+class ThrowingPass final : public RenderPass {
+public:
+    std::string_view name() const override { return "Throwing"; }
+    uint32_t execute(PassExecContext&) override {
+        throw std::runtime_error("intentional test failure");
     }
 };
 
@@ -221,6 +237,9 @@ TEST_CASE(ctx_executes_through_pipeline_with_disabled_pass) {
     const uint32_t draws = pipe.executeAll(ctx);
     // Only the enabled pass contributed.
     CHECK(draws == 1u);
+    CHECK(pipe.lastPassOutcomes().size() == 2u);
+    CHECK(pipe.lastPassOutcomes()[0].state == PassExecutionState::Disabled);
+    CHECK(pipe.lastPassOutcomes()[1].state == PassExecutionState::Submitted);
     // The enabled pass still saw ctx with viewId=0 (default).
     CHECK(CapturingPass::lastViewId == 0);
 }
@@ -247,6 +266,32 @@ TEST_CASE(compiled_frame_graph_culls_registered_pipeline_slot) {
     pipe.addPass(ayt::render::RenderPassSlot::PostProcess,
                  std::make_unique<CapturingPass>());
     CHECK(pipe.executeAll(ctx) == 0u);
+    CHECK(pipe.lastPassOutcomes().size() == 1u);
+    CHECK(pipe.lastPassOutcomes()[0].state
+          == PassExecutionState::GraphCulled);
+}
+
+TEST_CASE(outcomes_distinguish_no_draws_from_failure) {
+    BGFXAdapter adapter;
+    ayt::shader::ShaderResourcePool pool;
+    RenderScene scene;
+    std::unordered_map<uint64_t, GpuMesh> meshes;
+    std::unordered_map<uint64_t, GpuTexture> textures;
+    std::unordered_map<uint64_t, GpuMaterial> materials;
+    FrameContext frame;
+    PassExecContext ctx{adapter, pool, scene, meshes, textures, materials,
+                        0, 0, 1280, 720, frame, 0};
+
+    RenderPipeline pipe;
+    pipe.addPass(std::make_unique<NoDrawPass>());
+    pipe.addPass(std::make_unique<ThrowingPass>());
+
+    CHECK(pipe.executeAll(ctx) == 0u);
+    CHECK(pipe.lastPassOutcomes().size() == 2u);
+    CHECK(pipe.lastPassOutcomes()[0].state
+          == PassExecutionState::CompletedNoDraws);
+    CHECK(pipe.lastPassOutcomes()[1].state == PassExecutionState::Failed);
+    CHECK(!pipe.lastPassOutcomes()[1].detail.empty());
 }
 
 TEST_SUITE_END
