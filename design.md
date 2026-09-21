@@ -1,5 +1,13 @@
 # AYRenderer Design
 
+## 2026-09-21 — R6-6 第二刀：延迟纹理调试入口
+
+- 复用现有 view 250 的 `GBufferDebugPass`，保留 0–5 的 GBuffer 通道数值并 append-only 增加 6 MotionVectors、7 SSAO Occlusion、8 TAA History、9 Shadow Atlas；公开 byte channel API 不变，旧宿主不会发生枚举重排。
+- 新通道只绑定一个由 CPU 按当前选择解析的 `auxiliary` 纹理，不为四类诊断长期占用四个 sampler；默认关闭时不提交 draw、不创建 RT，也不改变 Deferred 主链和 Present 顺序。
+- MotionVector 与 SSAO 必须来自资源黑板的当帧已产出项；TAA History 必须具有有效 persistent content；Shadow Atlas 必须由 ShadowPass 明确报告可采样。缺少所选资源时 fail-close，不显示旧帧或任意 fallback 内容。
+- Motion 以 RG 映射有符号速度、B 显示有效性；SSAO 和 Shadow Atlas 使用灰度；TAA History 显示当前 history-read 颜色。TAA resolve/rejection/weight/clipping/reprojected-history 继续由既有 view 245 diagnostics 提供，避免重复实现第二套 resolve 调试。
+- Phoskia cache key 升至 `gbufferdebug_v4_r6_diagnostic_textures`；定向测试 58/58、全量 4694/4694，包含 Windows D3D11 `s_5_0` 生产编译，`AYEditorShell_Demo` 链接通过。Noop 的合法空后处理图保持 declared/live 0/0。真正的 D3D11 帧捕获仍按 [`docs/d3d11-capture-checklist.md`](docs/d3d11-capture-checklist.md) 执行，当前代码与单测不替代画面验收。
+
 ## 2026-09-21 — R6-6 第一刀：运行时架构诊断
 
 - 公开 `RenderFrameStats` 以 append-only 方式增加 `graph` 与 `resources` 两组 backend-neutral 摘要；不暴露 bgfx handle 或内部 FrameGraph 类型。现有每 Pass CPU/GPU 时间、draw count 和既有字段顺序保持不变。

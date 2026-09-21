@@ -38,18 +38,21 @@
 namespace ayt::render::detail
 {
 
-// Six logical visualizations. Material decodes AO from RT2.a while the model
-// view shows the independently packed shading-model ID. Motion remains a
-// compatibility alias.
+// GBuffer channels retain their original values. R6-6 appends renderer-wide
+// diagnostic textures without changing the existing byte-based host API.
 enum class GBufferDebugChannel : uint8_t {
     Albedo   = 0,  // RT0.rgb
     Normal   = 1,  // RT1.xyz, already encoded to [0,1]
     WorldPos = 2,  // RT2.xyz, remapped for display
     Material = 3,  // RGB = metallic / roughness / material AO
-    Motion   = Material, // compatibility alias; no velocity RT exists yet
+    Motion   = Material, // legacy compatibility alias for channel 3
     Depth    = 4,  // depth attachment, reversed to near=white
     MaterialModel = 5, // StandardLit=green, Unlit=red
-    Count    = 6,
+    MotionVectors = 6, // RG = signed motion, B = validity
+    SsaoOcclusion = 7, // grayscale current-frame AO
+    TaaHistory = 8, // persistent history read color
+    ShadowAtlas = 9, // encoded shadow depth atlas
+    Count    = 10,
 };
 
 class GBufferDebugPass : public RenderPass {
@@ -93,6 +96,7 @@ private:
     ayt::shader::BindingId      _tWorldPos       = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tMaterial       = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tDepth          = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _tAuxiliary      = ayt::shader::InvalidBinding;
 
     // Latch so a failed acquire does not re-run shaderc every frame.
     bool                        _programAcquireFailed = false;

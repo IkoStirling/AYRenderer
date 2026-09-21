@@ -1,7 +1,7 @@
 # AYRenderer R6 架构收口计划
 
 > 日期：2026-09-09
-> 状态：R6-0、R6-1、R6-2、R6-3、R6-4 已落地；R6-5 第一阶段已落地；R6-6 第一刀已落地。
+> 状态：R6-0、R6-1、R6-2、R6-3、R6-4 已落地；R6-5 第一阶段已落地；R6-6 第一、二刀已落地，真 GPU 门禁仍开放。
 > 范围：在不重写 bgfx/RHI、不改变 Forward/Deferred 画面顺序的前提下，收口 Pass 描述、资源依赖、诊断和场景提交。
 
 ## 1. 当前真实基线
@@ -138,7 +138,15 @@ R6-3c 验证：FrameGraph 可裁剪 slot 不进入 `execute()`；禁用、正常
 - bgfx debug text overlay 可直接显示 `FG` 与 `BB` 两行；overlay 关闭时宿主仍可通过 `getFrameStats()` 读取，不增加 GPU 工作。
 - 定向统计回归与 Renderer 集成验证通过；全量 `AYRenderer_Test` 为 4677/4677，`AYEditorShell_Demo` 链接通过。
 
-下一刀：补齐 MotionVector、SSAO、Shadow atlas 的独立纹理调试入口，复用现有 TAA diagnostics；随后按固定清单执行 D3D11 capture。第一刀只建立可观察性，不宣称真 GPU 门禁已关闭。
+第二刀完成项（2026-09-21）：
+
+- 复用 view 250 的纹理覆盖层并保持原 GBuffer 0–5 通道数值，追加 6 MotionVectors、7 SSAO Occlusion、8 TAA History、9 Shadow Atlas；宿主 byte channel API 保持兼容。
+- 四个新通道共享一个按选择绑定的 auxiliary sampler；默认关闭时零 draw、零 RT，不插入新 Pass，也不改变主渲染顺序。
+- MotionVector/SSAO 只显示资源黑板的当帧已产出内容，TAA History 只显示有效 persistent read history，Shadow Atlas 只显示 ShadowPass 明确发布的可采样深度；缺失时 fail-close，避免把 stale texture 当成诊断结果。
+- 保留既有 view 245 的 TAA Final、History rejection、History weight、Clipping difference、Motion 与 Reprojected history 模式，原始 history 通道用于补齐资源级观察，不复制 resolve 诊断。
+- Phoskia IR 与 Windows D3D11 `s_5_0` 生产编译定向回归通过；全量 `AYRenderer_Test` 为 4694/4694，`AYEditorShell_Demo` 链接通过。Noop 空后处理图的诊断预期同步修正为 declared/live 0/0，不把 CPU-only 管线节点伪装成 FrameGraph 节点。
+
+下一步：按 [`d3d11-capture-checklist.md`](d3d11-capture-checklist.md) 执行固定场景 capture，并记录 MRT、Shadow、Bloom、Haze、SSAO、TAA、透明与 resize 的资源/时序证据。本机当前未安装 RenderDoc，因此 R6-6 真 GPU 门禁仍保持开放，不以 shader 编译、Noop 单测或普通截图代替。
 
 ## 4. 新画质能力的恢复顺序
 

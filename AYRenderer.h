@@ -396,13 +396,11 @@ public:
     // Convenience: radius + bias (does not change enabled/strength).
     void setSsaoParams(float radius, float bias);
 
-    // V1 GBuffer Debug (2026-07-24) — host knobs for the
-    // independent GBuffer channel debug pass (option-B second
-    // viewport on view 250, not main-frame replacement). Renderer
-    // defaults: enabled=false, channel=Albedo(0) (K-GBD-1 zero
-    // alloc, K-GBD-3 default channel = WorldPos base).
-    // Editor may enable on the Deferred path; Forward path always
-    // no-ops (gbufferPass==nullptr gate).
+    // Renderer texture diagnostics on view 250. Existing GBuffer values stay
+    // stable: 0 Albedo, 1 Normal, 2 WorldPos, 3 Material, 4 Depth,
+    // 5 MaterialModel. R6-6 appends 6 MotionVectors, 7 SSAO,
+    // 8 TAA History and 9 Shadow Atlas. Default is disabled/Albedo, so the
+    // feature remains zero-draw and zero-allocation until explicitly enabled.
     void setGBufferDebugEnabled(bool enabled);
     bool gbufferDebugEnabled() const noexcept;
     void setGBufferDebugChannel(uint8_t channel);

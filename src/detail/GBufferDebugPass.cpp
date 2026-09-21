@@ -7,6 +7,7 @@
 #include "detail/PassExecContext.h"
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/RenderPass.h"
+#include "detail/ShadowPass.h"
 
 #include <cstdio>
 #include <string>
@@ -31,9 +32,9 @@ constexpr FullscreenVertex kFullscreenTriangle[3] = {
 
 constexpr uint16_t kFullscreenIndices[3] = { 0, 1, 2 };
 
-// Visible view-250 overlay. Channel 3 visualizes the packed PBR scalars
-// (metallic, roughness, material AO); `Motion` remains an enum alias for ABI
-// compatibility until a dedicated velocity RT exists.
+// Visible view-250 overlay. Channels 0..5 preserve the GBuffer contract;
+// channels 6..9 use one CPU-selected auxiliary texture so adding diagnostics
+// does not consume four more sampler stages.
 constexpr const char* kGBufferDebugPhoskiaSource = R"(
 material GBufferDebug {
     texture2d albedo
@@ -41,6 +42,7 @@ material GBufferDebug {
     texture2d worldPos
     texture2d materialSurface
     texture2d depthTex
+    texture2d auxiliary
     uniform vec4 debugChannel
     vertex {
         in  pos : position
@@ -55,13 +57,18 @@ material GBufferDebug {
         let w = sample(worldPos, uv)
         let s = sample(materialSurface, uv)
         let d = sample(depthTex, uv).x
+        let x = sample(auxiliary, uv)
         let c = debugChannel.x
         let pick0 = 1.0 - step(0.5, c)
         let pick1 = step(0.5, c) * (1.0 - step(1.5, c))
         let pick2 = step(1.5, c) * (1.0 - step(2.5, c))
         let pick3 = step(2.5, c) * (1.0 - step(3.5, c))
         let pick4 = step(3.5, c) * (1.0 - step(4.5, c))
-        let pick5 = step(4.5, c)
+        let pick5 = step(4.5, c) * (1.0 - step(5.5, c))
+        let pick6 = step(5.5, c) * (1.0 - step(6.5, c))
+        let pick7 = step(6.5, c) * (1.0 - step(7.5, c))
+        let pick8 = step(7.5, c) * (1.0 - step(8.5, c))
+        let pick9 = step(8.5, c)
         let materialModel = floor(w.a * 0.5 + 0.0001)
         let materialAo = max(0.0, min(1.0, w.a - materialModel * 2.0))
         let modelNorm = min(materialModel, 1.0)
@@ -71,17 +78,25 @@ material GBufferDebug {
         let materialView = vec4(a.a, n.a, materialAo, 1.0)
         let modelView = vec4(modelNorm, 1.0 - modelNorm, 0.25, 1.0)
         let depthView = vec4(1.0 - d, 1.0 - d, 1.0 - d, 1.0)
+        let motionValid = step(0.5, x.a)
+        let motionX = max(0.0, min(1.0, x.x * 16.0 + 0.5))
+        let motionY = max(0.0, min(1.0, x.y * 16.0 + 0.5))
+        let motionView = vec4(motionX, motionY, motionValid, 1.0)
+        let ssaoView = vec4(x.x, x.x, x.x, 1.0)
+        let historyView = vec4(x.rgb, 1.0)
+        let shadowView = vec4(x.x, x.x, x.x, 1.0)
         let geometryView = (albedoView * pick0 + normalView * pick1
                          + worldView * pick2 + materialView * pick3
                          + modelView * pick5)
                          * step(0.5, s.a)
-        return geometryView + depthView * pick4
+        return geometryView + depthView * pick4 + motionView * pick6
+             + ssaoView * pick7 + historyView * pick8 + shadowView * pick9
     }
 }
 )";
 
 constexpr const char* kGBufferDebugCacheKey =
-    "gbufferdebug_v3_material_model_decode";
+    "gbufferdebug_v4_r6_diagnostic_textures";
 
 } // namespace
 
@@ -115,6 +130,9 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
         return 0;
     }
 
+    const uint8_t channel = ctx.frame.gbufferDebugChannel;
+    const bool needsGBuffer = channel
+        < static_cast<uint8_t>(GBufferDebugChannel::MotionVectors);
     BlackboardGBufferView blackboardGBuffer;
     const bool useBlackboard = ctx.resourceBlackboard != nullptr;
     const bool blackboardReady = useBlackboard
@@ -122,22 +140,70 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
     const bool legacyReady = !useBlackboard && ctx.gbufferPass != nullptr
         && ctx.gbufferPass->producedThisFrame()
         && ctx.gbufferPass->hasValidAttachments();
-    if (!blackboardReady && !legacyReady) {
+    if (needsGBuffer && !blackboardReady && !legacyReady) {
         rateLimitedEarlyReturn("GBufferDebugPass", "gbuffer not produced this frame");
         return 0;
     }
 
+    bgfx::TextureHandle auxiliary = BGFX_INVALID_HANDLE;
+    if (channel == static_cast<uint8_t>(
+            GBufferDebugChannel::MotionVectors)) {
+        const BlackboardResourceEntry* motion = useBlackboard
+            ? ctx.resourceBlackboard->findProduced(
+                  BlackboardResourceId::MotionVectors)
+            : nullptr;
+        auxiliary = motion != nullptr ? motion->texture
+                                      : bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    } else if (channel == static_cast<uint8_t>(
+                   GBufferDebugChannel::SsaoOcclusion)) {
+        const BlackboardResourceEntry* ssao = useBlackboard
+            ? ctx.resourceBlackboard->findProduced(
+                  BlackboardResourceId::SsaoOcclusion)
+            : nullptr;
+        auxiliary = ssao != nullptr ? ssao->texture
+                                    : bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    } else if (channel == static_cast<uint8_t>(
+                   GBufferDebugChannel::TaaHistory)) {
+        const BlackboardResourceEntry* history = useBlackboard
+            ? ctx.resourceBlackboard->find(
+                  BlackboardResourceId::TaaHistoryRead)
+            : nullptr;
+        if (history != nullptr && history->contentValid) {
+            auxiliary = BGFXAdapter::isValid(history->texture)
+                ? history->texture
+                : adapter.getFboAttachment(history->framebuffer, 0);
+        }
+    } else if (channel == static_cast<uint8_t>(
+                   GBufferDebugChannel::ShadowAtlas)) {
+        auxiliary = ctx.shadowPass != nullptr
+                && ctx.shadowPass->hasSampleableShadow()
+            ? ctx.shadowPass->shadowSampleTexture()
+            : bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    }
+
+    if (!needsGBuffer && !BGFXAdapter::isValid(auxiliary)) {
+        rateLimitedEarlyReturn(
+            "GBufferDebugPass", "selected diagnostic texture unavailable");
+        return 0;
+    }
+
+    const bgfx::TextureHandle safeTexture = BGFXAdapter::isValid(auxiliary)
+        ? auxiliary
+        : blackboardReady ? blackboardGBuffer.albedo
+        : ctx.gbufferPass->gbufferAlbedoRt();
     const bgfx::TextureHandle albedoRt = blackboardReady
-        ? blackboardGBuffer.albedo : ctx.gbufferPass->gbufferAlbedoRt();
+        ? blackboardGBuffer.albedo : safeTexture;
     const bgfx::TextureHandle normalRt = blackboardReady
-        ? blackboardGBuffer.normal : ctx.gbufferPass->gbufferNormalRt();
+        ? blackboardGBuffer.normal : safeTexture;
     const bgfx::TextureHandle worldPosRt = blackboardReady
-        ? blackboardGBuffer.worldPosition
-        : ctx.gbufferPass->gbufferWorldPositionRt();
+        ? blackboardGBuffer.worldPosition : safeTexture;
     const bgfx::TextureHandle materialRt = blackboardReady
-        ? blackboardGBuffer.material : ctx.gbufferPass->gbufferMaterialRt();
+        ? blackboardGBuffer.material : safeTexture;
     const bgfx::TextureHandle depthRt = blackboardReady
-        ? blackboardGBuffer.depth : ctx.gbufferPass->gbufferDepthRt();
+        ? blackboardGBuffer.depth : safeTexture;
+    if (!BGFXAdapter::isValid(auxiliary)) {
+        auxiliary = safeTexture;
+    }
 
     ensureFullscreenQuad(adapter);
     if (!BGFXAdapter::isValid(_fullscreenVB)
@@ -153,7 +219,8 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
         && _tNormal       != ayt::shader::InvalidBinding
         && _tWorldPos     != ayt::shader::InvalidBinding
         && _tMaterial     != ayt::shader::InvalidBinding
-        && _tDepth        != ayt::shader::InvalidBinding;
+        && _tDepth        != ayt::shader::InvalidBinding
+        && _tAuxiliary    != ayt::shader::InvalidBinding;
     if (!programReady) {
         rateLimitedEarlyReturn("GBufferDebugPass", "program not ready");
         return 0;
@@ -181,10 +248,13 @@ uint32_t GBufferDebugPass::execute(PassExecContext& ctx)
                         toShaderTexture(materialRt));
     _program.setTexture(_program.getTextureStage(_tDepth), _tDepth,
                         toShaderTexture(depthRt));
-    const float channel[4] = {
+    _program.setTexture(_program.getTextureStage(_tAuxiliary), _tAuxiliary,
+                        toShaderTexture(auxiliary));
+    const float channelValue[4] = {
         static_cast<float>(ctx.frame.gbufferDebugChannel), 0.0f, 0.0f, 0.0f
     };
-    _program.setUniform(_uDebugChannel, channel, sizeof(channel));
+    _program.setUniform(
+        _uDebugChannel, channelValue, sizeof(channelValue));
 
     ayt::shader::DrawCallContext sub;
     sub.viewId = viewId;
@@ -257,6 +327,7 @@ void GBufferDebugPass::ensureProgram(shader::ShaderResourcePool& pool)
     _tWorldPos     = _program.getTextureBinding("worldPos");
     _tMaterial     = _program.getTextureBinding("materialSurface");
     _tDepth        = _program.getTextureBinding("depthTex");
+    _tAuxiliary    = _program.getTextureBinding("auxiliary");
 }
 
 void GBufferDebugPass::destroyResources(BGFXAdapter& adapter)
@@ -278,6 +349,7 @@ void GBufferDebugPass::destroyResources(BGFXAdapter& adapter)
     _tWorldPos       = ayt::shader::InvalidBinding;
     _tMaterial       = ayt::shader::InvalidBinding;
     _tDepth          = ayt::shader::InvalidBinding;
+    _tAuxiliary      = ayt::shader::InvalidBinding;
     _programAcquireFailed = false;
 }
 

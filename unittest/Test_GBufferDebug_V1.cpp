@@ -8,7 +8,7 @@
 //        GBufferDebugPass::kGBufferDebugViewId == 250
 //        (verified unused via repo grep, 2026-07-24)
 //   3) FrameContext defaults to a disabled, zero-allocation path.
-//   4) Six-channel enum, with Motion retained as the Material alias.
+//   4) Original six GBuffer channels plus append-only R6-6 diagnostics.
 //   5) Cache-key extern mirror (Bug fix #3 pattern):
 //        kGBufferDebugCacheKeyCStr literals must agree between
 //        .h declaration + .cpp definition.
@@ -29,6 +29,7 @@
 #include "AYRenderer.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
+#include "AYShader/BGFXConverter.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "AYShader/ShaderResource.h"
 #include "AYShader/Ir.h"
@@ -41,9 +42,14 @@
 #include "detail/RenderPass.h"
 
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#ifndef AY_SHADER_SHADERC_HINT
+#  define AY_SHADER_SHADERC_HINT ""
+#endif
 
 using ayt::render::RenderPassSlot;
 using ayt::render::RenderScene;
@@ -105,8 +111,12 @@ TEST_CASE(v1_channel_enum_append_only_values) {
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Motion)   == 3u);
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::Depth)    == 4u);
     CHECK(static_cast<uint8_t>(GBufferDebugChannel::MaterialModel) == 5u);
-    CHECK(static_cast<uint8_t>(GBufferDebugChannel::Count)    == 6u);
-    CHECK(GBufferDebugPass::kGBufferDebugChannelCount == 6u);
+    CHECK(static_cast<uint8_t>(GBufferDebugChannel::MotionVectors) == 6u);
+    CHECK(static_cast<uint8_t>(GBufferDebugChannel::SsaoOcclusion) == 7u);
+    CHECK(static_cast<uint8_t>(GBufferDebugChannel::TaaHistory) == 8u);
+    CHECK(static_cast<uint8_t>(GBufferDebugChannel::ShadowAtlas) == 9u);
+    CHECK(static_cast<uint8_t>(GBufferDebugChannel::Count)    == 10u);
+    CHECK(GBufferDebugPass::kGBufferDebugChannelCount == 10u);
 }
 
 // ─── C. FrameContext default state (K-GBD-1 zero alloc) ───────────
@@ -134,6 +144,14 @@ TEST_CASE(v1_frame_context_debug_round_trip) {
     CHECK(ctx.gbufferDebugChannel == 3u);
 }
 
+TEST_CASE(r6_public_channel_setter_accepts_appended_range) {
+    ayt::render::Renderer renderer;
+    renderer.setGBufferDebugChannel(9u);
+    CHECK(renderer.gbufferDebugChannel() == 9u);
+    renderer.setGBufferDebugChannel(10u);
+    CHECK(renderer.gbufferDebugChannel() == 0u);
+}
+
 // ─── D. Cache-key extern mirror (Bug fix #3) ──────────────────────
 
 TEST_CASE(v1_cache_key_extern_mirror_non_null) {
@@ -147,7 +165,7 @@ TEST_CASE(v1_cache_key_extern_mirror_contains_marker) {
     // Live overlay literal contains "gbufferdebug" + version stamp.
     const std::string key(ayt::render::detail::kGBufferDebugCacheKeyCStr);
     CHECK(key.find("gbufferdebug") != std::string::npos);
-    CHECK(key.find("v3")          != std::string::npos);
+    CHECK(key.find("v4")          != std::string::npos);
 }
 
 TEST_CASE(v2_live_overlay_source_generates_valid_ir) {
@@ -159,7 +177,41 @@ TEST_CASE(v2_live_overlay_source_generates_valid_ir) {
         ayt::shader::phoskia::CompileOptions{}, ir, errors);
     CHECK(success);
     CHECK(errors.empty());
+    const std::string source(
+        ayt::render::detail::kGBufferDebugPhoskiaSourceCStr);
+    CHECK(source.find("texture2d auxiliary") != std::string::npos);
+    CHECK(source.find("motionView * pick6") != std::string::npos);
+    CHECK(source.find("ssaoView * pick7") != std::string::npos);
+    CHECK(source.find("historyView * pick8") != std::string::npos);
+    CHECK(source.find("shadowView * pick9") != std::string::npos);
 }
+
+#ifdef _WIN32
+TEST_CASE(r6_diagnostic_overlay_compiles_for_d3d_s_5_0) {
+    ayt::shader::phoskia::Compiler compiler;
+    ayt::shader::phoskia::CompileOptions frontend;
+    ayt::shader::BGFXCompileOptions backend;
+    backend.shadercPath = AY_SHADER_SHADERC_HINT;
+    backend.platform = "windows";
+    backend.profile = "s_5_0";
+#ifdef AY_SHADER_BGFX_COMMON_HINT
+    backend.includeDirs.emplace_back(AY_SHADER_BGFX_COMMON_HINT);
+#endif
+#ifdef AY_SHADER_BGFX_SRC_HINT
+    backend.includeDirs.emplace_back(AY_SHADER_BGFX_SRC_HINT);
+#endif
+    ayt::shader::CompiledShaderProgram program;
+    compiler.compileToProgram(
+        ayt::render::detail::kGBufferDebugPhoskiaSourceCStr,
+        frontend, backend, program);
+    if (!program.success) {
+        for (const std::string& error : program.errors) {
+            std::cerr << "[GBufferDebug D3D test] " << error << '\n';
+        }
+    }
+    CHECK(program.success);
+}
+#endif
 
 // ─── E. Lazy initial state + destroyResources idempotency ─────────
 

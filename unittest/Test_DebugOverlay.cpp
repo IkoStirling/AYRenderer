@@ -173,8 +173,11 @@ TEST_CASE(noop_backend_graph_culls_gpu_postprocess_but_keeps_cpu_visible_passes)
     CHECK(dispatched("UI"));
     CHECK(stats.graph.compiled);
     CHECK(stats.graph.compileSucceeded);
-    CHECK(stats.graph.declaredPasses > 0u);
-    CHECK(stats.graph.livePasses > 0u);
+    // Noop exposes no usable scene target, so the post-process plan compiles
+    // as a valid empty graph. Diagnostics must report that truthfully rather
+    // than folding CPU-only pipeline dispatches into FrameGraph counts.
+    CHECK(stats.graph.declaredPasses == 0u);
+    CHECK(stats.graph.livePasses == 0u);
     CHECK(stats.resources.declaredResources > 0u);
 
     renderer.shutdown();
