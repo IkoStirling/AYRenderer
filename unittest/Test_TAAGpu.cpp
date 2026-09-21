@@ -79,7 +79,7 @@ struct TaaGpuFixture {
         if (!geometry.ensure(adapter)) return false;
         targetTexture = bgfx::createTexture2D(kSize, kSize, false, 1,
             halfPrecision ? bgfx::TextureFormat::RGBA16F : bgfx::TextureFormat::RGBA32F,
-            BGFX_TEXTURE_RT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP);
+            BGFX_TEXTURE_RT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_POINT);
         if (!bgfx::isValid(targetTexture)) return false;
         textures.push_back(targetTexture);
         target = bgfx::createFrameBuffer(1, &targetTexture, false);
@@ -155,7 +155,7 @@ struct TaaGpuFixture {
         const auto firstInput = textures.size();
         std::array<bgfx::TextureHandle,6> bindings;
         for (uint8_t i = 0; i < inputs.size(); ++i) {
-            bindings[i] = input(*inputs[i], i >= 2, i == 0 || i == 3);
+            bindings[i] = input(*inputs[i], i >= 1, i == 0 || i == 3);
             CHECK(bgfx::isValid(bindings[i]));
         }
         submitResolve(jitter,bindings,historyValid,debugMode,target);
@@ -290,10 +290,12 @@ TEST_CASE(motion_rasterized_geometry_removes_jitter_without_removing_real_motion
         // Both projection types and rigid/skinned geometry, all eight phases.
         for (int perspective=0;perspective<2;++perspective)
         for (int skinned=0;skinned<2;++skinned)
+        for (int sloped=0;sloped<2;++sloped)
         for (int phase=0;phase<8;++phase)
         for (int moving=0;moving<2;++moving) {
             auto base=identity;
             base(2,2)=.5f;
+            base(2,0)=sloped ? .16f : 0;
             if (perspective) { base(3,2)=1; base(3,3)=0; }
             const auto jitter=taaHaltonJitter(phase);
             const auto previousJitter=taaHaltonJitter((phase+7)%8);
@@ -337,7 +339,10 @@ TEST_CASE(motion_rasterized_geometry_removes_jitter_without_removing_real_motion
             float error=0; bool valid=true;
             for(int y=10;y<22;++y) for(int x=10;x<22;++x) {
                 const auto& p=pixels[y*kSize+x];
-                valid=valid && p[3]>.99f && std::abs(p[2]-.5f)<.0001f;
+                const float previousX=(2*(x+.5f-jitter.x)/kSize-1)-(moving?4.0f/kSize:0);
+                const float expectedDepth=.5f+(sloped?.16f:0)*previousX;
+                valid=valid && std::abs(p[3]-(sloped?1.01f:1.0f))<.0001f
+                    && std::abs(p[2]-expectedDepth)<.0001f;
                 error=std::max(error,std::max(std::abs(p[0]*kSize-(moving?2.0f:0)),std::abs(p[1]*kSize)));
             }
             CHECK(valid);
@@ -368,7 +373,7 @@ TEST_CASE(taa_gpu_resident_ping_pong_uses_immediately_previous_frame)
     constexpr int frames=40;
     // Keep both RGBA16F histories on GPU. No per-frame readback, CPU history
     // upload or extra empty frame: this exercises actual queued ping-pong.
-    const auto second=fixture.adapter.createFrameBuffer(kSize,kSize,bgfx::TextureFormat::RGBA16F,false,false);
+    const auto second=fixture.adapter.createFrameBuffer(kSize,kSize,bgfx::TextureFormat::RGBA16F,false,true);
     CHECK(bgfx::isValid(second));
     if(!bgfx::isValid(second)) return;
     const std::array<bgfx::FrameBufferHandle,2> targets={fixture.target,second};
@@ -427,6 +432,89 @@ TEST_CASE(taa_gpu_resident_ping_pong_uses_immediately_previous_frame)
 TEST_SUITE_END
 
 TEST_SUITE(AYRenderer_TAAEdgeGpu)
+
+TEST_CASE(taa_static_sloped_surface_retains_history_without_accepting_disocclusion)
+{
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend) { std::cout << "[SKIP] GPU slope diagnostic requires AY_TAA_GPU_TEST.\n"; return; }
+    TaaGpuFixture fixture;
+    const bool ready=fixture.initialize(backend,true);
+    CHECK(ready);
+    if(!ready) return;
+    float flatPeak=0;
+    for(int scenario=0;scenario<3;++scenario) {
+        const float slope=scenario==0 ? 0.0f : .01f;
+        const bool footprintEnabled=scenario!=1; // No-footprint control reproduces v8.
+        std::vector<Pixel> history(kSize*kSize,Pixel{0,0,0,-1});
+        std::vector<float> low(kSize*kSize,1),high(kSize*kSize,0);
+        unsigned rejected=0,checked=0;
+        for(int frame=0;frame<24;++frame) {
+            const auto jitter=taaHaltonJitter(frame%8);
+            std::vector<Pixel> current(kSize*kSize),world(kSize*kSize),surface(kSize*kSize),velocity(kSize*kSize);
+            for(int y=0;y<kSize;++y) for(int x=0;x<kSize;++x) {
+                const size_t i=y*kSize+x;
+                const bool foreground=x+.5f-jitter.x > 16.55f + .13f*(y+.5f-jitter.y-16);
+                const float z=foreground ? .2f+slope*(x+.5f-jitter.x) : .9f;
+                current[i]=foreground ? Pixel{1,0,0,1} : Pixel{0,0,1,1};
+                world[i]={0,0,z,1}; surface[i]={0,0,0,1};
+                velocity[i]={0,0,z,1+(foreground && footprintEnabled?slope:0)};
+            }
+            if(frame>=16) {
+                const auto weights=fixture.dispatch(jitter,current,history,world,surface,velocity,true,2);
+                for(int y=8;y<24;++y) for(int x=16;x<21;++x) {
+                    ++checked;
+                    if(weights[y*kSize+x][0]<.01f) ++rejected;
+                }
+            }
+            history=fixture.dispatch(jitter,current,history,world,surface,velocity,frame!=0);
+            if(frame>=16) for(size_t i=0;i<history.size();++i) {
+                low[i]=std::min(low[i],history[i][0]); high[i]=std::max(high[i],history[i][0]);
+            }
+        }
+        float peak=0;
+        for(int y=8;y<24;++y) for(int x=16;x<21;++x) peak=std::max(peak,high[y*kSize+x]-low[y*kSize+x]);
+        std::cout << "[TAA slope] gradient=" << slope << " footprint=" << footprintEnabled
+                  << " rejected=" << rejected << '/' << checked << " peak=" << peak << '\n';
+        if(scenario==0) flatPeak=peak;
+        if(scenario==2) { CHECK(peak<=flatPeak+.003f); }
+        // Small silhouette-coverage changes may reject history; a stationary
+        // sloped face must not lose half its history merely due to jitter.
+        if(footprintEnabled) { CHECK(rejected<=8u); }
+        else { CHECK(rejected>checked/4); }
+        std::vector<Pixel> current(kSize*kSize,Pixel{0,0,1,1});
+        std::vector<Pixel> world(kSize*kSize,Pixel{0,0,.5f,1});
+        std::vector<Pixel> surface(kSize*kSize,Pixel{0,0,0,1});
+        std::vector<Pixel> velocity(kSize*kSize,Pixel{0,0,.5f,1+slope});
+        std::vector<Pixel> occluded(kSize*kSize,Pixel{1,0,0,.47f});
+        const auto weight=fixture.dispatch({},current,occluded,world,surface,velocity,true,2);
+        CHECK(weight[16*kSize+16][0]==0);
+        const auto resolved=fixture.dispatch({},current,occluded,world,surface,velocity,true);
+        CHECK(resolved[16*kSize+16][0]<.001f);
+        CHECK(resolved[16*kSize+16][2]>.999f);
+        // Even a large footprint cannot legitimize a point outside the old
+        // depth clip range. Missing motion remains invalid as well.
+        for(auto& v:velocity) v={0,0,-.1f,1};
+        const auto clipped=fixture.dispatch({},current,occluded,world,surface,velocity,true,2);
+        CHECK(clipped[16*kSize+16][0]==0);
+        for(auto& v:velocity) v={0,0,.47f,2};
+        const auto extreme=fixture.dispatch({},current,occluded,world,surface,velocity,true,2);
+        CHECK(extreme[16*kSize+16][0]==0);
+        for(auto& v:velocity) v={0,0,.47f,0};
+        const auto missing=fixture.dispatch({},current,occluded,world,surface,velocity,true,2);
+        CHECK(missing[16*kSize+16][0]==0);
+    }
+    // Depth provenance: history alpha must use sampled raster depth rather
+    // than reconstructing depth from an imprecise world-position attachment.
+    const auto white=fixture.input(std::vector<Pixel>(kSize*kSize,Pixel{1,1,1,1}),true,true);
+    const auto incorrectWorld=fixture.input(std::vector<Pixel>(kSize*kSize,Pixel{0,0,.45f,1}),true);
+    const auto motion=fixture.input(std::vector<Pixel>(kSize*kSize,Pixel{0,0,.5f,1}),true);
+    const auto depth=fixture.input(std::vector<Pixel>(kSize*kSize,Pixel{.5f,0,0,0}),true);
+    fixture.submitResolve({}, {white,white,incorrectWorld,white,motion,depth},false,0,fixture.target);
+    const auto raster=fixture.readTarget();
+    CHECK(std::abs(raster[16*kSize+16][3]-.5f)<.001f);
+#endif
+}
 
 TEST_CASE(taa_recursive_hard_edges_converge_without_surface_class_flicker)
 {

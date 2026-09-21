@@ -58,7 +58,9 @@ private:
 
 // Deferred temporal surface pass. It owns one full-resolution RGBA16F
 // texture: xy = current-minus-previous UV excluding projection jitter,
-// z = the same surface's previous NDC depth, w = valid history (1 or 0).
+// z = the same surface's previous NDC depth.
+// w = 0 for invalid history, otherwise 1 + min(fwidth(previousDepth), 1).
+// The primitive-local footprint lets TAA distinguish depth slope from a cut.
 // Clear/missing draws are invalid, never implicitly stationary.
 // texture, borrows GBuffer depth through a non-owning FBO shell, and replays
 // only opaque 3D draws. It is dormant unless a temporal consumer requests it.

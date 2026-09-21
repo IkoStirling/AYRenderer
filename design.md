@@ -1,5 +1,15 @@
 # AYRenderer Design
 
+## 2026-09-21 — TAA v9 / Motion Vector v6：近景斜面历史深度误拒绝
+
+- 用户确认 Motion/Clipping 静帧已稳定，但 History weight 的间断黑边对应 Final image 中实际可见的点状凸起和闪烁，近景更明显。本轮不将它归为纯诊断现象；不调整 jitter、反馈权重、颜色裁剪或阴影 bias。
+- **可复现的缺陷**：3×3 最近表面选择随 jitter 相位取到同一斜面的不同位置；上一帧存储的深度与当前点的 previous-depth 有合理差异，固定 0.0025 阈值却反复拒绝历史。新增 GPU 斜面控制组（每像素 NDC 深度梯度 0.01）在关闭 footprint 补偿时拒绝 **323/640**，最后八帧红通道最大峰峰值 **0.749512**；启用后为 **4/640、0.103027**，与恒定深度控制组一致。此结果是合成输入的生产 Resolve 验证，不等同于已证明用户场景的全部剩余闪烁消失。
+- Motion Vector RGBA16F 的 RG/B 语义不变；A 从 0/1 扩展为无效 0、有效 `1 + min(fwidth(previousNdcDepth), 1)`。导数在实际光栅化的同一图元上求得，位于分支及 cutout discard 之前，不从跨前后景的深度纹理估计坡度。TAA 以 `baseTolerance + 2 * footprint` 比较历史 tap；平坦表面维持原阈值。footprint ≥ 0.05 或 previous-depth 不在 [0,1] 时保守拒绝，避免近裁剪异常导数放宽到整个深度范围。它仍是有限容差的启发式，而不是表面身份匹配；非常接近的不同表面仍有混入历史的可能。
+- history alpha 改存选中位置的真实 raster depth，避免从 RGBA16F world position 重建深度引入量化差异。两张 history 明确使用 point sampler；RGB 仍由 shader 对四个深度筛选后的 tap 手动双线性重建，不允许 alpha 在硬件过滤时混合天空和几何。保留原有 world-position 绑定和正 W 检查，不扩展公开 ABI、纹理格式或 RT 数量。
+- 两个 Motion shader 缓存键同时升级 v6，TAA 升级 v9，全部继续经 Phoskia 编译；不改其全局解析语义。成本为 Motion 片元的深度导数及少量 ALU，没有新增全屏 pass 或纹理采样。
+- **验证**：VS 2026 Insider x64 Debug 构建 Renderer 测试与 Editor Demo；Renderer 全量 **4484/4484**。独立 D3D11/D3D12：生产 Motion 光栅化各 **772/772**（增加斜面深度和 footprint 检查）；TAA 递归边缘各 **3406/3406**；GPU 常驻双缓冲各 **163/163**；原固定网格 Resolve 各 **178/178**。斜面用例还检查 0.03 的遮挡深度差、clip-range 外历史、极端 footprint、缺失 motion 的拒绝，以及 history alpha 的 raster-depth 来源。
+- **验收边界**：Motion producer 的真实光栅化与 Resolve 的合成斜面测试分别覆盖，两者不是完整 Editor 场景端到端测试；常驻 history 回归也不替代真实宿主提交验收。短序列对照仍有约 0.103 的边缘覆盖波动，未宣称零闪烁。验证包同步更新，最终须在用户原近景机位检查 Final image、静止 History weight 及移动后的拖影/轮廓稳定性。
+
 ## 2026-09-21 — Motion Vector v5：去除假运动与 GPU 常驻历史验证
 
 - 验证结果：VS 2026 Insider x64 Debug 构建；Renderer 全量 **4481/4481**、MotionVector 专项 **57/57**；旧 TAA GPU 固定网格/递归边缘测试在 D3D11/D3D12 仍分别为 **178/178**、**2604/2604**。Editor 验证程序已重新链接，生产缓存键 v5 强制重新编译修正后的运动 shader。

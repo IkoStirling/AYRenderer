@@ -161,14 +161,15 @@ TEST_CASE(motion_vector_shader_contract_covers_rigid_skin_cutout_and_sentinel)
         CHECK(source.find("let unjitteredPreviousUv = previousUv - motionJitter.zw") != std::string::npos);
         CHECK(source.find("velocity = unjitteredCurrentUv - unjitteredPreviousUv") != std::string::npos);
     }
-    CHECK(opaque.find("previousClip.z / max(previousClip.w, 0.00001), valid")
+    CHECK(opaque.find("return vec4(velocity, previousDepth, valid)")
           != std::string::npos);
-    CHECK(cutout.find("previousClip.z / max(previousClip.w, 0.00001), valid")
+    CHECK(cutout.find("return vec4(velocity, previousDepth, valid)")
           != std::string::npos);
     CHECK(cutout.find("texture2d opacityMap") != std::string::npos);
     CHECK(cutout.find("discard") != std::string::npos);
     CHECK(std::string(ayt::render::detail::kMotionVectorCacheKeyCStr)
-          == "motion_vector_phoskia_rgba16f_unjittered_depth_v5");
+          == "motion_vector_phoskia_rgba16f_depth_footprint_v6");
+    CHECK(cutout.find("fwidth(previousDepth)") < cutout.find("if (surfaceAlpha"));
 }
 
 TEST_CASE(motion_vector_noop_backend_returns_zero_and_lifecycle_is_idempotent)

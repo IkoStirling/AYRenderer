@@ -56,6 +56,11 @@ material MotionVector {
     fragment {
         in currentClip : color
         in previousClip : tangent
+        // Derive on the rasterized primitive, before divergent control flow.
+        // Unlike depth-texture derivatives, helper lanes do not mix another
+        // object's depth into the surface's pixel footprint at silhouettes.
+        let previousDepth = previousClip.z / max(previousClip.w, 0.00001)
+        let previousDepthFootprint = min(fwidth(previousDepth), 1.0)
         let currentNdc = currentClip.xy / max(abs(currentClip.w), 0.00001)
         let previousNdc = previousClip.xy / max(abs(previousClip.w), 0.00001)
         let currentUv = vec2(currentNdc.x * 0.5 + 0.5,
@@ -72,9 +77,9 @@ material MotionVector {
             let unjitteredCurrentUv = currentUv - motionJitter.xy
             let unjitteredPreviousUv = previousUv - motionJitter.zw
             velocity = unjitteredCurrentUv - unjitteredPreviousUv
-            valid = 1.0
+            valid = 1.0 + previousDepthFootprint
         }
-        return vec4(velocity, previousClip.z / max(previousClip.w, 0.00001), valid)
+        return vec4(velocity, previousDepth, valid)
     }
 }
 )";
@@ -117,6 +122,9 @@ material MotionVectorCutout {
         in currentClip : color
         in previousClip : tangent
         in vUv : texcoord
+        // Must precede alpha discard so derivatives remain well-defined.
+        let previousDepth = previousClip.z / max(previousClip.w, 0.00001)
+        let previousDepthFootprint = min(fwidth(previousDepth), 1.0)
         let albedo = sample(albedoMap, vUv) * baseColor
         let opacitySample = sample(opacityMap, vUv)
         let dedicatedOpacity = mix(opacitySample.x, opacitySample.w,
@@ -140,17 +148,17 @@ material MotionVectorCutout {
             let unjitteredCurrentUv = currentUv - motionJitter.xy
             let unjitteredPreviousUv = previousUv - motionJitter.zw
             velocity = unjitteredCurrentUv - unjitteredPreviousUv
-            valid = 1.0
+            valid = 1.0 + previousDepthFootprint
         }
-        return vec4(velocity, previousClip.z / max(previousClip.w, 0.00001), valid)
+        return vec4(velocity, previousDepth, valid)
     }
 }
 )";
 
 constexpr const char* kMotionVectorCacheKey =
-    "motion_vector_phoskia_rgba16f_unjittered_depth_v5";
+    "motion_vector_phoskia_rgba16f_depth_footprint_v6";
 constexpr const char* kMotionVectorCutoutCacheKey =
-    "motion_vector_phoskia_rgba16f_unjittered_depth_cutout_v5";
+    "motion_vector_phoskia_rgba16f_depth_footprint_cutout_v6";
 
 struct CommitKey final {
     uint64_t objectId = 0;

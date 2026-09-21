@@ -145,19 +145,32 @@ material TemporalAA {
         // disocclusions and prevents sky/geometry samples crossing edges.
         let currentHistoryDepth = -1.0
         let expectedPreviousDepth = -1.0
+        let historyDepthTolerance = taaDepthParams.x
         if (coverage > 0.5) {
             let world = sample(worldPosition, surfaceUv).xyz
             let currentClip = currentViewProjection * vec4(world, 1.0)
             validHistory = validHistory && currentClip.w > 0.00001
-            currentHistoryDepth = currentClip.z / max(currentClip.w, 0.00001)
+            // Use raster depth, not depth reconstructed from quantized
+            // RGBA16F world position (especially sensitive near the camera).
+            currentHistoryDepth = selectedDepth
             // Missing velocity is not zero velocity. In particular 2D and
             // failed/new draws must never consume an unrelated surface's history.
             validHistory = validHistory && taaJitter.w > 0.5
             if (taaJitter.w > 0.5) {
                 let motion = sample(motionVectors, surfaceUv)
                 validHistory = validHistory && motion.w > 0.5
+                // Extreme projected gradients are not a license to accept
+                // the full depth range: fail closed at a near-plane crossing.
+                validHistory = validHistory && motion.w < 1.05
                 previousUv = outputUv - motion.xy
                 expectedPreviousDepth = motion.z
+                validHistory = validHistory && !(expectedPreviousDepth < 0.0 || expectedPreviousDepth > 1.0)
+                // Nearest-surface dilation can pick neighboring points of
+                // the SAME sloped primitive on successive jitter phases.
+                // w stores valid + that primitive's previous-depth footprint.
+                // Flat surfaces keep the original tolerance; never estimate
+                // slope across a foreground/background depth-texture edge.
+                historyDepthTolerance = taaDepthParams.x + max(motion.w - 1.0, 0.0) * 2.0
             }
         } else {
             validHistory = validHistory && taaJitter.z > 0.5
@@ -182,10 +195,10 @@ material TemporalAA {
         let w2 = (1.0 - historyFraction.x) * historyFraction.y
         let w3 = historyFraction.x * historyFraction.y
         if (coverage > 0.5) {
-            if (h0.w < 0.0 || abs(h0.w - expectedPreviousDepth) > taaDepthParams.x) { w0 = 0.0 }
-            if (h1.w < 0.0 || abs(h1.w - expectedPreviousDepth) > taaDepthParams.x) { w1 = 0.0 }
-            if (h2.w < 0.0 || abs(h2.w - expectedPreviousDepth) > taaDepthParams.x) { w2 = 0.0 }
-            if (h3.w < 0.0 || abs(h3.w - expectedPreviousDepth) > taaDepthParams.x) { w3 = 0.0 }
+            if (h0.w < 0.0 || abs(h0.w - expectedPreviousDepth) > historyDepthTolerance) { w0 = 0.0 }
+            if (h1.w < 0.0 || abs(h1.w - expectedPreviousDepth) > historyDepthTolerance) { w1 = 0.0 }
+            if (h2.w < 0.0 || abs(h2.w - expectedPreviousDepth) > historyDepthTolerance) { w2 = 0.0 }
+            if (h3.w < 0.0 || abs(h3.w - expectedPreviousDepth) > historyDepthTolerance) { w3 = 0.0 }
         } else {
             if (h0.w >= 0.0) { w0 = 0.0 }
             if (h1.w >= 0.0) { w1 = 0.0 }
@@ -266,7 +279,7 @@ material TemporalAA {
 )";
 
 constexpr const char* kTaaCacheKey =
-    "taa_phoskia_dilated_surface_history_v8";
+    "taa_phoskia_surface_footprint_history_v9";
 
 float halton(uint32_t index, uint32_t base) noexcept
 {
@@ -609,12 +622,14 @@ bool TAAPass::ensureHistory(BGFXAdapter& adapter,
         return true;
     }
     destroyHistory(adapter);
+    // RGB bilinear reconstruction is explicit and depth-gated in the shader.
+    // Keep raw taps point sampled; alpha must never blend sky and geometry.
     _history[0] = adapter.createFrameBuffer(
         width, height, bgfx::TextureFormat::RGBA16F,
-        /*withDepth=*/false, /*pointSampled=*/false);
+        /*withDepth=*/false, /*pointSampled=*/true);
     _history[1] = adapter.createFrameBuffer(
         width, height, bgfx::TextureFormat::RGBA16F,
-        /*withDepth=*/false, /*pointSampled=*/false);
+        /*withDepth=*/false, /*pointSampled=*/true);
     if (!BGFXAdapter::isValid(_history[0])
         || !BGFXAdapter::isValid(_history[1])) {
         destroyHistory(adapter);

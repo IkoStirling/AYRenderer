@@ -342,7 +342,9 @@ TEST_CASE(taa_shader_contract_has_reprojection_neighborhood_clamp_and_motion_fee
     CHECK(source.find("h3.w >= 0.0") != std::string::npos);
     CHECK(source.find("reactiveMismatch") != std::string::npos);
     CHECK(std::string(ayt::render::detail::kTaaCacheKeyCStr)
-          == "taa_phoskia_dilated_surface_history_v8");
+          == "taa_phoskia_surface_footprint_history_v9");
+    CHECK(source.find("currentHistoryDepth = selectedDepth") != std::string::npos);
+    CHECK(source.find("historyDepthTolerance = taaDepthParams.x + max(motion.w - 1.0, 0.0) * 2.0") != std::string::npos);
 }
 
 TEST_CASE(taa_failed_resolve_discards_motion_snapshots)
