@@ -220,4 +220,34 @@ TEST_CASE(frame_output_invalidation_covers_scene_color_and_bloom)
     }
 }
 
+TEST_CASE(diagnostic_summary_counts_declared_valid_and_produced_resources)
+{
+    RenderResourceBlackboard blackboard;
+    blackboard.beginFrame();
+    blackboard.publishProduced(
+        BlackboardResourceId::MotionVectors,
+        BlackboardResourceLifetime::External,
+        bgfx::FrameBufferHandle{81}, bgfx::TextureHandle{82},
+        1280, 720, 3);
+    blackboard.publish(
+        BlackboardResourceId::TaaHistoryRead,
+        BlackboardResourceLifetime::PersistentHistory,
+        bgfx::FrameBufferHandle{83}, bgfx::TextureHandle{84},
+        1280, 720, 4,
+        true);
+    blackboard.publish(
+        BlackboardResourceId::BloomBright,
+        BlackboardResourceLifetime::Transient,
+        BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE, 640, 360, 0, false,
+        ResourceInvalidationReason::PreparationFailed);
+
+    const BlackboardDiagnosticStats stats = blackboard.diagnosticStats();
+    CHECK(stats.declaredResources == 3u);
+    CHECK(stats.availableResources == 2u);
+    CHECK(stats.validResources == 2u);
+    CHECK(stats.producedResources == 1u);
+    CHECK(stats.invalidResources == 1u);
+    CHECK(stats.persistentHistoryResources == 1u);
+}
+
 TEST_SUITE_END

@@ -106,6 +106,32 @@ struct RenderPassFrameStats {
     float       gpuTimeMs = 0.0f;
 };
 
+// Public, backend-neutral summaries for renderer architecture diagnostics.
+// These are snapshots only; no GPU handles or internal FrameGraph types leak
+// through the public API.
+struct RenderGraphFrameStats {
+    bool     compiled = false;
+    bool     compileSucceeded = false;
+    uint16_t compileErrors = 0;
+    uint16_t declaredPasses = 0;
+    uint16_t livePasses = 0;
+    uint16_t logicalResources = 0;
+    uint16_t transientTargets = 0;
+    uint16_t peakTransientTargets = 0;
+    uint16_t retainedTargets = 0;
+    uint16_t idleResources = 0;
+    uint16_t releasedTargets = 0;
+};
+
+struct RenderResourceFrameStats {
+    uint16_t declaredResources = 0;
+    uint16_t availableResources = 0;
+    uint16_t validResources = 0;
+    uint16_t producedResources = 0;
+    uint16_t invalidResources = 0;
+    uint16_t persistentHistoryResources = 0;
+};
+
 struct RenderFrameStats {
     // Wall-clock cadence between consecutive beginFrame calls. Unlike the
     // old render-only timer this includes simulation, event polling, VSync,
@@ -132,6 +158,11 @@ struct RenderFrameStats {
     uint32_t gpuFrameNumber = 0;
 
     std::vector<RenderPassFrameStats> passes;
+
+    // Append-only architecture diagnostics. Existing timing/counter field
+    // order above remains stable for source and aggregate compatibility.
+    RenderGraphFrameStats graph;
+    RenderResourceFrameStats resources;
 };
 
 struct ClearDesc {

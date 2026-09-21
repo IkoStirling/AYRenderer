@@ -1,5 +1,14 @@
 # AYRenderer Design
 
+## 2026-09-21 — R6-6 第一刀：运行时架构诊断
+
+- 公开 `RenderFrameStats` 以 append-only 方式增加 `graph` 与 `resources` 两组 backend-neutral 摘要；不暴露 bgfx handle 或内部 FrameGraph 类型。现有每 Pass CPU/GPU 时间、draw count 和既有字段顺序保持不变。
+- FrameGraph 每帧报告 compile 成败/错误数、declared/live pass、logical resource、当前与进程内峰值 transient target，以及 retained/idle/released target。峰值由 `DebugOverlay::resetStats()` 显式归零，便于一段 capture 会话单独测量。
+- 资源黑板每帧报告 declared、available、content-valid、当帧 produced、invalid 与 persistent-history 数量；统计在所有 Pass 和 TAA `finishFrame()` 完成后采样，因此反映最终生产状态，不参与渲染门禁。
+- 现有 bgfx debug text overlay 增加 `FG` 与 `BB` 两行，compile failure 使用错误色显示。关闭 overlay 时仍可通过 `Renderer::getFrameStats()` 获取同一摘要，不增加 draw call 或 GPU target。
+- 定向测试覆盖黑板计数、峰值保持/重置和 Renderer 实际填充；全量 `AYRenderer_Test` 4677/4677，`AYEditorShell_Demo` 链接通过。
+- 下一刀补齐 MotionVector/SSAO/Shadow atlas 独立调试视图并整理 D3D11 capture 清单；本刀没有把单元测试或截图等同于真实 GPU capture 验收。
+
 ## 2026-09-21 — R6-4 资源黑板第三刀（logical output 迁移完成）
 
 - LightingColor 与 SkyboxColor 作为 pass-owned `External` 输出发布，带尺寸与 generation。SceneColor routing、Transparent 与 Lighting backdrop 的生产路径不再用具体 Pass 的 `producedThisFrame()` 判断纹理新鲜度。

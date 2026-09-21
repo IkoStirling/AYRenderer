@@ -1856,6 +1856,36 @@ void Renderer::render(const RenderScene& scene)
             &_impl->resourceBlackboard);
     }
 
+    // R6-6 diagnostics: publish one backend-neutral architecture snapshot
+    // after every producer has had a chance to update the blackboard. This is
+    // observational only and does not participate in graph execution.
+    const detail::FgCompileStats& fgStats = fg.stats();
+    const detail::FgRetentionStats retention = fg.retentionStats();
+    RenderGraphFrameStats graphStats{};
+    graphStats.compiled = true;
+    graphStats.compileSucceeded = graphPlan.compileSucceeded;
+    graphStats.compileErrors = static_cast<uint16_t>(std::min<size_t>(
+        fg.compileErrors().size(), UINT16_MAX));
+    graphStats.declaredPasses = fgStats.declaredPasses;
+    graphStats.livePasses = fgStats.livePasses;
+    graphStats.logicalResources = fgStats.logicalResources;
+    graphStats.transientTargets = fgStats.physicalTargets;
+    graphStats.retainedTargets = retention.leasedTargets;
+    graphStats.idleResources = retention.idleResources;
+    graphStats.releasedTargets = retention.releasedTargets;
+
+    const detail::BlackboardDiagnosticStats blackboardStats =
+        _impl->resourceBlackboard.diagnosticStats();
+    RenderResourceFrameStats resourceStats{};
+    resourceStats.declaredResources = blackboardStats.declaredResources;
+    resourceStats.availableResources = blackboardStats.availableResources;
+    resourceStats.validResources = blackboardStats.validResources;
+    resourceStats.producedResources = blackboardStats.producedResources;
+    resourceStats.invalidResources = blackboardStats.invalidResources;
+    resourceStats.persistentHistoryResources =
+        blackboardStats.persistentHistoryResources;
+    _impl->debugOverlay.setArchitectureStats(graphStats, resourceStats);
+
     // §5.5 cleanup (2026-07-22) — the F1-diagnostic lastFrameShadowFbo
     // cache update is removed. Consumers that need the current shadow
     // FBO call `ctx.shadowPass->shadowFbo()` directly; we no longer

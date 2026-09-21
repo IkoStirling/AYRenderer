@@ -171,6 +171,11 @@ TEST_CASE(noop_backend_graph_culls_gpu_postprocess_but_keeps_cpu_visible_passes)
     // execute() only to return zero.
     CHECK(!dispatched("PostProcess"));
     CHECK(dispatched("UI"));
+    CHECK(stats.graph.compiled);
+    CHECK(stats.graph.compileSucceeded);
+    CHECK(stats.graph.declaredPasses > 0u);
+    CHECK(stats.graph.livePasses > 0u);
+    CHECK(stats.resources.declaredResources > 0u);
 
     renderer.shutdown();
 }
@@ -212,6 +217,44 @@ TEST_CASE(nonzero_gpu_timings_survive_cpu_merge_and_map_to_current_passes)
     overlay.updateFrameStats(0, 0, cpu, nullptr);
     CHECK(overlay.stats().gpuFrameTimeMs == 0.0f);
     for (const auto& pass : overlay.stats().passes) CHECK(pass.gpuTimeMs == 0.0f);
+}
+
+TEST_CASE(architecture_diagnostics_track_graph_resources_and_peak_targets)
+{
+    ayt::render::detail::DebugOverlay overlay;
+    overlay.onBeginFrame();
+
+    ayt::render::RenderGraphFrameStats graph{};
+    graph.compiled = true;
+    graph.compileSucceeded = true;
+    graph.declaredPasses = 9;
+    graph.livePasses = 7;
+    graph.logicalResources = 8;
+    graph.transientTargets = 4;
+    graph.retainedTargets = 3;
+    ayt::render::RenderResourceFrameStats resources{};
+    resources.declaredResources = 12;
+    resources.availableResources = 11;
+    resources.validResources = 9;
+    resources.producedResources = 7;
+    resources.invalidResources = 3;
+    resources.persistentHistoryResources = 2;
+    overlay.setArchitectureStats(graph, resources);
+
+    CHECK(overlay.stats().graph.compiled);
+    CHECK(overlay.stats().graph.compileSucceeded);
+    CHECK(overlay.stats().graph.livePasses == 7u);
+    CHECK(overlay.stats().graph.peakTransientTargets == 4u);
+    CHECK(overlay.stats().resources.producedResources == 7u);
+
+    overlay.onBeginFrame();
+    graph.transientTargets = 2;
+    overlay.setArchitectureStats(graph, resources);
+    CHECK(overlay.stats().graph.transientTargets == 2u);
+    CHECK(overlay.stats().graph.peakTransientTargets == 4u);
+
+    overlay.resetStats();
+    CHECK(overlay.stats().graph.peakTransientTargets == 0u);
 }
 
 TEST_SUITE_END

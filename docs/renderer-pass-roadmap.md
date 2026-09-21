@@ -7,7 +7,7 @@
 
 | 阶段 | 文档 | 状态 |
 |------|------|------|
-| **R6（正在做）** | [`render-architecture-r6.md`](render-architecture-r6.md) | **唯一开工清单** — R6-1/R6-2/R6-3/R6-4 与 R6-5 第一阶段已完成，下一阶段 R6-6 |
+| **R6（正在做）** | [`render-architecture-r6.md`](render-architecture-r6.md) | **唯一开工清单** — R6-1/R6-2/R6-3/R6-4 与 R6-5 第一阶段已完成；R6-6 第一刀已完成 |
 | **历史 cutsheet** | [`short-term-plan.md`](short-term-plan.md)、[`frame-graph-mvp.md`](frame-graph-mvp.md) | Bloom/Haze/SSAO/FrameGraph MVP 已落地，仅供追溯 |
 | **Deferred 验收锁** | [`deferred-acceptance.md`](deferred-acceptance.md) | 已钉；回归先查此表 |
 
@@ -51,7 +51,7 @@ Deferred: Shadow → Skybox → GBuffer → MotionVector(on demand) → SSAO
 2. **R6-2 图计划外移（已完成）** — 后处理图声明已提取为不持有具体 Pass 的 `PostProcessGraphPlan`。
 3. **R6-4 资源黑板与历史资源（已完成）** — MotionVector/TAA history、GBuffer/SSAO/DepthHaze、Lighting/Skybox/Bloom 的可消费纹理输出已集中登记；具体 Pass 指针仅保留非纹理元数据和单测兼容用途。
 4. **R6-5 DrawListBuilder（第一阶段完成）** — 几何 Pass 已共享每帧分类与稳定排序；可靠 bounds/frustum cull 和 instancing 留在后续阶段。
-5. **R6-6 诊断与 D3D11 capture（下一阶段）** — 完成后再恢复新画质 Pass。
+5. **R6-6 诊断与 D3D11 capture（进行中）** — 第一刀已接入 graph/blackboard/RT 统计和 overlay；下一刀补调试纹理入口，再执行 D3D11 capture。完成后恢复新画质 Pass。
 
 ## 纪律（抄自 Shadow lessons）
 

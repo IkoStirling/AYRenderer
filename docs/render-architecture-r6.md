@@ -1,7 +1,7 @@
 # AYRenderer R6 架构收口计划
 
 > 日期：2026-09-09
-> 状态：R6-0、R6-1、R6-2、R6-3、R6-4 已落地；R6-5 第一阶段已落地；下一阶段 R6-6。
+> 状态：R6-0、R6-1、R6-2、R6-3、R6-4 已落地；R6-5 第一阶段已落地；R6-6 第一刀已落地。
 > 范围：在不重写 bgfx/RHI、不改变 Forward/Deferred 画面顺序的前提下，收口 Pass 描述、资源依赖、诊断和场景提交。
 
 ## 1. 当前真实基线
@@ -124,12 +124,21 @@ R6-3c 验证：FrameGraph 可裁剪 slot 不进入 `execute()`；禁用、正常
 
 验收：画面与 draw 顺序不变；CPU pass 时间下降；透明排序和 MotionVector stable id 不回归。
 
-### R6-6：诊断与真 GPU 门禁
+### R6-6：诊断与真 GPU 门禁（进行中）
 
 - 调试视图：MotionVector、SSAO、TAA history/resolve、Shadow atlas。
 - 每 Pass CPU/GPU 时间、transient RT 数量/峰值和 graph compile 摘要。
 - D3D11 capture 覆盖 MRT、阴影、Bloom、Haze、SSAO、TAA、透明和 resize。
 - D3D12 本阶段最低要求是启动/初始化错误可报告且不闪退；完整画面对齐可独立排期。
+
+第一刀完成项（2026-09-21）：
+
+- 保留既有每 Pass CPU/GPU 时间，在公开 `RenderFrameStats` 尾部追加 backend-neutral 的 FrameGraph 与资源黑板摘要。
+- FrameGraph 摘要覆盖 compile 成败/错误数、declared/live pass、logical resource、当前/峰值 transient target 和 retention 状态；资源黑板摘要覆盖 declared/available/valid/produced/invalid/history 数量。
+- bgfx debug text overlay 可直接显示 `FG` 与 `BB` 两行；overlay 关闭时宿主仍可通过 `getFrameStats()` 读取，不增加 GPU 工作。
+- 定向统计回归与 Renderer 集成验证通过；全量 `AYRenderer_Test` 为 4677/4677，`AYEditorShell_Demo` 链接通过。
+
+下一刀：补齐 MotionVector、SSAO、Shadow atlas 的独立纹理调试入口，复用现有 TAA diagnostics；随后按固定清单执行 D3D11 capture。第一刀只建立可观察性，不宣称真 GPU 门禁已关闭。
 
 ## 4. 新画质能力的恢复顺序
 

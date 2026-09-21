@@ -267,6 +267,35 @@ bool RenderResourceBlackboard::producedThisFrame(
         && entry->producedFrame == _frameNumber;
 }
 
+BlackboardDiagnosticStats
+RenderResourceBlackboard::diagnosticStats() const noexcept
+{
+    BlackboardDiagnosticStats stats{};
+    for (const BlackboardResourceEntry& entry : _entries) {
+        if (!entry.declared) {
+            continue;
+        }
+        ++stats.declaredResources;
+        if (entry.available) {
+            ++stats.availableResources;
+        }
+        if (entry.contentValid) {
+            ++stats.validResources;
+        } else {
+            ++stats.invalidResources;
+        }
+        if (entry.producedThisFrame
+            && entry.producedFrame == _frameNumber) {
+            ++stats.producedResources;
+        }
+        if (entry.lifetime ==
+            BlackboardResourceLifetime::PersistentHistory) {
+            ++stats.persistentHistoryResources;
+        }
+    }
+    return stats;
+}
+
 const char* blackboardResourceName(BlackboardResourceId id) noexcept
 {
     switch (id) {

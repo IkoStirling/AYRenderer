@@ -34,6 +34,9 @@ void DebugOverlay::setSuppressed(bool suppressed)
 
 void DebugOverlay::onBeginFrame()
 {
+    _stats.graph = {};
+    _stats.graph.peakTransientTargets = _peakTransientTargets;
+    _stats.resources = {};
     const auto now = std::chrono::steady_clock::now();
     if (_lastFrameStart.time_since_epoch().count() != 0) {
         const float cadenceMs = std::chrono::duration<float, std::milli>(
@@ -52,9 +55,21 @@ void DebugOverlay::resetStats()
     _frameTimes.fill(0.0f);
     _frameTimeCount = 0;
     _frameTimeCursor = 0;
+    _peakTransientTargets = 0;
     // §P5 M5 (2026-08-24) — clear the cached stats pointer on
     // reset so a stale pointer can't survive a frame boundary.
     _lastBgfxStats = nullptr;
+}
+
+void DebugOverlay::setArchitectureStats(
+    const RenderGraphFrameStats& graph,
+    const RenderResourceFrameStats& resources)
+{
+    _peakTransientTargets = std::max(
+        _peakTransientTargets, graph.transientTargets);
+    _stats.graph = graph;
+    _stats.graph.peakTransientTargets = _peakTransientTargets;
+    _stats.resources = resources;
 }
 
 void DebugOverlay::pushFrameCadence(float frameMs)
@@ -228,8 +243,30 @@ void DebugOverlay::onEndFrame(uint32_t drawCalls, uint32_t sceneItems,
                         drawCalls, _stats.backendDrawCalls,
                         _stats.backendBlitCalls, sceneItems, triPrims);
 
+    bgfx::dbgTextPrintf(col, row + 2,
+                        _stats.graph.compileSucceeded ? 0x0a : 0x0c,
+                        "FG %s pass %u/%u res %u RT %u peak %u lease %u err %u",
+                        _stats.graph.compiled
+                            ? (_stats.graph.compileSucceeded ? "OK" : "FAIL")
+                            : "N/A",
+                        _stats.graph.livePasses,
+                        _stats.graph.declaredPasses,
+                        _stats.graph.logicalResources,
+                        _stats.graph.transientTargets,
+                        _stats.graph.peakTransientTargets,
+                        _stats.graph.retainedTargets,
+                        _stats.graph.compileErrors);
+    bgfx::dbgTextPrintf(col, row + 3, 0x07,
+                        "BB declared %u available %u valid %u produced %u invalid %u hist %u",
+                        _stats.resources.declaredResources,
+                        _stats.resources.availableResources,
+                        _stats.resources.validResources,
+                        _stats.resources.producedResources,
+                        _stats.resources.invalidResources,
+                        _stats.resources.persistentHistoryResources);
+
     const uint16_t maxRows = static_cast<uint16_t>(height / kCellH);
-    uint16_t passRow = static_cast<uint16_t>(row + 2);
+    uint16_t passRow = static_cast<uint16_t>(row + 4);
     for (const auto& pass : _stats.passes) {
         if (passRow >= maxRows) break;
         bgfx::dbgTextPrintf(col, passRow++, 0x07, "%-14s dc=%3u cpu=%5.2f gpu=%5.2f",

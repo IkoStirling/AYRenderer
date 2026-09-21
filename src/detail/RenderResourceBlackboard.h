@@ -82,6 +82,15 @@ struct BlackboardGBufferView final {
     uint32_t generation = 0;
 };
 
+struct BlackboardDiagnosticStats final {
+    uint16_t declaredResources = 0;
+    uint16_t availableResources = 0;
+    uint16_t validResources = 0;
+    uint16_t producedResources = 0;
+    uint16_t invalidResources = 0;
+    uint16_t persistentHistoryResources = 0;
+};
+
 // Read-mostly per-renderer registry. It does not own GPU handles in R6-4;
 // pass/FrameGraph owners publish borrowed handles and remain responsible for
 // destruction. The registry is the single source for temporal validity,
@@ -133,6 +142,7 @@ public:
         BlackboardResourceId id) const noexcept;
     bool resolveGBuffer(BlackboardGBufferView& view) const noexcept;
     bool producedThisFrame(BlackboardResourceId id) const noexcept;
+    BlackboardDiagnosticStats diagnosticStats() const noexcept;
     uint64_t frameNumber() const noexcept { return _frameNumber; }
 
 private:

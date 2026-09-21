@@ -32,6 +32,8 @@ public:
     void updateFrameStats(uint32_t drawCalls, uint32_t sceneItems,
                           const std::vector<RenderPassFrameStats>& passStats,
                           const bgfx::Stats* gpuStats);
+    void setArchitectureStats(const RenderGraphFrameStats& graph,
+                              const RenderResourceFrameStats& resources);
 
     const RenderFrameStats& stats() const noexcept { return _stats; }
 
@@ -48,6 +50,7 @@ private:
     std::array<float, kFrameWindow> _frameTimes{};
     size_t _frameTimeCount = 0;
     size_t _frameTimeCursor = 0;
+    uint16_t _peakTransientTargets = 0;
     // §P5 M5 (2026-08-24) — cached bgfx::Stats pointer set by
     // updateFrameStats() (called at the start of onEndFrame). Used by
     // onEndFrame() to read triPrims without a second
