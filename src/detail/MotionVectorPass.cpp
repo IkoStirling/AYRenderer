@@ -35,7 +35,8 @@ material MotionVector {
     uniform mat4 previousBones[128]
     uniform mat4 previousWorld
     uniform mat4 previousViewProjection
-    // x = skinned draw, y = previous object/frame history is valid.
+    // x = skinned draw, y = previous object/frame history is valid,
+    // z = transparent/reactive surface.
     uniform vec4 motionParams
     uniform vec4 motionJitter
     vertex {
@@ -135,7 +136,9 @@ material MotionVectorCutout {
                                  step(0.5, opacitySource.x))
         let surfaceAlpha = albedo.w * sampledOpacity
                          * clamp(opacity.x, 0.0, 1.0)
-        if (surfaceAlpha < alphaCutoff.x) {
+        let reactive = step(0.5, motionParams.z)
+        let coverageThreshold = mix(alphaCutoff.x, 0.001, reactive)
+        if (surfaceAlpha < coverageThreshold) {
             discard
         }
         let currentNdc = currentClip.xy / max(abs(currentClip.w), 0.00001)
@@ -152,15 +155,18 @@ material MotionVectorCutout {
             velocity = unjitteredCurrentUv - unjitteredPreviousUv
             valid = 1.0 + previousDepthFootprint
         }
-        return vec4(velocity, previousDepth, valid)
+        // Reactive is packed as a +2 flag. The lower [0,2) range retains the
+        // existing valid + previous-depth-footprint contract, including zero
+        // for a new object whose velocity must not be consumed.
+        return vec4(velocity, previousDepth, valid + reactive * 2.0)
     }
 }
 )";
 
 constexpr const char* kMotionVectorCacheKey =
-    "motion_vector_phoskia_rgba16f_depth_footprint_v6";
+    "motion_vector_phoskia_rgba16f_depth_footprint_v7_reactive";
 constexpr const char* kMotionVectorCutoutCacheKey =
-    "motion_vector_phoskia_rgba16f_depth_footprint_cutout_v6";
+    "motion_vector_phoskia_rgba16f_depth_footprint_cutout_v7_reactive";
 
 struct CommitKey final {
     uint64_t objectId = 0;
@@ -541,7 +547,29 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
     FrameDrawLists fallbackDrawLists;
     const FrameDrawLists& drawLists =
         resolveFrameDrawLists(ctx, fallbackDrawLists);
-    for (const DrawItem* itemPtr : drawLists.opaque3D) {
+    struct MotionItem final {
+        const DrawItem* item = nullptr;
+        bool reactive = false;
+    };
+    std::vector<MotionItem> motionItems;
+    motionItems.reserve(drawLists.opaque3D.size()
+                        + drawLists.transparent3D.size());
+    for (const DrawItem* item : drawLists.opaque3D) {
+        motionItems.push_back({item, false});
+    }
+    // Transparent surfaces are replayed after opaque velocity, in the same
+    // stable back-to-front order as color. With depth writes disabled the
+    // nearest visible transparent layer wins while opaque foreground still
+    // rejects hidden transparent motion through borrowed GBuffer depth.
+    for (const SortedTransparentItem& sorted : drawLists.transparent3D) {
+        motionItems.push_back({sorted.item, true});
+    }
+    uint32_t reactiveDrawCount = 0u;
+    for (const MotionItem& motionItem : motionItems) {
+        if (motionItem.item == nullptr) {
+            continue;
+        }
+        const DrawItem* itemPtr = motionItem.item;
         const DrawItem& item = *itemPtr;
         const auto meshIt = ctx.meshes.find(item.mesh.id);
         const auto materialIt = ctx.materials.find(item.material.id);
@@ -560,7 +588,8 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
             continue;
         }
 
-        ayt::shader::ShaderResource& program = material.alphaCutout
+        const bool alphaAware = material.alphaCutout || motionItem.reactive;
+        ayt::shader::ShaderResource& program = alphaAware
             ? _cutoutProgram
             : _opaqueProgram;
         const uint32_t currentBoneCount = completeSkeletonCount(item);
@@ -603,7 +632,7 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
         const float motionParams[4] = {
             currentSkinned ? 1.0f : 0.0f,
             historyValid ? 1.0f : 0.0f,
-            0.0f, 0.0f,
+            motionItem.reactive ? 1.0f : 0.0f, 0.0f,
         };
         program.setUniform(program.getUniformBinding("motionParams"),
                            motionParams, sizeof(motionParams));
@@ -614,7 +643,7 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
         program.setUniform(program.getUniformBinding("motionJitter"),
                            motionJitter, sizeof(motionJitter));
 
-        if (material.alphaCutout) {
+        if (alphaAware) {
             const float baseColor[4] = {
                 material.hasColorOverride ? material.colorOverride.x : 1.0f,
                 material.hasColorOverride ? material.colorOverride.y : 1.0f,
@@ -624,7 +653,8 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
             program.setUniform(program.getUniformBinding("baseColor"),
                                baseColor, sizeof(baseColor));
             const float alphaCutoff[4] = {
-                material.alphaCutoff, 0.0f, 0.0f, 0.0f
+                motionItem.reactive ? 0.001f : material.alphaCutoff,
+                0.0f, 0.0f, 0.0f
             };
             program.setUniform(program.getUniformBinding("alphaCutoff"),
                                alphaCutoff, sizeof(alphaCutoff));
@@ -657,6 +687,7 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
         draw.state = 0;
         program.submit(draw);
         ++drawCount;
+        reactiveDrawCount += motionItem.reactive ? 1u : 0u;
 
         if (item.motionObjectId != 0u) {
             commits[CommitKey{item.motionObjectId, item.mesh.id}] = &item;
@@ -693,11 +724,12 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
     if (!_firstDispatchLogged) {
         std::fprintf(stderr,
                      "[MotionVectorPass] first dispatch view=%u size=%ux%u "
-                     "format=RGBA16F draws=%u historyKeys=%zu\n",
+                     "format=RGBA16F draws=%u reactiveDraws=%u historyKeys=%zu\n",
                      static_cast<unsigned>(viewId),
                      static_cast<unsigned>(_allocatedWidth),
                      static_cast<unsigned>(_allocatedHeight),
-                     static_cast<unsigned>(drawCount), _history.size());
+                     static_cast<unsigned>(drawCount),
+                     static_cast<unsigned>(reactiveDrawCount), _history.size());
         _firstDispatchLogged = true;
     }
     return drawCount;

@@ -39,7 +39,7 @@ Deferred: Shadow → Skybox → GBuffer → MotionVector(on demand) → SSAO
 | **Shadow** | 可用，真 GPU 门禁未关 | 八灯 atlas；Point omni 与 Spot 透视锥体仍是能力项 |
 | **Skybox** | Deferred 可用 | equirect + 独立 IBL cube |
 | **GBuffer / Lighting** | Deferred 可用 | 四 MRT + HDR Lighting；真实 capture/带宽门禁未关 |
-| **MotionVector / TAA** | Deferred 可用 | opaque 刚体/蒙皮 velocity + persistent history；透明 reactive mask 未做 |
+| **MotionVector / TAA** | Deferred 可用 | opaque/cutout/transparent 刚体与蒙皮 velocity、3×3 有效速度 dilation、透明 reactive feedback + persistent history |
 | **SSAO / Haze / Bloom** | 可用 | FrameGraph logical resource + current-frame production latch |
 | **Transparent / CameraOverlay2D** | 可用 | 3D 透明稳定排序；2D 使用独立正交相机并在 3D 后合成 |
 | **PostProcess / AA / ColorGrading / Present** | 可用 | 唯一 backbuffer 边界；TAA/FXAA/SMAA 互斥 |

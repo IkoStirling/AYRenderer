@@ -78,10 +78,14 @@ material GBufferDebug {
         let materialView = vec4(a.a, n.a, materialAo, 1.0)
         let modelView = vec4(modelNorm, 1.0 - modelNorm, 0.25, 1.0)
         let depthView = vec4(1.0 - d, 1.0 - d, 1.0 - d, 1.0)
-        let motionValid = step(0.5, x.a)
+        let motionReactive = step(1.999, x.a)
+        let motionCode = x.a - motionReactive * 2.0
+        let motionValid = step(0.5, motionCode)
         let motionX = max(0.0, min(1.0, x.x * 16.0 + 0.5))
         let motionY = max(0.0, min(1.0, x.y * 16.0 + 0.5))
-        let motionView = vec4(motionX, motionY, motionValid, 1.0)
+        let motionView = vec4(mix(motionX, 1.0, motionReactive),
+                              mix(motionY, 0.25, motionReactive),
+                              motionValid, 1.0)
         let ssaoView = vec4(x.x, x.x, x.x, 1.0)
         let historyView = vec4(x.rgb, 1.0)
         let shadowView = vec4(x.x, x.x, x.x, 1.0)
@@ -96,7 +100,7 @@ material GBufferDebug {
 )";
 
 constexpr const char* kGBufferDebugCacheKey =
-    "gbufferdebug_v4_r6_diagnostic_textures";
+    "gbufferdebug_v5_reactive_motion";
 
 } // namespace
 

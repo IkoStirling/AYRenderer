@@ -91,53 +91,95 @@ material TemporalAA {
         neighborhoodMin = neighborhoodMin - expansion
         neighborhoodMax = neighborhoodMax + expansion
 
-        // Current RGB represents a footprint, not the center surface alone.
-        // Dilate the nearest surface over 3x3 (standard non-reversed depth).
-        // Read ALL temporal attributes from the chosen point, never average
-        // foreground/background velocity or classify from a different point.
+        // Velocity dilation selects the nearest VALID temporal surface over
+        // 3x3 (standard non-reversed depth). Never let an invalid nearer texel
+        // hide a usable neighbor, and never average foreground/background
+        // velocity. Reactive is intentionally read at the exact current pixel
+        // so transparency coverage is not expanded into opaque neighbors.
+        let centerMotion = sample(motionVectors, uv)
+        let centerReactive = step(1.999, centerMotion.w)
+        let centerMotionCode = centerMotion.w - centerReactive * 2.0
         let surfaceUv = uv
-        let selectedDepth = sample(sceneDepth, uv).x
+        let surfaceMotion = centerMotion
+        let selectedDepth = 2.0
+        let selectedMotionValid = step(0.5, centerMotionCode)
+        if (selectedMotionValid > 0.5) {
+            selectedDepth = sample(sceneDepth, uv).x
+        }
+        let candidateMotion0 = sample(motionVectors, uv0)
+        let candidateCode0 = candidateMotion0.w - step(1.999, candidateMotion0.w) * 2.0
         let candidateDepth0 = sample(sceneDepth, uv0).x
-        if (candidateDepth0 < selectedDepth) {
+        if (candidateCode0 > 0.5 && candidateDepth0 < selectedDepth) {
             selectedDepth = candidateDepth0
             surfaceUv = uv0
+            surfaceMotion = candidateMotion0
+            selectedMotionValid = 1.0
         }
+        let candidateMotion1 = sample(motionVectors, uv1)
+        let candidateCode1 = candidateMotion1.w - step(1.999, candidateMotion1.w) * 2.0
         let candidateDepth1 = sample(sceneDepth, uv1).x
-        if (candidateDepth1 < selectedDepth) {
+        if (candidateCode1 > 0.5 && candidateDepth1 < selectedDepth) {
             selectedDepth = candidateDepth1
             surfaceUv = uv1
+            surfaceMotion = candidateMotion1
+            selectedMotionValid = 1.0
         }
+        let candidateMotion2 = sample(motionVectors, uv2)
+        let candidateCode2 = candidateMotion2.w - step(1.999, candidateMotion2.w) * 2.0
         let candidateDepth2 = sample(sceneDepth, uv2).x
-        if (candidateDepth2 < selectedDepth) {
+        if (candidateCode2 > 0.5 && candidateDepth2 < selectedDepth) {
             selectedDepth = candidateDepth2
             surfaceUv = uv2
+            surfaceMotion = candidateMotion2
+            selectedMotionValid = 1.0
         }
+        let candidateMotion3 = sample(motionVectors, uv3)
+        let candidateCode3 = candidateMotion3.w - step(1.999, candidateMotion3.w) * 2.0
         let candidateDepth3 = sample(sceneDepth, uv3).x
-        if (candidateDepth3 < selectedDepth) {
+        if (candidateCode3 > 0.5 && candidateDepth3 < selectedDepth) {
             selectedDepth = candidateDepth3
             surfaceUv = uv3
+            surfaceMotion = candidateMotion3
+            selectedMotionValid = 1.0
         }
+        let candidateMotion5 = sample(motionVectors, uv5)
+        let candidateCode5 = candidateMotion5.w - step(1.999, candidateMotion5.w) * 2.0
         let candidateDepth5 = sample(sceneDepth, uv5).x
-        if (candidateDepth5 < selectedDepth) {
+        if (candidateCode5 > 0.5 && candidateDepth5 < selectedDepth) {
             selectedDepth = candidateDepth5
             surfaceUv = uv5
+            surfaceMotion = candidateMotion5
+            selectedMotionValid = 1.0
         }
+        let candidateMotion6 = sample(motionVectors, uv6)
+        let candidateCode6 = candidateMotion6.w - step(1.999, candidateMotion6.w) * 2.0
         let candidateDepth6 = sample(sceneDepth, uv6).x
-        if (candidateDepth6 < selectedDepth) {
+        if (candidateCode6 > 0.5 && candidateDepth6 < selectedDepth) {
             selectedDepth = candidateDepth6
             surfaceUv = uv6
+            surfaceMotion = candidateMotion6
+            selectedMotionValid = 1.0
         }
+        let candidateMotion7 = sample(motionVectors, uv7)
+        let candidateCode7 = candidateMotion7.w - step(1.999, candidateMotion7.w) * 2.0
         let candidateDepth7 = sample(sceneDepth, uv7).x
-        if (candidateDepth7 < selectedDepth) {
+        if (candidateCode7 > 0.5 && candidateDepth7 < selectedDepth) {
             selectedDepth = candidateDepth7
             surfaceUv = uv7
+            surfaceMotion = candidateMotion7
+            selectedMotionValid = 1.0
         }
+        let candidateMotion8 = sample(motionVectors, uv8)
+        let candidateCode8 = candidateMotion8.w - step(1.999, candidateMotion8.w) * 2.0
         let candidateDepth8 = sample(sceneDepth, uv8).x
-        if (candidateDepth8 < selectedDepth) {
+        if (candidateCode8 > 0.5 && candidateDepth8 < selectedDepth) {
             selectedDepth = candidateDepth8
             surfaceUv = uv8
+            surfaceMotion = candidateMotion8
+            selectedMotionValid = 1.0
         }
         let coverage = sample(geometryData, surfaceUv).w
+        let reactive = centerReactive
         let validHistory = taaParams.w > 0.5
         let previousUv = outputUv
         // History alpha is private to TAA. Geometry stores its projected
@@ -146,7 +188,13 @@ material TemporalAA {
         let currentHistoryDepth = -1.0
         let expectedPreviousDepth = -1.0
         let historyDepthTolerance = taaDepthParams.x
-        if (coverage > 0.5) {
+        if (reactive > 0.5) {
+            validHistory = validHistory && taaJitter.w > 0.5
+            validHistory = validHistory && centerMotionCode > 0.5
+            if (centerMotionCode > 0.5) {
+                previousUv = outputUv - centerMotion.xy
+            }
+        } else if (coverage > 0.5) {
             let world = sample(worldPosition, surfaceUv).xyz
             let currentClip = currentViewProjection * vec4(world, 1.0)
             validHistory = validHistory && currentClip.w > 0.00001
@@ -157,11 +205,14 @@ material TemporalAA {
             // failed/new draws must never consume an unrelated surface's history.
             validHistory = validHistory && taaJitter.w > 0.5
             if (taaJitter.w > 0.5) {
-                let motion = sample(motionVectors, surfaceUv)
-                validHistory = validHistory && motion.w > 0.5
+                let motion = surfaceMotion
+                let motionReactive = step(1.999, motion.w)
+                let motionCode = motion.w - motionReactive * 2.0
+                validHistory = validHistory && selectedMotionValid > 0.5
+                validHistory = validHistory && motionCode > 0.5
                 // Extreme projected gradients are not a license to accept
                 // the full depth range: fail closed at a near-plane crossing.
-                validHistory = validHistory && motion.w < 1.05
+                validHistory = validHistory && motionCode < 1.05
                 previousUv = outputUv - motion.xy
                 expectedPreviousDepth = motion.z
                 validHistory = validHistory && !(expectedPreviousDepth < 0.0 || expectedPreviousDepth > 1.0)
@@ -170,7 +221,7 @@ material TemporalAA {
                 // w stores valid + that primitive's previous-depth footprint.
                 // Flat surfaces keep the original tolerance; never estimate
                 // slope across a foreground/background depth-texture edge.
-                historyDepthTolerance = taaDepthParams.x + max(motion.w - 1.0, 0.0) * 2.0
+                historyDepthTolerance = taaDepthParams.x + max(motionCode - 1.0, 0.0) * 2.0
             }
         } else {
             validHistory = validHistory && taaJitter.z > 0.5
@@ -194,12 +245,12 @@ material TemporalAA {
         let w1 = historyFraction.x * (1.0 - historyFraction.y)
         let w2 = (1.0 - historyFraction.x) * historyFraction.y
         let w3 = historyFraction.x * historyFraction.y
-        if (coverage > 0.5) {
+        if (reactive < 0.5 && coverage > 0.5) {
             if (h0.w < 0.0 || abs(h0.w - expectedPreviousDepth) > historyDepthTolerance) { w0 = 0.0 }
             if (h1.w < 0.0 || abs(h1.w - expectedPreviousDepth) > historyDepthTolerance) { w1 = 0.0 }
             if (h2.w < 0.0 || abs(h2.w - expectedPreviousDepth) > historyDepthTolerance) { w2 = 0.0 }
             if (h3.w < 0.0 || abs(h3.w - expectedPreviousDepth) > historyDepthTolerance) { w3 = 0.0 }
-        } else {
+        } else if (reactive < 0.5) {
             if (h0.w >= 0.0) { w0 = 0.0 }
             if (h1.w >= 0.0) { w1 = 0.0 }
             if (h2.w >= 0.0) { w2 = 0.0 }
@@ -235,6 +286,11 @@ material TemporalAA {
             let motionPixels = (previousUv - outputUv) * taaMetrics.zw
             let motionAmount = clamp(length(motionPixels) / 16.0, 0.0, 1.0)
             let feedback = mix(taaParams.x, taaParams.y, motionAmount)
+            // Transparent pixels have valid object velocity but no matching
+            // depth layer in the opaque GBuffer. Keep only a small temporal
+            // contribution; this suppresses trails without turning moving
+            // glass/particles into hard one-frame aliasing.
+            feedback = feedback * mix(1.0, 0.15, reactive)
             let unexpectedMismatch = historyDifference.x
             let luminanceMismatch = clamp(unexpectedMismatch * 4.0, 0.0, 1.0)
             let chromaMismatch = clamp(length(historyDifference.yz) * 2.0,
@@ -284,7 +340,7 @@ material TemporalAA {
 )";
 
 constexpr const char* kTaaCacheKey =
-    "taa_phoskia_supported_history_v10";
+    "taa_phoskia_velocity_dilation_reactive_v11";
 
 float halton(uint32_t index, uint32_t base) noexcept
 {

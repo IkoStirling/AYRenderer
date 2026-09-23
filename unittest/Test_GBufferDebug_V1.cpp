@@ -165,7 +165,7 @@ TEST_CASE(v1_cache_key_extern_mirror_contains_marker) {
     // Live overlay literal contains "gbufferdebug" + version stamp.
     const std::string key(ayt::render::detail::kGBufferDebugCacheKeyCStr);
     CHECK(key.find("gbufferdebug") != std::string::npos);
-    CHECK(key.find("v4")          != std::string::npos);
+    CHECK(key.find("v5")          != std::string::npos);
 }
 
 TEST_CASE(v2_live_overlay_source_generates_valid_ir) {

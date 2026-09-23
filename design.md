@@ -1,5 +1,12 @@
 # AYRenderer Design
 
+## 2026-09-23 — 基础画质第一阶段：TAA velocity dilation 与透明 reactive motion
+
+- MotionVectorPass 继续使用单个全分辨率 RGBA16F 目标，不新增常驻 reactive RT。A 通道的原 `valid + previous-depth footprint` 保留在 `[0,2)`，透明表面追加 `+2` reactive 标志；新出现的透明对象可写 reactive 而保持 velocity 无效，避免误用伪零速度。
+- Opaque/Cutout 后按 TransparentPass 相同的稳定远到近顺序重放透明几何；借用 GBuffer depth、关闭 depth write，使不透明前景仍能遮挡透明 motion，而最近可见透明层最终覆盖 velocity。透明重放复用刚体/蒙皮对象历史和材质 albedo/opacity coverage，不为透明路径建立第二套历史缓存。
+- TAA 的 3×3 dilation 改为选择“最近且 velocity 有效”的样本， invalid 近邻不再挡住可用运动；velocity、previous depth 与 footprint 始终从同一 texel 读取。当前像素若带 reactive 标志，则使用透明对象 velocity 重投影、跳过不匹配的 opaque depth 层验证，并把 temporal feedback 限制为正常值的 15%，以抑制透明拖影而不完全退化为单帧锯齿。
+- Motion debug overlay 将 reactive 像素显示为橙色，B 仍表示解包后的 velocity validity。Phoskia cache key 升级到 Motion v7 / TAA v11 / GBufferDebug v5；D3D11/D3D12 shader 生产编译定向回归通过。
+
 ## 2026-09-23 — Selection Outline 稳定化与 R6-6 收口
 
 - 橙色 Selection Outline 不再依赖“jittered 遮罩 + 合成时反向偏移”消除抖动。view 244 以未 jitter 投影、无深度只写 Alpha 稳定轮廓；view 253 以场景同一 jitter 投影和 GBuffer depth 只写 RGB 可见性；view 254 在 Present 后分别按稳定/对齐 UV 读取两个通道并合成。这样固定输出像素上的边界覆盖率不再随 Halton 相位变化，遮挡判定仍与当帧深度一致。selection target 在 texture 或任一 borrowed FBO 失效时整体重建，覆盖 resize/backend generation 边界。
@@ -60,7 +67,7 @@
 
 ## 2026-09-21 — TAA 诊断层纹与透明边缘异常观察（开放风险，暂缓处理）
 
-**跟踪项：TAA-TRANSPARENCY-01。状态：已记录、未关闭，按用户决定暂缓进一步修复。** 当前用户观察到 Final image 干净，继续追查的即时视觉收益有限；这不意味着透明时域处理已经完整，也不能把潜在问题当作“诊断图正常闪动”直接忽略。本轮只记录现象与追查边界，不改算法、参数或渲染架构。
+**跟踪项：TAA-TRANSPARENCY-01。状态：基础 motion/reactive 修复已落地，多层透明与折射仍开放。** 本节保留 2026-09-21 的视觉观察；2026-09-23 已增加可见透明几何的 velocity、reactive 标志和低反馈路径，但这不等同于拥有逐层透明深度或折射专用时域解法。
 
 ### 用户观察与复查入口
 
@@ -74,10 +81,10 @@
 ### 已知实现事实与尚待验证的解释
 
 - Clipping difference 输出 `clamp(length(historyBeforeClip - historyAfterClip) * 8, 0, 1)`，比较发生在 YCoCg 空间。亮色表示较强裁剪，不是错误标记；黑色既可能是无需裁剪，也可能是历史无效而跳过计算，必须结合 History rejection / History weight 判断。
-- 当前颜色在 TAA 前已经合成透明物体，但 Transparent 的表面绘制只读深度、不写深度，MotionVectorPass 跳过透明混合材质；TAA 表面判定仍使用不透明 GBuffer 的 depth/coverage 及其运动信息。代码入口见 [TransparentPass](src/detail/TransparentPass.cpp)、[MotionVectorPass](src/detail/MotionVectorPass.cpp)、[TAAPass](src/detail/TAAPass.cpp)。
-- 因此，“颜色含透明前景，深度与运动来自后方地面”是已存在的数据对应局限；它可能在移动时放大透明轮廓的裁剪，并在地面/天空分界附近产生不同的历史有效性表现。**这只是有代码依据的候选解释，尚不是该白边及裁断现象的已证实根因。**
+- 当前颜色在 TAA 前已经合成透明物体，Transparent 的表面绘制仍只读不透明深度且不写深度；MotionVectorPass 现会按相同排序重放可见透明几何，并在 A 通道携带 reactive 标志。TAA 对该像素使用透明对象 velocity、跳过不匹配的 opaque depth 层验证并降低反馈。代码入口见 [TransparentPass](src/detail/TransparentPass.cpp)、[MotionVectorPass](src/detail/MotionVectorPass.cpp)、[TAAPass](src/detail/TAAPass.cpp)。
+- 因此，“透明颜色完全只能沿用后方地面的运动”已被基础版修复；仍存在的对应局限是单个 motion texel 只描述最终可见透明层、没有透明自身深度，也没有覆盖折射后背景或多层透明。它们仍可能在复杂透明边界放大裁剪差异，但不再作为普通单层透明的默认解释。
 - 普通物体的层纹另行保留待查，不能直接归因于透明、深度精度或阴影 bias；此前通过 shadow bias 消除的自阴影层纹，不足以证明本条层纹来自同一原因。
-- 现有不透明/Cutout 的 TAA/Motion GPU 回归通过，不覆盖透明颜色与多层深度/运动的一致性，也不能据此关闭本条风险。未来透明材质、相对运动、背景对比度或历史反馈策略变化，可能把目前被裁剪/降权限制住的差异暴露为拖影、边缘缺口或闪烁；这些是风险，不是当前已观察到的 Final image 缺陷。
+- 现有不透明/Cutout 与透明基础 motion/reactive 的 shader/契约回归通过；仍未覆盖真实 GPU 下的多层透明深度/运动一致性。未来折射、透明层相对运动、背景对比度或历史反馈策略变化，可能暴露拖影、边缘缺口或闪烁；这些是风险，不是当前已观察到的 Final image 缺陷。
 
 ### 后续重启条件与关闭标准
 
@@ -149,7 +156,7 @@
 - **分离重建与裁剪**：输出颜色仍在固定网格用 `outputUV + currentJitterUV` 重建；裁剪盒改为原始 texel-center 的 3×3 YCoCg 范围，避免双线性过滤范围随相位缩小而截断细线历史。反应性降权依据历史超出裁剪盒的量，不再把盒内的正常覆盖率/色度变化当作突然变化。遮挡深度拒绝、缺失 velocity 拒绝和无历史回退保留。
 - **验证方法**：新增独立 `AYRenderer_TAAEdgeGpu`，32×32 的竖边、约 22.5° 斜边、0.8px 细线，运行 96 帧；上一帧 GPU Resolve 输出作为下一帧历史，统计最后 32 帧中央区域 RGB 最大峰峰值。使用 RGBA8 当前颜色/coverage 和 RGBA16F 历史/运动输入；depth 由合成表面上传为浮点纹理，不是假装已覆盖真实 D24/几何光栅化。v7 D3D11 基线依次 **0.9375 / 0.91748 / 0.995605**，v8 D3D11/D3D12 均约 **0.04150 / 0.07422 / 0.08105**，门限 0.10。并检查红蓝覆盖的能量守恒、纯 RGB/混合色连续保真、8px 平移、遮挡消失、重置和全部诊断输出。
 - **RenderSettings → TAA Diagnostics**：0 Final image；1 History rejection（红拒绝/绿接受）；2 History weight（灰度实际历史权重）；3 Clipping difference（YCoCg 裁剪距离×8）；4 Motion (pixels)（RG=xy/16+0.5，静止灰）；5 Reprojected history（深度筛选后、裁剪前颜色）。仅会话状态，不写入用户偏好；禁用 TAA 时不绘制。诊断模式不改变正常历史，独立的 view 245 在 Present 后、GBufferDebug/选择框/Gizmo/UI 前覆盖视口；同帧重绑全部输入和 uniform，不能依赖 submit 已丢弃的状态。切回 Final image 不必重置历史，重复设置相同 TAA enable 状态也不再重置。
-- **成本与边界**：正常 Resolve 新增 9 次点深度读取和 1 次原始中心颜色读取，无新增历史 RT；调试开启才额外执行一次 Resolve 绘制，默认零额外调试 draw/RT（同一 shader 内保留诊断 uniform 分支）。静态契约同时修正 TaaColor 为 RGBA16F，并标明可选诊断 side effect。当前仍是 LDR TAA；没有声称消除所有亚像素波动、实现天空旋转重投影或透明/WorldLit2D 多层运动。编辑器真实画面、真实 MotionVector 几何光栅化与 WASD 崩溃仍需各自验收，合成 GPU 测试不能代替。
+- **成本与边界**：正常 Resolve 新增 9 次点深度读取和 1 次原始中心颜色读取，无新增历史 RT；调试开启才额外执行一次 Resolve 绘制，默认零额外调试 draw/RT（同一 shader 内保留诊断 uniform 分支）。静态契约同时修正 TaaColor 为 RGBA16F，并标明可选诊断 side effect。当前仍是 LDR TAA；没有声称消除所有亚像素波动、实现天空旋转重投影或透明/WorldLit2D 多层运动。2026-09-23 已补基础透明 velocity/reactive 与有效速度 dilation，WorldLit2D、多层透明和折射仍未覆盖。编辑器真实画面与真实 MotionVector 几何光栅化仍需视觉验收，合成 GPU 测试不能代替。
 - 诊断的晚读目前依赖 FrameGraph 已有的 never-share RT 策略及 GBuffer/历史的整帧存活。将来启用瞬态 alias 前，必须把诊断 draw 的晚读范围纳入图的资源生命周期；不能仅按普通 TAA Resolve 的 view 5 作为 FinalLdr 的最后使用点。
 
 ## 2026-09-21 — TAA 固定输出网格与历史表面验证修正
@@ -158,7 +165,7 @@
 - MotionVector v4 使用 `RGBA16F`：RG 为不含投影 jitter 的 Current−Previous UV，B 为上一帧同一刚体/骨骼表面的 NDC 深度，A 为历史有效标记。清屏、缺失身份、新对象和未覆盖的 draw 均无效，不再把缺失数据解释成静止。代价是速度目标从 4 增至 8 bytes/pixel；仅时间消费者启用时分配。
 - 深度仍存放在 history alpha（天空为 −1），但按四个 texel 中心分别验证，再仅对有效 RGB tap 做双线性加权与归一化。禁止先把天空标记和几何深度插值后再比较；动态深度来自 MotionVector 的上一帧变形表面，不再以当前世界位置代替。
 - 相机移动时保留 jitter，失效历史返回固定网格重建后的当前颜色；天空在相机运动时仍拒绝历史，尚未实现天空旋转重投影。准备阶段检查 GBuffer/Lighting/PostProcess/Present 均启用，帧末将失败的 TAA 与 Motion 历史成对失效，防止颜色和运动错帧。
-- WorldLit2D、透明及其他未覆盖对象的完整运动重放尚未实现。WorldLit2D 几何缺少有效 velocity 时保守拒绝历史；不再使用对动态对象不可靠的 world-position 相机运动回退。透明叠加和 SceneOverlay 的多层运动仍是独立后续工作。
+- WorldLit2D 及其他未覆盖对象的完整运动重放尚未实现。WorldLit2D 几何缺少有效 velocity 时保守拒绝历史；不再使用对动态对象不可靠的 world-position 相机运动回退。2026-09-23 已补普通透明几何的基础 motion/reactive；透明叠加、折射和 SceneOverlay 的多层运动仍是独立后续工作。
 - 新增可选 `AYRenderer_TAAGpu`：在独立进程设置 `AY_TAA_GPU_TEST=d3d11` 或 `d3d12`，创建隐藏测试窗口，实际编译生产 Phoskia Resolve 并读回 GPU 像素。覆盖 8 相位固定网格、动态前后深度、缺失 velocity、天空混合 tap、遮挡拒绝、无历史及越界。普通全量测试明确跳过该硬件用例，不能用普通测试数替代 GPU 验收。
 - 本轮不迁移 HDR/Tonemap 顺序、不增加 Catmull–Rom、variance clipping 或速度膨胀；当前仍为 LDR TAA。Shader 缓存键升级，旧 v6/v3 二进制不复用。
 - 验收边界：上述合成输入 GPU 测试不替代编辑器整场景视觉、真实几何 MotionVector 光栅化和右键 WASD 回归；编辑器移动闪退不能由 Shader 单测通过宣称已解决。
@@ -1397,4 +1404,4 @@ include/AYRenderer/
 
 ### 下一步
 
-TAA 当前契约以本页 2026-09-21 记录为准：固定输出网格、RGBA16F 运动/前帧深度/有效标记、逐 tap 历史验证和失败帧联动失效。下一步应在 D3D11 Editor 验证静止收敛、相机运动、动态角色、对象生成/删除、Edit/Play 切换、resize/camera-cut 与透明物体边界，并补齐 WorldLit2D 的运动重放；再以 capture 数据决定是否增加速度膨胀、透明 velocity、reactive mask 或 Motion Blur。
+TAA 当前契约以本页 2026-09-21 基线和 2026-09-23 增量记录为准：固定输出网格、RGBA16F motion/previous-depth/reactive 打包、3×3 最近有效速度 dilation、逐 tap 历史验证和失败帧联动失效。下一步应在 D3D11 Editor 验证静止收敛、相机运动、动态角色、对象生成/删除、Edit/Play 切换、resize/camera-cut 与透明物体边界，并补齐 WorldLit2D 的运动重放；Motion Blur 与多层透明/折射的专用时域契约仍需独立设计。

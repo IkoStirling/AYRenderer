@@ -163,12 +163,14 @@ TEST_CASE(motion_vector_shader_contract_covers_rigid_skin_cutout_and_sentinel)
     }
     CHECK(opaque.find("return vec4(velocity, previousDepth, valid)")
           != std::string::npos);
-    CHECK(cutout.find("return vec4(velocity, previousDepth, valid)")
+    CHECK(cutout.find("valid + reactive * 2.0")
+          != std::string::npos);
+    CHECK(cutout.find("coverageThreshold = mix(alphaCutoff.x, 0.001, reactive)")
           != std::string::npos);
     CHECK(cutout.find("texture2d opacityMap") != std::string::npos);
     CHECK(cutout.find("discard") != std::string::npos);
     CHECK(std::string(ayt::render::detail::kMotionVectorCacheKeyCStr)
-          == "motion_vector_phoskia_rgba16f_depth_footprint_v6");
+          == "motion_vector_phoskia_rgba16f_depth_footprint_v7_reactive");
     CHECK(cutout.find("fwidth(previousDepth)") < cutout.find("if (surfaceAlpha"));
 }
 

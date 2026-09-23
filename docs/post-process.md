@@ -130,14 +130,14 @@ TAA cache key：`taa_phoskia_motion_vectors_ycocg_v5`。
 - 两块全分辨率 `RGBA16F` history FBO 由 Pass 持久拥有并 ping-pong；resize、pipeline rebuild、开关切换和相机 cut 会失效历史并从样本 0 重启；
 - 当前帧 `FinalLdrColor` 的 3×3 邻域转换到 YCoCg，历史颜色在邻域 min/max 内限幅，再按屏幕运动量和超出局部亮度跨度的异常差异动态降低反馈。正常高反差斜边的逐样本覆盖变化不会被误判成 disocclusion；首帧、越界、无 geometry coverage 或无有效上一帧时直接写当前颜色；
 - opaque 几何优先读取 MotionVector RG16F，以 `previousUV = currentUV - velocity` 重投影刚体、Transform、骨骼与相机运动；Pass 不可用时回退到 GBuffer RT2 world position 与上一帧 jittered view-projection，保证静态几何仍可运行。覆盖位来自 RT3.a；相机完全稳定时，无 coverage 像素按前后两帧 jitter 差值重投影，使轮廓外侧与天空/背景样本也能参与时间积累。相机移动时关闭该背景回退，避免没有 world position 的天空拖影；
-- 透明物体仍没有 GBuffer coverage/velocity；邻域限幅会抑制但不能彻底消除透明运动拖影，后续需独立透明 velocity 或 reactive mask；
+- 透明物体仍不写 GBuffer depth/coverage，但 MotionVectorPass 已按可见透明几何重放对象/骨骼 velocity，并在现有 RGBA16F A 通道打包 reactive 标志。TAA 对 reactive 像素使用透明 velocity、跳过 opaque depth 层匹配并将 history feedback 限制为正常值的 15%；这能抑制常规透明拖影，但不是多层透明深度排序或折射专用时域解法；
 - shader 使用 Phoskia，经标准 `ShaderResourcePool::acquire` 进入源码缓存与磁盘二进制缓存；分支采用单一最终输出赋值，避免把 material `return` 误当作早退。生产源由 Windows `s_5_0` 编译测试覆盖，D3D11/D3D12 共用该路径。shader/FBO/GBuffer 任一依赖失败时不提升 `PresentSource`，并保持未 jitter 的稳定回退。
 
 ### 6.1 Motion Vector 契约
 
 - append-only `RenderPassSlot::MotionVector=20`，Deferred-only，固定顺序 `GBuffer(view 7) → MotionVector(view 3) → SSAO(view 14) → Lighting(view 8)`；view 3 与 Forward transparent 复用但两条管线互斥；
-- 仅当 TAA 本帧准备成功时分配/执行。Pass 拥有一张全分辨率 point/clamp `RG16F` velocity texture 和 non-owning FBO shell，借用 GBuffer D24S8；关闭 TAA、resize、MSAA/reset、pipeline rebuild 与 shutdown 都会先释放 shell，再允许 GBuffer 销毁附件；
-- 重放 opaque 与 alpha-cutout 几何，执行 color-only `LEQUAL`，不清深度、不写深度。速度以 UV 单位编码 `currentUV - previousUV`，包含当前/上一帧 jitter；TAA 因此无需额外减 jitter；
+- 仅当 TAA 本帧准备成功时分配/执行。Pass 拥有一张全分辨率 point/clamp `RGBA16F` motion texture 和 non-owning FBO shell，借用 GBuffer D24S8；关闭 TAA、resize、MSAA/reset、pipeline rebuild 与 shutdown 都会先释放 shell，再允许 GBuffer 销毁附件；
+- 依次重放 opaque、alpha-cutout 与 transparent 几何，执行 color-only `LEQUAL`，不清深度、不写深度；透明部分沿用 TransparentPass 的稳定远到近顺序。RG 以 UV 单位编码 `currentUV - previousUV`，B 保存 previous depth，A 的 `[0,2)` 保存 validity/footprint，`+2` 表示 reactive transparent；
 - `DrawItem::motionObjectId` 为宿主提供稳定身份，零表示兼容静态路径，只生成相机速度。非零对象按 `objectId + meshId` 保存上一帧 world 与完整骨骼姿态；分段 palette 只在上传时 remap，历史不保存借用指针；
 - 只有连续上一帧、相同 mesh 和相同完整 skeleton 数量才接受历史。新对象、重现对象、姿态布局变化或切换效果时写 `(2,2)` 越界哨兵，使 TAA 的 UV 门禁拒绝旧 history；120 帧未见的条目被清理；
 - AYEntity 刚体、分段蒙皮与 whole-mesh fallback 都提交混入 World 地址、entity id 和 handle generation 的稳定 ID，Edit/Play 场景或回收实体不会串用历史；
@@ -218,7 +218,7 @@ FinalLdrColor → TAA/FXAA/SMAA → ColorGrading → OtherLdrEffect → NewLdrCo
 5. 把 `RenderPassSlot` append 到 ABI 尾部，并在默认/Deferred 管线中明确位置；
 6. 增加生产 shader 编译、view 唯一性、Noop、resize、teardown 与 stale-handle 测试。
 
-运动模糊可以复用当前 opaque motion vector，但在成为产品效果前仍需定义采样方向/长度门限、相机 cut、velocity dilation、遮挡边界及透明/reactive-mask 契约；不能直接把 TAA 的基础速度纹理当作完整 Motion Blur。
+运动模糊可以复用当前 opaque/cutout/transparent motion vector 与 reactive 标志，但在成为产品效果前仍需定义采样方向/长度门限、相机 cut、速度 tile-max/neighbor-max、遮挡边界及透明采样权重；TAA 的 3×3 有效速度 dilation 不是完整 Motion Blur 速度层级。
 
 ## 11. 验收
 
@@ -235,5 +235,5 @@ FinalLdrColor → TAA/FXAA/SMAA → ColorGrading → OtherLdrEffect → NewLdrCo
 
 - 精确 sRGB OETF、dithering 与 HDR swapchain 输出；
 - 外部 `.cube`/图片 LUT 导入、SMAA edge/weight 与 Motion Vector 调试视图；
-- DOF、MotionBlur、透明物体 velocity/reactive mask 与完整时间域重投影；
+- DOF、MotionBlur、WorldLit2D velocity、透明多层深度/折射 reactive 与完整时间域重投影；
 - 基于 GPU capture 的带宽与 RenderTarget alias 优化。

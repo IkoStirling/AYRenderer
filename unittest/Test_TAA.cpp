@@ -322,7 +322,7 @@ TEST_CASE(taa_shader_contract_has_reprojection_neighborhood_clamp_and_motion_fee
     CHECK(source.find("coverage > 0.5") != std::string::npos);
     CHECK(source.find("previousUv = outputUv - motion.xy")
           != std::string::npos);
-    CHECK(source.find("validHistory && motion.w > 0.5") != std::string::npos);
+    CHECK(source.find("validHistory && motionCode > 0.5") != std::string::npos);
     CHECK(source.find("taaJitter.w > 0.5") != std::string::npos);
     CHECK(source.find("outputUv.x + taaJitter.x") != std::string::npos);
     CHECK(source.find("outputUv.y + taaJitter.y") != std::string::npos);
@@ -331,7 +331,13 @@ TEST_CASE(taa_shader_contract_has_reprojection_neighborhood_clamp_and_motion_fee
     CHECK(source.find("sample(sceneDepth, uv)") != std::string::npos);
     CHECK(source.find("sample(geometryData, surfaceUv)") != std::string::npos);
     CHECK(source.find("sample(worldPosition, surfaceUv)") != std::string::npos);
-    CHECK(source.find("sample(motionVectors, surfaceUv)") != std::string::npos);
+    CHECK(source.find("let surfaceMotion = centerMotion") != std::string::npos);
+    CHECK(source.find("candidateCode0 > 0.5 && candidateDepth0 < selectedDepth")
+          != std::string::npos);
+    CHECK(source.find("let centerReactive = step(1.999, centerMotion.w)")
+          != std::string::npos);
+    CHECK(source.find("feedback = feedback * mix(1.0, 0.15, reactive)")
+          != std::string::npos);
     CHECK(source.find("abs(unclippedHistory.y - history.y)") != std::string::npos);
     CHECK(source.find("unexpectedMismatch") != std::string::npos);
     CHECK(source.find("luminanceMismatch") != std::string::npos);
@@ -342,9 +348,9 @@ TEST_CASE(taa_shader_contract_has_reprojection_neighborhood_clamp_and_motion_fee
     CHECK(source.find("h3.w >= 0.0") != std::string::npos);
     CHECK(source.find("reactiveMismatch") != std::string::npos);
     CHECK(std::string(ayt::render::detail::kTaaCacheKeyCStr)
-          == "taa_phoskia_supported_history_v10");
+          == "taa_phoskia_velocity_dilation_reactive_v11");
     CHECK(source.find("currentHistoryDepth = selectedDepth") != std::string::npos);
-    CHECK(source.find("historyDepthTolerance = taaDepthParams.x + max(motion.w - 1.0, 0.0) * 2.0") != std::string::npos);
+    CHECK(source.find("historyDepthTolerance = taaDepthParams.x + max(motionCode - 1.0, 0.0) * 2.0") != std::string::npos);
     CHECK(source.find("historyConfidence = clamp(historyWeight, 0.0, 1.0)") != std::string::npos);
     CHECK(source.find("effectiveFeedback = clamp(feedback, 0.0, 0.95) * historyConfidence") != std::string::npos);
 }
