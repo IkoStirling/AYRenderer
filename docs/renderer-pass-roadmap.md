@@ -36,7 +36,7 @@ Deferred: Shadow → Skybox → GBuffer → MotionVector(on demand) → SSAO
 | Pass | 状态 | 说明 |
 |------|------|------|
 | **ForwardOpaque** | 可用 | 含阴影采样；Alpha skip 给 Transparent |
-| **Shadow** | 可用，真 GPU 门禁未关 | 八灯 atlas；Point omni 与 Spot 透视锥体仍是能力项 |
+| **Shadow** | 可用，CSM/Spot 第二轮待真 GPU 验收 | 八槽 atlas；Deferred 主方向光 3 级稳定 CSM，Spot 透视锥体；Point omni 仍是能力项 |
 | **Skybox** | Deferred 可用 | equirect + 独立 IBL cube |
 | **GBuffer / Lighting** | Deferred 可用 | 四 MRT + HDR Lighting；真实 capture/带宽门禁未关 |
 | **MotionVector / TAA** | Deferred 可用 | opaque/cutout/transparent 刚体与蒙皮 velocity、3×3 有效速度 dilation、透明 reactive feedback + persistent history |

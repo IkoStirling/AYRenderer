@@ -88,7 +88,7 @@ const char* const kLightingBuildStampCStr = kLightingBuildStamp;
 //   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
 //   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v31_ssao_ambient_only";
+    "lighting_v32_csm_spot_perspective";
 
 // �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -207,6 +207,10 @@ material Lighting {
     uniform mat4 lightViewProjs[8]
     uniform vec4 shadowBiases[8]
     uniform vec4 perLightShadowCount
+    uniform vec4 shadowProjectionCount
+    uniform vec4 shadowLightProjectionSlots[8]
+    uniform vec4 shadowCascadeSplits[8]
+    uniform vec4 shadowCameraForward
     uniform vec4 activeLightCount
     property baseColor = vec4(1.0, 1.0, 1.0, 1.0)
     vertex {
@@ -311,7 +315,7 @@ material Lighting {
         let _t0i = max(1.0 - step(_s0i + _bias0, _ref0), step(0.999, _s0i))
         let _soft0 = (_t0a + _t0b + _t0c + _t0d + _t0e + _t0f + _t0g + _t0h + _t0i) * (1.0 / 9.0)
         let _shadow0 = mix(1.0, mix(_t0e, _soft0, shadowPcf.x), _inMap0)
-        let perLightShadow0 = mix(vec4(1.0), vec4(_shadow0), step(0.5, perLightShadowCount.x))
+        let perLightShadow0 = mix(vec4(1.0), vec4(_shadow0), step(0.5, shadowProjectionCount.x))
 
         // slot 1
         let _lvp1 = lightViewProjs[1]
@@ -351,7 +355,7 @@ material Lighting {
         let _t1i = max(1.0 - step(_s1i + _bias1, _ref1), step(0.999, _s1i))
         let _soft1 = (_t1a + _t1b + _t1c + _t1d + _t1e + _t1f + _t1g + _t1h + _t1i) * (1.0 / 9.0)
         let _shadow1 = mix(1.0, mix(_t1e, _soft1, shadowPcf.x), _inMap1)
-        let perLightShadow1 = mix(vec4(1.0), vec4(_shadow1), step(1.5, perLightShadowCount.x))
+        let perLightShadow1 = mix(vec4(1.0), vec4(_shadow1), step(1.5, shadowProjectionCount.x))
 
         // slot 2
         let _lvp2 = lightViewProjs[2]
@@ -391,7 +395,7 @@ material Lighting {
         let _t2i = max(1.0 - step(_s2i + _bias2, _ref2), step(0.999, _s2i))
         let _soft2 = (_t2a + _t2b + _t2c + _t2d + _t2e + _t2f + _t2g + _t2h + _t2i) * (1.0 / 9.0)
         let _shadow2 = mix(1.0, mix(_t2e, _soft2, shadowPcf.x), _inMap2)
-        let perLightShadow2 = mix(vec4(1.0), vec4(_shadow2), step(2.5, perLightShadowCount.x))
+        let perLightShadow2 = mix(vec4(1.0), vec4(_shadow2), step(2.5, shadowProjectionCount.x))
 
         // slot 3
         let _lvp3 = lightViewProjs[3]
@@ -431,7 +435,7 @@ material Lighting {
         let _t3i = max(1.0 - step(_s3i + _bias3, _ref3), step(0.999, _s3i))
         let _soft3 = (_t3a + _t3b + _t3c + _t3d + _t3e + _t3f + _t3g + _t3h + _t3i) * (1.0 / 9.0)
         let _shadow3 = mix(1.0, mix(_t3e, _soft3, shadowPcf.x), _inMap3)
-        let perLightShadow3 = mix(vec4(1.0), vec4(_shadow3), step(3.5, perLightShadowCount.x))
+        let perLightShadow3 = mix(vec4(1.0), vec4(_shadow3), step(3.5, shadowProjectionCount.x))
 
         // slot 4
         let _lvp4 = lightViewProjs[4]
@@ -471,7 +475,7 @@ material Lighting {
         let _t4i = max(1.0 - step(_s4i + _bias4, _ref4), step(0.999, _s4i))
         let _soft4 = (_t4a + _t4b + _t4c + _t4d + _t4e + _t4f + _t4g + _t4h + _t4i) * (1.0 / 9.0)
         let _shadow4 = mix(1.0, mix(_t4e, _soft4, shadowPcf.x), _inMap4)
-        let perLightShadow4 = mix(vec4(1.0), vec4(_shadow4), step(4.5, perLightShadowCount.x))
+        let perLightShadow4 = mix(vec4(1.0), vec4(_shadow4), step(4.5, shadowProjectionCount.x))
 
         // slot 5
         let _lvp5 = lightViewProjs[5]
@@ -511,7 +515,7 @@ material Lighting {
         let _t5i = max(1.0 - step(_s5i + _bias5, _ref5), step(0.999, _s5i))
         let _soft5 = (_t5a + _t5b + _t5c + _t5d + _t5e + _t5f + _t5g + _t5h + _t5i) * (1.0 / 9.0)
         let _shadow5 = mix(1.0, mix(_t5e, _soft5, shadowPcf.x), _inMap5)
-        let perLightShadow5 = mix(vec4(1.0), vec4(_shadow5), step(5.5, perLightShadowCount.x))
+        let perLightShadow5 = mix(vec4(1.0), vec4(_shadow5), step(5.5, shadowProjectionCount.x))
 
         // slot 6
         let _lvp6 = lightViewProjs[6]
@@ -551,7 +555,7 @@ material Lighting {
         let _t6i = max(1.0 - step(_s6i + _bias6, _ref6), step(0.999, _s6i))
         let _soft6 = (_t6a + _t6b + _t6c + _t6d + _t6e + _t6f + _t6g + _t6h + _t6i) * (1.0 / 9.0)
         let _shadow6 = mix(1.0, mix(_t6e, _soft6, shadowPcf.x), _inMap6)
-        let perLightShadow6 = mix(vec4(1.0), vec4(_shadow6), step(6.5, perLightShadowCount.x))
+        let perLightShadow6 = mix(vec4(1.0), vec4(_shadow6), step(6.5, shadowProjectionCount.x))
 
         // slot 7
         let _lvp7 = lightViewProjs[7]
@@ -591,7 +595,7 @@ material Lighting {
         let _t7i = max(1.0 - step(_s7i + _bias7, _ref7), step(0.999, _s7i))
         let _soft7 = (_t7a + _t7b + _t7c + _t7d + _t7e + _t7f + _t7g + _t7h + _t7i) * (1.0 / 9.0)
         let _shadow7 = mix(1.0, mix(_t7e, _soft7, shadowPcf.x), _inMap7)
-        let perLightShadow7 = mix(vec4(1.0), vec4(_shadow7), step(7.5, perLightShadowCount.x))
+        let perLightShadow7 = mix(vec4(1.0), vec4(_shadow7), step(7.5, shadowProjectionCount.x))
 
         // �P5.5 B (2026-07-23) ??per-light contribution. Each light
         // dispatches per-type via `dirs[i].w = float(LightType)`:
@@ -945,6 +949,38 @@ static std::string hardShadowBlock(std::string_view block, uint32_t slot)
     return out;
 }
 
+std::string buildCascadeSelectorBlock()
+{
+    std::string out;
+    out += "        // camera-facing CSM selector; Spot/base lights repeat one slot\n";
+    out += "        let _shadowCameraDepth = max(dot(worldPos - u_cameraPos.xyz, shadowCameraForward.xyz), 0.0)\n";
+    for (uint32_t light = 0; light < ayt::render::kMaxSceneLights; ++light) {
+        const std::string n = std::to_string(light);
+        out += "        let _cascadeIndex" + n
+            + " = step(shadowCascadeSplits[" + n + "].x, _shadowCameraDepth)"
+              " + step(shadowCascadeSplits[" + n + "].y, _shadowCameraDepth)\n";
+        out += "        let _cascadeSlot01_" + n
+            + " = mix(shadowLightProjectionSlots[" + n + "].x, shadowLightProjectionSlots[" + n + "].y, step(0.5, _cascadeIndex" + n + "))\n";
+        out += "        let _cascadeSlot" + n
+            + " = mix(_cascadeSlot01_" + n + ", shadowLightProjectionSlots[" + n + "].z, step(1.5, _cascadeIndex" + n + "))\n";
+        out += "        let _selectedShadow" + n + " = ";
+        for (uint32_t slot = 0; slot < ayt::render::kMaxSceneLights; ++slot) {
+            if (slot != 0u) {
+                out += " + ";
+            }
+            out += "perLightShadow" + std::to_string(slot)
+                + ".x * (1.0 - step(0.5, abs(_cascadeSlot" + n
+                + " - " + std::to_string(slot) + ".0)))";
+        }
+        out += "\n";
+        out += "        let resolvedLightShadow" + n
+            + " = mix(1.0, _selectedShadow" + n
+            + ", step(0.5, shadowLightProjectionSlots[" + n + "].w))\n";
+    }
+    out += "\n";
+    return out;
+}
+
 std::string buildLightingVariantSource(uint32_t shadowCount, bool pcfEnabled)
 {
     shadowCount = std::min(shadowCount, ayt::render::kMaxSceneLights);
@@ -985,6 +1021,20 @@ std::string buildLightingVariantSource(uint32_t shadowCount, bool pcfEnabled)
             source.replace(begin, end - begin,
                            hardShadowBlock(block, static_cast<uint32_t>(slot)));
         }
+    }
+    for (uint32_t light = 0; light < ayt::render::kMaxSceneLights; ++light) {
+        const std::string oldToken = "perLightShadow" + std::to_string(light) + ".x";
+        const std::string newToken = "resolvedLightShadow" + std::to_string(light);
+        size_t pos = 0;
+        while ((pos = source.find(oldToken, pos)) != std::string::npos) {
+            source.replace(pos, oldToken.size(), newToken);
+            pos += newToken.size();
+        }
+    }
+    const std::string lightMarker = "        // --- light 0 (key) ---";
+    const size_t lightBegin = source.find(lightMarker);
+    if (lightBegin != std::string::npos) {
+        source.insert(lightBegin, buildCascadeSelectorBlock());
     }
     return source;
 }
@@ -1291,7 +1341,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
 
     const uint32_t shadowVariantCount =
         ctx.shadowPass != nullptr && ctx.shadowPass->hasSampleableShadow()
-        ? std::min(ctx.shadowPass->perLightShadowCount(),
+        ? std::min(ctx.shadowPass->shadowProjectionCount(),
                    ayt::render::kMaxSceneLights)
         : 0u;
     const bool shadowVariantPcf = shadowVariantCount > 0

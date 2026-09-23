@@ -24,7 +24,14 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
 {
     _producedThisFrame = false;
     _perLightShadowCount = 0;
+    _shadowProjectionCount = 0;
     _sampleMapSize = 0;
+    for (uint32_t light = 0; light < kMaxSceneLights; ++light) {
+        for (uint32_t component = 0; component < 4u; ++component) {
+            _shadowLightProjectionSlots[light][component] = 0.0f;
+            _shadowCascadeSplits[light][component] = 0.0f;
+        }
+    }
 
     BGFXAdapter& adapter = ctx.adapter;
     ayt::shader::ShaderResourcePool& pool = ctx.pool;
@@ -35,6 +42,10 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     FrameDrawLists fallbackDrawLists;
     const FrameDrawLists& drawLists =
         resolveFrameDrawLists(ctx, fallbackDrawLists);
+    _shadowCameraForward[0] = ctx.frame.view(2, 0);
+    _shadowCameraForward[1] = ctx.frame.view(2, 1);
+    _shadowCameraForward[2] = ctx.frame.view(2, 2);
+    _shadowCameraForward[3] = 0.0f;
 
     if (!adapter.isInitialized() || adapter.isNoopBackend()) {
         // §P4 M1 (2026-08-24) — rate-limited early-return diagnostic
@@ -77,6 +88,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
     // shadowKey=1.0 (no shadow).
     const ayt::render::SceneLights* lightsPtr = _sceneLightsRef;
     uint32_t activeCount = 0;
+    uint32_t baseShadowCount = 0;
     // §P4 L9 (2026-08-24) — collapsed the per-frame re-init
     // loop into a comment. The members are already identity at
     // construction (see ShadowPass.h M9 comment + the
@@ -169,21 +181,17 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
 
     const bool homogeneousDepth = adapter.capsHomogeneousDepth();
 
-    // Build the per-slot LVP matrices. Order matters: the active
-    // castShadow slots are packed into the first `activeCount`
-    // atlas sub-rects; the remaining slots stay identity (no-op).
-    // Directional + Spot: buildDirectionalShadowMatricesForScene
-    // builds an ortho light-space VP fitting the scene bounds —
-    // correct for Directional; for Spot it's an approximation
-    // (Spot's cone-frustum projection is left for a future cut;
-    // Spot shadow in §P5.5 C uses the same scene-fit ortho MVP
-    // as Directional, which gives a slightly loose shadow but
-    // produces correct cast/receive behavior at no extra cost).
-    // Point castShadow=true ⇒ log + skip (omni-shadow out of scope).
+    // Build base projections first so legacy/custom materials keep the stable
+    // one-light/one-slot contract. Spot bases use a real cone projection.
+    // Remaining atlas slots are used by the first directional caster's
+    // stabilized camera-facing near/mid cascades; its scene-fit base remains
+    // the conservative far fallback.
     uint32_t casterDrawCount = 0;
     if (useAtlas) {
-        activeCount = std::min(lightOrder.shadowCasterCount,
-                               _atlasLayout.slotCount);
+        const uint32_t baseProjectionCount = std::min(
+            lightOrder.shadowCasterCount, _atlasLayout.slotCount);
+        baseShadowCount = baseProjectionCount;
+        activeCount = baseProjectionCount;
 
         // Point lights are deliberately excluded from the packed caster range.
         // Keep the existing diagnostic for hosts that request unsupported omni
@@ -217,14 +225,11 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             }
         }
 
-        for (uint32_t slot = 0; slot < activeCount; ++slot) {
+        const ShadowSceneBounds sceneBounds = computeShadowSceneBounds(
+            drawLists.shadowBoundsItems, meshes);
+        for (uint32_t slot = 0; slot < baseProjectionCount; ++slot) {
             const uint32_t sourceIndex = lightOrder.indices[slot];
             const ayt::render::Light& L = lightsPtr->lights[sourceIndex];
-            // Directional + Spot both use the scene-fit ortho VP
-            // built from light direction. For Directional, this
-            // matches pre-C behavior; for Spot, the cone isn't
-            // honored in caster projection (cone-frustum MVP is
-            // a future cut).
             // §P4 L9 (2026-08-24) — reset the active slot
             // before overwriting (the L9 helper replaces the
             // old "reset all slots up front" pattern).
@@ -232,19 +237,107 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             for (uint32_t c = 0; c < 4; ++c) {
                 _shadowSampleRects[slot][c] = _atlasLayout.subRects[slot][c];
             }
-            buildDirectionalShadowMatricesForItems(
-                drawLists.shadowBoundsItems,
-                meshes,
-                L.type == ayt::render::LightType::Spot
-                    ? L.spotDirection
-                    : L.direction,
-                _atlasLightViews[slot],
-                _atlasLightProjs[slot],
-                _atlasLightViewProjs[slot],
-                _atlasLightViewsCol[slot],
-                _atlasLightProjsCol[slot],
-                _atlasLightViewProjsCol[slot]);
+            if (L.type == ayt::render::LightType::Spot) {
+                buildSpotShadowMatrices(
+                    L.position, L.spotDirection, L.coneCosOuter, L.range,
+                    _atlasLightViews[slot],
+                    _atlasLightProjs[slot],
+                    _atlasLightViewProjs[slot],
+                    _atlasLightViewsCol[slot],
+                    _atlasLightProjsCol[slot],
+                    _atlasLightViewProjsCol[slot]);
+            } else {
+                buildDirectionalShadowMatricesForItems(
+                    drawLists.shadowBoundsItems,
+                    meshes,
+                    L.direction,
+                    _atlasLightViews[slot],
+                    _atlasLightProjs[slot],
+                    _atlasLightViewProjs[slot],
+                    _atlasLightViewsCol[slot],
+                    _atlasLightProjsCol[slot],
+                    _atlasLightViewProjsCol[slot]);
+            }
             _atlasShadowBiases[slot] = L.shadowBias;
+            _shadowLightProjectionSlots[slot][0] = static_cast<float>(slot);
+            _shadowLightProjectionSlots[slot][1] = static_cast<float>(slot);
+            _shadowLightProjectionSlots[slot][2] = static_cast<float>(slot);
+            _shadowLightProjectionSlots[slot][3] = 1.0f;
+        }
+
+        // The first ordered directional caster is the key sun. Allocate up to
+        // two extra projections while preserving at least one base slot for
+        // every supported shadow-casting light.
+        uint32_t csmLight = UINT32_MAX;
+        for (uint32_t lightSlot = 0; lightSlot < baseProjectionCount; ++lightSlot) {
+            const ayt::render::Light& light =
+                lightsPtr->lights[lightOrder.indices[lightSlot]];
+            if (light.type == ayt::render::LightType::Directional) {
+                csmLight = lightSlot;
+                break;
+            }
+        }
+        if (csmLight != UINT32_MAX && activeCount < _atlasLayout.slotCount) {
+            const DirectionalCascadeSplits splits =
+                computeDirectionalCascadeSplits(
+                    ctx.frame.projection, kDirectionalCascadeCount);
+            const ayt::render::Light& light =
+                lightsPtr->lights[lightOrder.indices[csmLight]];
+            const ShadowAtlasPixelRect tile = slotPixelRect(0u);
+            const uint16_t cascadeResolution = std::max<uint16_t>(
+                1u, std::min(tile.w, tile.h));
+            uint32_t extraSlots[2] = {csmLight, csmLight};
+            uint32_t extraCount = 0;
+            float sliceNear = 0.0f;
+            for (uint32_t cascade = 0;
+                 cascade < 2u && cascade < splits.count
+                     && activeCount < _atlasLayout.slotCount;
+                 ++cascade) {
+                const uint32_t projectionSlot = activeCount;
+                resetAtlasSlot(projectionSlot);
+                for (uint32_t component = 0; component < 4u; ++component) {
+                    _shadowSampleRects[projectionSlot][component] =
+                        _atlasLayout.subRects[projectionSlot][component];
+                }
+                if (!buildDirectionalCascadeMatrices(
+                        ctx.frame.view, ctx.frame.projection,
+                        sliceNear, splits.distances[cascade],
+                        sceneBounds, light.direction, cascadeResolution,
+                        _atlasLightViews[projectionSlot],
+                        _atlasLightProjs[projectionSlot],
+                        _atlasLightViewProjs[projectionSlot],
+                        _atlasLightViewsCol[projectionSlot],
+                        _atlasLightProjsCol[projectionSlot],
+                        _atlasLightViewProjsCol[projectionSlot])) {
+                    break;
+                }
+                _atlasShadowBiases[projectionSlot] = light.shadowBias;
+                extraSlots[extraCount++] = projectionSlot;
+                ++activeCount;
+                sliceNear = splits.distances[cascade];
+            }
+            if (extraCount == 2u) {
+                _shadowLightProjectionSlots[csmLight][0] =
+                    static_cast<float>(extraSlots[0]);
+                _shadowLightProjectionSlots[csmLight][1] =
+                    static_cast<float>(extraSlots[1]);
+                _shadowLightProjectionSlots[csmLight][2] =
+                    static_cast<float>(csmLight);
+                _shadowLightProjectionSlots[csmLight][3] = 3.0f;
+                _shadowCascadeSplits[csmLight][0] = splits.distances[0];
+                _shadowCascadeSplits[csmLight][1] = splits.distances[1];
+                _shadowCascadeSplits[csmLight][2] = splits.distances[2];
+            } else if (extraCount == 1u) {
+                _shadowLightProjectionSlots[csmLight][0] =
+                    static_cast<float>(extraSlots[0]);
+                _shadowLightProjectionSlots[csmLight][1] =
+                    static_cast<float>(csmLight);
+                _shadowLightProjectionSlots[csmLight][2] =
+                    static_cast<float>(csmLight);
+                _shadowLightProjectionSlots[csmLight][3] = 2.0f;
+                _shadowCascadeSplits[csmLight][0] = splits.distances[0];
+                _shadowCascadeSplits[csmLight][1] = splits.distances[2];
+            }
         }
     } else {
         // Pre-C byte-equivalent path: single key light from
@@ -281,9 +374,15 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
         }
         // Pre-C bias is the global uniform; per-slot bias is 0
         // (FS uses global fallback when 0).
+        _shadowLightProjectionSlots[0][0] = 0.0f;
+        _shadowLightProjectionSlots[0][1] = 0.0f;
+        _shadowLightProjectionSlots[0][2] = 0.0f;
+        _shadowLightProjectionSlots[0][3] = 1.0f;
         activeCount = 1;
+        baseShadowCount = 1;
     }
-    _perLightShadowCount = activeCount;
+    _perLightShadowCount = baseShadowCount;
+    _shadowProjectionCount = activeCount;
 
     if (ayt::render::ShadowDiagnostics::enabled(ayt::render::ShadowLogLevel::L3_Probe)) {
         logShadowPassCpuDiag(ctx.frame.lightDirection, homogeneousDepth, _lightViewProjCol);
@@ -403,6 +502,7 @@ void ShadowPass::destroyResources(BGFXAdapter& adapter)
 {
     _producedThisFrame = false;
     _perLightShadowCount = 0;
+    _shadowProjectionCount = 0;
     _sampleMapSize = 0;
     _mapResources.destroy(adapter);
     _shadowCaster.destroy(adapter);

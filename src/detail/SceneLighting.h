@@ -26,7 +26,11 @@ struct PackedShadowAtlas {
     alignas(16) float rects[kMaxSceneLights][4]{};
     alignas(16) float lightViewProjs[kMaxSceneLights][16]{};
     alignas(16) float biases[kMaxSceneLights][4]{};
+    alignas(16) float lightProjectionSlots[kMaxSceneLights][4]{};
+    alignas(16) float cascadeSplits[kMaxSceneLights][4]{};
+    alignas(16) float cameraForward[4]{0.0f, 0.0f, 1.0f, 0.0f};
     uint32_t activeShadowCount = 0;
+    uint32_t activeProjectionCount = 0;
 };
 
 PackedSceneLighting packSceneLighting(const SceneLights* sceneLights,

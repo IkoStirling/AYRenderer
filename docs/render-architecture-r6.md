@@ -166,7 +166,7 @@ R6-2、R6-3 和 D3D11 基线完成后再恢复新增效果：
 
 1. MotionVector/SSAO/TAA/Shadow 调试节点；
 2. TAA velocity dilation 与透明 velocity/reactive mask；（2026-09-23 已完成基础版；多层透明/折射仍后续）
-3. Shadow 质量：CSM、Spot 透视锥体，再评估 Point omni；
+3. Shadow 质量：CSM、Spot 透视锥体（2026-09-23 基础版已完成，待真 GPU 验收），再评估 Point omni；
 4. Motion Blur；
 5. Bloom 金字塔与 Auto Exposure；
 6. DOF；

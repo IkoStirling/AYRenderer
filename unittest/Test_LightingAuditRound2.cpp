@@ -1,6 +1,7 @@
 #include "AYTest.h"
 
 #include "AYRenderer/RenderScene.h"
+#include "AYShader/BGFXConverter.h"
 #include "AYShader/Ir.h"
 #include "AYShader/Phoskia.h"
 
@@ -10,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -54,12 +56,13 @@ TEST_CASE(shadow_pass_default_sampling_contract_is_finite_and_full_rect)
     ayt::render::detail::ShadowPass pass;
     const float* rects = pass.shadowSampleRects();
     CHECK(pass.perLightShadowCount() == 0u);
+    CHECK(pass.shadowProjectionCount() == 0u);
     CHECK(pass.shadowSampleMapSize()
           == ayt::render::detail::ShadowPass::kDefaultShadowMapSize);
-    CHECK(rects[0] == 0.0f);
-    CHECK(rects[1] == 0.0f);
-    CHECK(rects[2] == 1.0f);
-    CHECK(rects[3] == 1.0f);
+    CHECK_FLOAT_EQ(rects[0], 0.0f, 1e-6f);
+    CHECK_FLOAT_EQ(rects[1], 0.0f, 1e-6f);
+    CHECK_FLOAT_EQ(rects[2], 1.0f, 1e-6f);
+    CHECK_FLOAT_EQ(rects[3], 1.0f, 1e-6f);
 }
 
 TEST_CASE(lighting_shadow_variants_remove_inactive_sampling_work)
@@ -114,11 +117,45 @@ TEST_CASE(lighting_variants_generate_valid_phoskia_ir)
     }
 }
 
+TEST_CASE(csm_lighting_variant_compiles_for_d3d11_and_d3d12_shader_model)
+{
+    const std::string source =
+        ayt::render::detail::buildLightingVariantSource(3u, true);
+    ayt::shader::phoskia::Compiler compiler;
+    ayt::shader::phoskia::CompileOptions frontend;
+    ayt::shader::BGFXCompileOptions backend;
+#ifdef AY_SHADER_SHADERC_HINT
+    backend.shadercPath = AY_SHADER_SHADERC_HINT;
+#endif
+    backend.platform = "windows";
+    backend.profile = "s_5_0";
+#ifdef AY_SHADER_BGFX_COMMON_HINT
+    backend.includeDirs.emplace_back(AY_SHADER_BGFX_COMMON_HINT);
+#endif
+#ifdef AY_SHADER_BGFX_SRC_HINT
+    backend.includeDirs.emplace_back(AY_SHADER_BGFX_SRC_HINT);
+#endif
+    ayt::shader::CompiledShaderProgram program;
+    compiler.compileToProgram(source, frontend, backend, program);
+    if (!program.success) {
+        for (const std::string& error : program.errors) {
+            std::cerr << "[CSM lighting shader] " << error << '\n';
+        }
+    }
+    CHECK(program.success);
+    CHECK(!program.vsBin.empty());
+    CHECK(!program.fsBin.empty());
+}
+
 TEST_CASE(lighting_source_pins_active_count_safe_normal_and_full_brdf)
 {
     const std::string source(
         ayt::render::detail::kLightingPhoskiaSourceCStr);
     CHECK(source.find("uniform vec4 activeLightCount")
+          != std::string::npos);
+    CHECK(source.find("uniform vec4 shadowLightProjectionSlots[8]")
+          != std::string::npos);
+    CHECK(source.find("uniform vec4 shadowCascadeSplits[8]")
           != std::string::npos);
     CHECK(source.find("let active7 = step(7.5, activeLightCount.x)")
           != std::string::npos);

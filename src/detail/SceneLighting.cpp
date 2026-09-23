@@ -139,6 +139,8 @@ PackedShadowAtlas packShadowAtlas(const ShadowPass* shadowPass,
 
     packed.activeShadowCount = std::min(
         shadowPass->perLightShadowCount(), kMaxSceneLights);
+    packed.activeProjectionCount = std::min(
+        shadowPass->shadowProjectionCount(), kMaxSceneLights);
     if (packed.activeShadowCount == 0u) {
         return packed;
     }
@@ -146,8 +148,17 @@ PackedShadowAtlas packShadowAtlas(const ShadowPass* shadowPass,
     const float* rects = shadowPass->shadowSampleRects();
     const float* matrices = shadowPass->atlasLightViewProjsColumnMajor();
     const float* biases = shadowPass->atlasShadowBiases();
+    const float* projectionSlots = shadowPass->shadowLightProjectionSlots();
+    const float* cascadeSplits = shadowPass->shadowCascadeSplits();
+    const float* cameraForward = shadowPass->shadowCameraForward();
     std::memcpy(packed.rects, rects, sizeof(packed.rects));
     std::memcpy(packed.lightViewProjs, matrices, sizeof(packed.lightViewProjs));
+    std::memcpy(packed.lightProjectionSlots, projectionSlots,
+                sizeof(packed.lightProjectionSlots));
+    std::memcpy(packed.cascadeSplits, cascadeSplits,
+                sizeof(packed.cascadeSplits));
+    std::memcpy(packed.cameraForward, cameraForward,
+                sizeof(packed.cameraForward));
     for (uint32_t i = 0; i < kMaxSceneLights; ++i) {
         packed.biases[i][0] = biases[i];
     }
@@ -187,6 +198,16 @@ bool uploadShadowAtlas(ayt::shader::ShaderResource& shader,
     const bool matrices = uploadVec4Array(
         shader, "lightViewProjs", &packed.lightViewProjs[0][0],
         sizeof(packed.lightViewProjs));
+    const bool projectionSlots = uploadVec4Array(
+        shader, "shadowLightProjectionSlots",
+        &packed.lightProjectionSlots[0][0],
+        sizeof(packed.lightProjectionSlots));
+    const bool cascadeSplits = uploadVec4Array(
+        shader, "shadowCascadeSplits", &packed.cascadeSplits[0][0],
+        sizeof(packed.cascadeSplits));
+    const bool cameraForward = uploadVec4Array(
+        shader, "shadowCameraForward", packed.cameraForward,
+        sizeof(packed.cameraForward));
 
     const ayt::shader::BindingId countBinding =
         shader.getUniformBinding("perLightShadowCount");
@@ -196,7 +217,16 @@ bool uploadShadowAtlas(ayt::shader::ShaderResource& shader,
         };
         shader.setUniform(countBinding, count, sizeof(count));
     }
-    return rects && biases && matrices;
+    const ayt::shader::BindingId projectionCountBinding =
+        shader.getUniformBinding("shadowProjectionCount");
+    if (projectionCountBinding != ayt::shader::InvalidBinding) {
+        const float count[4] = {
+            static_cast<float>(packed.activeProjectionCount), 0.0f, 0.0f, 0.0f
+        };
+        shader.setUniform(projectionCountBinding, count, sizeof(count));
+    }
+    return rects && biases && matrices && projectionSlots
+        && cascadeSplits && cameraForward;
 }
 
 } // namespace ayt::render::detail

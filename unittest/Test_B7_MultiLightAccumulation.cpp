@@ -121,7 +121,7 @@ namespace {
 // fails. Same TU-local-mirror pattern used by
 // Test_B5_LightingDirectional.cpp::kExpectedLightingCacheKey.
 inline constexpr const char* kExpectedB7LightingCacheKey =
-    "lighting_v31_ssao_ambient_only";
+    "lighting_v32_csm_spot_perspective";
 
 // §P5 B7+ (2026-07-22) �?Phoskia source substring pins. Drift =
 // test fails. Note PascalCase `Lights` block name (matches
@@ -599,7 +599,7 @@ TEST_CASE(b7_lighting_cache_key_bump_pinned_live) {
     CHECK(std::string(kExpectedB7LightingCacheKey).size() >= 20u);
     CHECK(std::string(kLightingCacheKeyCStr).size() >= 20u);
     // The literal must contain the current SSAO ambient-only version marker.
-    CHECK(std::string(kLightingCacheKeyCStr).find("v31_ssao_ambient_only")
+    CHECK(std::string(kLightingCacheKeyCStr).find("v32_csm_spot_perspective")
           != std::string::npos);
 }
 

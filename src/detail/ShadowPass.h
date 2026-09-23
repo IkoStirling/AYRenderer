@@ -26,6 +26,7 @@ namespace ayt::render::detail
 
 class ShadowPass : public RenderPass {
 public:
+    static constexpr uint32_t kDirectionalCascadeCount = 3u;
     static constexpr uint16_t kDefaultShadowMapSize = 2048;
     static constexpr float    kDefaultFrustumRadius = ayt::render::kShadowDefaultFrustumRadius;
     static constexpr float    kShadowNearPlane      = ayt::render::kShadowNearPlane;
@@ -109,12 +110,15 @@ public:
     {
         return _sceneLightsRef;
     }
-    // §P5.5 C — number of lights with castShadow=true (max 8).
-    // Legacy fallback reports 1 after a successful execute; 0 means no
-    // sampleable shadow was produced in the current frame.
+    // Number of active atlas projections (base lights plus extra directional
+    // cascades, max 8). Legacy fallback reports one projection.
     uint32_t perLightShadowCount() const noexcept
     {
         return _perLightShadowCount;
+    }
+    uint32_t shadowProjectionCount() const noexcept
+    {
+        return _shadowProjectionCount;
     }
     // §P5.5 C — atlas sub-rects in UV [0,1] (consumed by
     // LightingPass to upload `shadowAtlasRects[8]`).
@@ -140,6 +144,21 @@ public:
     const float* atlasShadowBiases() const noexcept
     {
         return _atlasShadowBiases;
+    }
+    // Per ordered light: xyz are near/mid/far atlas projection indices and w
+    // is cascade count. Spot lights repeat their single projection index.
+    const float* shadowLightProjectionSlots() const noexcept
+    {
+        return &_shadowLightProjectionSlots[0][0];
+    }
+    // Per ordered light: xyz are positive camera-view split distances.
+    const float* shadowCascadeSplits() const noexcept
+    {
+        return &_shadowCascadeSplits[0][0];
+    }
+    const float* shadowCameraForward() const noexcept
+    {
+        return _shadowCameraForward;
     }
     // §P5.5 C — atlas pixel rect for a given slot (consumed by
     // ShadowPass internally to drive BGFXAdapter::setScissorRect).
@@ -248,6 +267,13 @@ private:
     float                      _atlasShadowBiases[kShadowAtlasMaxSlots] = {
         0,0,0,0, 0,0,0,0
     };
+    float                      _shadowLightProjectionSlots[kMaxSceneLights][4] = {};
+    float                      _shadowCascadeSplits[kMaxSceneLights][4] = {};
+    float                      _shadowCameraForward[4] = {0,0,1,0};
+    // Keep all post-P5.5 state appended after the original object layout.
+    // This protects incremental MSVC builds from mixing an older constructor
+    // object with a newer accessor while the editor executable is still open.
+    uint32_t                   _shadowProjectionCount = 0;
 };
 
 } // namespace ayt::render::detail

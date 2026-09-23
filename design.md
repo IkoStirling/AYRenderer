@@ -1,5 +1,12 @@
 # AYRenderer Design
 
+## 2026-09-23 — 基础画质第二刀：Directional CSM 与 Spot 透视阴影
+
+- Shadow atlas 保持八槽兼容布局：先为每盏受支持的投影阴影灯保留一个 base tile，再把剩余槽位分配给第一盏 Directional 的 near/mid cascade；原 scene-fit Directional tile 作为 far fallback。`perLightShadowCount` 与总 projection count 分离，避免旧透明/自定义 receiver 把 cascade 误认成额外光源。
+- Directional CSM 使用三段 practical split（lambda=0.65），相机视锥切片用稳定正方形包围，半径量化并将光空间中心对齐到 atlas tile texel。Deferred Lighting 依据相机前向深度选择 near/mid/far；Spot 改用光源位置、外锥角和 range 的真实透视投影。
+- Forward、内建透明 PBR 与旧自定义材质继续采每灯 base tile，画面语义不回归，但暂不享受 near/mid cascade 分辨率。Point omni 仍明确不支持。下一阶段为 IBL v2（irradiance、prefiltered specular、BRDF LUT）。
+- 私有 `ShadowPass` 新字段改为尾部追加，避免 VS 增量构建混用旧构造代码时移动既有字段偏移；本轮定向重编直接包含该头的 Renderer/Test TU，未清理整个引擎。
+
 ## 2026-09-23 — 基础画质第一阶段：TAA velocity dilation 与透明 reactive motion
 
 - MotionVectorPass 继续使用单个全分辨率 RGBA16F 目标，不新增常驻 reactive RT。A 通道的原 `valid + previous-depth footprint` 保留在 `[0,2)`，透明表面追加 `+2` reactive 标志；新出现的透明对象可写 reactive 而保持 velocity 无效，避免误用伪零速度。

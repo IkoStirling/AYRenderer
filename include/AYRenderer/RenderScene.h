@@ -277,10 +277,12 @@ struct Light {
     // in ndc01 units (0 ⇒ use the global `shadowBias` uniform
     // uploaded by RenderPass::tryBindShadowSampler).
     //
-    // Point omni-shadow is OUT OF SCOPE for §P5.5 C — Point light
-    // with castShadow=true is logged + skipped at ShadowPass (FS
-    // contribution remains * 1.0 *). Spot + Directional castShadow
-    // each occupy one atlas sub-rect.
+    // Point omni-shadow remains unsupported: Point castShadow=true is logged
+    // and skipped (its lighting contribution stays fully lit). Spot occupies
+    // one atlas tile with a perspective cone projection. The first ordered
+    // Directional caster may use two extra stabilized CSM tiles in deferred
+    // Lighting; the original one-slot projection remains its far/legacy
+    // fallback for forward and custom receiver shaders.
     bool                  castShadow     = false;
     float                 shadowBias     = 0.0f;
 

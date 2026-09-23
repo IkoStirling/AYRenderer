@@ -88,7 +88,7 @@ D:\Projects\out\build\x64-Debug\AYRuntime\AYEditor\AYEditorShell_Demo.exe
 
 ```
 ShadowPass
-  ├─ ShadowMatrixBuilder   scene AABB → light view + ortho
+  ├─ ShadowMatrixBuilder   Directional: stabilized CSM; Spot: perspective cone
   ├─ ShadowMapResources    RGBA8 + D24S8 FBO → blit resolve
   ├─ ShadowCaster          castsShadow(flags) 的 depth draw
   └─ ShadowDiagnostics     L0–L4 + ShadowFrameStats
@@ -111,9 +111,11 @@ ForwardOpaque / Transparent
 ## 已知限制 / 后续
 
 - 深度为 **R8 复刻**（非 `packFloatToRgba`）；clear=`0xffffffff` + `step(0.999,o)` 契约见 lessons 文档 §3.6
-- 已有可选 3×3 PCF（`shadowPcf` / `AY_SHADOW_PCF`）；VSM / ESM / PCSS / CSM 未做
+- 已有可选 3×3 PCF（`shadowPcf` / `AY_SHADOW_PCF`）和 Deferred 主方向光 3 级 CSM；VSM / ESM / PCSS 未做
 - FO 采样 caster color RT；blit→resolve 仅可选 readback（须独立 view）
-- 单 cascade 方向光 ortho；扩展预留见 `docs/shadow-pass-plan.md`
+- 第一盏投影阴影的 Directional 使用 practical split（lambda=0.65）的 near/mid CSM，并保留 scene-fit ortho 作为 far fallback；cascade XY 范围量化并按 atlas tile texel 对齐，避免相机微移造成阴影游动
+- Spot 使用光源位置、`spotDirection`、外锥角和 range 构建透视投影；Point omni 仍未实现
+- CSM 选择当前仅接入 Deferred Lighting。Forward、自定义 receiver 和内建透明 PBR 继续采每灯 base tile，因此保持正确但没有近景 cascade 分辨率提升
 - 产品默认 pipeline **可不含** Shadow；Editor / demo 用 `makeForwardWithShadows()`
 
 ## Shadow Bias 控制

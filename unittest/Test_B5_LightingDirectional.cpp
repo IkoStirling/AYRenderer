@@ -103,7 +103,7 @@ namespace {
 // key via `kLightingCacheKeyCStr` in LightingPass.h, so this test
 // compares the mirror against the live key �?drift now fails.
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v31_ssao_ambient_only";
+    "lighting_v32_csm_spot_perspective";
 inline constexpr const char* kExpectedLightingBuildStamp =
     "lighting-hdr-v1-2026-08-28";
 
