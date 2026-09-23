@@ -49,6 +49,7 @@
 // render() call (passes owned via unique_ptr).
 
 #include "detail/BGFXAdapter.h"
+#include "detail/IblPrecompute.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
 #include "detail/SkyboxPass.h"
@@ -127,6 +128,21 @@ public:
         _ambientStrength = strength;
     }
     float ambientStrength() const noexcept { return _ambientStrength; }
+    bool iblV2ReadyFor(uint64_t sourceTextureId) const noexcept {
+        return _iblResources.isReadyFor(sourceTextureId);
+    }
+    bgfx::TextureHandle iblIrradianceTexture() const noexcept {
+        return _iblResources.irradiance();
+    }
+    bgfx::TextureHandle iblPrefilteredSpecularTexture() const noexcept {
+        return _iblResources.prefilteredSpecular();
+    }
+    bgfx::TextureHandle iblBrdfLutTexture() const noexcept {
+        return _iblResources.brdfLut();
+    }
+    float iblMaxSpecularLod() const noexcept {
+        return _iblResources.maxSpecularLod();
+    }
     void destroyResources(BGFXAdapter& adapter);
 
     // §P5 B5 (2026-07-22) — lazy Phoskia Lighting VS/FS acquire.
@@ -232,6 +248,10 @@ private:
     // §P3 L12 (2026-08-24) — magic 0.6f hoisted to
     // ayt::render::kDefaultAmbientStrength (RenderTypes.h).
     float _ambientStrength = ayt::render::kDefaultAmbientStrength;
+
+    // Append-only: the renderer test suite also protects the legacy pass ABI.
+    // Generated only when the immutable source cube changes.
+    IblResources _iblResources;
 };
 
 // §P5.5 B (2026-07-23) — Bug fix #3: externalize the cache-key

@@ -197,8 +197,11 @@ void bindTransparentEnvironment(shader::ShaderResource& shader,
                                 const PassExecContext& ctx)
 {
     bool cubeActive = false;
+    bool iblV2Active = false;
+    float iblMaxLod = 0.0f;
     if (ctx.skyboxPass != nullptr && ctx.skyboxPass->hasCubeTexture()) {
-        const auto cubeIt = ctx.textures.find(ctx.skyboxPass->cubeTexture().id);
+        const uint64_t cubeTextureId = ctx.skyboxPass->cubeTexture().id;
+        const auto cubeIt = ctx.textures.find(cubeTextureId);
         const shader::BindingId cubeBinding = shader.getTextureBinding("envCube");
         if (cubeBinding != shader::InvalidBinding
             && cubeIt != ctx.textures.end()
@@ -206,6 +209,34 @@ void bindTransparentEnvironment(shader::ShaderResource& shader,
             shader.setTexture(shader.getTextureStage(cubeBinding), cubeBinding,
                               toShaderTexture(cubeIt->second.handle));
             cubeActive = true;
+        }
+        if (ctx.lightingPass != nullptr
+            && ctx.lightingPass->iblV2ReadyFor(cubeTextureId)) {
+            const shader::BindingId irradianceBinding =
+                shader.getTextureBinding("irradianceCube");
+            const shader::BindingId prefilterBinding =
+                shader.getTextureBinding("prefilteredSpecularCube");
+            const shader::BindingId brdfBinding =
+                shader.getTextureBinding("brdfLut");
+            if (irradianceBinding != shader::InvalidBinding
+                && prefilterBinding != shader::InvalidBinding
+                && brdfBinding != shader::InvalidBinding) {
+                shader.setTexture(
+                    shader.getTextureStage(irradianceBinding),
+                    irradianceBinding,
+                    toShaderTexture(
+                        ctx.lightingPass->iblIrradianceTexture()));
+                shader.setTexture(
+                    shader.getTextureStage(prefilterBinding),
+                    prefilterBinding,
+                    toShaderTexture(
+                        ctx.lightingPass->iblPrefilteredSpecularTexture()));
+                shader.setTexture(
+                    shader.getTextureStage(brdfBinding), brdfBinding,
+                    toShaderTexture(ctx.lightingPass->iblBrdfLutTexture()));
+                iblV2Active = true;
+                iblMaxLod = ctx.lightingPass->iblMaxSpecularLod();
+            }
         }
     }
 
@@ -218,7 +249,13 @@ void bindTransparentEnvironment(shader::ShaderResource& shader,
             : ayt::render::kDefaultAmbientStrength,
         0.0f, 0.0f, 0.0f
     };
+    const float iblV2Value[4] = {
+        iblV2Active ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f
+    };
+    const float iblLodValue[4] = { iblMaxLod, 0.0f, 0.0f, 0.0f };
     trySetUniformVec4(shader, "cubeActive", cubeActiveValue);
+    trySetUniformVec4(shader, "iblV2Active", iblV2Value);
+    trySetUniformVec4(shader, "iblMaxLod", iblLodValue);
     trySetUniformVec4(shader, "ambientStrength", ambientValue);
 }
 

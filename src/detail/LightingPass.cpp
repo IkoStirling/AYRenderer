@@ -88,7 +88,7 @@ const char* const kLightingBuildStampCStr = kLightingBuildStamp;
 //   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
 //   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v32_csm_spot_perspective";
+    "lighting_v33_ibl_v2_split_sum";
 
 // �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -187,6 +187,9 @@ material Lighting {
     texture2d gbufferSky
     texture2d ssaoTexture
     texturecube envCube
+    texturecube irradianceCube
+    texturecube prefilteredSpecularCube
+    texture2d brdfLut
     uniform vec4 u_lightDirection
     uniform vec4 u_lightColor
     uniform vec4 u_cameraPos
@@ -196,6 +199,8 @@ material Lighting {
     uniform vec4 shadowPcf
     uniform vec4 skyMix
     uniform vec4 cubeActive
+    uniform vec4 iblV2Active
+    uniform vec4 iblMaxLod
     uniform vec4 ambientStrength
     uniform vec4 ssaoParams
     // �P5.5 C (2026-07-23) ??per-light shadow atlas bindings.
@@ -250,7 +255,7 @@ material Lighting {
         // ambientStrength (default 0.6).
         let ambientFlat = vec3(0.1, 0.1, 0.1)
         let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x
-        let ambient = ambientFlat + ambientCube
+        let legacyAmbient = ambientFlat + ambientCube
         // �P5 B5.5 v16 ??worldPos from GBuffer RT2 (RGBA16F raw xyz).
         let worldPos = worldSample.xyz
         // �P5.5 C (2026-07-23) ??per-light shadow factor helper.
@@ -888,7 +893,18 @@ material Lighting {
         let directLit = direct0 + direct1 + direct2 + direct3 + direct4 + direct5 + direct6 + direct7
         let ambientF = fresnelSchlickRoughness(NdotV, F0, materialRoughness)
         let ambientDiffuseWeight = (vec3(1.0, 1.0, 1.0) - ambientF) * (1.0 - materialMetallic)
-        let ambientLit = albedo.rgb * ambientDiffuseWeight * ambient
+        let irradiance = sample(irradianceCube, N).rgb
+        let reflection = reflect(V * -1.0, N)
+        let prefilteredSpecular = sampleLod(
+            prefilteredSpecularCube, reflection,
+            materialRoughness * iblMaxLod.x).rgb
+        let brdfSample = sample(brdfLut, vec2(NdotV, materialRoughness)).xy
+        let iblDiffuse = irradiance * albedo.rgb * ambientDiffuseWeight
+        let iblSpecular = prefilteredSpecular
+                        * (ambientF * brdfSample.x + vec3(brdfSample.y))
+        let iblAmbient = (iblDiffuse + iblSpecular) * ambientStrength.x
+        let legacyAmbientLit = albedo.rgb * ambientDiffuseWeight * legacyAmbient
+        let ambientLit = mix(legacyAmbientLit, iblAmbient, iblV2Active.x)
                        * materialAo * ssaoAmbient
         let pbrLit = ambientLit + directLit + surface.rgb
         let unlit = albedo.rgb + surface.rgb
@@ -1078,6 +1094,7 @@ void LightingPass::destroyResources(BGFXAdapter& adapter)
         adapter.destroy(_fullscreenIB);
         _fullscreenIB = bgfx::IndexBufferHandle{BGFX_INVALID_HANDLE};
     }
+    _iblResources.destroy(adapter);
     _lightingW  = 0;
     _lightingH  = 0;
     _allocatedW = 0;
@@ -1534,10 +1551,13 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // still feeds ambientCube. cubeActive=0 only when no cube
     // handle / no SkyboxPass / texture missing from ctx.textures.
     bool cubeActive = false;
+    bool iblV2Active = false;
+    float iblMaxLod = 0.0f;
     if (ctx.skyboxPass != nullptr
         && ctx.skyboxPass->hasCubeTexture()) {
+        const uint64_t cubeTextureId = ctx.skyboxPass->cubeTexture().id;
         const auto cubeIt = ctx.textures.find(
-            ctx.skyboxPass->cubeTexture().id);
+            cubeTextureId);
         if (cubeIt != ctx.textures.end()
             && BGFXAdapter::isValid(cubeIt->second.handle)) {
             const shader::BindingId envCubeBinding =
@@ -1548,6 +1568,33 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                                     toShaderTexture(cubeIt->second.handle));
             }
             cubeActive = true;
+
+            if (_iblResources.ensure(ctx.adapter, cubeTextureId,
+                                     cubeIt->second)) {
+                const shader::BindingId irradianceBinding =
+                    _program.getTextureBinding("irradianceCube");
+                const shader::BindingId prefilterBinding =
+                    _program.getTextureBinding("prefilteredSpecularCube");
+                const shader::BindingId brdfBinding =
+                    _program.getTextureBinding("brdfLut");
+                if (irradianceBinding != shader::InvalidBinding
+                    && prefilterBinding != shader::InvalidBinding
+                    && brdfBinding != shader::InvalidBinding) {
+                    _program.setTexture(
+                        _program.getTextureStage(irradianceBinding),
+                        irradianceBinding,
+                        toShaderTexture(_iblResources.irradiance()));
+                    _program.setTexture(
+                        _program.getTextureStage(prefilterBinding),
+                        prefilterBinding,
+                        toShaderTexture(_iblResources.prefilteredSpecular()));
+                    _program.setTexture(
+                        _program.getTextureStage(brdfBinding), brdfBinding,
+                        toShaderTexture(_iblResources.brdfLut()));
+                    iblV2Active = true;
+                    iblMaxLod = _iblResources.maxSpecularLod();
+                }
+            }
         }
     }
 
@@ -1579,6 +1626,20 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
         };
         _program.setUniform(cubeActiveBinding, cubeActivePad,
                             sizeof(cubeActivePad));
+    }
+    const shader::BindingId iblV2ActiveBinding =
+        _program.getUniformBinding("iblV2Active");
+    if (iblV2ActiveBinding != shader::InvalidBinding) {
+        const float value[4] = {
+            iblV2Active ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f
+        };
+        _program.setUniform(iblV2ActiveBinding, value, sizeof(value));
+    }
+    const shader::BindingId iblMaxLodBinding =
+        _program.getUniformBinding("iblMaxLod");
+    if (iblMaxLodBinding != shader::InvalidBinding) {
+        const float value[4] = { iblMaxLod, 0.0f, 0.0f, 0.0f };
+        _program.setUniform(iblMaxLodBinding, value, sizeof(value));
     }
     const shader::BindingId ambientStrengthBinding =
         _program.getUniformBinding("ambientStrength");

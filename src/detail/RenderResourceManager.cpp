@@ -1539,6 +1539,10 @@ TextureHandle RenderResourceManager::createCubeTextureFromRgba8(uint32_t size,
     GpuTexture gpuTex;
     gpuTex.width  = static_cast<uint16_t>(size);
     gpuTex.height = static_cast<uint16_t>(size);
+    gpuTex.cube = true;
+    gpuTex.cpuRgba8.assign(
+        rgba8Faces,
+        rgba8Faces + static_cast<size_t>(size) * size * 4u * 6u);
     gpuTex.handle = _adapter.createTextureCube(gpuTex.width, rgba8Faces);
     if (!bgfx::isValid(gpuTex.handle)) {
         return out;

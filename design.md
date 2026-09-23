@@ -1,5 +1,12 @@
 # AYRenderer Design
 
+## 2026-09-23 — 基础画质第三刀：IBL v2 split-sum
+
+- 立方体环境资源保留只读 RGBA8 CPU 面数据；资源 id 变化时一次性生成 cosine-weighted diffuse irradiance cube、GGX prefiltered specular mip chain 和 split-sum BRDF LUT。正常帧只采样生成纹理，不运行卷积 Pass，也不增加 FrameGraph 节点。
+- Deferred Lighting 与内建 Transparent PBR 共享同一组 IBL 资源：漫反射使用 irradiance，镜面反射按 roughness 选择显式 mip，并用 BRDF LUT 修正 Fresnel/geometry 项。旧 `envCube` ambient 仍作为预计算不可用时的回退，生成失败对同一资源只记录一次，避免逐帧重算卡顿。
+- BGFXAdapter 增加 mutable mipmapped cube 创建与 face/mip 更新；AYShader 增加 `texturecube sampleLod` 生产转换。CPU 常色立方体测试固定卷积、mip 和 LUT 输出，Lighting 与 PBR 已通过 Phoskia IR 及 Windows `s_5_0` 生产编译。
+- 当前生成纹理使用 RGBA8，预计算发生在环境首次进入 Lighting 的帧；后续可迁移为离线 cook/RGBA16F 以提高 HDR 范围并完全消除首次生成成本。下一刀为 Bloom 多尺度金字塔与自动曝光。
+
 ## 2026-09-23 — 基础画质第二刀：Directional CSM 与 Spot 透视阴影
 
 - Shadow atlas 保持八槽兼容布局：先为每盏受支持的投影阴影灯保留一个 base tile，再把剩余槽位分配给第一盏 Directional 的 near/mid cascade；原 scene-fit Directional tile 作为 far fallback。`perLightShadowCount` 与总 projection count 分离，避免旧透明/自定义 receiver 把 cascade 误认成额外光源。

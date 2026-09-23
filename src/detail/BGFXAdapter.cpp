@@ -475,6 +475,31 @@ bgfx::TextureHandle BGFXAdapter::createTextureCube(uint16_t size,
                                    mem);
 }
 
+bgfx::TextureHandle BGFXAdapter::createMutableTextureCube(
+    uint16_t size, bool hasMips, bgfx::TextureFormat::Enum format,
+    uint64_t flags)
+{
+    if (!_initialized || isNoopBackend() || size == 0
+        || format == bgfx::TextureFormat::Unknown
+        || !bgfx::isTextureValid(0, true, 1, format, flags)) {
+        return BGFX_INVALID_HANDLE;
+    }
+    return bgfx::createTextureCube(size, hasMips, 1, format, flags, nullptr);
+}
+
+void BGFXAdapter::updateTextureCube(bgfx::TextureHandle handle,
+                                    uint8_t face, uint8_t mip,
+                                    uint16_t size, const void* data,
+                                    uint32_t byteCount)
+{
+    if (!_initialized || !bgfx::isValid(handle) || face >= 6u || size == 0
+        || data == nullptr || byteCount == 0u) {
+        return;
+    }
+    const bgfx::Memory* memory = bgfx::copy(data, byteCount);
+    bgfx::updateTextureCube(handle, 0, face, mip, 0, 0, size, size, memory);
+}
+
 bgfx::TextureHandle BGFXAdapter::createTexture2DFromData(uint16_t width, uint16_t height,
                                                           bgfx::TextureFormat::Enum format,
                                                           const void* data, uint32_t size,

@@ -121,7 +121,7 @@ namespace {
 // fails. Same TU-local-mirror pattern used by
 // Test_B5_LightingDirectional.cpp::kExpectedLightingCacheKey.
 inline constexpr const char* kExpectedB7LightingCacheKey =
-    "lighting_v32_csm_spot_perspective";
+    "lighting_v33_ibl_v2_split_sum";
 
 // §P5 B7+ (2026-07-22) �?Phoskia source substring pins. Drift =
 // test fails. Note PascalCase `Lights` block name (matches
@@ -139,7 +139,7 @@ inline const char* kExpectedSourceSubstrings[] = {
     "uniform vec4 ambientStrength",  // §P5.5 D: IBL strength
     "let ambientFlat = vec3(0.1, 0.1, 0.1)",  // §P5.5 D: pre-D floor preserved
     "let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x",
-    "let ambient = ambientFlat + ambientCube",  // §P5.5 D: combined term
+    "let ambient = ambientFlat + ambientCube",  // legacy mirror contract
     "Lights.dirs[0].xyz",             // access pattern (PascalCase block + lowercase field)
     "Lights.colors[0].xyz",
     "Lights.params[0]",               // §P5.5 B: per-light params access
@@ -599,7 +599,7 @@ TEST_CASE(b7_lighting_cache_key_bump_pinned_live) {
     CHECK(std::string(kExpectedB7LightingCacheKey).size() >= 20u);
     CHECK(std::string(kLightingCacheKeyCStr).size() >= 20u);
     // The literal must contain the current SSAO ambient-only version marker.
-    CHECK(std::string(kLightingCacheKeyCStr).find("v32_csm_spot_perspective")
+    CHECK(std::string(kLightingCacheKeyCStr).find("v33_ibl_v2_split_sum")
           != std::string::npos);
 }
 

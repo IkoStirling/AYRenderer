@@ -103,6 +103,11 @@ TEST_CASE(runtime_pbr_declares_imported_material_contract)
     CHECK(source.find("let shadow7 = mix(") != std::string::npos);
     CHECK(source.find("let cubeAmbient = sample(envCube, N)")
           != std::string::npos);
+    CHECK(source.find("texturecube irradianceCube") != std::string::npos);
+    CHECK(source.find("texturecube prefilteredSpecularCube")
+          != std::string::npos);
+    CHECK(source.find("texture2d brdfLut") != std::string::npos);
+    CHECK(source.find("sampleLod(") != std::string::npos);
 }
 
 TEST_CASE(runtime_pbr_frontend_and_shaderc_compile)

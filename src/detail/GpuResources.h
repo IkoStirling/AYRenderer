@@ -56,6 +56,11 @@ struct GpuTexture {
     // Sampling transfer function is part of the GPU resource identity.
     // Same file + different material semantic must not alias in the cache.
     bool srgb = false;
+    // Immutable cubemaps retain their upload bytes so lighting can build IBL
+    // convolution resources once without a GPU readback stall. Appended to
+    // preserve all existing member offsets in incremental MSVC builds.
+    bool cube = false;
+    std::vector<uint8_t> cpuRgba8;
 };
 
 struct GpuMaterial {

@@ -17,6 +17,9 @@ material PBR {
     texture2d emissiveTexture
     texture2d shadowMap
     texturecube envCube
+    texturecube irradianceCube
+    texturecube prefilteredSpecularCube
+    texture2d brdfLut
 
     uniform mat4 u_lightViewProj
     uniform vec4 cameraPos
@@ -29,6 +32,8 @@ material PBR {
     uniform vec4 perLightShadowCount
     uniform vec4 activeLightCount
     uniform vec4 cubeActive
+    uniform vec4 iblV2Active
+    uniform vec4 iblMaxLod
     uniform vec4 ambientStrength
     // Optional transparent-pass depth haze. x=density, y=strength,
     // z=additive blend policy (1 attenuates without fog-color injection).
@@ -871,8 +876,26 @@ material PBR {
         let flatAmbient = albedo * (0.03 * materialAo)
         let cubeAmbient = sample(envCube, N).rgb * albedo
                         * (ambientStrength.x * cubeActive.x * materialAo)
+        let legacyAmbient = flatAmbient + cubeAmbient
+        let ambientF = fresnelSchlickRoughness(
+            NdotV, materialF0, materialRoughness)
+        let ambientDiffuseWeight = (vec3(1.0, 1.0, 1.0) - ambientF)
+                                 * (1.0 - materialMetallic)
+        let irradiance = sample(irradianceCube, N).rgb
+        let reflection = reflect(V * -1.0, N)
+        let prefilteredSpecular = sampleLod(
+            prefilteredSpecularCube, reflection,
+            materialRoughness * iblMaxLod.x).rgb
+        let brdfSample = sample(
+            brdfLut, vec2(NdotV, materialRoughness)).xy
+        let iblDiffuse = irradiance * albedo * ambientDiffuseWeight
+        let iblSpecular = prefilteredSpecular
+                        * (ambientF * brdfSample.x + vec3(brdfSample.y))
+        let iblAmbient = (iblDiffuse + iblSpecular)
+                       * (ambientStrength.x * materialAo)
+        let ambient = mix(legacyAmbient, iblAmbient, iblV2Active.x)
         let materialEmissive = emissive.xyz * sample(emissiveTexture, uvOut).rgb
-        let color = flatAmbient + cubeAmbient + direct + materialEmissive
+        let color = ambient + direct + materialEmissive
         let alpha = sampledBase.a * sampledOpacity
                   * max(0.0, min(1.0, opacity.x))
         let hazeDistance = length(worldPos - cameraPos.xyz)

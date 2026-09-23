@@ -118,6 +118,13 @@ public:
     bgfx::TextureHandle createTextureCube(uint16_t size,
                                           const void* rgba8Faces,
                                           uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
+    bgfx::TextureHandle createMutableTextureCube(
+        uint16_t size, bool hasMips, bgfx::TextureFormat::Enum format,
+        uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
+    void updateTextureCube(bgfx::TextureHandle handle,
+                           uint8_t face, uint8_t mip,
+                           uint16_t size, const void* data,
+                           uint32_t byteCount);
     bgfx::TextureHandle createTexture2DFromData(uint16_t width, uint16_t height,
                                               bgfx::TextureFormat::Enum format,
                                               const void* data, uint32_t size,

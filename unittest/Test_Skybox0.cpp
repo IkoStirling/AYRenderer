@@ -109,7 +109,7 @@ namespace {
 // mirror here ALSO moves v20 �?v22; live drift detection
 // compares against `kLightingCacheKeyCStr` (Bug fix #3 mirror �?// pre-D self-compare was false-green).
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v32_csm_spot_perspective";
+    "lighting_v33_ibl_v2_split_sum";
 
 // §Skybox0 (2026-07-23) �?SkyboxPass cache-key literal. Pin
 // here so a master-cache-key change without a Test_Skybox0
@@ -140,7 +140,7 @@ inline const char* kSkybox0LightingExpectedSubstrings[] = {
     "uniform vec4 ambientStrength",   // §P5.5 D �?IBL strength
     "let ambientFlat = vec3(0.1, 0.1, 0.1)",  // §P5.5 D �?pre-D floor preserved
     "let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x",
-    "let ambient = ambientFlat + ambientCube",  // §P5.5 D �?combined term
+    "let ambient = ambientFlat + ambientCube",  // legacy unused mirror
     "let skyColor = sample(gbufferSky, baseUv).xyz * skyMix.x",  // backdrop sample
     "let coverage = step(0.001, max(max(lit.r, lit.g), lit.b))",  // coverage gate
     "let finalColor = mix(skyColor, lit, coverage)",            // backdrop blend
@@ -367,7 +367,7 @@ TEST_CASE(lighting_pass_cache_key_bump_v22_p5p5d) {
     CHECK(std::string(kExpectedLightingCacheKey).size() >= 10u);
     // Live drift detection (Bug fix #3 mirror) �?the mirror
     // literal MUST match the live kLightingCacheKeyCStr extern.
-    CHECK(std::string(kLightingCacheKeyCStr).find("v32_csm_spot_perspective")
+    CHECK(std::string(kLightingCacheKeyCStr).find("v33_ibl_v2_split_sum")
           != std::string::npos);
 }
 

@@ -103,7 +103,7 @@ namespace {
 // key via `kLightingCacheKeyCStr` in LightingPass.h, so this test
 // compares the mirror against the live key �?drift now fails.
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v32_csm_spot_perspective";
+    "lighting_v33_ibl_v2_split_sum";
 inline constexpr const char* kExpectedLightingBuildStamp =
     "lighting-hdr-v1-2026-08-28";
 
@@ -125,7 +125,7 @@ inline const char* kExpectedSourceSubstrings[] = {
     "let NdotPos0  = max(dot(N, Lp0), 0.0)",
     "let ambientFlat = vec3(0.1, 0.1, 0.1)",  // §P5.5 D: pre-D floor preserved
     "let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x",
-    "let ambient = ambientFlat + ambientCube",  // §P5.5 D: combined term
+    "let ambient = ambientFlat + ambientCube",  // legacy mirror contract
     "let materialRoughness = max(0.045, min(1.0, normalSample.a))",
     "let lit = ambientLit + diffuseLit + specularLit + surface.rgb",
 };
