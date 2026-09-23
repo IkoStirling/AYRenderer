@@ -28,6 +28,9 @@ enum class BlackboardResourceId : uint8_t {
     BloomBright,
     BloomBlurA,
     BloomBlurB,
+    AutoExposureRead,
+    AutoExposureWrite,
+    AutoExposure,
     Count,
 };
 

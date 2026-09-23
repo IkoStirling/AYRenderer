@@ -136,7 +136,7 @@ TEST_CASE(postprocess_consumes_haze_as_primary_source_not_halfres_sampler) {
     CHECK(primary.find("ssaoTexture") == std::string::npos);
     CHECK(fallback.find("ssaoTexture") == std::string::npos);
     CHECK(std::string(ayt::render::detail::kPostProcessCacheKeyCStr)
-          == "postprocess_tonemap_aces_v12_sanitized_params_fs");
+          == "postprocess_tonemap_aces_v13_auto_exposure_fs");
 }
 
 TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {
@@ -152,7 +152,7 @@ TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {
 
 TEST_CASE(deferred_pipeline_matches_data_dependencies) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
-    CHECK(desc.passes.size() == 19u);
+    CHECK(desc.passes.size() == 20u);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
     CHECK(desc.passes[3] == RenderPassSlot::MotionVector);
     CHECK(desc.passes[4] == RenderPassSlot::SSAO);
@@ -162,12 +162,13 @@ TEST_CASE(deferred_pipeline_matches_data_dependencies) {
     CHECK(desc.passes[8] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[9] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[10] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[11] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[11] == RenderPassSlot::AutoExposure);
+    CHECK(desc.passes[12] == RenderPassSlot::PostProcess);
 }
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 37u);
+    CHECK(order.size() == 43u);
     CHECK(order[14] == 14u);  // SSAO
     CHECK(order[15] == 8u);   // Lighting
     CHECK(order[16] == 13u);  // DepthHaze
@@ -177,31 +178,38 @@ TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     CHECK(order[20] == 246u); // Camera-overlay 2D
     CHECK(order[21] == 10u);  // BloomExtract
     CHECK(order[22] == 11u);  // BloomBlurH
-    CHECK(order[23] == 12u);  // BloomBlurV
-    CHECK(order[24] == 15u);  // PostProcess
-    CHECK(order[25] == 5u);   // TAA
-    CHECK(order[26] == 17u);  // FXAA
-    CHECK(order[27] == 247u); // SMAA edge detection
-    CHECK(order[28] == 248u); // SMAA blend weights
-    CHECK(order[29] == 249u); // SMAA neighborhood blend
-    CHECK(order[30] == 4u);   // ColorGrading
-    CHECK(order[31] == 16u);  // Present
-    CHECK(order[32] == 245u); // Optional TAA diagnostics, never history
-    CHECK(order[33] == 250u); // GBufferDebug
-    CHECK(order[34] == 254u); // Selection screen-space composite
-    CHECK(order[35] == 251u); // Editor orientation axis
-    CHECK(order[36] == 252u); // Transform gizmo
+    CHECK(order[23] == 26u);  // Bloom downsample quarter
+    CHECK(order[24] == 27u);  // Bloom downsample eighth
+    CHECK(order[25] == 28u);  // Bloom downsample sixteenth
+    CHECK(order[26] == 29u);  // Bloom upsample eighth
+    CHECK(order[27] == 30u);  // Bloom upsample quarter
+    CHECK(order[28] == 12u);  // Bloom final half-res resolve
+    CHECK(order[29] == 31u);  // Auto exposure
+    CHECK(order[30] == 15u);  // PostProcess
+    CHECK(order[31] == 5u);   // TAA
+    CHECK(order[32] == 17u);  // FXAA
+    CHECK(order[33] == 247u); // SMAA edge detection
+    CHECK(order[34] == 248u); // SMAA blend weights
+    CHECK(order[35] == 249u); // SMAA neighborhood blend
+    CHECK(order[36] == 4u);   // ColorGrading
+    CHECK(order[37] == 16u);  // Present
+    CHECK(order[38] == 245u); // Optional TAA diagnostics, never history
+    CHECK(order[39] == 250u); // GBufferDebug
+    CHECK(order[40] == 254u); // Selection screen-space composite
+    CHECK(order[41] == 251u); // Editor orientation axis
+    CHECK(order[42] == 252u); // Transform gizmo
 }
 
 TEST_CASE(forward_pipeline_keeps_haze_as_safe_noop_before_transparent) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
-    CHECK(desc.passes.size() == 13u);
+    CHECK(desc.passes.size() == 14u);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
     CHECK(desc.passes[3] == RenderPassSlot::Transparent);
     CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[7] == RenderPassSlot::AutoExposure);
+    CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
 }
 
 TEST_CASE(builtin_pbr_transparent_shader_has_fragment_depth_haze) {

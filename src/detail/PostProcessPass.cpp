@@ -37,8 +37,10 @@ constexpr const char* kPostProcessPhoskiaSource = R"(
 material PostProcess {
     texture2d sceneColor
     texture2d bloomTexture
+    texture2d autoExposureTexture
     uniform vec4 bloomStrength
     uniform vec4 exposure
+    uniform vec4 autoExposureEnabled
     uniform vec4 tonemapMode
     uniform vec4 gammaParams
     vertex {
@@ -51,9 +53,13 @@ material PostProcess {
         let uv = vec2(vUv.x, 1.0 - vUv.y)
         let sampled = sample(sceneColor, uv)
         let bloomSample = sample(bloomTexture, uv)
-        let raw = sampled.xyz * exposure.x
+        let autoExposureSample = sample(autoExposureTexture, vec2(0.5, 0.5))
+        let autoFactor = mix(1.0, autoExposureSample.x,
+                             autoExposureEnabled.x)
+        let combinedExposure = exposure.x * autoFactor
+        let raw = sampled.xyz * combinedExposure
         let withBloom = raw
-                      + bloomSample.xyz * bloomStrength.x * exposure.x
+                      + bloomSample.xyz * bloomStrength.x * combinedExposure
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -79,7 +85,7 @@ material PostProcess {
 
 // v12 removes the dead uTime ABI and consumes sanitized display parameters.
 constexpr const char* kPostProcessCacheKey =
-    "postprocess_tonemap_aces_v12_sanitized_params_fs";
+    "postprocess_tonemap_aces_v13_auto_exposure_fs";
 
 // Deliberately independent minimal fallback. If a primary-only language or
 // math feature fails to compile, this still has a high chance of restoring a
@@ -207,10 +213,12 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         && _programVariant == ProgramVariant::Primary
         && _uBloomStrength != ayt::shader::InvalidBinding
         && _uExposure      != ayt::shader::InvalidBinding
+        && _uAutoExposureEnabled != ayt::shader::InvalidBinding
         && _uTonemapMode   != ayt::shader::InvalidBinding
         && _uGammaParams   != ayt::shader::InvalidBinding
         && _tSceneColor    != ayt::shader::InvalidBinding
-        && _tBloomTexture  != ayt::shader::InvalidBinding;
+        && _tBloomTexture  != ayt::shader::InvalidBinding
+        && _tAutoExposureTexture != ayt::shader::InvalidBinding;
     const bool fallbackProgramReady = _program.isValid()
         && _programVariant == ProgramVariant::Fallback
         && _tSceneColor != ayt::shader::InvalidBinding;
@@ -305,6 +313,18 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
             }
         }
     }
+    ayt::shader::TextureHandle autoExposureTexHandle = texHandle;
+    bool autoExposureReady = false;
+    if (primaryProgramReady && ctx.resourceBlackboard != nullptr) {
+        const BlackboardResourceEntry* autoExposure =
+            ctx.resourceBlackboard->findProduced(
+                BlackboardResourceId::AutoExposure);
+        if (autoExposure != nullptr
+            && BGFXAdapter::isValid(autoExposure->texture)) {
+            autoExposureTexHandle = toShaderTexture(autoExposure->texture);
+            autoExposureReady = true;
+        }
+    }
     // bgfx Vec4 slots — pad scalars into .x (lessons §3.1).
     const float bloomPad[4] = {
         effectiveBloomStrength(frame.bloomStrength, bloomSourceReady),
@@ -312,6 +332,9 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     };
     const float exposurePad[4] = {
         sanitizePostProcessExposure(frame.exposure), 0.0f, 0.0f, 0.0f
+    };
+    const float autoExposurePad[4] = {
+        autoExposureReady ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f
     };
     const float tonemapPad[4] = {
         static_cast<float>(std::clamp(
@@ -327,8 +350,12 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     _program.setTexture(0, _tSceneColor, texHandle);
     if (primaryProgramReady) {
         _program.setTexture(0, _tBloomTexture, bloomTexHandle);
+        _program.setTexture(0, _tAutoExposureTexture,
+                            autoExposureTexHandle);
         _program.setUniform(_uBloomStrength, bloomPad, sizeof(bloomPad));
         _program.setUniform(_uExposure, exposurePad, sizeof(exposurePad));
+        _program.setUniform(_uAutoExposureEnabled, autoExposurePad,
+                            sizeof(autoExposurePad));
         _program.setUniform(_uTonemapMode, tonemapPad, sizeof(tonemapPad));
         _program.setUniform(_uGammaParams, gammaPad, sizeof(gammaPad));
     }
@@ -391,6 +418,8 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
             primary.getUniformBinding("bloomStrength");
         const ayt::shader::BindingId exposure =
             primary.getUniformBinding("exposure");
+        const ayt::shader::BindingId autoExposureEnabled =
+            primary.getUniformBinding("autoExposureEnabled");
         const ayt::shader::BindingId tonemapMode =
             primary.getUniformBinding("tonemapMode");
         const ayt::shader::BindingId gammaParams =
@@ -399,21 +428,27 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
             primary.getTextureBinding("sceneColor");
         const ayt::shader::BindingId bloomTexture =
             primary.getTextureBinding("bloomTexture");
+        const ayt::shader::BindingId autoExposureTexture =
+            primary.getTextureBinding("autoExposureTexture");
         const bool bindingsReady =
             bloomStrength != ayt::shader::InvalidBinding
             && exposure != ayt::shader::InvalidBinding
+            && autoExposureEnabled != ayt::shader::InvalidBinding
             && tonemapMode != ayt::shader::InvalidBinding
             && gammaParams != ayt::shader::InvalidBinding
             && sceneColor != ayt::shader::InvalidBinding
-            && bloomTexture != ayt::shader::InvalidBinding;
+            && bloomTexture != ayt::shader::InvalidBinding
+            && autoExposureTexture != ayt::shader::InvalidBinding;
         if (bindingsReady) {
             _program = std::move(primary);
             _uBloomStrength = bloomStrength;
             _uExposure = exposure;
+            _uAutoExposureEnabled = autoExposureEnabled;
             _uTonemapMode = tonemapMode;
             _uGammaParams = gammaParams;
             _tSceneColor = sceneColor;
             _tBloomTexture = bloomTexture;
+            _tAutoExposureTexture = autoExposureTexture;
             _programVariant = ProgramVariant::Primary;
             _programRetryFrames = 0;
             return;
@@ -459,10 +494,12 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
     _program = std::move(fallback);
     _uBloomStrength = ayt::shader::InvalidBinding;
     _uExposure = ayt::shader::InvalidBinding;
+    _uAutoExposureEnabled = ayt::shader::InvalidBinding;
     _uTonemapMode = ayt::shader::InvalidBinding;
     _uGammaParams = ayt::shader::InvalidBinding;
     _tSceneColor = sceneColor;
     _tBloomTexture = ayt::shader::InvalidBinding;
+    _tAutoExposureTexture = ayt::shader::InvalidBinding;
     _programVariant = ProgramVariant::Fallback;
     _programRetryFrames = kRetryIntervalFrames;
 }
@@ -485,10 +522,12 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
     }
     _uBloomStrength = ayt::shader::InvalidBinding;
     _uExposure      = ayt::shader::InvalidBinding;
+    _uAutoExposureEnabled = ayt::shader::InvalidBinding;
     _uTonemapMode   = ayt::shader::InvalidBinding;
     _uGammaParams   = ayt::shader::InvalidBinding;
     _tSceneColor    = ayt::shader::InvalidBinding;
     _tBloomTexture  = ayt::shader::InvalidBinding;
+    _tAutoExposureTexture = ayt::shader::InvalidBinding;
     _programVariant = ProgramVariant::None;
     _programRetryFrames = 0;
 }

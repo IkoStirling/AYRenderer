@@ -144,7 +144,7 @@ constexpr const char* kFinalPPExpectedSubstrings[] = {
     "texture2d sceneColor",
     "texture2d bloomTexture",            // §S1c (2026-07-23) — new sampler
     "let bloomSample = sample(bloomTexture, uv)",  // §S1c — real bloom composite
-    "bloomSample.xyz * bloomStrength.x * exposure.x",
+    "bloomSample.xyz * bloomStrength.x * combinedExposure",
     "uniform vec4 bloomStrength",
     "uniform vec4 exposure",
     "uniform vec4 tonemapMode",
@@ -152,7 +152,7 @@ constexpr const char* kFinalPPExpectedSubstrings[] = {
 };
 
 constexpr const char* kExpectedFinalPPCacheKey =
-    "postprocess_tonemap_aces_v12_sanitized_params_fs";
+    "postprocess_tonemap_aces_v13_auto_exposure_fs";
 
 } // namespace
 
@@ -378,18 +378,18 @@ TEST_CASE(s1c_make_default_slot_table_postprocess_after_bloomblur) {
     // RenderPassSlot enum unchanged).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 13);
+    CHECK(desc.passes.size() == 14);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
     CHECK(desc.passes[3] == RenderPassSlot::Transparent);
     CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[8] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[9] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[10] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[11] == RenderPassSlot::Present);
-    CHECK(desc.passes[12] == RenderPassSlot::UI);
+    CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[9] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[10] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[11] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[12] == RenderPassSlot::Present);
+    CHECK(desc.passes[13] == RenderPassSlot::UI);
     // S1c does NOT add a RenderPassSlot enum value (no slot in the
     // table for "FinalPP" — the composite lives in PostProcessPass
     // and reads ctx.bloomBlurPass via borrowed pointer). Future
@@ -403,7 +403,7 @@ TEST_CASE(s1c_make_deferred_slot_table_postprocess_after_bloomblur) {
     // DepthHaze and PostProcess), PostProcess at index 9.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 19);
+    CHECK(desc.passes.size() == 20);
     CHECK(desc.passes[3] == RenderPassSlot::MotionVector);
     CHECK(desc.passes[4] == RenderPassSlot::SSAO);
     CHECK(desc.passes[5] == RenderPassSlot::Lighting);
@@ -412,13 +412,13 @@ TEST_CASE(s1c_make_deferred_slot_table_postprocess_after_bloomblur) {
     CHECK(desc.passes[8] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[9] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[10] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[11] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[12] == RenderPassSlot::TAA);
-    CHECK(desc.passes[13] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[14] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[15] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[16] == RenderPassSlot::Present);
-    CHECK(desc.passes[17] == RenderPassSlot::UI);
+    CHECK(desc.passes[12] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[13] == RenderPassSlot::TAA);
+    CHECK(desc.passes[14] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[15] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[16] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[17] == RenderPassSlot::Present);
+    CHECK(desc.passes[18] == RenderPassSlot::UI);
 }
 
 // === H. setEnabled(false) on PostProcessPass skips dispatch =========

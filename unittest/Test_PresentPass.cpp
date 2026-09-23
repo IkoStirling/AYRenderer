@@ -78,7 +78,7 @@ TEST_CASE(present_append_only_abi_values_are_locked)
     CHECK(static_cast<uint8_t>(RenderPassSlot::FXAA) == 16u);
     CHECK(static_cast<uint8_t>(FgResourceId::FinalLdrColor) == 6u);
     CHECK(static_cast<uint8_t>(FgResourceId::FxaaColor) == 7u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 19u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 26u);
     CHECK(static_cast<uint8_t>(FgSemantic::PresentSource) == 4u);
     CHECK(static_cast<uint8_t>(FgSemantic::Count) == 5u);
 }

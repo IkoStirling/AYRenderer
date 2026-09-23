@@ -1,5 +1,13 @@
 # AYRenderer Design
 
+## 2026-09-23 — 基础画质第四刀：Bloom 金字塔与自动曝光
+
+- Bloom 从单层半分辨率横/纵模糊升级为 1/2 → 1/4 → 1/8 → 1/16 的能量守恒降采样金字塔，再以 tent filter 逐级上采样并与较高分辨率层合并；最终仍发布兼容的 `BloomBlurB`，PostProcess 和外部调用点不需要改写。
+- FrameGraph 新增五个金字塔中间资源和 1/8、1/16 extent，完整 Bloom 现在是 Extract + 7 个有序 fullscreen draw。Bloom 关闭时整条分支仍由图存活分析裁剪，目标不会分配，也不会留下 stale producer。
+- 自动曝光是独立、默认关闭的 `AutoExposurePass`：从当前 HDR scene 取固定 4×4 对数亮度样本，输出 1×1 RGBA16F 曝光历史，按变亮/变暗速度做帧率无关适应，并在 PostProcess tone-map 前与手动 Exposure 相乘。关闭时不创建历史 FBO、不增加 draw；resize、效果关闭和生命周期重建会使历史安全失效。
+- RenderSettings 增加 `Auto Exposure` 开关并持久化；手动 Exposure 保留为曝光补偿。生产 Bloom down/up、AutoExposure 与 PostProcess shader 均通过 Phoskia/shaderc 编译，FrameGraph 完整链、资源契约和编辑器面板均有定向覆盖。
+- VS 2026 Insider Debug：`AYRenderer_Test` **5374/5374**，`AYEditor_Shell` **1184/1184**；`AYEditorShell_Demo` 链接通过。选择轮廓仍保持 Post-TAA，下一项画质收尾是对其稳定 mask 做局部覆盖率抗锯齿。
+
 ## 2026-09-23 — 基础画质第三刀：IBL v2 split-sum
 
 - 立方体环境资源保留只读 RGBA8 CPU 面数据；资源 id 变化时一次性生成 cosine-weighted diffuse irradiance cube、GGX prefiltered specular mip chain 和 split-sum BRDF LUT。正常帧只采样生成纹理，不运行卷积 Pass，也不增加 FrameGraph 节点。
@@ -709,7 +717,8 @@ public:
 | LightingPass | 已落地全屏 Deferred 光照；shadow atlas、完整多光 BRDF、采样变体与 HDR 链路已完成第二轮收敛 |
 | TransparentPass | 已接入双路径；Deferred 借用 LightingOutput 颜色与 GBuffer 深度组成缓存 FBO，共享多光/阴影契约，按 sortKey 与相机距离稳定排序并在输入失效时 fail-close |
 | Forward2DOpaquePass | Camera Overlay 2D；独立正交相机、无深度、跨 Sprite/Tilemap 全局稳定排序；Forward/Deferred 都在 3D Transparent 后合成 |
-| BloomExtract / BloomBlur | 已完成第二轮收敛：完整链门控、当前帧产出契约、RGBA16F、Karis 降采样、5-fetch/axis blur、曝光一致合成 |
+| BloomExtract / BloomBlur | 多尺度 HDR 金字塔：Karis 亮区提取，1/2→1/4→1/8→1/16 能量守恒降采样，tent 逐级上采样合并；完整链门控与当前帧产出契约保持 fail-close |
+| AutoExposure | 独立 1×1 RGBA16F 历史 Pass，4×4 对数亮度估计与非对称时间适应；默认关闭，关闭时零资源、零 draw，RenderSettings 可切换并持久化 |
 | DepthHaze | 已完成第二轮收敛：全分辨率 HDR HazeColor、Coverage 背景语义、逐帧 fail-close、透明 PBR 雾化与显式 view 顺序；SSAO 已在 Lighting 环境光阶段完成，不在 Haze 内重复合成 |
 | SSAO | 已完成审核与按序修复：RT3 coverage、TBN 旋转核、view-Z 比较、完整链门控、生命周期闭合，且只影响 Lighting 环境光 |
 | PostProcess / FXAA / ColorGrading / Present / UI | PostProcess 写 RGBA8 FinalLdrColor；FXAA 默认开启并可切换；ColorGrading 默认关闭，以 32³ 2D strip LUT 提供 Neutral/Warm/Cool/Cinematic；每个成功节点依次提升 PresentSource，Present 单独写 backbuffer，UI 最后合成 |
@@ -720,7 +729,7 @@ public:
 ```text
 Shadow → ForwardOpaque → DepthHaze(no-op) → Transparent
        → Forward2DOpaque → BloomExtract → BloomBlur
-       → PostProcess(FinalLdrColor) → FXAA(FxaaColor)
+       → AutoExposure(optional) → PostProcess(FinalLdrColor) → FXAA(FxaaColor)
        → ColorGrading(ColorGradedColor) → Present → UI
 ```
 
@@ -729,7 +738,7 @@ Shadow → ForwardOpaque → DepthHaze(no-op) → Transparent
 ```text
 Shadow → Skybox → GBuffer → MotionVector → SSAO → Lighting → DepthHaze
        → Transparent → Forward2DOpaque → BloomExtract → BloomBlur
-       → PostProcess(FinalLdrColor) → TAA / FXAA / SMAA
+       → AutoExposure(optional) → PostProcess(FinalLdrColor) → TAA / FXAA / SMAA
        → ColorGrading(ColorGradedColor) → Present → UI → GBufferDebug
 ```
 

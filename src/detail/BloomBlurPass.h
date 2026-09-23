@@ -1,9 +1,9 @@
 #pragma once
 
-// Half-resolution separable Gaussian blur. It consumes BloomBright only when
-// BloomExtract produced it in the current frame, then writes BloomBlurA in
-// view 11 and BloomBlurB in view 12. Linear filtering folds the Gaussian
-// kernel into five texture fetches per axis.
+// Multi-resolution bloom pyramid. It consumes the half-resolution
+// BloomBright image, downsamples to 1/4, 1/8 and 1/16, then reconstructs the
+// broad glow back to 1/2 resolution. BloomBlurB remains the stable public
+// output consumed by PostProcess.
 //
 // FrameGraph owns all three RGBA16F targets. BloomBlurA and BloomBlurB cannot
 // alias because the vertical pass reads A while writing B. This pass owns only
@@ -25,10 +25,20 @@ namespace ayt::render::detail
 
 class BloomBlurPass : public RenderPass {
 public:
-    // §S1b view map: after BloomExtract=10, before DepthHaze=13.
-    // UI is fixed at 255 (not adjacent — leave Post headroom).
-    static constexpr uint8_t kBloomBlurHorizontalViewId = 11;
-    static constexpr uint8_t kBloomBlurVerticalViewId   = 12;
+    // Every stage needs a distinct bgfx view because viewport and framebuffer
+    // state are view-scoped. RenderViewOrder executes these sparse IDs in the
+    // logical order below, before PostProcess.
+    static constexpr uint8_t kBloomDownQuarterViewId   = 11;
+    static constexpr uint8_t kBloomDownEighthViewId    = 26;
+    static constexpr uint8_t kBloomDownSixteenthViewId = 27;
+    static constexpr uint8_t kBloomUpEighthViewId      = 28;
+    static constexpr uint8_t kBloomUpQuarterViewId     = 29;
+    static constexpr uint8_t kBloomUpHalfViewId        = 30;
+    static constexpr uint8_t kBloomResolveViewId       = 12;
+    // Source compatibility for tests/tools that name the old two-pass views.
+    static constexpr uint8_t kBloomBlurHorizontalViewId =
+        kBloomDownQuarterViewId;
+    static constexpr uint8_t kBloomBlurVerticalViewId = kBloomResolveViewId;
 
     BloomBlurPass() = default;
     // Mirror S1a BloomExtractPass + PostProcessPass: dtor does NOT
@@ -45,7 +55,9 @@ public:
     // Program readiness is separate from current-frame production and target
     // validity. Production consumers use the resource blackboard; the latch is
     // retained for direct contexts that intentionally omit it.
-    bool isReady() const noexcept { return _program.isValid(); }
+    bool isReady() const noexcept {
+        return _downsampleProgram.isValid() && _upsampleProgram.isValid();
+    }
     bool producedThisFrame() const noexcept { return _producedThisFrame; }
     void resetFrameState() noexcept { _producedThisFrame = false; }
 
@@ -77,8 +89,8 @@ private:
     //      refresh; mirrors pre-F3 behavior).
     bgfx::VertexBufferHandle   _fullscreenVB = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle    _fullscreenIB = BGFX_INVALID_HANDLE;
-    bgfx::TextureHandle        _sourceRt     = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
-    bgfx::TextureHandle        _pingRt       = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle        _sourceRt = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
+    bgfx::TextureHandle        _pingRt   = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
 
     // §S1b (2026-07-23) — Phoskia program for the separable
     // Gaussian blur effect (single program, branched via uniform
@@ -88,13 +100,17 @@ private:
     // + parse error); in that case isReady() stays false and
     // execute() degrades to "early-return 0" — visually identical
     // to bloomStrength=0 host (S1a K1 #1 propagated).
-    ayt::shader::ShaderResource _program;
+    ayt::shader::ShaderResource _downsampleProgram;
+    ayt::shader::ShaderResource _upsampleProgram;
 
     // Cached binding IDs. Resolved on the first acquire; InvalidBinding
     // means "not yet resolved / acquire failed".
-    ayt::shader::BindingId      _uDirection = ayt::shader::InvalidBinding;
-    ayt::shader::BindingId      _uTexelSize = ayt::shader::InvalidBinding;
-    ayt::shader::BindingId      _tSource    = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uDownsampleTexelSize = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _tDownsampleSource = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uUpsampleTexelSize = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _uBloomCombine = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _tLowSource = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId _tHighSource = ayt::shader::InvalidBinding;
 
     // Latch so a failed acquire does not re-run shaderc every
     // frame (same stutter source PostProcessPass + S1a
@@ -105,7 +121,7 @@ private:
     // R5+ helpers — VB/IB + program acquisition only (FBO ensure
     // removed in F3; FG owns both ping-pong RTs now).
     void ensureFullscreenQuad(BGFXAdapter& adapter);
-    void ensureProgram(shader::ShaderResourcePool& pool);
+    void ensurePrograms(shader::ShaderResourcePool& pool);
 };
 
 } // namespace ayt::render::detail

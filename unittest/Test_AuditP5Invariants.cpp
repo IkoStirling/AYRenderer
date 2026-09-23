@@ -254,7 +254,7 @@ TEST_SUITE(AuditP5_T5_CacheKeyAndFormat)
 TEST_CASE(post_process_cache_key_tracks_sanitized_parameter_abi) {
     // Pin the runtime key so shader ABI changes cannot reuse stale binaries.
     CHECK(std::string_view(kPostProcessCacheKeyCStr)
-          == "postprocess_tonemap_aces_v12_sanitized_params_fs");
+          == "postprocess_tonemap_aces_v13_auto_exposure_fs");
 }
 
 TEST_CASE(post_process_renderer_owns_teardown_before_pipeline_clear) {

@@ -8,6 +8,7 @@
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
 #include "detail/BloomPipeline.h"
+#include "detail/AutoExposurePass.h"
 #include "detail/DepthHazePass.h"  // S4b (2026-07-23) — borrowed-ptr source for PassExecContext::depthHazePass + destroyResources.
 #include "detail/DepthHazePipeline.h"
 #include "detail/DebugOverlay.h"
@@ -95,6 +96,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::Forward2DOpaque,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
+        RenderPassSlot::AutoExposure,
         RenderPassSlot::PostProcess,
         RenderPassSlot::FXAA,
         RenderPassSlot::SMAA,
@@ -208,6 +210,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::Forward2DOpaque,
         RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
         RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
+        RenderPassSlot::AutoExposure,
         RenderPassSlot::PostProcess,
         RenderPassSlot::TAA,
         RenderPassSlot::FXAA,
@@ -252,6 +255,8 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::TAAPass>();
     case RenderPassSlot::MotionVector:
         return std::make_unique<detail::MotionVectorPass>();
+    case RenderPassSlot::AutoExposure:
+        return std::make_unique<detail::AutoExposurePass>();
     case RenderPassSlot::ColorGrading:
         return std::make_unique<detail::ColorGradingPass>();
     case RenderPassSlot::Present:
@@ -452,6 +457,12 @@ struct Renderer::Impl {
     float                          postProcessBloomThreshold = 1.0f;
     float                          postProcessBloomSoftKnee  = 0.5f;
     float                          postProcessExposure       = 1.0f;
+    bool                           autoExposureEnabled       = false;
+    float                          autoExposureKey           = 0.18f;
+    float                          autoExposureMinimum       = 0.25f;
+    float                          autoExposureMaximum       = 4.0f;
+    float                          autoExposureBrightenSpeed = 2.0f;
+    float                          autoExposureDarkenSpeed   = 1.0f;
     float                          postProcessGamma          = 2.2f;
     // §P5.5 D — IBL ambient cube strength (.x uploaded as vec4).
     float                          ambientStrength           = 0.6f;
@@ -518,6 +529,10 @@ struct Renderer::Impl {
         if (detail::MotionVectorPass* motion =
                 pipeline.findPass<detail::MotionVectorPass>()) {
             motion->invalidateHistory();
+        }
+        if (detail::AutoExposurePass* exposure =
+                pipeline.findPass<detail::AutoExposurePass>()) {
+            exposure->invalidateHistory(reason);
         }
     }
 
@@ -790,6 +805,12 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
             pipeline.findPass<detail::BloomBlurPass>()) {
         if (adapter.isInitialized()) {
             bloomBlurPass->destroyResources(adapter);
+        }
+    }
+    if (detail::AutoExposurePass* autoExposurePass =
+            pipeline.findPass<detail::AutoExposurePass>()) {
+        if (adapter.isInitialized()) {
+            autoExposurePass->destroyResources(adapter);
         }
     }
 
@@ -1070,6 +1091,12 @@ void Renderer::shutdown()
             _impl->pipeline.findPass<detail::BloomBlurPass>()) {
         if (_impl->adapter.isInitialized()) {
             bloomBlurPass->destroyResources(_impl->adapter);
+        }
+    }
+    if (detail::AutoExposurePass* autoExposurePass =
+            _impl->pipeline.findPass<detail::AutoExposurePass>()) {
+        if (_impl->adapter.isInitialized()) {
+            autoExposurePass->destroyResources(_impl->adapter);
         }
     }
     if (detail::DepthHazePass* depthHazePass =
@@ -1545,6 +1572,37 @@ void Renderer::render(const RenderScene& scene)
         bloomBlurPassPtr->resetFrameState();
     }
 
+    detail::AutoExposurePass* autoExposurePassPtr =
+        _impl->pipeline.findPass<detail::AutoExposurePass>();
+    bool autoExposurePrepared = false;
+    if (autoExposurePassPtr != nullptr) {
+        autoExposurePassPtr->setSettings(
+            _impl->autoExposureEnabled,
+            _impl->autoExposureKey,
+            _impl->autoExposureMinimum,
+            _impl->autoExposureMaximum,
+            _impl->autoExposureBrightenSpeed,
+            _impl->autoExposureDarkenSpeed);
+        autoExposurePrepared = autoExposurePassPtr->prepareFrame(
+            _impl->adapter, _impl->viewportW, _impl->viewportH);
+        const detail::ResourceInvalidationReason historyReason =
+            autoExposurePassPtr->historyValid()
+                ? detail::ResourceInvalidationReason::None
+                : autoExposurePassPtr->invalidationReason();
+        _impl->resourceBlackboard.publish(
+            detail::BlackboardResourceId::AutoExposureRead,
+            detail::BlackboardResourceLifetime::PersistentHistory,
+            autoExposurePassPtr->readFbo(), BGFX_INVALID_HANDLE,
+            1, 1, autoExposurePassPtr->generation(),
+            autoExposurePassPtr->historyValid(), historyReason);
+        _impl->resourceBlackboard.publish(
+            detail::BlackboardResourceId::AutoExposureWrite,
+            detail::BlackboardResourceLifetime::PersistentHistory,
+            autoExposurePassPtr->writeFbo(), BGFX_INVALID_HANDLE,
+            1, 1, autoExposurePassPtr->generation(), false,
+            detail::ResourceInvalidationReason::AwaitingProducer);
+    }
+
     // Borrow the haze producer so downstream passes can require a successful
     // submit from this frame before promoting FgSemantic::HazeSource.
     detail::DepthHazePass* depthHazePassPtr =
@@ -1662,6 +1720,10 @@ void Renderer::render(const RenderScene& scene)
         && postProcessPassPtr->isEnabled()
         && presentPassPtr != nullptr
         && presentPassPtr->isEnabled();
+    const bool autoExposureStageEnabled = finalLdrStageEnabled
+        && autoExposurePrepared
+        && autoExposurePassPtr != nullptr
+        && autoExposurePassPtr->isEnabled();
     const bool taaStageEnabled = finalLdrStageEnabled
         && taaPrepared && taaPassPtr != nullptr;
     const bool fxaaStageEnabled = finalLdrStageEnabled
@@ -1708,6 +1770,11 @@ void Renderer::render(const RenderScene& scene)
     graphInput.haze = hazePassEnabled;
     graphInput.bloomExtract = bloomStages.extract;
     graphInput.bloomBlur = bloomStages.blur;
+    graphInput.autoExposure = autoExposureStageEnabled;
+    if (autoExposureStageEnabled) {
+        graphInput.autoExposureHistory = autoExposurePassPtr->readFbo();
+        graphInput.autoExposureTarget = autoExposurePassPtr->writeFbo();
+    }
     graphInput.finalLdr = finalLdrStageEnabled;
     graphInput.motionVector = taaStageEnabled
         && motionVectorPassPtr != nullptr
@@ -2554,6 +2621,13 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
                     ->destroyResources(_impl->adapter);
             }
         }
+        if (detail::RenderPass* autoExposurePass =
+                _impl->pipeline.findPass("AutoExposure")) {
+            if (_impl->adapter.isInitialized()) {
+                static_cast<detail::AutoExposurePass*>(autoExposurePass)
+                    ->destroyResources(_impl->adapter);
+            }
+        }
         _impl->frameGraph.resize(_impl->initDesc.width, _impl->initDesc.height);
         _impl->renderTargetPool.reset();
         _impl->adapter.setMsaaSampleCount(requestedSamples);
@@ -2673,6 +2747,56 @@ void Renderer::setPostProcessExposure(float exposure)
     }
     _impl->postProcessExposure =
         detail::sanitizePostProcessExposure(exposure);
+}
+
+void Renderer::setAutoExposureEnabled(bool enabled)
+{
+    if (_impl) {
+        _impl->autoExposureEnabled = enabled;
+        if (!enabled) {
+            if (detail::AutoExposurePass* pass =
+                    _impl->pipeline.findPass<detail::AutoExposurePass>()) {
+                pass->invalidateHistory(
+                    detail::ResourceInvalidationReason::FeatureDisabled);
+            }
+        }
+    }
+}
+
+bool Renderer::autoExposureEnabled() const noexcept
+{
+    return _impl && _impl->autoExposureEnabled;
+}
+
+void Renderer::setAutoExposureKey(float keyValue)
+{
+    if (_impl) {
+        _impl->autoExposureKey = std::clamp(
+            std::isfinite(keyValue) ? keyValue : 0.18f, 0.01f, 2.0f);
+    }
+}
+
+void Renderer::setAutoExposureRange(float minimum, float maximum)
+{
+    if (!_impl) return;
+    minimum = std::clamp(std::isfinite(minimum) ? minimum : 0.25f,
+                         0.01f, 16.0f);
+    maximum = std::clamp(std::isfinite(maximum) ? maximum : 4.0f,
+                         minimum, 32.0f);
+    _impl->autoExposureMinimum = minimum;
+    _impl->autoExposureMaximum = maximum;
+}
+
+void Renderer::setAutoExposureAdaptation(float brightenSpeed,
+                                         float darkenSpeed)
+{
+    if (!_impl) return;
+    _impl->autoExposureBrightenSpeed = std::clamp(
+        std::isfinite(brightenSpeed) ? brightenSpeed : 2.0f,
+        0.01f, 20.0f);
+    _impl->autoExposureDarkenSpeed = std::clamp(
+        std::isfinite(darkenSpeed) ? darkenSpeed : 1.0f,
+        0.01f, 20.0f);
 }
 
 void Renderer::setPostProcessGamma(float gamma)

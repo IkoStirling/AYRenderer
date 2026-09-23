@@ -39,6 +39,13 @@ enum class RenderPassResourceId : uint8_t {
     ColorGradedColor,
     SelectionMask,
     PresentedColor,
+    BloomPyramidQuarter,
+    BloomPyramidEighth,
+    BloomPyramidSixteenth,
+    BloomPyramidUpEighth,
+    BloomPyramidUpQuarter,
+    AutoExposureHistory,
+    AutoExposure,
     Count,
 };
 
@@ -63,6 +70,9 @@ enum class RenderPassResourceExtent : uint8_t {
     Half,
     Atlas,
     Backbuffer,
+    Quarter,
+    Eighth,
+    Sixteenth,
 };
 
 struct RenderPassResourceRead {

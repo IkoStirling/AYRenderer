@@ -102,8 +102,17 @@ enum class FgResourceId : uint8_t {
     GBufferDepth         = 16,
     MotionVectors        = 17,
     TaaHistory           = 18,
+    // Bloom v2 private pyramid. BloomBright remains the half-resolution
+    // thresholded root and BloomBlurB remains the stable composite source.
+    BloomPyramidQuarter  = 19,
+    BloomPyramidEighth   = 20,
+    BloomPyramidSixteenth = 21,
+    BloomPyramidUpEighth = 22,
+    BloomPyramidUpQuarter = 23,
+    AutoExposureHistory   = 24,
+    AutoExposure          = 25,
     // Sentinel ── 测试和实现都靠它做数组大小 / 上界判断。
-    Count        = 19,
+    Count        = 26,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。
@@ -111,6 +120,8 @@ enum class FgTextureScale : uint8_t {
     Full    = 0,
     Half    = 1,
     Quarter = 2,
+    Eighth  = 3,
+    Sixteenth = 4,
 };
 
 // Scene-referred color stays HDR until the final post-process pass performs

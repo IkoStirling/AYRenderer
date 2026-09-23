@@ -73,7 +73,7 @@ TEST_CASE(color_grading_append_only_abi_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::ColorGrading) == 17u);
     CHECK(static_cast<uint8_t>(FgResourceId::ColorGradedColor) == 8u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 19u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 26u);
     CHECK(ayt::render::detail::ColorGradingPass::kColorGradingViewId == 4u);
     CHECK(std::is_final_v<ayt::render::detail::ColorGradingPass>);
 }

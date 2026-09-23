@@ -152,6 +152,9 @@ void RenderResourceBlackboard::invalidateTemporal(
     invalidate(BlackboardResourceId::MotionVectors, reason);
     invalidate(BlackboardResourceId::TaaHistoryRead, reason);
     invalidate(BlackboardResourceId::TaaHistoryWrite, reason);
+    invalidate(BlackboardResourceId::AutoExposureRead, reason);
+    invalidate(BlackboardResourceId::AutoExposureWrite, reason);
+    invalidate(BlackboardResourceId::AutoExposure, reason);
 }
 
 void RenderResourceBlackboard::invalidateFrameOutputs(
@@ -170,7 +173,8 @@ void RenderResourceBlackboard::invalidateFrameOutputs(
              BlackboardResourceId::SkyboxColor,
              BlackboardResourceId::BloomBright,
              BlackboardResourceId::BloomBlurA,
-             BlackboardResourceId::BloomBlurB}) {
+             BlackboardResourceId::BloomBlurB,
+             BlackboardResourceId::AutoExposure}) {
         invalidate(id, reason);
     }
 }
@@ -314,6 +318,9 @@ const char* blackboardResourceName(BlackboardResourceId id) noexcept
     case BlackboardResourceId::BloomBright: return "BloomBright";
     case BlackboardResourceId::BloomBlurA: return "BloomBlurA";
     case BlackboardResourceId::BloomBlurB: return "BloomBlurB";
+    case BlackboardResourceId::AutoExposureRead: return "AutoExposureRead";
+    case BlackboardResourceId::AutoExposureWrite: return "AutoExposureWrite";
+    case BlackboardResourceId::AutoExposure: return "AutoExposure";
     case BlackboardResourceId::Count: break;
     }
     return "Unknown";

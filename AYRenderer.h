@@ -315,6 +315,13 @@ public:
     void setPostProcessBloomThreshold(float threshold);
     void setPostProcessBloomSoftKnee(float softKnee);
     void setPostProcessExposure(float exposure);
+    // GPU scene-luminance metering with a persistent 1x1 adaptation history.
+    // Manual exposure remains as an artistic compensation multiplier.
+    void setAutoExposureEnabled(bool enabled);
+    bool autoExposureEnabled() const noexcept;
+    void setAutoExposureKey(float keyValue);
+    void setAutoExposureRange(float minimum, float maximum);
+    void setAutoExposureAdaptation(float brightenSpeed, float darkenSpeed);
     // Display gamma for final blit encode (pow(c, 1/gamma)). Default 2.2.
     void setPostProcessGamma(float gamma);
     // Freeze FrameContext.timeSeconds. When paused, render() keeps the

@@ -45,6 +45,12 @@ FgTextureScale toFgScale(RenderPassResourceExtent extent)
         return FgTextureScale::Full;
     case RenderPassResourceExtent::Half:
         return FgTextureScale::Half;
+    case RenderPassResourceExtent::Quarter:
+        return FgTextureScale::Quarter;
+    case RenderPassResourceExtent::Eighth:
+        return FgTextureScale::Eighth;
+    case RenderPassResourceExtent::Sixteenth:
+        return FgTextureScale::Sixteenth;
     case RenderPassResourceExtent::Atlas:
         break;
     }
@@ -105,6 +111,8 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     graph.setExecutionEligibility(RenderPassSlot::BloomExtract,
                                   input.bloomExtract);
     graph.setExecutionEligibility(RenderPassSlot::BloomBlur, input.bloomBlur);
+    graph.setExecutionEligibility(RenderPassSlot::AutoExposure,
+                                  input.autoExposure);
     graph.setExecutionEligibility(RenderPassSlot::PostProcess, input.finalLdr);
     graph.setExecutionEligibility(RenderPassSlot::MotionVector,
                                   input.motionVector);
@@ -187,18 +195,79 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
         graph.addResource(FgResourceId::BloomBlurB,
                           graphTextureDesc(RenderPassSlot::BloomBlur,
                                            RenderPassResourceId::BloomBlurB));
-        graph.addPass({"BloomBlurH",
+        graph.addResource(FgResourceId::BloomPyramidQuarter,
+                          graphTextureDesc(
+                              RenderPassSlot::BloomBlur,
+                              RenderPassResourceId::BloomPyramidQuarter));
+        graph.addResource(FgResourceId::BloomPyramidEighth,
+                          graphTextureDesc(
+                              RenderPassSlot::BloomBlur,
+                              RenderPassResourceId::BloomPyramidEighth));
+        graph.addResource(FgResourceId::BloomPyramidSixteenth,
+                          graphTextureDesc(
+                              RenderPassSlot::BloomBlur,
+                              RenderPassResourceId::BloomPyramidSixteenth));
+        graph.addResource(FgResourceId::BloomPyramidUpEighth,
+                          graphTextureDesc(
+                              RenderPassSlot::BloomBlur,
+                              RenderPassResourceId::BloomPyramidUpEighth));
+        graph.addResource(FgResourceId::BloomPyramidUpQuarter,
+                          graphTextureDesc(
+                              RenderPassSlot::BloomBlur,
+                              RenderPassResourceId::BloomPyramidUpQuarter));
+        graph.addPass({"BloomDownQuarter",
                        {FgResourceId::BloomBright},
+                       {FgResourceId::BloomPyramidQuarter},
+                       true, false,
+                       executionSlot(RenderPassSlot::BloomBlur)});
+        graph.addPass({"BloomDownEighth",
+                       {FgResourceId::BloomPyramidQuarter},
+                       {FgResourceId::BloomPyramidEighth},
+                       true, false,
+                       executionSlot(RenderPassSlot::BloomBlur)});
+        graph.addPass({"BloomDownSixteenth",
+                       {FgResourceId::BloomPyramidEighth},
+                       {FgResourceId::BloomPyramidSixteenth},
+                       true, false,
+                       executionSlot(RenderPassSlot::BloomBlur)});
+        graph.addPass({"BloomUpEighth",
+                       {FgResourceId::BloomPyramidSixteenth,
+                        FgResourceId::BloomPyramidEighth},
+                       {FgResourceId::BloomPyramidUpEighth},
+                       true, false,
+                       executionSlot(RenderPassSlot::BloomBlur)});
+        graph.addPass({"BloomUpQuarter",
+                       {FgResourceId::BloomPyramidUpEighth,
+                        FgResourceId::BloomPyramidQuarter},
+                       {FgResourceId::BloomPyramidUpQuarter},
+                       true, false,
+                       executionSlot(RenderPassSlot::BloomBlur)});
+        graph.addPass({"BloomUpHalf",
+                       {FgResourceId::BloomPyramidUpQuarter,
+                        FgResourceId::BloomBright},
                        {FgResourceId::BloomBlurA},
                        true, false,
                        executionSlot(RenderPassSlot::BloomBlur)});
-        graph.addPass({"BloomBlurV",
+        graph.addPass({"BloomResolve",
                        {FgResourceId::BloomBlurA},
                        {FgResourceId::BloomBlurB},
                        true, false,
                        executionSlot(RenderPassSlot::BloomBlur)});
         graph.setResolvedSemantic(FgSemantic::BloomSource,
                                   FgResourceId::BloomBlurB);
+    }
+
+    if (input.autoExposure) {
+        graph.importExternal(FgResourceId::AutoExposureHistory,
+                             input.autoExposureHistory);
+        graph.importExternal(FgResourceId::AutoExposure,
+                             input.autoExposureTarget);
+        graph.addPass({contractName(RenderPassSlot::AutoExposure),
+                       {result.hdrSceneSource,
+                        FgResourceId::AutoExposureHistory},
+                       {FgResourceId::AutoExposure},
+                       true, false,
+                       executionSlot(RenderPassSlot::AutoExposure)});
     }
 
     // Runtime source selection may promote HazeSource after its submit, while
@@ -217,6 +286,9 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     std::vector<FgResourceId> postProcessReads{result.hdrSceneSource};
     if (input.bloomBlur) {
         postProcessReads.push_back(FgResourceId::BloomBlurB);
+    }
+    if (input.autoExposure) {
+        postProcessReads.push_back(FgResourceId::AutoExposure);
     }
     graph.addPass({contractName(RenderPassSlot::PostProcess),
                    std::move(postProcessReads),

@@ -175,7 +175,7 @@ TEST_CASE(bloom_round2_runtime_sources_pin_quality_and_exposure_contract) {
     CHECK(blur.find("1.3846153846") != std::string::npos);
     CHECK(blur.find("3.2307692308") != std::string::npos);
     const std::string exposedBloom =
-        "bloomSample.xyz * bloomStrength.x * exposure.x";
+        "bloomSample.xyz * bloomStrength.x * combinedExposure";
     CHECK(post.find(exposedBloom) != std::string::npos);
     // The fallback is intentionally independent from bloom/exposure math so
     // a primary-only compile failure can still leave a visible scene blit.
@@ -268,7 +268,7 @@ TEST_CASE(s1a_make_default_includes_bloomextract_after_transparent) {
     // PostProcess — slot index shifts PostProcess/UI by another +1.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 13);
+    CHECK(desc.passes.size() == 14);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
@@ -276,12 +276,12 @@ TEST_CASE(s1a_make_default_includes_bloomextract_after_transparent) {
     CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[8] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[9] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[10] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[11] == RenderPassSlot::Present);
-    CHECK(desc.passes[12] == RenderPassSlot::UI);
+    CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[9] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[10] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[11] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[12] == RenderPassSlot::Present);
+    CHECK(desc.passes[13] == RenderPassSlot::UI);
     // contains() helper round-trip
     CHECK(desc.contains(RenderPassSlot::BloomExtract));
     CHECK(desc.contains(RenderPassSlot::BloomBlur));          // S1b (2026-07-23)
@@ -299,7 +299,7 @@ TEST_CASE(s1a_make_deferred_includes_bloomextract_after_transparent) {
     // and PostProcess — PostProcess/UI shift by another +1.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 19);
+    CHECK(desc.passes.size() == 20);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
@@ -311,13 +311,13 @@ TEST_CASE(s1a_make_deferred_includes_bloomextract_after_transparent) {
     CHECK(desc.passes[8] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[9] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[10] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[11] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[12] == RenderPassSlot::TAA);
-    CHECK(desc.passes[13] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[14] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[15] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[16] == RenderPassSlot::Present);
-    CHECK(desc.passes[17] == RenderPassSlot::UI);
+    CHECK(desc.passes[12] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[13] == RenderPassSlot::TAA);
+    CHECK(desc.passes[14] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[15] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[16] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[17] == RenderPassSlot::Present);
+    CHECK(desc.passes[18] == RenderPassSlot::UI);
 }
 
 // === C. Half-resolution size math =====================================

@@ -127,7 +127,7 @@ TEST_CASE(cm1_renderpassslot_forward2dopaque_value_is_14) {
 TEST_CASE(camera_overlay_2d_runs_after_3d_transparent_in_forward) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 13);
+    CHECK(desc.passes.size() == 14);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
@@ -135,12 +135,12 @@ TEST_CASE(camera_overlay_2d_runs_after_3d_transparent_in_forward) {
     CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[8] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[9] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[10] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[11] == RenderPassSlot::Present);
-    CHECK(desc.passes[12] == RenderPassSlot::UI);
+    CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[9] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[10] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[11] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[12] == RenderPassSlot::Present);
+    CHECK(desc.passes[13] == RenderPassSlot::UI);
     CHECK(desc.contains(RenderPassSlot::Forward2DOpaque));
 }
 
@@ -148,7 +148,7 @@ TEST_CASE(camera_overlay_2d_is_mounted_after_3d_transparent_in_deferred) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
     CHECK(desc.contains(RenderPassSlot::Forward2DOpaque));
-    CHECK(desc.passes.size() == 19);
+    CHECK(desc.passes.size() == 20);
     CHECK(desc.passes[7] == RenderPassSlot::Transparent);
     CHECK(desc.passes[8] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[9] == RenderPassSlot::BloomExtract);

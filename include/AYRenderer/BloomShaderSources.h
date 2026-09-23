@@ -80,4 +80,81 @@ material BloomBlur {
 }
 )";
 
+// Bloom v2 uses a real mip-like pyramid rather than repeatedly blurring one
+// half-resolution image. The downsample kernel is deliberately energy
+// preserving; the first Karis-filtered threshold stage already removed HDR
+// fireflies.
+inline constexpr const char kBloomPyramidDownsampleCacheKey[] =
+    "bloom_pyramid_downsample_v1_13tap_fs";
+
+inline constexpr const char kBloomPyramidDownsamplePhoskiaSource[] = R"(
+material BloomPyramidDownsample {
+    texture2d source
+    uniform vec4 sourceTexelSize
+    vertex {
+        in  pos : position
+        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
+        return vec4(pos.x, pos.y, 0.0, 1.0)
+    }
+    fragment {
+        in  vUv : texcoord
+        let uv = vec2(vUv.x, 1.0 - vUv.y)
+        let t = sourceTexelSize.xy
+        let center = sample(source, uv) * 0.125
+        let axial = (sample(source, uv + vec2( t.x, 0.0))
+                   + sample(source, uv + vec2(-t.x, 0.0))
+                   + sample(source, uv + vec2(0.0,  t.y))
+                   + sample(source, uv + vec2(0.0, -t.y))) * 0.125
+        let diagonal = (sample(source, uv + vec2( t.x,  t.y))
+                      + sample(source, uv + vec2(-t.x,  t.y))
+                      + sample(source, uv + vec2( t.x, -t.y))
+                      + sample(source, uv + vec2(-t.x, -t.y))) * 0.0625
+        let wide = (sample(source, uv + vec2(2.0 * t.x, 0.0))
+                  + sample(source, uv + vec2(-2.0 * t.x, 0.0))
+                  + sample(source, uv + vec2(0.0, 2.0 * t.y))
+                  + sample(source, uv + vec2(0.0, -2.0 * t.y))) * 0.03125
+        let result = center + axial + diagonal + wide
+        return vec4(result.xyz, 0.0)
+    }
+}
+)";
+
+// A 3x3 tent reconstructs the lower level and adds it to the matching
+// higher-frequency level. bloomCombine=(lowWeight, highWeight, 0, 0) also
+// lets the final resolve apply the tent without adding a second image.
+inline constexpr const char kBloomPyramidUpsampleCacheKey[] =
+    "bloom_pyramid_upsample_v1_tent_combine_fs";
+
+inline constexpr const char kBloomPyramidUpsamplePhoskiaSource[] = R"(
+material BloomPyramidUpsample {
+    texture2d lowSource
+    texture2d highSource
+    uniform vec4 lowTexelSize
+    uniform vec4 bloomCombine
+    vertex {
+        in  pos : position
+        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
+        return vec4(pos.x, pos.y, 0.0, 1.0)
+    }
+    fragment {
+        in  vUv : texcoord
+        let uv = vec2(vUv.x, 1.0 - vUv.y)
+        let t = lowTexelSize.xy
+        let corners = sample(lowSource, uv + vec2(-t.x, -t.y))
+                    + sample(lowSource, uv + vec2( t.x, -t.y))
+                    + sample(lowSource, uv + vec2(-t.x,  t.y))
+                    + sample(lowSource, uv + vec2( t.x,  t.y))
+        let edges = sample(lowSource, uv + vec2(-t.x, 0.0))
+                  + sample(lowSource, uv + vec2( t.x, 0.0))
+                  + sample(lowSource, uv + vec2(0.0, -t.y))
+                  + sample(lowSource, uv + vec2(0.0,  t.y))
+        let tent = (corners + edges * 2.0 + sample(lowSource, uv) * 4.0)
+                 * 0.0625
+        let high = sample(highSource, uv)
+        let result = tent * bloomCombine.x + high * bloomCombine.y
+        return vec4(result.xyz, 0.0)
+    }
+}
+)";
+
 } // namespace ayt::render

@@ -72,7 +72,7 @@ TEST_CASE(b1_make_default_path_is_forward)
     const RenderPipelineDesc def = RenderPipelineDesc::makeDefault();
     CHECK(def.path == RenderPath::Forward);
     CHECK(def.isDeferred() == false);
-    CHECK(def.passes.size() == 13u);  // FXAA/SMAA and ColorGrading bridge FinalLdr and Present.
+    CHECK(def.passes.size() == 14u);  // FXAA/SMAA and ColorGrading bridge FinalLdr and Present.
     CHECK(def.contains(RenderPassSlot::Shadow));
     CHECK(def.contains(RenderPassSlot::ForwardOpaque));
     CHECK(def.contains(RenderPassSlot::Transparent));
@@ -92,7 +92,7 @@ TEST_CASE(b1_make_forward_with_shadows_path_is_forward)
     const RenderPipelineDesc fws = RenderPipelineDesc::makeForwardWithShadows();
     CHECK(fws.path == RenderPath::Forward);
     CHECK(fws.isDeferred() == false);
-    CHECK(fws.passes.size() == 13u);
+    CHECK(fws.passes.size() == 14u);
     CHECK(fws.contains(RenderPassSlot::Shadow));
     CHECK(fws.contains(RenderPassSlot::BloomExtract));   // S1a (2026-07-23)
     CHECK(fws.contains(RenderPassSlot::BloomBlur));      // S1b (2026-07-23)

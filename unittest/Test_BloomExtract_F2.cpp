@@ -256,7 +256,7 @@ TEST_CASE(f2_render_pipeline_slot_abi_lock) {
     // S4b 后是 9 slot (CM-1 2026-08-11: +1 Forward2DOpaque),顺序
     // Shadow, FO, 2DOpaque, Trans, BloomExtract, BloomBlur,
     // DepthHaze, PostProcess, UI。
-    CHECK(desc.passes.size() == 13);
+    CHECK(desc.passes.size() == 14);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.contains(RenderPassSlot::BloomExtract));
     // BloomExtract enum 值仍 = 8(append-only 锁)。

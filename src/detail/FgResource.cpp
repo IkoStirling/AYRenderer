@@ -22,6 +22,9 @@ uint16_t scaledDim(uint16_t viewport, FgTextureScale scale)
     case FgTextureScale::Full:    return viewport;
     case FgTextureScale::Half:    return static_cast<uint16_t>((viewport + 1u) / 2u);
     case FgTextureScale::Quarter: return static_cast<uint16_t>((viewport + 3u) / 4u);
+    case FgTextureScale::Eighth:  return static_cast<uint16_t>((viewport + 7u) / 8u);
+    case FgTextureScale::Sixteenth:
+        return static_cast<uint16_t>((viewport + 15u) / 16u);
     }
     return viewport;
 }

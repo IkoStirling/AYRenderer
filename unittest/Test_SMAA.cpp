@@ -73,7 +73,7 @@ TEST_CASE(smaa_append_only_abi_resources_and_views_are_locked)
     CHECK(static_cast<uint8_t>(FgResourceId::SmaaEdges) == 9u);
     CHECK(static_cast<uint8_t>(FgResourceId::SmaaBlendWeights) == 10u);
     CHECK(static_cast<uint8_t>(FgResourceId::SmaaColor) == 11u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 19u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 26u);
     CHECK(ayt::render::detail::SMAAPass::kEdgeViewId == 247u);
     CHECK(ayt::render::detail::SMAAPass::kBlendWeightViewId == 248u);
     CHECK(ayt::render::detail::SMAAPass::kNeighborhoodViewId == 249u);

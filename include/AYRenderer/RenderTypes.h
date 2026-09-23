@@ -445,6 +445,10 @@ enum class RenderPassSlot : uint8_t {
     // GBuffer depth attachment, and is requested only by temporal consumers
     // such as TAA.
     MotionVector = 20,
+
+    // Scene-linear luminance metering with persistent 1x1 exposure history.
+    // Append-only ABI value 21; disabled by default.
+    AutoExposure = 21,
 };
 
 enum class ColorGradingPreset : uint8_t {

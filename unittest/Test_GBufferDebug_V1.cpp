@@ -343,7 +343,7 @@ TEST_CASE(v1_make_deferred_total_slot_count_incremented_by_one) {
     const auto desc = ayt::render::RenderPipelineDesc::makeDeferred();
     // 12 slots pre-existing (Shadow..UI) + 1 GBufferDebug = 12
     // (deferred pipeline total is 12 slots with GBufferDebug).
-    CHECK(desc.passes.size() == 19u);
+    CHECK(desc.passes.size() == 20u);
 }
 
 // ─── H. PassExecContext producer defaults ─────────────────────────

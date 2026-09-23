@@ -194,7 +194,7 @@ TEST_CASE(s1b_make_default_includes_bloomblur_after_bloomextract) {
     // Transparent).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 13);
+    CHECK(desc.passes.size() == 14);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
@@ -202,12 +202,13 @@ TEST_CASE(s1b_make_default_includes_bloomblur_after_bloomextract) {
     CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[5] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[6] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[8] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[9] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[10] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[11] == RenderPassSlot::Present);
-    CHECK(desc.passes[12] == RenderPassSlot::UI);
+    CHECK(desc.passes[7] == RenderPassSlot::AutoExposure);
+    CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[9] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[10] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[11] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[12] == RenderPassSlot::Present);
+    CHECK(desc.passes[13] == RenderPassSlot::UI);
     CHECK(desc.contains(RenderPassSlot::BloomBlur));
     CHECK(desc.contains(RenderPassSlot::Forward2DOpaque));
 }
@@ -219,7 +220,7 @@ TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
     // from S4b; +1 SSAO from §A2).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 19);
+    CHECK(desc.passes.size() == 20);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
@@ -231,13 +232,15 @@ TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
     CHECK(desc.passes[8] == RenderPassSlot::Forward2DOpaque);
     CHECK(desc.passes[9] == RenderPassSlot::BloomExtract);
     CHECK(desc.passes[10] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[11] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[12] == RenderPassSlot::TAA);
-    CHECK(desc.passes[13] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[14] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[15] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[16] == RenderPassSlot::Present);
-    CHECK(desc.passes[17] == RenderPassSlot::UI);
+    CHECK(desc.passes[11] == RenderPassSlot::AutoExposure);
+    CHECK(desc.passes[12] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[13] == RenderPassSlot::TAA);
+    CHECK(desc.passes[14] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[15] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[16] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[17] == RenderPassSlot::Present);
+    CHECK(desc.passes[18] == RenderPassSlot::UI);
+    CHECK(desc.passes[19] == RenderPassSlot::GBufferDebug);
 }
 
 // === C. View id constants ===========================================

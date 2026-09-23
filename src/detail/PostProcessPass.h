@@ -69,6 +69,7 @@ private:
     // these to pin that the wire path actually found the names.
     ayt::shader::BindingId      _uBloomStrength = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uExposure      = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uAutoExposureEnabled = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uTonemapMode   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uGammaParams   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tSceneColor    = ayt::shader::InvalidBinding;
@@ -79,6 +80,7 @@ private:
     // `raw + sample(bloomTexture, uv) * bloomStrength`. Invalid
     // when the program hasn't been acquired yet (mirror _tSceneColor).
     ayt::shader::BindingId      _tBloomTexture  = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _tAutoExposureTexture = ayt::shader::InvalidBinding;
     enum class ProgramVariant : uint8_t {
         None,
         Primary,

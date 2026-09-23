@@ -62,10 +62,13 @@ TEST_CASE(full_temporal_chain_preserves_every_required_dependency)
     FrameGraph graph(adapter);
     PostProcessGraphPlanInput input = baseInput();
     input.taaWriteTarget = fakeHandle(0x71);
+    input.autoExposureHistory = fakeHandle(0x76);
+    input.autoExposureTarget = fakeHandle(0x77);
     input.ssao = true;
     input.haze = true;
     input.bloomExtract = true;
     input.bloomBlur = true;
+    input.autoExposure = true;
     input.finalLdr = true;
     input.motionVector = true;
     input.taa = true;
@@ -76,16 +79,18 @@ TEST_CASE(full_temporal_chain_preserves_every_required_dependency)
 
     CHECK(result.compileSucceeded);
     CHECK(graph.compileErrors().empty());
-    CHECK(graph.stats().declaredPasses == 10u);
-    CHECK(graph.stats().livePasses == 10u);
-    CHECK(graph.stats().logicalResources == 15u);
-    CHECK(graph.stats().physicalTargets == 7u);
+    CHECK(graph.stats().declaredPasses == 16u);
+    CHECK(graph.stats().livePasses == 16u);
+    CHECK(graph.stats().logicalResources == 22u);
+    CHECK(graph.stats().physicalTargets == 12u);
     CHECK(result.hdrSceneSource == FgResourceId::HazeColor);
     CHECK(result.antialiasingSource == FgResourceId::TaaColor);
     CHECK(result.presentationSource == FgResourceId::ColorGradedColor);
     CHECK(graph.resolve(FgResourceId::TaaColor).idx == 0x71u);
+    CHECK(graph.resolve(FgResourceId::AutoExposure).idx == 0x77u);
     CHECK(graph.shouldExecute(ayt::render::RenderPassSlot::MotionVector));
     CHECK(graph.shouldExecute(ayt::render::RenderPassSlot::TAA));
+    CHECK(graph.shouldExecute(ayt::render::RenderPassSlot::AutoExposure));
 }
 
 TEST_CASE(spatial_chain_orders_fxaa_before_smaa)

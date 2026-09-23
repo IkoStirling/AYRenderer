@@ -232,17 +232,18 @@ TEST_CASE(make_default_omits_editoroverlay) {
 TEST_CASE(make_editor_forward_inserts_overlay_after_present) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeEditorForward();
     CHECK(desc.contains(RenderPassSlot::EditorOverlay));
-    CHECK(desc.passes.size() == 14u);
+    CHECK(desc.passes.size() == 15u);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
     CHECK(desc.passes[3] == RenderPassSlot::Transparent);
     CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
-    CHECK(desc.passes[7] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[8] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[9] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[10] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[11] == RenderPassSlot::Present);
-    CHECK(desc.passes[12] == RenderPassSlot::EditorOverlay);
-    CHECK(desc.passes[13] == RenderPassSlot::UI);
+    CHECK(desc.passes[7] == RenderPassSlot::AutoExposure);
+    CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[9] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[10] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[11] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[12] == RenderPassSlot::Present);
+    CHECK(desc.passes[13] == RenderPassSlot::EditorOverlay);
+    CHECK(desc.passes[14] == RenderPassSlot::UI);
 }
 
 TEST_CASE(make_editor_deferred_inserts_overlay_after_present) {

@@ -58,7 +58,7 @@ TEST_CASE(fxaa_append_only_abi_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::FXAA) == 16u);
     CHECK(static_cast<uint8_t>(FgResourceId::FxaaColor) == 7u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 19u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 26u);
     CHECK(ayt::render::detail::FXAAPass::kFxaaViewId == 17u);
     CHECK(std::is_final_v<ayt::render::detail::FXAAPass>);
 }

@@ -2,6 +2,8 @@
 
 #include "AYShader/BGFXConverter.h"
 #include "AYShader/Phoskia.h"
+#include "AYRenderer/AutoExposureShaderSources.h"
+#include "AYRenderer/BloomShaderSources.h"
 #include "detail/PostProcessPass.h"
 #include "detail/PostProcessPipeline.h"
 
@@ -118,9 +120,10 @@ TEST_CASE(r51_primary_source_is_the_live_runtime_source)
     CHECK(source.find("material PostProcess") != std::string::npos);
     CHECK(source.find("texture2d sceneColor") != std::string::npos);
     CHECK(source.find("texture2d bloomTexture") != std::string::npos);
+    CHECK(source.find("texture2d autoExposureTexture") != std::string::npos);
     CHECK(source.find("uniform vec4 exposure") != std::string::npos);
     CHECK(source.find("uniform vec4 gammaParams") != std::string::npos);
-    CHECK(source.find("bloomSample.xyz * bloomStrength.x * exposure.x")
+    CHECK(source.find("bloomSample.xyz * bloomStrength.x * combinedExposure")
           != std::string::npos);
     CHECK(source.find("step(1.5, m)") != std::string::npos);
     CHECK(source.find("uTime") == std::string::npos);
@@ -142,7 +145,7 @@ TEST_CASE(r51_fallback_is_an_independent_minimal_blit)
 TEST_CASE(r51_cache_keys_pin_both_production_programs)
 {
     CHECK(std::string(ayt::render::detail::kPostProcessCacheKeyCStr)
-          == "postprocess_tonemap_aces_v12_sanitized_params_fs");
+          == "postprocess_tonemap_aces_v13_auto_exposure_fs");
     CHECK(std::string(ayt::render::detail::kPostProcessFallbackCacheKeyCStr)
           == "postprocess_fallback_blit_v11_minimal_fs");
 }
@@ -159,11 +162,13 @@ TEST_CASE(r51_production_sources_compile_and_expose_expected_bindings)
     if (primary.success) {
         CHECK(hasUniform(primary, "bloomStrength"));
         CHECK(hasUniform(primary, "exposure"));
+        CHECK(hasUniform(primary, "autoExposureEnabled"));
         CHECK(hasUniform(primary, "tonemapMode"));
         CHECK(hasUniform(primary, "gammaParams"));
         CHECK_FALSE(hasUniform(primary, "uTime"));
         CHECK(hasTexture(primary, "sceneColor"));
         CHECK(hasTexture(primary, "bloomTexture"));
+        CHECK(hasTexture(primary, "autoExposureTexture"));
     }
 
     ayt::shader::CompiledShaderProgram fallback;
@@ -177,6 +182,26 @@ TEST_CASE(r51_production_sources_compile_and_expose_expected_bindings)
     if (fallback.success) {
         CHECK(hasTexture(fallback, "sceneColor"));
         CHECK_FALSE(hasTexture(fallback, "bloomTexture"));
+    }
+}
+
+TEST_CASE(r51_bloom_pyramid_and_auto_exposure_sources_compile)
+{
+    struct SourceCase {
+        const char* name;
+        const char* source;
+    };
+    const SourceCase cases[] = {
+        {"bloom-downsample",
+         ayt::render::kBloomPyramidDownsamplePhoskiaSource},
+        {"bloom-upsample", ayt::render::kBloomPyramidUpsamplePhoskiaSource},
+        {"auto-exposure", ayt::render::kAutoExposurePhoskiaSource},
+    };
+    for (const SourceCase& sourceCase : cases) {
+        ayt::shader::CompiledShaderProgram program;
+        compileProductionSource(sourceCase.source, program);
+        if (!program.success) printCompileErrors(program, sourceCase.name);
+        CHECK(program.success);
     }
 }
 

@@ -21,11 +21,14 @@ struct PostProcessGraphPlanInput {
     bgfx::FrameBufferHandle taaReadHistory = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle gbuffer = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle motionVectors = BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle autoExposureHistory = BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle autoExposureTarget = BGFX_INVALID_HANDLE;
 
     bool ssao = false;
     bool haze = false;
     bool bloomExtract = false;
     bool bloomBlur = false;
+    bool autoExposure = false;
     bool finalLdr = false;
     bool motionVector = false;
     bool taa = false;
