@@ -32,6 +32,7 @@
 ## 2026-09-23 — Selection Outline 稳定化与 R6-6 收口
 
 - 橙色 Selection Outline 不再依赖“jittered 遮罩 + 合成时反向偏移”消除抖动。view 244 以未 jitter 投影、无深度只写 Alpha 稳定轮廓；view 253 以场景同一 jitter 投影和 GBuffer depth 只写 RGB 可见性；view 254 在 Present 后分别按稳定/对齐 UV 读取两个通道并合成。这样固定输出像素上的边界覆盖率不再随 Halton 相位变化，遮挡判定仍与当帧深度一致。selection target 在 texture 或任一 borrowed FBO 失效时整体重建，覆盖 resize/backend generation 边界。
+- 后续视觉验收确认稳定轮廓仍有空间锯齿；合成核已从轴向/对角半径不一致的方形 2px 膨胀改为 2.25px 八方向圆形采样。分数像素偏移利用线性采样重建 ring coverage，再以 smoothstep 生成外缘 alpha；采样数保持不变，且仍位于 Present/TAA 之后，不引入 history 抖动。
 - RenderDoc 1.46 最终序列得到 24 个彼此独立的 D3D11 capture，覆盖 selection、resize 首帧/稳定帧、camera cut、效果关闭/重开首帧/稳定帧、透明边界静止/小幅移动、10 个 raw resource channel、5 个 TAA diagnostic mode 和双投影阴影 atlas。异步 `TriggerCapture` 请求间隔扩大到五帧，Motion 与 SSAO 不再发生文件名/通道串帧。
 - 效果关闭帧中 Motion、SSAO、Haze、Bloom 与 TAA 对应 view 均消失；重开首帧即恢复完整链且未读取 stale target。resize 首帧未混用旧、新尺寸资源；双阴影灯捕获同时出现 view 18/19 和两个 atlas 区域。透明边界最终画面完整，但 `TAA-TRANSPARENCY-01` 仍作为无透明 depth/motion 对应面的已知能力限制保留。
 - 新链接的 `AYEditorShell_Demo --renderer d3d12` 连续运行 15 秒未退出，日志记录 renderer type 3 与主链首帧提交。presentation bootstrap 失败路径现会关闭 splash、写入持久日志、显示模态错误并安全 shutdown，不再静默闪退。

@@ -115,16 +115,20 @@ TEST_CASE(selection_mask_uses_full_silhouette_and_screen_space_composite)
     CHECK((compositeState & BGFX_STATE_BLEND_MASK) != 0u);
 
     const std::string source(selectionOutlinePhoskiaSourceForTests());
-    CHECK(source.find("selectionTexelSize.xy * 2.0") != std::string::npos);
+    CHECK(source.find("selectionTexelSize.xy * 2.25") != std::string::npos);
+    CHECK(source.find("radius * 0.70710678") != std::string::npos);
     CHECK(source.find("let stableUv") != std::string::npos);
     CHECK(source.find("let visibleUv = stableUv + selectionTexelSize.zw")
           != std::string::npos);
     CHECK(source.find("sample(selectionMask, stableUv).w")
           != std::string::npos);
     CHECK(source.find("neighborSum") != std::string::npos);
-    CHECK(source.find("outerCoverage") != std::string::npos);
+    CHECK(source.find("let ringCoverage = neighborSum * 0.125")
+          != std::string::npos);
+    CHECK(source.find("let outerCoverage = smoothstep(0.025, 0.30")
+          != std::string::npos);
     CHECK(source.find("visibleCoverage") != std::string::npos);
-    CHECK(source.find("smoothstep(0.05, 0.95, center)")
+    CHECK(source.find("smoothstep(0.20, 0.80, center)")
           != std::string::npos);
     CHECK(source.find("vec4(1.0, 0.55, 0.12, edge)") != std::string::npos);
 

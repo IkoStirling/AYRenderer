@@ -141,48 +141,46 @@ material EditorSelectionOutline {
         in  vUv : texcoord
         let stableUv = vec2(vUv.x, 1.0 - vUv.y)
         let visibleUv = stableUv + selectionTexelSize.zw
-        let texel = selectionTexelSize.xy * 2.0
+        let radius = selectionTexelSize.xy * 2.25
+        let diagonal = radius * 0.70710678
         let center = sample(selectionMask, stableUv).w
-        let a0 = sample(selectionMask, stableUv + vec2( texel.x, 0.0)).w
-        let a1 = sample(selectionMask, stableUv + vec2(-texel.x, 0.0)).w
-        let a2 = sample(selectionMask, stableUv + vec2(0.0,  texel.y)).w
-        let a3 = sample(selectionMask, stableUv + vec2(0.0, -texel.y)).w
-        let a4 = sample(selectionMask, stableUv + vec2( texel.x,  texel.y)).w
-        let a5 = sample(selectionMask, stableUv + vec2(-texel.x,  texel.y)).w
-        let a6 = sample(selectionMask, stableUv + vec2( texel.x, -texel.y)).w
-        let a7 = sample(selectionMask, stableUv + vec2(-texel.x, -texel.y)).w
-        let v0 = sample(selectionMask, visibleUv + vec2( texel.x, 0.0)).x
-        let v1 = sample(selectionMask, visibleUv + vec2(-texel.x, 0.0)).x
-        let v2 = sample(selectionMask, visibleUv + vec2(0.0,  texel.y)).x
-        let v3 = sample(selectionMask, visibleUv + vec2(0.0, -texel.y)).x
-        let v4 = sample(selectionMask, visibleUv + vec2( texel.x,  texel.y)).x
-        let v5 = sample(selectionMask, visibleUv + vec2(-texel.x,  texel.y)).x
-        let v6 = sample(selectionMask, visibleUv + vec2( texel.x, -texel.y)).x
-        let v7 = sample(selectionMask, visibleUv + vec2(-texel.x, -texel.y)).x
-        let neighborPeak = max(max(max(a0, a1), max(a2, a3)),
-                               max(max(a4, a5), max(a6, a7)))
+        let a0 = sample(selectionMask, stableUv + vec2( radius.x, 0.0)).w
+        let a1 = sample(selectionMask, stableUv + vec2(-radius.x, 0.0)).w
+        let a2 = sample(selectionMask, stableUv + vec2(0.0,  radius.y)).w
+        let a3 = sample(selectionMask, stableUv + vec2(0.0, -radius.y)).w
+        let a4 = sample(selectionMask, stableUv + vec2( diagonal.x,  diagonal.y)).w
+        let a5 = sample(selectionMask, stableUv + vec2(-diagonal.x,  diagonal.y)).w
+        let a6 = sample(selectionMask, stableUv + vec2( diagonal.x, -diagonal.y)).w
+        let a7 = sample(selectionMask, stableUv + vec2(-diagonal.x, -diagonal.y)).w
+        let v0 = sample(selectionMask, visibleUv + vec2( radius.x, 0.0)).x
+        let v1 = sample(selectionMask, visibleUv + vec2(-radius.x, 0.0)).x
+        let v2 = sample(selectionMask, visibleUv + vec2(0.0,  radius.y)).x
+        let v3 = sample(selectionMask, visibleUv + vec2(0.0, -radius.y)).x
+        let v4 = sample(selectionMask, visibleUv + vec2( diagonal.x,  diagonal.y)).x
+        let v5 = sample(selectionMask, visibleUv + vec2(-diagonal.x,  diagonal.y)).x
+        let v6 = sample(selectionMask, visibleUv + vec2( diagonal.x, -diagonal.y)).x
+        let v7 = sample(selectionMask, visibleUv + vec2(-diagonal.x, -diagonal.y)).x
         let neighborSum = a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7
-        let visiblePeak = max(max(max(v0, v1), max(v2, v3)),
-                              max(max(v4, v5), max(v6, v7)))
         let visibleSum = v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7
-        // Reconstruct a soft two-pixel dilation from ring coverage instead of
-        // making a binary decision from one maximum sample. This preserves
-        // corners while suppressing the raster staircase changes that remain
-        // after the jitter-aligned linear lookup on shallow diagonal edges.
-        let outerCoverage = clamp(neighborSum * 0.32 + neighborPeak * 0.35,
-                                  0.0, 1.0)
-        let visibleCoverage = clamp(visibleSum * 0.32 + visiblePeak * 0.35,
-                                    0.0, 1.0)
-        let centerCoverage = smoothstep(0.05, 0.95, center)
+        // An eight-tap circular ring keeps the diagonal radius equal to the
+        // axial radius. Fractional offsets engage linear filtering so the
+        // stable post-TAA mask produces sub-pixel coverage instead of the
+        // square, binary staircase of the former 2x2 dilation kernel.
+        let ringCoverage = neighborSum * 0.125
+        let visibleRingCoverage = visibleSum * 0.125
+        let outerCoverage = smoothstep(0.025, 0.30, ringCoverage)
+        let visibleCoverage = smoothstep(0.025, 0.30,
+                                         visibleRingCoverage)
+        let centerCoverage = smoothstep(0.20, 0.80, center)
         let edge = outerCoverage * (1.0 - centerCoverage)
-                 * smoothstep(0.02, 0.65, visibleCoverage)
+                 * visibleCoverage
         return vec4(1.0, 0.55, 0.12, edge)
     }
 }
 )";
 
 constexpr const char* kSelectionOutlineCacheKey =
-    "editor_selection_mask_dilate_2px_v6_stable_silhouette";
+    "editor_selection_mask_circular_coverage_v7_stable_silhouette";
 
 } // namespace
 
