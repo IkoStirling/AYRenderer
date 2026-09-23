@@ -41,10 +41,10 @@ uint64_t transparentDrawState(BlendMode blendMode,
                               bool doubleSided,
                               bool reverseWinding) noexcept;
 
-// Selection mask alpha stores the full silhouette while RGB stores its
-// depth-visible coverage. Screen-space dilation uses alpha for the original
-// projected border and RGB only to suppress occluded segments. The border is
-// fixed-width without outlining unrelated foreground occluders.
+// Selection mask alpha stores the unjittered full silhouette while RGB stores
+// depth-visible coverage rasterized against the jittered scene depth.
+// Screen-space dilation uses stable alpha for the border and jitter-aligned RGB
+// only to suppress occluded segments.
 uint64_t selectionMaskState(bool doubleSided,
                             bool reverseWinding) noexcept;
 uint64_t selectionVisibleMaskState(bool doubleSided,
@@ -54,14 +54,14 @@ const char* selectionOutlinePhoskiaSourceForTests() noexcept;
 
 // Forward path composites into sceneFbo after ForwardOpaque. Deferred path
 // uses a dedicated view and a cached FBO that borrows LightingOutput color and
-// GBuffer depth. Selection borrows that depth for the RGB visibility channel
-// while alpha remains the complete silhouette. The mask projection exactly
-// matches the borrowed jittered depth; its UV is realigned and the fixed-width
-// outer edge is composited on the backbuffer after Present, so TAA never
-// accumulates editor chrome. SceneLights
+// GBuffer depth. Selection writes an unjittered silhouette to alpha on view
+// 244, then borrows the jittered scene depth for RGB visibility on view 253.
+// The fixed-width outer edge is composited on the backbuffer after Present, so
+// TAA never accumulates editor chrome. SceneLights
 // and shadow-atlas arrays share the same CPU packing contract as LightingPass.
 class TransparentPass : public RenderPass {
 public:
+    static constexpr uint8_t kSelectionStableMaskViewId = 244;
     static constexpr uint8_t kSelectionMaskViewId = 253;
     static constexpr uint8_t kSelectionCompositeViewId = 254;
 
@@ -73,6 +73,10 @@ public:
                                       float yPixels) noexcept {
         _selectionJitterXPixels = xPixels;
         _selectionJitterYPixels = yPixels;
+    }
+    void setSelectionUnjitteredProjection(
+        const ayt::math::Float4x4& projection) noexcept {
+        _selectionUnjitteredProjection = projection;
     }
 
 private:
@@ -112,6 +116,8 @@ private:
     bgfx::TextureHandle _deferredDepth =
         bgfx::TextureHandle{BGFX_INVALID_HANDLE};
 
+    bgfx::FrameBufferHandle _selectionStableMaskFbo =
+        bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     bgfx::FrameBufferHandle _selectionMaskFbo =
         bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     bgfx::TextureHandle _selectionMaskTexture =
@@ -130,6 +136,8 @@ private:
     uint16_t _selectionProgramRetryFrames = 0;
     float _selectionJitterXPixels = 0.0f;
     float _selectionJitterYPixels = 0.0f;
+    ayt::math::Float4x4 _selectionUnjitteredProjection =
+        ayt::math::Float4x4::identity();
 };
 
 } // namespace ayt::render::detail

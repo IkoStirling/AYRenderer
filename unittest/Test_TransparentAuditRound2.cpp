@@ -116,7 +116,11 @@ TEST_CASE(selection_mask_uses_full_silhouette_and_screen_space_composite)
 
     const std::string source(selectionOutlinePhoskiaSourceForTests());
     CHECK(source.find("selectionTexelSize.xy * 2.0") != std::string::npos);
-    CHECK(source.find("+ selectionTexelSize.zw") != std::string::npos);
+    CHECK(source.find("let stableUv") != std::string::npos);
+    CHECK(source.find("let visibleUv = stableUv + selectionTexelSize.zw")
+          != std::string::npos);
+    CHECK(source.find("sample(selectionMask, stableUv).w")
+          != std::string::npos);
     CHECK(source.find("neighborSum") != std::string::npos);
     CHECK(source.find("outerCoverage") != std::string::npos);
     CHECK(source.find("visibleCoverage") != std::string::npos);
@@ -185,6 +189,8 @@ TEST_CASE(selection_mask_precedes_postprocess_and_composite_follows_present)
                          viewId) - kRenderViewRemap.begin();
     };
     CHECK(rankOf(ayt::render::kTransparentDeferredViewId)
+          < rankOf(TransparentPass::kSelectionStableMaskViewId));
+    CHECK(rankOf(TransparentPass::kSelectionStableMaskViewId)
           < rankOf(TransparentPass::kSelectionMaskViewId));
     CHECK(rankOf(TransparentPass::kSelectionMaskViewId)
           < rankOf(bgfx::ViewId{10}));

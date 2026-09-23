@@ -1598,6 +1598,7 @@ void Renderer::render(const RenderScene& scene)
     }
     if (detail::TransparentPass* transparent =
             _impl->pipeline.findPass<detail::TransparentPass>()) {
+        transparent->setSelectionUnjitteredProjection(_impl->mainProjection);
         const detail::TaaJitter selectionJitter = taaPrepared
             ? taaPassPtr->currentJitter()
             : detail::TaaJitter{};

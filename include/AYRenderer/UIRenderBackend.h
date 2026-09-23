@@ -55,16 +55,17 @@ public:
     //  16 = Present → backbuffer panel (Forward + Deferred)
     //  17 = FXAA offscreen LDR filter (ordered before Present)
     //  18–25 = Shadow atlas slots
-    //  26–245 = retained UI Layer / generic offscreen paint targets
+    //  26–243 = retained UI Layer / generic offscreen paint targets
+    //  244 = unjittered selection silhouette; 245 = TAA diagnostics
     //  246 = camera-overlay 2D composition
     //  247–249 = SMAA 1x edge / blend-weight / neighborhood stages
     //  250 = GBufferDebug, 251/252 = EditorOverlay axis/compatibility
-    //  253/254 = selection visibility mask / screen-space composite
+    //  253/254 = jittered selection visibility / screen-space composite
     //  255 = UI chrome / menus (fixed high slot — insert Post passes
     //        without reshuffling UI; must stay after presentation overlays)
     static constexpr uint8_t kViewId = 255;
     static constexpr uint8_t kFirstLayerViewId = 26;
-    static constexpr uint8_t kLastLayerViewId = 245;
+    static constexpr uint8_t kLastLayerViewId = 243;
     static constexpr uint16_t kMaxOffscreenPaintsPerFrame =
         static_cast<uint16_t>(kLastLayerViewId - kFirstLayerViewId + 1u);
 

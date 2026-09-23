@@ -40,6 +40,10 @@ For each item, save the capture filename, commit, backend, dimensions, relevant 
 The first real baseline capture is recorded in
 [`d3d11-capture-report-2026-09-21.md`](d3d11-capture-report-2026-09-21.md).
 It closes the normal-frame ordering, format, binding, and static TAA ping-pong
-checks. Resize, camera cut, disabled/re-enabled effects, diagnostic views, raw
-resource pixel inspection, and multi-light Shadow remain open, so the overall
-R6-6 D3D11 gate is not yet closed.
+checks. The final sequence is recorded in
+[`d3d11-capture-report-2026-09-23.md`](d3d11-capture-report-2026-09-23.md)
+and adds resize, camera cut, disabled/re-enabled effects, raw resource and TAA
+diagnostic views, multi-light Shadow, selection compositing and the transparent
+boundary pair. The R6-6 D3D11 gate is closed. `TAA-TRANSPARENCY-01` remains an
+explicit capability limitation; it was recorded rather than misclassified as
+a successful transparent depth/motion implementation.

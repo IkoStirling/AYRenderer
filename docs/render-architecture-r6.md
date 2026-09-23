@@ -1,7 +1,7 @@
 # AYRenderer R6 架构收口计划
 
 > 日期：2026-09-09
-> 状态：R6-0、R6-1、R6-2、R6-3、R6-4 已落地；R6-5 第一阶段已落地；R6-6 第一、二刀已落地，真 GPU 门禁仍开放。
+> 状态：R6-0、R6-1、R6-2、R6-3、R6-4 已落地；R6-5 第一阶段已落地；R6-6 已完成。
 > 范围：在不重写 bgfx/RHI、不改变 Forward/Deferred 画面顺序的前提下，收口 Pass 描述、资源依赖、诊断和场景提交。
 
 ## 1. 当前真实基线
@@ -124,7 +124,7 @@ R6-3c 验证：FrameGraph 可裁剪 slot 不进入 `execute()`；禁用、正常
 
 验收：画面与 draw 顺序不变；CPU pass 时间下降；透明排序和 MotionVector stable id 不回归。
 
-### R6-6：诊断与真 GPU 门禁（进行中）
+### R6-6：诊断与真 GPU 门禁（已完成）
 
 - 调试视图：MotionVector、SSAO、TAA history/resolve、Shadow atlas。
 - 每 Pass CPU/GPU 时间、transient RT 数量/峰值和 graph compile 摘要。
@@ -146,14 +146,19 @@ R6-3c 验证：FrameGraph 可裁剪 slot 不进入 `execute()`；禁用、正常
 - 保留既有 view 245 的 TAA Final、History rejection、History weight、Clipping difference、Motion 与 Reprojected history 模式，原始 history 通道用于补齐资源级观察，不复制 resolve 诊断。
 - Phoskia IR 与 Windows D3D11 `s_5_0` 生产编译定向回归通过；全量 `AYRenderer_Test` 为 4694/4694，`AYEditorShell_Demo` 链接通过。Noop 空后处理图的诊断预期同步修正为 declared/live 0/0，不把 CPU-only 管线节点伪装成 FrameGraph 节点。
 
-D3D11 基线 capture（2026-09-21，部分完成）：
+D3D11 基线 capture（2026-09-21）：
 
 - RenderDoc 1.46 在 1536×912 窗口、1083×594 视口和 4×MSAA 下连续捕获三个正常帧；主链覆盖 Shadow、Skybox、GBuffer、MotionVector、SSAO、Lighting、DepthHaze、Transparent、Bloom、PostProcess、TAA、Present 与 Editor/UI overlay。
 - 抓帧确认 MRT/Depth、Motion、SSAO、HDR scene、Bloom、FinalLdr 与 TAA history 的尺寸和格式符合契约；生产者先写、消费者后读，没有发现主链倒序。
 - TAA history 在 frame 24490/24663/24686 依次执行 A←B、B←A、A←B，且 Present 读取同帧 resolve 输出；静态 history ping-pong 门禁已关闭。
-- 完整证据见 [`d3d11-capture-report-2026-09-21.md`](d3d11-capture-report-2026-09-21.md)。resize、camera cut、效果关闭/重开、diagnostic channels、raw texture 像素内容及多灯 Shadow 尚未 capture，因此 R6-6 真 GPU 门禁仍保持开放。
+- 基线证据见 [`d3d11-capture-report-2026-09-21.md`](d3d11-capture-report-2026-09-21.md)。
 
-下一步：按 [`d3d11-capture-checklist.md`](d3d11-capture-checklist.md) 补齐动态/失效场景 capture；D3D12 仍只要求启动失败可报告且不闪退，不以本次 D3D11 正常帧替代后端专项验证。
+最终动态/失效 capture（2026-09-23）：
+
+- 24 个独立 D3D11 capture 补齐 selection、resize 首帧/稳定帧、camera cut、效果关闭/重开、透明边界、10 个 raw resource channel、5 个 TAA diagnostic mode 与双灯 Shadow atlas。关闭帧不含被禁用效果的 view，重开首帧恢复有效目标；resize 首帧未混用资源代际。
+- Selection Outline 改为 view 244 未 jitter Alpha silhouette + view 253 jittered/depth-tested RGB visibility + view 254 稳定栅格合成，不再以反向偏移尝试抵消 coverage 变化。
+- D3D12 编辑器启动烟测保持运行 15 秒；初始化失败返回路径会持久记录、显示错误并安全退出。完整画面对齐不属于本阶段最低门禁。
+- 最终证据见 [`d3d11-capture-report-2026-09-23.md`](d3d11-capture-report-2026-09-23.md)。`TAA-TRANSPARENCY-01` 继续作为明确记录的透明 depth/motion 能力限制，不影响 R6-6 基础门禁关闭。
 
 ## 4. 新画质能力的恢复顺序
 

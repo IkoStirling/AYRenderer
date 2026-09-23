@@ -30,7 +30,7 @@ Shadow → Skybox → GBuffer → MotionVector(on demand) → SSAO → Lighting 
        → Present(view 16, backbuffer) → UI(view 255)
 ```
 
-Editor 选中轮廓在 Transparent 后以 view 253 写双通道遮罩：Alpha 是所选网格的完整投影，RGB 是通过场景深度测试的可见覆盖。遮罩与借用的场景深度使用完全相同的 jitter 投影，view 254 延后到 Present 之后按当前 jitter 反向对齐采样，再以八方向环形覆盖率重建柔和的固定两像素外边界，并用 RGB 覆盖率抑制遮挡段。这里不能混用未 jitter 遮罩和 jitter 深度，否则 `LEQUAL` 会逐帧翻转。选中框不进入 Bloom/PostProcess/TAA history；之后 view 251 绘制方向轴、view 252 绘制 Transform Gizmo，二者使用未 jitter 的相机投影。
+Editor 选中轮廓在 Transparent 后使用同一 RGBA8 mask 的两套栅格：view 244 以未 jitter 投影且不绑定深度，只写 Alpha 完整 silhouette；view 253 以场景相同的 jitter 投影并借用 GBuffer depth，只写 RGB 可见覆盖。view 254 延后到 Present 之后，Alpha 始终按稳定输出 UV 采样，RGB 则按当前 jitter 对齐 UV 采样，再以八方向环形覆盖率重建柔和的固定两像素外边界并抑制遮挡段。不能再退回单一 jittered silhouette 后反向偏移的方案，因为偏移不能撤销光栅覆盖率随 jitter 相位改变。选中框不进入 Bloom/PostProcess/TAA history；之后 view 251 绘制方向轴、view 252 绘制 Transform Gizmo，二者也使用未 jitter 的相机投影。
 
 ## 2. 数据流与所有权
 
@@ -184,7 +184,9 @@ PostProcess、TAA、FXAA、SMAA、ColorGrading 与 Present 共用 `FullscreenPas
 | 16 | Present → backbuffer |
 | 17 | FXAA → FxaaColor（显式排在 Present 之前） |
 | 18–25 | Shadow atlas slots |
-| 26–245 | UI offscreen layer/RenderTarget（每帧最多 220 次 retained repaint） |
+| 26–243 | UI offscreen layer/RenderTarget（每帧最多 218 次 retained repaint） |
+| 244 | 未抖动的编辑器选择轮廓 silhouette mask |
+| 245 | TAA 诊断覆盖层 |
 | 246 | 相机覆层 2D 合成（独立正交相机，位于 3D Transparent 之后） |
 | 247 | SMAA edge detection → SmaaEdges |
 | 248 | SMAA blend weights → SmaaBlendWeights |

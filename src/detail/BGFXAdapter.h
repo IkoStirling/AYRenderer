@@ -252,6 +252,11 @@ public:
     bgfx::FrameBufferHandle createBorrowedColorDepthFrameBuffer(
         bgfx::TextureHandle color,
         bgfx::TextureHandle depth);
+    // Borrow an existing color texture without transferring ownership. This
+    // lets two ordered views write different channels of one logical target
+    // while using different camera projections.
+    bgfx::FrameBufferHandle createBorrowedColorFrameBuffer(
+        bgfx::TextureHandle color);
     // Swap-chain color + borrowed scene depth. Do NOT use for direct
     // outline draws: a depth-only attachment FBO has zero RTVs on D3D11
     // (OMSetRenderTargets(0, NULL, dsv) discards color). EditorOverlayPass

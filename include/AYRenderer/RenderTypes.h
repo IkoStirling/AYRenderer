@@ -397,9 +397,10 @@ enum class RenderPassSlot : uint8_t {
 
     // Editor overlay (2026-07-25) — append-only ABI value 13. It owns the
     // orientation widget on view 251 after Present. TransparentPass generates
-    // the depth-aware selection mask earlier on view 253, then composites its
-    // screen-space dilation to the backbuffer on view 254 after Present. This
-    // keeps the fixed-width rim out of TAA/Bloom while preserving occlusion.
+    // an unjittered alpha silhouette on view 244 and jittered depth-tested RGB
+    // visibility on view 253, then composites their screen-space dilation to
+    // the backbuffer on view 254 after Present. This keeps the fixed-width rim
+    // out of TAA/Bloom while preserving current-frame occlusion.
     // Omitted from makeDefault() / makeDeferred(); editor hosts opt in via
     // makeEditorForward() / makeEditorDeferred().
     EditorOverlay = 13,

@@ -940,6 +940,17 @@ bgfx::FrameBufferHandle BGFXAdapter::createBorrowedColorDepthFrameBuffer(
     return bgfx::createFrameBuffer(2, attachment, /*destroyTextures=*/false);
 }
 
+bgfx::FrameBufferHandle BGFXAdapter::createBorrowedColorFrameBuffer(
+    bgfx::TextureHandle color)
+{
+    if (!_initialized || !bgfx::isValid(color)) {
+        return BGFX_INVALID_HANDLE;
+    }
+    bgfx::Attachment attachment;
+    attachment.init(color);
+    return bgfx::createFrameBuffer(1, &attachment, /*destroyTextures=*/false);
+}
+
 bgfx::FrameBufferHandle BGFXAdapter::createBackbufferWithBorrowedDepthFrameBuffer(
     bgfx::TextureHandle depth)
 {

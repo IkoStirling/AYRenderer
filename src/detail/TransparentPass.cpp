@@ -139,25 +139,32 @@ material EditorSelectionOutline {
     }
     fragment {
         in  vUv : texcoord
-        let uv = vec2(vUv.x, 1.0 - vUv.y) + selectionTexelSize.zw
+        let stableUv = vec2(vUv.x, 1.0 - vUv.y)
+        let visibleUv = stableUv + selectionTexelSize.zw
         let texel = selectionTexelSize.xy * 2.0
-        let center = sample(selectionMask, uv).w
-        let s0 = sample(selectionMask, uv + vec2( texel.x, 0.0))
-        let s1 = sample(selectionMask, uv + vec2(-texel.x, 0.0))
-        let s2 = sample(selectionMask, uv + vec2(0.0,  texel.y))
-        let s3 = sample(selectionMask, uv + vec2(0.0, -texel.y))
-        let s4 = sample(selectionMask, uv + vec2( texel.x,  texel.y))
-        let s5 = sample(selectionMask, uv + vec2(-texel.x,  texel.y))
-        let s6 = sample(selectionMask, uv + vec2( texel.x, -texel.y))
-        let s7 = sample(selectionMask, uv + vec2(-texel.x, -texel.y))
-        let neighborPeak = max(max(max(s0.w, s1.w), max(s2.w, s3.w)),
-                               max(max(s4.w, s5.w), max(s6.w, s7.w)))
-        let neighborSum = s0.w + s1.w + s2.w + s3.w
-                        + s4.w + s5.w + s6.w + s7.w
-        let visiblePeak = max(max(max(s0.x, s1.x), max(s2.x, s3.x)),
-                              max(max(s4.x, s5.x), max(s6.x, s7.x)))
-        let visibleSum = s0.x + s1.x + s2.x + s3.x
-                       + s4.x + s5.x + s6.x + s7.x
+        let center = sample(selectionMask, stableUv).w
+        let a0 = sample(selectionMask, stableUv + vec2( texel.x, 0.0)).w
+        let a1 = sample(selectionMask, stableUv + vec2(-texel.x, 0.0)).w
+        let a2 = sample(selectionMask, stableUv + vec2(0.0,  texel.y)).w
+        let a3 = sample(selectionMask, stableUv + vec2(0.0, -texel.y)).w
+        let a4 = sample(selectionMask, stableUv + vec2( texel.x,  texel.y)).w
+        let a5 = sample(selectionMask, stableUv + vec2(-texel.x,  texel.y)).w
+        let a6 = sample(selectionMask, stableUv + vec2( texel.x, -texel.y)).w
+        let a7 = sample(selectionMask, stableUv + vec2(-texel.x, -texel.y)).w
+        let v0 = sample(selectionMask, visibleUv + vec2( texel.x, 0.0)).x
+        let v1 = sample(selectionMask, visibleUv + vec2(-texel.x, 0.0)).x
+        let v2 = sample(selectionMask, visibleUv + vec2(0.0,  texel.y)).x
+        let v3 = sample(selectionMask, visibleUv + vec2(0.0, -texel.y)).x
+        let v4 = sample(selectionMask, visibleUv + vec2( texel.x,  texel.y)).x
+        let v5 = sample(selectionMask, visibleUv + vec2(-texel.x,  texel.y)).x
+        let v6 = sample(selectionMask, visibleUv + vec2( texel.x, -texel.y)).x
+        let v7 = sample(selectionMask, visibleUv + vec2(-texel.x, -texel.y)).x
+        let neighborPeak = max(max(max(a0, a1), max(a2, a3)),
+                               max(max(a4, a5), max(a6, a7)))
+        let neighborSum = a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7
+        let visiblePeak = max(max(max(v0, v1), max(v2, v3)),
+                              max(max(v4, v5), max(v6, v7)))
+        let visibleSum = v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7
         // Reconstruct a soft two-pixel dilation from ring coverage instead of
         // making a binary decision from one maximum sample. This preserves
         // corners while suppressing the raster staircase changes that remain
@@ -175,7 +182,7 @@ material EditorSelectionOutline {
 )";
 
 constexpr const char* kSelectionOutlineCacheKey =
-    "editor_selection_mask_dilate_2px_v5_jitter_matched_soft_coverage";
+    "editor_selection_mask_dilate_2px_v6_stable_silhouette";
 
 } // namespace
 
@@ -455,12 +462,16 @@ bgfx::FrameBufferHandle TransparentPass::ensureDeferredCompositeFbo(
 
 void TransparentPass::destroySelectionTarget(BGFXAdapter& adapter) noexcept
 {
+    if (BGFXAdapter::isValid(_selectionStableMaskFbo)) {
+        adapter.destroy(_selectionStableMaskFbo);
+    }
     if (BGFXAdapter::isValid(_selectionMaskFbo)) {
         adapter.destroy(_selectionMaskFbo);
     }
     if (BGFXAdapter::isValid(_selectionMaskTexture)) {
         adapter.destroy(_selectionMaskTexture);
     }
+    _selectionStableMaskFbo = BGFX_INVALID_HANDLE;
     _selectionMaskFbo = BGFX_INVALID_HANDLE;
     _selectionMaskTexture = BGFX_INVALID_HANDLE;
     _selectionSceneDepth = BGFX_INVALID_HANDLE;
@@ -518,6 +529,9 @@ bool TransparentPass::ensureSelectionResources(
 
     const bool targetChanged = _selectionWidth != ctx.viewportWidth
         || _selectionHeight != ctx.viewportHeight
+        || !BGFXAdapter::isValid(_selectionMaskTexture)
+        || !BGFXAdapter::isValid(_selectionStableMaskFbo)
+        || !BGFXAdapter::isValid(_selectionMaskFbo)
         || !BGFXAdapter::isValid(_selectionSceneDepth)
         || _selectionSceneDepth.idx != sceneDepth.idx;
     if (targetChanged) {
@@ -530,10 +544,13 @@ bool TransparentPass::ensureSelectionResources(
         _selectionMaskTexture = adapter.createDynamicTexture2D(
             ctx.viewportWidth, ctx.viewportHeight, flags);
         if (BGFXAdapter::isValid(_selectionMaskTexture)) {
+            _selectionStableMaskFbo =
+                adapter.createBorrowedColorFrameBuffer(_selectionMaskTexture);
             _selectionMaskFbo = adapter.createBorrowedColorDepthFrameBuffer(
                 _selectionMaskTexture, sceneDepth);
         }
         if (!BGFXAdapter::isValid(_selectionMaskTexture)
+            || !BGFXAdapter::isValid(_selectionStableMaskFbo)
             || !BGFXAdapter::isValid(_selectionMaskFbo)) {
             destroySelectionTarget(adapter);
             return false;
@@ -714,12 +731,11 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         }
     }
 
-    // Alpha stores the selected mesh's complete projected silhouette. RGB then
-    // stores only the portion that passes the live scene depth test. The
-    // composite derives its edge exclusively from alpha and uses RGB only as
-    // a visibility gate. Foreground objects therefore neither punch false
-    // internal borders nor allow the selected border to show through them.
-    // Screen-space dilation remains continuous and scale-independent.
+    // Alpha stores an unjittered silhouette, while RGB stores the selected
+    // surface rasterized with the same jittered projection and depth as the
+    // scene. The composite samples those channels on their respective grids:
+    // stable alpha fixes the rim in output pixels and jitter-aligned RGB keeps
+    // foreground occlusion. This avoids feeding editor chrome through TAA.
     uint32_t selectionMaskDraws = 0;
     uint32_t selectionVisibleMaskDraws = 0;
     const bgfx::TextureHandle sceneDepth = BGFXAdapter::isValid(compositeFbo)
@@ -727,16 +743,25 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
         : bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     if (!outlineItems.empty()
         && ensureSelectionResources(ctx, sceneDepth)) {
+        constexpr uint8_t stableMaskViewId = kSelectionStableMaskViewId;
         constexpr uint8_t maskViewId = kSelectionMaskViewId;
+        adapter.setViewFrameBuffer(stableMaskViewId, _selectionStableMaskFbo);
+        adapter.setViewRect(stableMaskViewId, 0, 0,
+                            viewportWidth, viewportHeight);
+        adapter.setViewTransform(stableMaskViewId, frame.view,
+                                 _selectionUnjitteredProjection);
+        adapter.setViewMode(stableMaskViewId, bgfx::ViewMode::Sequential);
+        adapter.setViewClearRaw(stableMaskViewId, BGFX_CLEAR_COLOR,
+                                0x00000000u, 1.0f, 0);
+        adapter.touch(stableMaskViewId);
+
         adapter.setViewFrameBuffer(maskViewId, _selectionMaskFbo);
         adapter.setViewRect(maskViewId, 0, 0, viewportWidth, viewportHeight);
-        // The mask and borrowed scene depth must use the exact same jittered
-        // projection. Mixing an unjittered mask with jittered depth makes the
-        // LEQUAL visibility channel alternate as subpixel samples move.
+        // Only RGB visibility borrows scene depth, so it must use the exact
+        // same jittered projection. Alpha was already written without depth
+        // on the stable view and is preserved because this view does not clear.
         adapter.setViewTransform(maskViewId, frame.view, frame.projection);
         adapter.setViewMode(maskViewId, bgfx::ViewMode::Sequential);
-        adapter.setViewClearRaw(maskViewId, BGFX_CLEAR_COLOR,
-                                0x00000000u, 1.0f, 0);
         adapter.touch(maskViewId);
 
         for (const DrawItem* pItem : outlineItems) {
@@ -756,7 +781,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
             adapter.setState(selectionMaskState(
                 material.doubleSided, reversesWinding(maskItem.world)));
             const SubmitResult maskResult = submitItem(
-                adapter, ctx, frame, maskItem, maskViewId,
+                adapter, ctx, frame, maskItem, stableMaskViewId,
                 packedLights, packedShadows, SubmitMode::SelectionMask);
             if (maskResult.accepted) {
                 ++selectionMaskDraws;

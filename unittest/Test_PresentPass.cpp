@@ -90,7 +90,7 @@ TEST_CASE(present_view_map_has_no_shadow_ui_or_debug_collision)
     CHECK(FXAAPass::kFxaaViewId == 17u);
     CHECK(ayt::render::detail::ShadowPass::kShadowAtlasFirstViewId == 18u);
     CHECK(ayt::render::UIRenderBackend::kFirstLayerViewId == 26u);
-    CHECK(ayt::render::UIRenderBackend::kLastLayerViewId == 245u);
+    CHECK(ayt::render::UIRenderBackend::kLastLayerViewId == 243u);
     CHECK(ayt::render::detail::Forward2DOpaquePass::kOverlayViewId == 246u);
     CHECK(ayt::render::detail::SMAAPass::kEdgeViewId == 247u);
     CHECK(ayt::render::detail::SMAAPass::kBlendWeightViewId == 248u);

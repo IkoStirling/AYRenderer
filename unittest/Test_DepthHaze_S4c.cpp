@@ -167,29 +167,30 @@ TEST_CASE(deferred_pipeline_matches_data_dependencies) {
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 36u);
+    CHECK(order.size() == 37u);
     CHECK(order[14] == 14u);  // SSAO
     CHECK(order[15] == 8u);   // Lighting
     CHECK(order[16] == 13u);  // DepthHaze
     CHECK(order[17] == 9u);   // Deferred Transparent
-    CHECK(order[18] == 253u); // Selection visibility mask
-    CHECK(order[19] == 246u); // Camera-overlay 2D
-    CHECK(order[20] == 10u);  // BloomExtract
-    CHECK(order[21] == 11u);  // BloomBlurH
-    CHECK(order[22] == 12u);  // BloomBlurV
-    CHECK(order[23] == 15u);  // PostProcess
-    CHECK(order[24] == 5u);   // TAA
-    CHECK(order[25] == 17u);  // FXAA
-    CHECK(order[26] == 247u); // SMAA edge detection
-    CHECK(order[27] == 248u); // SMAA blend weights
-    CHECK(order[28] == 249u); // SMAA neighborhood blend
-    CHECK(order[29] == 4u);   // ColorGrading
-    CHECK(order[30] == 16u);  // Present
-    CHECK(order[31] == 245u); // Optional TAA diagnostics, never history
-    CHECK(order[32] == 250u); // GBufferDebug
-    CHECK(order[33] == 254u); // Selection screen-space composite
-    CHECK(order[34] == 251u); // Editor orientation axis
-    CHECK(order[35] == 252u); // Transform gizmo
+    CHECK(order[18] == 244u); // Stable selection silhouette
+    CHECK(order[19] == 253u); // Selection visibility mask
+    CHECK(order[20] == 246u); // Camera-overlay 2D
+    CHECK(order[21] == 10u);  // BloomExtract
+    CHECK(order[22] == 11u);  // BloomBlurH
+    CHECK(order[23] == 12u);  // BloomBlurV
+    CHECK(order[24] == 15u);  // PostProcess
+    CHECK(order[25] == 5u);   // TAA
+    CHECK(order[26] == 17u);  // FXAA
+    CHECK(order[27] == 247u); // SMAA edge detection
+    CHECK(order[28] == 248u); // SMAA blend weights
+    CHECK(order[29] == 249u); // SMAA neighborhood blend
+    CHECK(order[30] == 4u);   // ColorGrading
+    CHECK(order[31] == 16u);  // Present
+    CHECK(order[32] == 245u); // Optional TAA diagnostics, never history
+    CHECK(order[33] == 250u); // GBufferDebug
+    CHECK(order[34] == 254u); // Selection screen-space composite
+    CHECK(order[35] == 251u); // Editor orientation axis
+    CHECK(order[36] == 252u); // Transform gizmo
 }
 
 TEST_CASE(forward_pipeline_keeps_haze_as_safe_noop_before_transparent) {

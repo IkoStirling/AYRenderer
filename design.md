@@ -1,5 +1,13 @@
 # AYRenderer Design
 
+## 2026-09-23 — Selection Outline 稳定化与 R6-6 收口
+
+- 橙色 Selection Outline 不再依赖“jittered 遮罩 + 合成时反向偏移”消除抖动。view 244 以未 jitter 投影、无深度只写 Alpha 稳定轮廓；view 253 以场景同一 jitter 投影和 GBuffer depth 只写 RGB 可见性；view 254 在 Present 后分别按稳定/对齐 UV 读取两个通道并合成。这样固定输出像素上的边界覆盖率不再随 Halton 相位变化，遮挡判定仍与当帧深度一致。selection target 在 texture 或任一 borrowed FBO 失效时整体重建，覆盖 resize/backend generation 边界。
+- RenderDoc 1.46 最终序列得到 24 个彼此独立的 D3D11 capture，覆盖 selection、resize 首帧/稳定帧、camera cut、效果关闭/重开首帧/稳定帧、透明边界静止/小幅移动、10 个 raw resource channel、5 个 TAA diagnostic mode 和双投影阴影 atlas。异步 `TriggerCapture` 请求间隔扩大到五帧，Motion 与 SSAO 不再发生文件名/通道串帧。
+- 效果关闭帧中 Motion、SSAO、Haze、Bloom 与 TAA 对应 view 均消失；重开首帧即恢复完整链且未读取 stale target。resize 首帧未混用旧、新尺寸资源；双阴影灯捕获同时出现 view 18/19 和两个 atlas 区域。透明边界最终画面完整，但 `TAA-TRANSPARENCY-01` 仍作为无透明 depth/motion 对应面的已知能力限制保留。
+- 新链接的 `AYEditorShell_Demo --renderer d3d12` 连续运行 15 秒未退出，日志记录 renderer type 3 与主链首帧提交。presentation bootstrap 失败路径现会关闭 splash、写入持久日志、显示模态错误并安全 shutdown，不再静默闪退。
+- `AYRenderer_Test` 全量 **4698/4698**，`AYEditorShell_Demo` 链接通过。R6-6 完成；完整证据见 [`docs/d3d11-capture-report-2026-09-23.md`](docs/d3d11-capture-report-2026-09-23.md)。
+
 ## 2026-09-21 — R6-6 D3D11 基线抓帧（部分门禁通过）
 
 - 使用 RenderDoc 1.46 对 Renderer `dd6599d` / root `9ab3998` 的 `AYEditorShell_Demo --renderer d3d11` 连续捕获 frame 24490、24663、24686。最后一帧窗口为 1536×912、编辑视口为 1083×594、swapchain 为 RGBA8 4×MSAA；捕获可解码并导出结构化 XML，最终缩略图完整。
@@ -206,7 +214,7 @@
 
 > **2026-09-01 — Deferred Motion Vector Pass**：新增 append-only `RenderPassSlot::MotionVector=20` 与 view 3，固定在 `GBuffer(view 7) → MotionVector(view 3) → SSAO(view 14) → Lighting(view 8)`。Pass 不扩展 GBuffer MRT：仅在 TAA 成功准备时分配独立全分辨率 `RG16F` velocity，并通过 non-owning FBO 借用 GBuffer depth，以 `LEQUAL` color-only 重放 opaque/cutout 几何。速度编码为 `currentUV - previousUV`；新对象、断帧或姿态布局变化写 `(2,2)` 哨兵拒绝旧 history。`DrawItem::motionObjectId` 负责稳定对象匹配，AYEntity 为刚体、分段蒙皮和回退路径提供混入 World/handle generation 的标识；Pass 按对象+mesh 保存上一帧 world 与完整骨骼姿态。TAA 优先消费速度，资源或 shader 不可用时保留 RT2 world-position 静态回退；透明物体仍不在本轮覆盖。
 
-> **2026-09-01 — TAA 抖动与选中框隔离**：Halton jitter spread 收敛到 0.75，静态/运动 history feedback 调整为 0.92/0.65，并让亮度 history rejection 扣除当前 3×3 邻域的正常边缘跨度，降低浅角斜边的覆盖闪烁。中间验证证明两种看似直接的处理不可采用：空间最短路径重排会破坏 Halton 前缀均匀性；未 jitter 选中遮罩借用 jitter 深度会使 `LEQUAL` 可见性整帧翻转。最终保留标准 Halton 顺序，view 253 的遮罩与场景深度保持同一 jitter 投影，view 254 在 Present 后反向对齐，并以八方向环形覆盖率重建软外边界；选中框不进入 Bloom/PostProcess/TAA history，方向轴与 Gizmo 继续使用稳定覆盖层路径。
+> **2026-09-01 — TAA 抖动与选中框隔离（历史实现，已由 2026-09-23 双栅格方案取代）**：Halton jitter spread 收敛到 0.75，静态/运动 history feedback 调整为 0.92/0.65，并让亮度 history rejection 扣除当前 3×3 邻域的正常边缘跨度，降低浅角斜边的覆盖闪烁。当时保留标准 Halton 顺序，view 253 的遮罩与场景深度使用同一 jitter 投影，view 254 在 Present 后反向对齐；后续视觉验收证明反向偏移不能消除光栅 coverage 变化，因此当前实现已改为 view 244 未 jitter Alpha silhouette 与 view 253 jittered/depth-tested RGB visibility 分离。选中框始终不进入 Bloom/PostProcess/TAA history，方向轴与 Gizmo 继续使用稳定覆盖层路径。
 
 > **2026-09-01 — Deferred TAA 首版**：新增 append-only `RenderPassSlot::TAA=19`、`FgResourceId::TaaColor=12` 与 view 5，接入 `PostProcess → TAA → FXAA → SMAA → ColorGrading → Present`。TAA 使用 8 样本 Halton jitter、Pass-owned 双 `RGBA16F` history、GBuffer RT2 世界坐标重投影、RT3 coverage、稳定相机下的背景 jitter-delta 重投影、3×3 YCoCg 邻域限幅和运动/亮度自适应反馈；只有 shader、几何和 history 全部就绪才启用 jitter。TAA/FXAA/SMAA 在 Renderer 与 Editor Render Settings 中三选一，配置可持久化；Editor Gizmo 保持未 jitter 投影。首版只覆盖相机运动、静态 opaque 与静止背景轮廓；逐物体/骨骼限制已由上方 MotionVector 记录关闭，透明运动仍待后续契约。
 
@@ -748,8 +756,8 @@ backend 选择最久未 composite、且当前未 paint 的 Layer 撤销 backing�
 Widget 绘制路线，也不会把 dangling target token 暴露给 AYUI。
 逻辑 bounds 的 min/max 分别按 DPI 向外 `floor/ceil` 到物理像素，二者之差决定物理尺寸；完整
 backing composite 后裁回 logical bounds。这个约束使小数 origin/extent 的离屏像素中心仍与主
-framebuffer 对齐，不能退回只对 logical width/height 做 `ceil`。offscreen paint 使用 view 26–249
-（250 留给 GBufferDebug），主
+framebuffer 对齐，不能退回只对 logical width/height 做 `ceil`。offscreen paint 当前使用 view 26–243
+（244/245 留给 Selection/TAA diagnostics，250 留给 GBufferDebug），主
 composite 使用 view 255。
 target 切换是 batch barrier：进入离屏前 flush，保存 canvas/clip/path-clip/opacity/blend 状态；结束
 paint 后 flush 并恢复。由此 flat、SDF、text、nine-patch、vector fill/stroke 和 nested stencil clip
@@ -1217,7 +1225,7 @@ include/AYRenderer/
 ### 2026-08-30 — FXAA LDR Pass
 
 - 新增 append-only `RenderPassSlot::FXAA=16`、`FgResourceId::FxaaColor=7` 与 `FXAAPass`。默认、Deferred 和两条 Editor 管线固定为 PostProcess → FXAA → Present；旧 custom descriptor 不会被强制加入 FXAA，但显式包含 FXAA 且缺少 Present 时会把 Present 补在 FXAA 后。
-- FXAA 使用稳定 view 17，`RenderViewOrder` 显式将它排在 PostProcess view 15 与 Present view 16 之间，并与 Shadow atlas 18–25、UI Layer 26–249、GBufferDebug 250、Editor 251–254 隔离。
+- FXAA 使用稳定 view 17，`RenderViewOrder` 显式将它排在 PostProcess view 15 与 Present view 16 之间，并与 Shadow atlas 18–25、当前 UI Layer 26–243、Selection/TAA diagnostics 244/245、GBufferDebug 250、Editor 251–254 隔离。
 - 输入是 display-referred RGBA8 FinalLdrColor；本节记录的初版 shader 使用 FXAA 3.11 风格 luma 方向滤波，已由 2026-09-01 的 Quality 修复取代。输入格式、UV clamp 与按 viewport 上传 inverse texel size 的契约继续保留。
 - `PresentSource` 每帧先回退到 FinalLdrColor。FXAA 只有在 geometry/program/binding/FBO/attachment 全部有效并成功 submit 后才标记 FxaaColor 和提升 semantic；任何失败都由 Present 显示原 FinalLdrColor。
 - 新增 `Renderer::setFxaaEnabled/fxaaEnabled`，默认开启且跨 pipeline rebuild 保持。关闭时 FrameGraph 不声明 FxaaColor，不分配目标，也不执行 FXAA draw。
@@ -1228,7 +1236,7 @@ include/AYRenderer/
 - PostProcess 从“最终 backbuffer blit”改为 FrameGraph `FinalLdrColor` 生产者：view 15 在 viewport-local RGBA8 目标完成 bloom、exposure、tone-map 与 gamma，并仅在真实 submit 后发布 current-frame production latch。
 - 新增 append-only `RenderPassSlot::Present=15`、`FgResourceId::FinalLdrColor=6` 与 `FgSemantic::PresentSource=4`。旧 custom descriptor 若含 PostProcess 但没有 Present，会在配置时补入兼容边界。
 - PresentPass 使用 view 16，只负责把本帧有效的 PresentSource 拷贝到默认 backbuffer 的 Game View rect。PostProcess 与 Present 共用 `FullscreenPassGeometry` 实现，资源仍由各 Pass 独立拥有和销毁。
-- 默认/Deferred/Editor 管线均固定为 PostProcess → FXAA → Present；EditorOverlay 位于 Present 后、UI 前，view 251 负责方向轴，view 252 后续启用为 Transform Gizmo。选中轮廓在 Transparent 阶段使用 view 253/254：遮罩 Alpha 保存完整投影、RGB 保存场景深度可见覆盖，固定两像素外膨胀只从 Alpha 求边界并以 RGB 抑制遮挡段，避免大型地面产生内部伪轮廓或外框穿透前景。显式 view order 同时避开 FXAA 17、Shadow 18–25、UI Layer 26–249 与 GBufferDebug 250。
+- 默认/Deferred/Editor 管线均固定为 PostProcess → FXAA → Present；EditorOverlay 位于 Present 后、UI 前，view 251 负责方向轴，view 252 后续启用为 Transform Gizmo。选中轮廓在 Transparent 阶段使用 view 244/253/254：244 以未 jitter 投影写稳定 Alpha silhouette，253 以 jitter 投影和场景深度写 RGB visibility，254 在 Present 后按各自栅格取样并重建固定两像素外边界，避免选中框进入 TAA history 或随 jitter 覆盖率抖动。显式 view order 同时避开 FXAA 17、Shadow 18–25、UI Layer 26–243、TAA diagnostics 245 与 GBufferDebug 250。
 - FrameGraph 新增通用 `markProduced/producedThisFrame` latch 与 semantic 级查询，`beginFrame` 与 shutdown 清零，防止复用物理 handle 时 Present 读取上一帧目标。测试覆盖 ABI、管线顺序、view 区间、Noop、latch reset 和生产 Present shader 编译。
 - MSVC Debug 定向重编后 `AYRenderer_Test` 为 3429/3429；`AYEditorShell_Demo` 完成重新链接。为规避历史 stale `.obj` 问题，本轮只清理了 `AYRenderer_Test` 对象目录，没有执行全引擎 clean。
 - 该边界为 FXAA、ColorGrading 等后 tone-map Pass 提供稳定插入点；TAA/MotionBlur/DOF 仍需先完成 motion/history/depth 契约，不在本刀混入。
@@ -1240,8 +1248,8 @@ include/AYRenderer/
 - Pool 新增 strict acquire/预算 miss/peak bytes；FrameGraph 保持 soft acquire，UI target 不能新增
   超预算 storage。UI Layer backing 改为懒申请，压力下撤销 LRU backing、保持逻辑 handle 并同帧降级。
 - FrameGraph 的 owned target 从直接创建/销毁迁移为 pool lease，standalone 测试仍可使用内部 owned pool。
-- UIRenderBackend 完成 RenderTarget 和 Layer 全生命周期、纹理/blit、透明/color/preserve clear、
-  offscreen view 26–249、主 view 255、target transition batch barrier 与状态恢复。
+- UIRenderBackend 完成 RenderTarget 和 Layer 全生命周期、纹理/blit、透明/color/preserve clear；
+  当前 offscreen view 为 26–243，主 view 255，并保持 target transition batch barrier 与状态恢复。
 - AYUI root 主树可 opt-in retained pixel layer；clean frame 单 composite，overlay/drag visual 即时叠加，
   显式 dirty rect 局部清除/replay，无范围 dirty、resize/device reset 全量重绘，能力或 paint 失败同帧回退。
 - AYUI damage 扩展为最多 8 region 与 70% full 阈值，并支持 Always/Auto subtree Layer；backend 暴露
