@@ -33,6 +33,10 @@ target_compile_definitions(${TEST_NAME} PRIVATE
 )
 
 ay_add_test(${TEST_NAME})
+# This aggregate suite initializes renderer backends and compiles shaders while
+# exercising thousands of checks.  Running it beside other heavyweight suites
+# makes failures depend on host scheduling rather than renderer behavior.
+set_tests_properties(${TEST_NAME} PROPERTIES RUN_SERIAL TRUE)
 ay_add_test(${TEST_NAME}
     NAME AYRenderer_2DMatrixBaseline
     SUITE BgfxMatrixTests
