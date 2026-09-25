@@ -872,11 +872,16 @@ void BGFXAdapter::setStateOpaque()
 
 void BGFXAdapter::setStateAlphaBlend(bool lineList)
 {
+    setStateAlphaBlend(lineList, false);
+}
+
+void BGFXAdapter::setStateAlphaBlend(bool lineList, bool doubleSided)
+{
     uint64_t state = BGFX_STATE_WRITE_RGB
                    | BGFX_STATE_WRITE_A
                    | BGFX_STATE_BLEND_ALPHA
-                   | BGFX_STATE_DEPTH_TEST_LESS
-                   | kCullBackFaces;
+                   | BGFX_STATE_DEPTH_TEST_LESS;
+    if (!doubleSided) state |= kCullBackFaces;
     if (lineList) state |= BGFX_STATE_PT_LINES;
     bgfx::setState(state);
 }

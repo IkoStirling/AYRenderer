@@ -238,6 +238,7 @@ public:
     //                                source-order tie-breaking.
     void setStateOpaque();
     void setStateAlphaBlend(bool lineList = false);
+    void setStateAlphaBlend(bool lineList, bool doubleSided);
     void setStateDepthTestAlways();
     void setStateDepthOnlyWrite();
     void setStateOpaqueLEQUAL(bool doubleSided, bool reverseWinding = false,

@@ -115,7 +115,10 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
         const bool wireframe = bindDrawIndexBuffer(
             adapter, mesh, drawRange, ctx.wireframe);
         // Blend-only: BGFX_STATE_BLEND_ALPHA, no WRITE_Z.
-        adapter.setStateAlphaBlend(wireframe);
+        // Camera-overlay sprites are planar artwork rather than closed 3D
+        // surfaces.  Draw both sides so their visibility does not depend on
+        // the engine's 3D front-face winding or on a reflected 2D transform.
+        adapter.setStateAlphaBlend(wireframe, /*doubleSided=*/true);
 
         // Bind albedo textures (flushMaterial loop shape; shadowMap
         // slots skipped — 2D has no shadow path).
