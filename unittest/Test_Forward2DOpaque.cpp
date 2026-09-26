@@ -46,6 +46,7 @@
 using ayt::render::Backend;
 using ayt::render::DrawItem;
 using ayt::render::DrawPayload2D;
+using ayt::render::kSpriteRetroAaPhoskiaSource;
 using ayt::render::kTilemapPhoskiaSource;
 using ayt::render::RenderPassSlot;
 using ayt::render::RenderPath;
@@ -398,6 +399,33 @@ TEST_CASE(cm1_payload_item_drawn_exactly_once) {
     renderer.destroyTexture(tex);
     renderer.destroyMesh(quad);
     renderer.destroyMaterial(material);
+    renderer.shutdown();
+}
+
+TEST_CASE(sprite_retro_aa_shader_has_stable_texel_contract_and_compiles) {
+    const std::string source(kSpriteRetroAaPhoskiaSource);
+    CHECK(source.find("uniform vec4 albedoTexel") != std::string::npos);
+    CHECK(source.find("fwidth(pixel)") != std::string::npos);
+    CHECK(source.find("floor(pixel.x + 0.5)") != std::string::npos);
+
+    if (!shadercAvailable()) {
+        std::cerr << "[Renderer test] SKIP: shaderc not available.\n";
+        return;
+    }
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend = ayt::render::Backend::Noop;
+    desc.width   = 800;
+    desc.height  = 600;
+    CHECK(renderer.initialize(desc));
+
+    ayt::render::MaterialHandle material =
+        renderer.createMaterialFromPhoskia(
+            kSpriteRetroAaPhoskiaSource, "sprite_retro_aa_compile");
+    CHECK(material.isValid());
+    if (material.isValid()) {
+        renderer.destroyMaterial(material);
+    }
     renderer.shutdown();
 }
 

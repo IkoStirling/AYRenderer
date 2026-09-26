@@ -142,6 +142,21 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
             const uint8_t stage = material.shader.getTextureStage(binding);
             material.shader.setTexture(stage, binding,
                                        toShaderTexture(texIt->second.handle));
+            if (slot.name == "albedoMap") {
+                const shader::BindingId texelBinding =
+                    material.shader.getUniformBinding("albedoTexel");
+                if (texelBinding != shader::InvalidBinding
+                    && texIt->second.width > 0 && texIt->second.height > 0) {
+                    const float texel[4] = {
+                        1.0f / static_cast<float>(texIt->second.width),
+                        1.0f / static_cast<float>(texIt->second.height),
+                        0.0f,
+                        0.0f,
+                    };
+                    material.shader.setUniform(texelBinding, texel,
+                                               sizeof(texel));
+                }
+            }
         }
 
         upload2DDrawUniforms(material.shader, *item.payload);

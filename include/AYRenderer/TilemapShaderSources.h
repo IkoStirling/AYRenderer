@@ -47,6 +47,51 @@ material Tilemap2D {
 }
 )";
 
+// Sprite-only opt-in filter for pixel artwork presented at a non-integer
+// screen scale. It reconstructs a stable texel footprint from screen-space
+// derivatives before the normal bilinear sample. This keeps moving camera
+// edges from alternating between different texel blends while preserving
+// smooth subpixel motion. `albedoTexel.xy` is the inverse source texture size
+// uploaded by Forward2DOpaquePass.
+inline constexpr const char* kSpriteRetroAaPhoskiaSource = R"(
+material SpriteRetroAA {
+    texture2d albedoMap
+    uniform vec4 albedoTexel
+    property srcRect = vec4(0.0, 0.0, 1.0, 1.0)
+    property tint    = vec4(1.0, 1.0, 1.0, 1.0)
+    property flip    = vec4(0.0, 0.0, 0.0, 0.0)
+
+    vertex {
+        in pos : position
+        in uv  : texcoord
+        out uvOut : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
+    }
+    fragment {
+        in uvOut : texcoord
+        let v = 1.0 - uvOut.y
+        let u = mix(uvOut.x, 1.0 - uvOut.x, flip.x)
+        let vv = mix(v, 1.0 - v, flip.y)
+        let uvInRect = vec2(mix(srcRect.x, srcRect.z, u), mix(srcRect.y, srcRect.w, vv))
+        let pixel = vec2(uvInRect.x / albedoTexel.x, uvInRect.y / albedoTexel.y)
+        let center = vec2(floor(pixel.x + 0.5), floor(pixel.y + 0.5))
+        let footprint = fwidth(pixel)
+        let offset = vec2(clamp((pixel.x - center.x) / max(footprint.x, 0.0001), -0.5, 0.5),
+                          clamp((pixel.y - center.y) / max(footprint.y, 0.0001), -0.5, 0.5))
+        let stableUv = vec2((center.x + offset.x) * albedoTexel.x,
+                            (center.y + offset.y) * albedoTexel.y)
+        let minUv = vec2(srcRect.x + albedoTexel.x * 0.5,
+                         srcRect.y + albedoTexel.y * 0.5)
+        let maxUv = vec2(srcRect.z - albedoTexel.x * 0.5,
+                         srcRect.w - albedoTexel.y * 0.5)
+        let clampedUv = vec2(clamp(stableUv.x, minUv.x, maxUv.x),
+                             clamp(stableUv.y, minUv.y, maxUv.y))
+        let albedo = sample(albedoMap, clampedUv) * tint
+        return vec4(albedo.rgb, albedo.a)
+    }
+}
+)";
+
 // Chunk-mesh variants sample baked atlas UVs directly. `atlasTexel.xy` is the
 // inverse atlas size uploaded per draw. The 4/9-tap variants are opt-in quality
 // filters for scaled/rotated presentation; Linear is the normal default.
