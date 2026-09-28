@@ -1,0 +1,139 @@
+# Explicit source ownership. New tests must be assigned exactly once.
+set(AYRENDERER_TEST_GROUPS Contracts SceneMaterial Geometry LightingShadow PostProcess FrameGraph UI Shader Audit Gpu)
+
+set(AYRENDERER_TEST_Contracts_SOURCES
+    Test_BgfxMatrix.cpp
+    Test_FgResource_F1.cpp
+    Test_FrameDrawLists_R6.cpp
+    Test_FrameGraph_R6.cpp
+    Test_GBufferContractHardening.cpp
+    Test_GBufferMaterialContract.cpp
+    Test_PostProcessGraphPlan_R6.cpp
+    Test_PublicHeaderSurface.cpp
+    Test_RenderPassContracts_R6.cpp
+    Test_RenderPassLifecycleHardening.cpp
+    Test_RenderPipelineTypedLookup_R6.cpp
+    Test_RenderResourceBlackboard_R6.cpp
+    Test_SceneBuilderOwnership.cpp
+    Test_SceneVisibility.cpp
+    Test_ShadowDepthCodec.cpp
+    Test_ShadowMatrixBuilder.cpp
+    Test_ShadowReceiverContract.cpp
+    Test_VertexLayout.cpp
+    Test_WireframeGeometry.cpp)
+
+set(AYRENDERER_TEST_SceneMaterial_SOURCES
+    Test_CaptureScreenshot.cpp
+    Test_DebugOverlay.cpp
+    Test_EditorOverlay.cpp
+    Test_RenderAssetBridge.cpp
+    Test_RendererEventBridge.cpp
+    Test_RenderResources.cpp
+    Test_RenderTargetPool.cpp
+    Test_SceneRT_P2.cpp
+    Test_SkinWeightUpload.cpp
+    Test_TilemapSamplingVariants.cpp
+    Test_WorldLit2D.cpp)
+
+set(AYRENDERER_TEST_Geometry_SOURCES
+    Test_B2_GBufferPass.cpp
+    Test_B4_GBufferMRT.cpp
+    Test_B4_GBufferRealDraw.cpp
+    Test_B4c_MotionVector.cpp
+    Test_FO_Trans_NoopGate.cpp
+    Test_Forward2DOpaque.cpp
+    Test_ForwardOpaque_BlendSkip_P0_4.cpp
+    Test_ForwardOpaque.cpp
+    Test_GBufferDebug_V1.cpp
+    Test_MotionVector.cpp
+    Test_TransparentAuditRound2.cpp
+    Test_TransparentPass_U1.cpp
+    Test_TransparentPass_U1Plus5.cpp)
+
+set(AYRENDERER_TEST_LightingShadow_SOURCES
+    Test_B3_LightingForwardDeferred.cpp
+    Test_B5_LightingDirectional.cpp
+    Test_B5p5_LightingShadow.cpp
+    Test_B7_MultiLightAccumulation.cpp
+    Test_E4_DefaultShadow.cpp
+    Test_E5_DefaultShadow.cpp
+    Test_F1_LayoutDiag.cpp
+    Test_F2_ForwardShadow.cpp
+    Test_F3_SkinnedCaster.cpp
+    Test_IblV2.cpp
+    Test_LightingAuditRound2.cpp
+    Test_LightingCamera.cpp
+    Test_P4_ShadowBias.cpp
+    Test_ShadowCaster.cpp
+    Test_ShadowDiagnostics.cpp
+    Test_ShadowMapResources.cpp
+    Test_ShadowPass.cpp
+    Test_Skybox0.cpp)
+
+set(AYRENDERER_TEST_PostProcess_SOURCES
+    Test_B6_PostProcessSourceFbo.cpp
+    Test_BloomBlur_F3.cpp
+    Test_BloomBlur_S1b.cpp
+    Test_BloomExtract_F2.cpp
+    Test_BloomExtract_S1a.cpp
+    Test_ColorGrading.cpp
+    Test_DepthHaze_F4.cpp
+    Test_DepthHaze_S4a.cpp
+    Test_DepthHaze_S4b.cpp
+    Test_DepthHaze_S4c.cpp
+    Test_FinalPP_S1c.cpp
+    Test_FXAA.cpp
+    Test_PostProcess_F5.cpp
+    Test_PostProcess_R51.cpp
+    Test_PostProcess_R5Plus.cpp
+    Test_PostProcessPass.cpp
+    Test_PresentPass.cpp
+    Test_SMAA.cpp
+    Test_SSAO_A1.cpp
+    Test_SSAO_A2.cpp
+    Test_SSAO_A3_Integration.cpp
+    Test_SSAO_A3.cpp
+    Test_SSAO_Forward_Omitted.cpp
+    Test_TAA.cpp)
+
+set(AYRENDERER_TEST_FrameGraph_SOURCES
+    Test_B1_RenderPath.cpp
+    Test_FrameContext_E1_TailPOD.cpp
+    Test_FrameGraph_F6.cpp
+    Test_PassExecContext_P1.cpp
+    Test_RenderPass_Helper_U1PlusPlus.cpp
+    Test_RenderPipelineConfig.cpp)
+
+set(AYRENDERER_TEST_UI_SOURCES
+    Test_BgfxFontAtlas.cpp
+    Test_UIBatchBaseline.cpp
+    Test_UIDpiScale.cpp
+    Test_UIFontFamily.cpp
+    Test_UIGradientBlend.cpp
+    Test_UILayerRenderTarget.cpp
+    Test_UIPass_AI1.cpp
+    Test_UIPass_U1Plus.cpp
+    Test_UISdfCard.cpp
+    Test_UISdfShader.cpp
+    Test_UISdfSoftClip.cpp
+    Test_UITextStyle.cpp
+    Test_UITextureClipRemap.cpp
+    Test_UITextureRegistry.cpp
+    Test_UIUnifiedBatch.cpp
+    Test_UIVectorPath.cpp)
+
+set(AYRENDERER_TEST_Shader_SOURCES
+    Test_PbrShader.cpp
+    Test_ShadowConfig.cpp
+    Test_ShadowPhoskiaEmit.cpp)
+
+set(AYRENDERER_TEST_Audit_SOURCES
+    Test_AuditFollowupFixes.cpp
+    Test_AuditP1Invariants.cpp
+    Test_AuditP2Invariants.cpp
+    Test_AuditP3Invariants.cpp
+    Test_AuditP4Invariants.cpp
+    Test_AuditP5Invariants.cpp)
+
+set(AYRENDERER_TEST_Gpu_SOURCES
+    Test_TAAGpu.cpp)

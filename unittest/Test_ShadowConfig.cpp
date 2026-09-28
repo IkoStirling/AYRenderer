@@ -1,4 +1,5 @@
 #include "AYRenderer/ShadowConfig.h"
+#include "AYRenderer.h"
 
 #include "AYTest.h"
 #include "AYShader/ShaderResourcePool.h"
@@ -74,6 +75,14 @@ TEST_CASE(simple_lit_shadow_phoskia_mirrors_verified_sc)
 
 TEST_CASE(simple_lit_shadow_phoskia_frontend_compiles)
 {
+    // acquire() also creates bgfx objects. Own the Noop lifetime explicitly;
+    // independent groups cannot inherit another suite's backend initialization.
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc rendererOptions;
+    rendererOptions.backend = ayt::render::Backend::Noop;
+    const bool initialized = renderer.initialize(rendererOptions);
+    CHECK(initialized);
+    if (!initialized) return;
     // Frontend + converter smoke (Noop profile). Does not switch Editor
     // off sc-isolation; only proves the reverse-translated source parses.
     ayt::shader::ShaderResourcePool pool;
