@@ -49,7 +49,7 @@ foreach(group IN LISTS AYRENDERER_TEST_GROUPS)
         set(policy RESOURCE_LOCK renderer-backend-fixtures)
         list(APPEND AYRENDERER_INTEGRATION_TARGETS ${binary})
     endif()
-    ay_add_test(${binary} LABELS
+    ay_add_test(${binary} CASE_REPORT LABELS
         "renderer;renderer-full;renderer-${tier};${tier};renderer-${group_label}"
         TIMEOUT ${timeout} ${policy})
     list(APPEND AYRENDERER_TEST_OBJECTS ${objects})
