@@ -314,3 +314,5 @@ AYRenderer/
 | AYSerializer | `README.md` §变更记录 | 默认 `SerializerFor` → `SerializerForReflect` |
 
 **里程碑**：R0–R4 + Engine 闭环已完成；R5+ 延后，可启动 AYUI。
+
+测试按 fast/integration/gpu 分层，未启用真实设备时 GPU 用例明确跳过；见[统一测试契约](../../AYDocs/testing.md)。

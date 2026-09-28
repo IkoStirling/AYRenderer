@@ -32,11 +32,12 @@ target_compile_definitions(${TEST_NAME} PRIVATE
     AY_RENDERER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
 
-ay_add_test(${TEST_NAME})
-# This aggregate suite initializes renderer backends and compiles shaders while
-# exercising thousands of checks.  Running it beside other heavyweight suites
-# makes failures depend on host scheduling rather than renderer behavior.
-set_tests_properties(${TEST_NAME} PROPERTIES RUN_SERIAL TRUE)
+ay_add_test_tiers(${TEST_NAME} PREFIX renderer DEFAULT_TIER integration TIMEOUT 240 RUN_SERIAL
+    FAST_SUITES BgfxMatrixTests VertexLayoutTests RendererPublicHeaderTests
+        RendererSceneBuilderOwnershipTests RendererSceneVisibilityTests
+        ShadowMatrixBuilder AYShadowDepthCodec ShadowReceiverContract
+    GPU_SUITES AYRenderer_SkyOutputGpu AYRenderer_TAAGpu AYRenderer_TAASupportGpu
+        AYRenderer_MotionVectorGpu AYRenderer_TAAResidentGpu AYRenderer_TAARejectionGpu AYRenderer_TAAEdgeGpu)
 ay_add_test(${TEST_NAME}
     NAME AYRenderer_2DMatrixBaseline
     SUITE BgfxMatrixTests

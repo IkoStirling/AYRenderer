@@ -218,7 +218,7 @@ TEST_CASE(sky_output_is_current_frame_only_and_lighting_falls_back_to_black)
 {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");
-    if (!backend) return; // Opt-in isolated real-device suite, like TAA below.
+    if (!backend || !backend[0]) SKIP_TEST("Requires AY_TAA_GPU_TEST=d3d11/d3d12; no real-device validation performed");
     TaaGpuFixture fixture;
     const bool ready = fixture.initialize(backend, true);
     CHECK(ready);
@@ -277,6 +277,8 @@ TEST_CASE(sky_output_is_current_frame_only_and_lighting_falls_back_to_black)
     gbuffer.destroyResources(fixture.adapter);
     sky.destroyResources(fixture.adapter);
     CHECK(!sky.producedThisFrame());
+#else
+    SKIP_TEST("Real GPU regression currently requires the Windows D3D test harness");
 #endif
 }
 
@@ -288,10 +290,7 @@ TEST_CASE(taa_production_shader_fixed_grid_depth_and_missing_velocity)
 {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");
-    if (!backend) {
-        std::cout << "[SKIP] Set AY_TAA_GPU_TEST=d3d11/d3d12 and run isolated AYRenderer_TAAGpu.\n";
-        return;
-    }
+    if (!backend || !backend[0]) SKIP_TEST("Requires AY_TAA_GPU_TEST=d3d11/d3d12; no real-device validation performed");
     TaaGpuFixture fixture;
     const bool ready = fixture.initialize(backend);
     CHECK(ready);
@@ -320,7 +319,7 @@ TEST_CASE(taa_production_shader_fixed_grid_depth_and_missing_velocity)
     const auto outside = fixture.resolve({0.25f, -0.25f}, 0.8f, true, false, 0.002f, -2.0f, true, 64.0f);
     CHECK(std::abs(outside[y * kSize + x][0] - expected) < 0.0001f);
 #else
-    std::cout << "[SKIP] Windows D3D GPU regression.\n";
+    SKIP_TEST("Real GPU regression currently requires the Windows D3D test harness");
 #endif
 }
 
@@ -332,7 +331,7 @@ TEST_CASE(taa_valid_history_support_controls_feedback_continuously)
 {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");
-    if(!backend) { std::cout << "[SKIP] Set AY_TAA_GPU_TEST for support regression.\n"; return; }
+    if (!backend || !backend[0]) SKIP_TEST("Requires AY_TAA_GPU_TEST=d3d11/d3d12; no real-device validation performed");
     // RGBA32F isolates tiny fractional coordinates; production RGBA16F also
     // verifies quantized motion/history without expecting sub-ULP precision.
     for(bool half:{false,true}) {
@@ -375,6 +374,8 @@ TEST_CASE(taa_valid_history_support_controls_feedback_continuously)
         const auto disoccluded=f.dispatch({},current,history,world,surface,velocity,true,2);
         CHECK(disoccluded[center][0]==0);
     }
+#else
+    SKIP_TEST("Real GPU regression currently requires the Windows D3D test harness");
 #endif
 }
 
@@ -386,7 +387,7 @@ TEST_CASE(motion_rasterized_geometry_removes_jitter_without_removing_real_motion
 {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");
-    if (!backend) { std::cout << "[SKIP] Isolated GPU suite requires AY_TAA_GPU_TEST.\n"; return; }
+    if (!backend || !backend[0]) SKIP_TEST("Requires AY_TAA_GPU_TEST=d3d11/d3d12; no real-device validation performed");
     TaaGpuFixture fixture;
     const bool ready = fixture.initialize(backend);
     CHECK(ready);
@@ -484,6 +485,8 @@ TEST_CASE(motion_rasterized_geometry_removes_jitter_without_removing_real_motion
                   << " movingErrorPixels=" << worstMoving << '\n';
     }
     bgfx::destroy(vb);
+#else
+    SKIP_TEST("Real GPU regression currently requires the Windows D3D test harness");
 #endif
 }
 
@@ -495,7 +498,7 @@ TEST_CASE(taa_gpu_resident_ping_pong_uses_immediately_previous_frame)
 {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");
-    if(!backend) { std::cout << "[SKIP] Isolated resident-history GPU suite requires AY_TAA_GPU_TEST.\n"; return; }
+    if (!backend || !backend[0]) SKIP_TEST("Requires AY_TAA_GPU_TEST=d3d11/d3d12; no real-device validation performed");
     TaaGpuFixture fixture;
     const bool ready=fixture.initialize(backend,true);
     CHECK(ready);
@@ -556,6 +559,8 @@ TEST_CASE(taa_gpu_resident_ping_pong_uses_immediately_previous_frame)
     }
     std::cout << "[TAA resident] frames=" << frames << " maxRecurrenceError=" << worstError << '\n';
     fixture.adapter.destroy(second);
+#else
+    SKIP_TEST("Real GPU regression currently requires the Windows D3D test harness");
 #endif
 }
 
@@ -569,7 +574,7 @@ TEST_CASE(taa_rejection_probe_with_real_gbuffer_depth_replay)
 {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");
-    if(!backend) { std::cout << "[SKIP] Set AY_TAA_GPU_TEST for rejection probe.\n"; return; }
+    if (!backend || !backend[0]) SKIP_TEST("Requires AY_TAA_GPU_TEST=d3d11/d3d12; no real-device validation performed");
     const char* sizeSetting=std::getenv("AY_TAA_PROBE_SIZE");
     const uint16_t kSize=uint16_t(sizeSetting?std::clamp(std::atoi(sizeSetting),32,256):127);
     TaaGpuFixture f;
@@ -818,6 +823,8 @@ material ProbeCopy {
     f.program=resolve;
     bgfx::destroy(vb); bgfx::destroy(motionFbo); bgfx::destroy(motionTex);
     bgfx::destroy(colorFbo); bgfx::destroy(gbuffer);
+#else
+    SKIP_TEST("Real GPU regression currently requires the Windows D3D test harness");
 #endif
 }
 
@@ -829,7 +836,7 @@ TEST_CASE(taa_static_sloped_surface_retains_history_without_accepting_disocclusi
 {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");
-    if(!backend) { std::cout << "[SKIP] GPU slope diagnostic requires AY_TAA_GPU_TEST.\n"; return; }
+    if (!backend || !backend[0]) SKIP_TEST("Requires AY_TAA_GPU_TEST=d3d11/d3d12; no real-device validation performed");
     TaaGpuFixture fixture;
     const bool ready=fixture.initialize(backend,true);
     CHECK(ready);
@@ -905,6 +912,8 @@ TEST_CASE(taa_static_sloped_surface_retains_history_without_accepting_disocclusi
     fixture.submitResolve({}, {white,white,incorrectWorld,white,motion,depth},false,0,fixture.target);
     const auto raster=fixture.readTarget();
     CHECK(std::abs(raster[16*kSize+16][3]-.5f)<.001f);
+#else
+    SKIP_TEST("Real GPU regression currently requires the Windows D3D test harness");
 #endif
 }
 
@@ -912,7 +921,7 @@ TEST_CASE(taa_recursive_hard_edges_converge_without_surface_class_flicker)
 {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");
-    if (!backend) { std::cout << "[SKIP] Isolated AYRenderer_TAAEdgeGpu requires AY_TAA_GPU_TEST.\n"; return; }
+    if (!backend || !backend[0]) SKIP_TEST("Requires AY_TAA_GPU_TEST=d3d11/d3d12; no real-device validation performed");
     TaaGpuFixture fixture;
     const bool ready = fixture.initialize(backend, true);
     CHECK(ready);
@@ -1019,6 +1028,8 @@ TEST_CASE(taa_recursive_hard_edges_converge_without_surface_class_flicker)
     CHECK(clipping[moving][0] > .99f);
     const auto changed=fixture.dispatch({},current,history,world,surface,velocity,true);
     CHECK(changed[moving][1] > .998f);
+#else
+    SKIP_TEST("Real GPU regression currently requires the Windows D3D test harness");
 #endif
 }
 
