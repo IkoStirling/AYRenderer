@@ -12,6 +12,7 @@
 #include "AYResource/assetsDefs/IMaterial.h"
 #include "AYResource/assetsDefs/IMesh.h"
 #include "AYResource/assetsDefs/ITexture.h"
+#include <AYAssetFormat/AssetFormat.h>
 
 #include <AYIO/File.h>
 
@@ -1120,13 +1121,14 @@ bool RenderResourceManager::onResourceFileChanged(const std::string& path)
     const auto dot = key.find_last_of('.');
     const std::string ext = (dot == std::string::npos) ? std::string{} : key.substr(dot);
 
-    if (ext == ".aymesh") {
+    if (ayt::asset_format::matchesPath(path, ayt::asset_format::Id::Mesh)) {
         return reloadMeshFromPath(path);
     }
-    if (ext == ".aymat") {
+    if (ayt::asset_format::matchesPath(path, ayt::asset_format::Id::Material)) {
         return reloadMaterialFromPath(path);
     }
-    if (ext == ".aytex" || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga"
+    if (ayt::asset_format::matchesPath(path, ayt::asset_format::Id::Texture)
+        || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga"
         || ext == ".bmp" || ext == ".hdr") {
         return reloadTextureFromPath(path);
     }

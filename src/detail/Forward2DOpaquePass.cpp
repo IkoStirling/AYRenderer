@@ -33,7 +33,7 @@ std::vector<const DrawItem*> collectSortedOverlay2DItems(
 uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
 {
     BGFXAdapter& adapter = ctx.adapter;
-    const uint8_t viewId = kOverlayViewId;
+    const uint8_t viewId = _view;
     const auto& meshes   = ctx.meshes;
     const auto& textures = ctx.textures;
     auto& materials      = ctx.materials;
@@ -84,6 +84,11 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
 
     for (const DrawItem* itemPtr : sortedItems) {
         const DrawItem& item = *itemPtr;
+        if(item.particleBatch && item.particleBatch->submitGpu && item.particleBatch->gpuStream) {
+            item.particleBatch->submitGpu(item.particleBatch->gpuStream,viewId);
+            ++drawCount;
+            continue;
+        }
         if (!item.mesh.isValid() || !item.material.isValid()) {
             continue;
         }
@@ -111,14 +116,23 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
         }
 
         adapter.setTransform(item.world);
-        adapter.setVertexBuffer(mesh.vertexBuffer);
-        const bool wireframe = bindDrawIndexBuffer(
+        if (item.particleBatch) {
+            if (!adapter.bindParticleBatch(*item.particleBatch)) continue;
+        } else adapter.setVertexBuffer(mesh.vertexBuffer);
+        const bool wireframe = item.particleBatch ? false : bindDrawIndexBuffer(
             adapter, mesh, drawRange, ctx.wireframe);
         // Blend-only: BGFX_STATE_BLEND_ALPHA, no WRITE_Z.
         // Camera-overlay sprites are planar artwork rather than closed 3D
         // surfaces.  Draw both sides so their visibility does not depend on
         // the engine's 3D front-face winding or on a reflected 2D transform.
-        adapter.setStateAlphaBlend(wireframe, /*doubleSided=*/true);
+        if (item.particleBatch) {
+            adapter.setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
+                | (material.blendMode == BlendMode::Additive
+                    ? BGFX_STATE_BLEND_FUNC_SEPARATE(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_ONE,
+                        BGFX_STATE_BLEND_ZERO, BGFX_STATE_BLEND_ONE)
+                    : BGFX_STATE_BLEND_FUNC_SEPARATE(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
+                        BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA)));
+        } else adapter.setStateAlphaBlend(wireframe, /*doubleSided=*/true);
 
         // Bind albedo textures (flushMaterial loop shape; shadowMap
         // slots skipped — 2D has no shadow path).

@@ -6,6 +6,7 @@
 #include "AYMath/MathTypes.h"
 
 #include <cstddef>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
@@ -845,6 +846,28 @@ void BGFXAdapter::destroy(bgfx::FrameBufferHandle h)
 // The wrappers also let us add per-Pass guardrails in future (logging,
 // perf counters, leak detection) without touching every Pass.
 
+bool BGFXAdapter::bindParticleBatch(const ParticleDrawData& batch)
+{
+    if (!_initialized || batch.vertices.empty() || batch.indices.empty()
+        || batch.vertices.size() > 65532 || batch.indices.size() > 98298) return false;
+    for (uint16_t index : batch.indices) if (index >= batch.vertices.size()) return false;
+    bgfx::VertexLayout layout;
+    layout.begin().add(bgfx::Attrib::Position,3,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::TexCoord0,2,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Color0,4,bgfx::AttribType::Float).end();
+    const auto nv=static_cast<uint32_t>(batch.vertices.size());
+    const auto ni=static_cast<uint32_t>(batch.indices.size());
+    if (layout.getStride()!=sizeof(ParticleVertex)
+        || bgfx::getAvailTransientVertexBuffer(nv,layout)<nv
+        || bgfx::getAvailTransientIndexBuffer(ni)<ni) return false;
+    bgfx::TransientVertexBuffer vb; bgfx::TransientIndexBuffer ib;
+    bgfx::allocTransientVertexBuffer(&vb,nv,layout);
+    bgfx::allocTransientIndexBuffer(&ib,ni);
+    std::memcpy(vb.data,batch.vertices.data(),nv*sizeof(ParticleVertex));
+    std::memcpy(ib.data,batch.indices.data(),ni*sizeof(uint16_t));
+    bgfx::setVertexBuffer(0,&vb); bgfx::setIndexBuffer(&ib);
+    return true;
+}
 void BGFXAdapter::setState(uint64_t state)
 {
     bgfx::setState(state);

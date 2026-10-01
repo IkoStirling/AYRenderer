@@ -787,7 +787,7 @@ backend 选择最久未 composite、且当前未 paint 的 Layer 撤销 backing�
 Widget 绘制路线，也不会把 dangling target token 暴露给 AYUI。
 逻辑 bounds 的 min/max 分别按 DPI 向外 `floor/ceil` 到物理像素，二者之差决定物理尺寸；完整
 backing composite 后裁回 logical bounds。这个约束使小数 origin/extent 的离屏像素中心仍与主
-framebuffer 对齐，不能退回只对 logical width/height 做 `ceil`。offscreen paint 当前使用 view 26–243
+framebuffer 对齐，不能退回只对 logical width/height 做 `ceil`。offscreen paint 当前使用 view 32–242
 （244/245 留给 Selection/TAA diagnostics，250 留给 GBufferDebug），主
 composite 使用 view 255。
 target 切换是 batch barrier：进入离屏前 flush，保存 canvas/clip/path-clip/opacity/blend 状态；结束
@@ -1256,7 +1256,7 @@ include/AYRenderer/
 ### 2026-08-30 — FXAA LDR Pass
 
 - 新增 append-only `RenderPassSlot::FXAA=16`、`FgResourceId::FxaaColor=7` 与 `FXAAPass`。默认、Deferred 和两条 Editor 管线固定为 PostProcess → FXAA → Present；旧 custom descriptor 不会被强制加入 FXAA，但显式包含 FXAA 且缺少 Present 时会把 Present 补在 FXAA 后。
-- FXAA 使用稳定 view 17，`RenderViewOrder` 显式将它排在 PostProcess view 15 与 Present view 16 之间，并与 Shadow atlas 18–25、当前 UI Layer 26–243、Selection/TAA diagnostics 244/245、GBufferDebug 250、Editor 251–254 隔离。
+- FXAA 使用稳定 view 17，`RenderViewOrder` 显式将它排在 PostProcess view 15 与 Present view 16 之间，并与 Shadow atlas 18–25、当前 UI Layer 32–242、Selection/TAA diagnostics 244/245、GBufferDebug 250、Editor 251–254 隔离。
 - 输入是 display-referred RGBA8 FinalLdrColor；本节记录的初版 shader 使用 FXAA 3.11 风格 luma 方向滤波，已由 2026-09-01 的 Quality 修复取代。输入格式、UV clamp 与按 viewport 上传 inverse texel size 的契约继续保留。
 - `PresentSource` 每帧先回退到 FinalLdrColor。FXAA 只有在 geometry/program/binding/FBO/attachment 全部有效并成功 submit 后才标记 FxaaColor 和提升 semantic；任何失败都由 Present 显示原 FinalLdrColor。
 - 新增 `Renderer::setFxaaEnabled/fxaaEnabled`，默认开启且跨 pipeline rebuild 保持。关闭时 FrameGraph 不声明 FxaaColor，不分配目标，也不执行 FXAA draw。
@@ -1267,7 +1267,7 @@ include/AYRenderer/
 - PostProcess 从“最终 backbuffer blit”改为 FrameGraph `FinalLdrColor` 生产者：view 15 在 viewport-local RGBA8 目标完成 bloom、exposure、tone-map 与 gamma，并仅在真实 submit 后发布 current-frame production latch。
 - 新增 append-only `RenderPassSlot::Present=15`、`FgResourceId::FinalLdrColor=6` 与 `FgSemantic::PresentSource=4`。旧 custom descriptor 若含 PostProcess 但没有 Present，会在配置时补入兼容边界。
 - PresentPass 使用 view 16，只负责把本帧有效的 PresentSource 拷贝到默认 backbuffer 的 Game View rect。PostProcess 与 Present 共用 `FullscreenPassGeometry` 实现，资源仍由各 Pass 独立拥有和销毁。
-- 默认/Deferred/Editor 管线均固定为 PostProcess → FXAA → Present；EditorOverlay 位于 Present 后、UI 前，view 251 负责方向轴，view 252 后续启用为 Transform Gizmo。选中轮廓在 Transparent 阶段使用 view 244/253/254：244 以未 jitter 投影写稳定 Alpha silhouette，253 以 jitter 投影和场景深度写 RGB visibility，254 在 Present 后按各自栅格取样并重建固定两像素外边界，避免选中框进入 TAA history 或随 jitter 覆盖率抖动。显式 view order 同时避开 FXAA 17、Shadow 18–25、UI Layer 26–243、TAA diagnostics 245 与 GBufferDebug 250。
+- 默认/Deferred/Editor 管线均固定为 PostProcess → FXAA → Present；EditorOverlay 位于 Present 后、UI 前，view 251 负责方向轴，view 252 后续启用为 Transform Gizmo。选中轮廓在 Transparent 阶段使用 view 244/253/254：244 以未 jitter 投影写稳定 Alpha silhouette，253 以 jitter 投影和场景深度写 RGB visibility，254 在 Present 后按各自栅格取样并重建固定两像素外边界，避免选中框进入 TAA history 或随 jitter 覆盖率抖动。显式 view order 同时避开 FXAA 17、Shadow 18–25、UI Layer 32–242、TAA diagnostics 245 与 GBufferDebug 250。
 - FrameGraph 新增通用 `markProduced/producedThisFrame` latch 与 semantic 级查询，`beginFrame` 与 shutdown 清零，防止复用物理 handle 时 Present 读取上一帧目标。测试覆盖 ABI、管线顺序、view 区间、Noop、latch reset 和生产 Present shader 编译。
 - MSVC Debug 定向重编后 `AYRenderer_Test` 为 3429/3429；`AYEditorShell_Demo` 完成重新链接。为规避历史 stale `.obj` 问题，本轮只清理了 `AYRenderer_Test` 对象目录，没有执行全引擎 clean。
 - 该边界为 FXAA、ColorGrading 等后 tone-map Pass 提供稳定插入点；TAA/MotionBlur/DOF 仍需先完成 motion/history/depth 契约，不在本刀混入。
@@ -1280,7 +1280,7 @@ include/AYRenderer/
   超预算 storage。UI Layer backing 改为懒申请，压力下撤销 LRU backing、保持逻辑 handle 并同帧降级。
 - FrameGraph 的 owned target 从直接创建/销毁迁移为 pool lease，standalone 测试仍可使用内部 owned pool。
 - UIRenderBackend 完成 RenderTarget 和 Layer 全生命周期、纹理/blit、透明/color/preserve clear；
-  当前 offscreen view 为 26–243，主 view 255，并保持 target transition batch barrier 与状态恢复。
+  当前 offscreen view 为 32–242，主 view 255，并保持 target transition batch barrier 与状态恢复。
 - AYUI root 主树可 opt-in retained pixel layer；clean frame 单 composite，overlay/drag visual 即时叠加，
   显式 dirty rect 局部清除/replay，无范围 dirty、resize/device reset 全量重绘，能力或 paint 失败同帧回退。
 - AYUI damage 扩展为最多 8 region 与 70% full 阈值，并支持 Always/Auto subtree Layer；backend 暴露

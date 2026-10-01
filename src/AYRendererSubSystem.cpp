@@ -416,6 +416,8 @@ bool RendererSubSystem::initialize()
 void RendererSubSystem::update(float /*deltaTime*/)
 
 {
+    // Billboard extraction needs the camera for this presentation frame.
+    syncMainCamera();
     // Presentation builds the complete CPU render packet on the main thread.
     // The render callback only consumes this stable scene; GameLoop waits for
     // the previous consumer before the next packet is mutated.
@@ -656,6 +658,15 @@ bool RendererSubSystem::hasOverlayCamera2DOverride() const noexcept
     std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
     return g_overlayCameraOverrides.contains(
         const_cast<RendererSubSystem*>(this));
+}
+
+bool RendererSubSystem::overlayCamera2DOverride(OverlayCamera2D& output) const noexcept
+{
+    std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+    const auto found = g_overlayCameraOverrides.find(const_cast<RendererSubSystem*>(this));
+    if (found == g_overlayCameraOverrides.end()) return false;
+    output = {found->second.view, found->second.projection, found->second.layerMask, true};
+    return true;
 }
 
 void RendererSubSystem::setSceneVisibilityFilter(

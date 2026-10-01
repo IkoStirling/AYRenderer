@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYRenderer/RenderTypes.h"
+#include "AYRenderer/ParticleDraw.h"
 
 #include <bgfx/bgfx.h>
 
@@ -211,6 +212,7 @@ public:
     // `bgfx::` function names in Pass files" makes grep audits
     // trivial (one regex matches BGFXAdapter.cpp + .h and nothing
     // else under src/detail/*Pass*).
+    bool bindParticleBatch(const ParticleDrawData& batch);
     void setState(uint64_t state);
     void setTransformIdentity();
 

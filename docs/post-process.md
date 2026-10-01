@@ -184,7 +184,10 @@ PostProcess、TAA、FXAA、SMAA、ColorGrading 与 Present 共用 `FullscreenPas
 | 16 | Present → backbuffer |
 | 17 | FXAA → FxaaColor（显式排在 Present 之前） |
 | 18–25 | Shadow atlas slots |
-| 26–243 | UI offscreen layer/RenderTarget（每帧最多 218 次 retained repaint） |
+| 26–30 | Bloom pyramid additional stages |
+| 31 | Auto exposure adaptation |
+| 32–242 | UI offscreen layer/RenderTarget（每帧最多 211 次 retained repaint） |
+| 243 | GPU 粒子计算，显式排在 2D 合成 view 246 前 |
 | 244 | 未抖动的编辑器选择轮廓 silhouette mask |
 | 245 | TAA 诊断覆盖层 |
 | 246 | 相机覆层 2D 合成（独立正交相机，位于 3D Transparent 之后） |

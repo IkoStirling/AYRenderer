@@ -1092,6 +1092,7 @@ struct UIRenderBackend::FrameState {
     uint16_t activeHeight = 0;
     uint8_t activeViewId = kViewId;
     uint16_t nextOffscreenViewId = kFirstLayerViewId;
+    Renderer* renderer = nullptr;
     uint64_t frameIndex = 0;
     ayt::ui::IRenderBackend::LayerCacheStats layerStats{};
     float originX = 0.0f;
@@ -1161,6 +1162,7 @@ bool UIRenderBackend::initializeFromRenderer(Renderer& renderer, detail::BGFXAda
     _gpu        = std::make_unique<detail::UiGpuContext>();
     _adapter    = &adapter;
     _targetPool = renderer.renderTargetPool();
+    _frame->renderer = &renderer;
     _shaderPool = &shaderPool;
     if (!_gpu->initialize(shaderPool, adapter)) {
         shutdownFromRenderer(adapter, shaderPool);
@@ -1410,6 +1412,32 @@ void UIRenderBackend::releaseRenderTarget(RenderTargetHandle target)
     _frame->targetTextures.erase(it->second.textureToken);
     _frame->renderTargets.erase(it);
     if (_frame->boundTarget.id == target.id) bindRenderTarget({-1});
+}
+
+Renderer* UIRenderBackend::previewRenderer() noexcept {
+    return _initialized && _frame ? _frame->renderer : nullptr;
+}
+
+bool UIRenderBackend::renderScenePreview(RenderTargetHandle target,
+    const RenderScene& scene, const PreviewSceneCamera& camera, uint32_t clearRgba,
+    const std::function<void(uint16_t)>& beforeDraw)
+{
+    if (!_initialized || !_frame || !_frame->renderer || !_targetPool
+        || _frame->activeLayer.isValid() || _frame->boundTarget.isValid()
+        || _frame->nextOffscreenViewId + 3u > kLastLayerViewId
+        || !ensureRenderTarget(target.id)) return false;
+    const auto found = _frame->renderTargets.find(target.id);
+    if (found == _frame->renderTargets.end()) return false;
+    const auto fbo = _targetPool->framebuffer(found->second.pooled);
+    if (!detail::BGFXAdapter::isValid(fbo)) return false;
+    flushColoredRects();
+    const auto first = static_cast<uint8_t>(_frame->nextOffscreenViewId);
+    _frame->nextOffscreenViewId += 4;
+    if (beforeDraw) beforeDraw(first);
+    _frame->renderer->renderPreviewScene(scene, camera, fbo.idx,
+        static_cast<uint16_t>(found->second.desc.width),
+        static_cast<uint16_t>(found->second.desc.height), first, clearRgba);
+    return true;
 }
 
 void UIRenderBackend::bindRenderTarget(RenderTargetHandle target)

@@ -43,9 +43,13 @@ public:
     // Deferred MotionVector view 3.
     static constexpr uint8_t kOverlayViewId = 246;
 
+    explicit Forward2DOpaquePass(uint8_t view = kOverlayViewId) : _view(view) {}
+
     std::string_view name() const override { return "Forward2DOpaque"; }
 
     uint32_t execute(PassExecContext& ctx) override;
+private:
+    uint8_t _view;
 };
 
 } // namespace ayt::render::detail

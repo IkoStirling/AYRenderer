@@ -168,36 +168,37 @@ TEST_CASE(deferred_pipeline_matches_data_dependencies) {
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 43u);
+    CHECK(order.size() == 44u);
     CHECK(order[14] == 14u);  // SSAO
     CHECK(order[15] == 8u);   // Lighting
     CHECK(order[16] == 13u);  // DepthHaze
     CHECK(order[17] == 9u);   // Deferred Transparent
     CHECK(order[18] == 244u); // Stable selection silhouette
     CHECK(order[19] == 253u); // Selection visibility mask
-    CHECK(order[20] == 246u); // Camera-overlay 2D
-    CHECK(order[21] == 10u);  // BloomExtract
-    CHECK(order[22] == 11u);  // BloomBlurH
-    CHECK(order[23] == 26u);  // Bloom downsample quarter
-    CHECK(order[24] == 27u);  // Bloom downsample eighth
-    CHECK(order[25] == 28u);  // Bloom downsample sixteenth
-    CHECK(order[26] == 29u);  // Bloom upsample eighth
-    CHECK(order[27] == 30u);  // Bloom upsample quarter
-    CHECK(order[28] == 12u);  // Bloom final half-res resolve
-    CHECK(order[29] == 31u);  // Auto exposure
-    CHECK(order[30] == 15u);  // PostProcess
-    CHECK(order[31] == 5u);   // TAA
-    CHECK(order[32] == 17u);  // FXAA
-    CHECK(order[33] == 247u); // SMAA edge detection
-    CHECK(order[34] == 248u); // SMAA blend weights
-    CHECK(order[35] == 249u); // SMAA neighborhood blend
-    CHECK(order[36] == 4u);   // ColorGrading
-    CHECK(order[37] == 16u);  // Present
-    CHECK(order[38] == 245u); // Optional TAA diagnostics, never history
-    CHECK(order[39] == 250u); // GBufferDebug
-    CHECK(order[40] == 254u); // Selection screen-space composite
-    CHECK(order[41] == 251u); // Editor orientation axis
-    CHECK(order[42] == 252u); // Transform gizmo
+    CHECK(order[20] == 243u); // GPU particle compute
+    CHECK(order[21] == 246u); // Camera-overlay 2D
+    CHECK(order[22] == 10u);  // BloomExtract
+    CHECK(order[23] == 11u);  // BloomBlurH
+    CHECK(order[24] == 26u);  // Bloom downsample quarter
+    CHECK(order[25] == 27u);  // Bloom downsample eighth
+    CHECK(order[26] == 28u);  // Bloom downsample sixteenth
+    CHECK(order[27] == 29u);  // Bloom upsample eighth
+    CHECK(order[28] == 30u);  // Bloom upsample quarter
+    CHECK(order[29] == 12u);  // Bloom final half-res resolve
+    CHECK(order[30] == 31u);  // Auto exposure
+    CHECK(order[31] == 15u);  // PostProcess
+    CHECK(order[32] == 5u);   // TAA
+    CHECK(order[33] == 17u);  // FXAA
+    CHECK(order[34] == 247u); // SMAA edge detection
+    CHECK(order[35] == 248u); // SMAA blend weights
+    CHECK(order[36] == 249u); // SMAA neighborhood blend
+    CHECK(order[37] == 4u);   // ColorGrading
+    CHECK(order[38] == 16u);  // Present
+    CHECK(order[39] == 245u); // Optional TAA diagnostics, never history
+    CHECK(order[40] == 250u); // GBufferDebug
+    CHECK(order[41] == 254u); // Selection screen-space composite
+    CHECK(order[42] == 251u); // Editor orientation axis
+    CHECK(order[43] == 252u); // Transform gizmo
 }
 
 TEST_CASE(forward_pipeline_keeps_haze_as_safe_noop_before_transparent) {

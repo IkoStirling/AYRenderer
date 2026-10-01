@@ -19,6 +19,7 @@ namespace ayt::render
 {
 
 class UIRenderBackend;
+struct PreviewSceneCamera;
 
 namespace detail {
 class BGFXAdapter;
@@ -497,6 +498,10 @@ public:
 
 private:
     friend class UIRenderBackend;
+    void renderPreviewScene(const RenderScene& scene, const PreviewSceneCamera& camera,
+                            uint16_t framebuffer, uint16_t width, uint16_t height,
+                            uint8_t firstView, uint32_t clearRgba);
+
     detail::BGFXAdapter* bgfxAdapter() noexcept;
     const detail::BGFXAdapter* bgfxAdapter() const noexcept;
     detail::RenderTargetPool* renderTargetPool() noexcept;

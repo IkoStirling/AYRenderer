@@ -2,6 +2,7 @@
 // AYRenderer/RenderScene.h — frame draw list (engine-facing, no GPU types)
 
 #include "AYRenderer/RenderTypes.h"
+#include "AYRenderer/ParticleDraw.h"
 
 #include <vector>
 
@@ -91,6 +92,8 @@ struct DrawItem {
     // without identity, static and moving surfaces cannot be distinguished.
     // Multiple submeshes of one object should share the same id.
     uint64_t                   motionObjectId = 0;
+    // Borrowed batch data must outlive synchronous render(); particle draws cast no shadows.
+    const ParticleDrawData* particleBatch = nullptr;
 };
 
 // Camera used by the camera-overlay 2D composition domain. It is independent

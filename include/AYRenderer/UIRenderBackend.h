@@ -1,6 +1,8 @@
 #pragma once
 
 #include "AYUI/IRenderBackend.h"
+#include "AYRenderer/PreviewScene.h"
+#include <functional>
 
 #include <algorithm>
 #include <cstdint>
@@ -18,6 +20,7 @@ class IFont;
 namespace ayt::render {
 
 class Renderer;
+class RenderScene;
 
 namespace detail {
 class BGFXAdapter;
@@ -55,7 +58,9 @@ public:
     //  16 = Present → backbuffer panel (Forward + Deferred)
     //  17 = FXAA offscreen LDR filter (ordered before Present)
     //  18–25 = Shadow atlas slots
-    //  26–243 = retained UI Layer / generic offscreen paint targets
+    //  26–30 = Bloom pyramid stages; 31 = exposure adaptation
+    //  32–242 = retained UI Layer / generic offscreen paint targets
+    //  243 = GPU particle simulation (before camera-overlay composition)
     //  244 = unjittered selection silhouette; 245 = TAA diagnostics
     //  246 = camera-overlay 2D composition
     //  247–249 = SMAA 1x edge / blend-weight / neighborhood stages
@@ -64,8 +69,8 @@ public:
     //  255 = UI chrome / menus (fixed high slot — insert Post passes
     //        without reshuffling UI; must stay after presentation overlays)
     static constexpr uint8_t kViewId = 255;
-    static constexpr uint8_t kFirstLayerViewId = 26;
-    static constexpr uint8_t kLastLayerViewId = 243;
+    static constexpr uint8_t kFirstLayerViewId = 32;
+    static constexpr uint8_t kLastLayerViewId = 242;
     static constexpr uint16_t kMaxOffscreenPaintsPerFrame =
         static_cast<uint16_t>(kLastLayerViewId - kFirstLayerViewId + 1u);
 
@@ -83,6 +88,7 @@ public:
     bool initialize(Renderer& renderer);
     void shutdown();
     bool isInitialized() const { return _initialized; }
+    Renderer* previewRenderer() noexcept;
 
     bool supportsRenderTargets() const override;
     RenderTargetHandle createRenderTarget(int width, int height,
@@ -95,6 +101,15 @@ public:
     void* getRenderTargetTexture(RenderTargetHandle target) override;
     void blitRenderTarget(RenderTargetHandle source,
                           const ayt::math::FRectangle& destBounds) override;
+
+    /// Render an isolated forward scene into a depth-backed UI target. The callback
+    /// queues GPU simulation on its reserved view before draw extraction. Uses four
+    /// unique views from the shared offscreen allocator; false skips the callback.
+    /// Call during UI population, outside retained layer/target paints. Borrowed
+    /// scene data must survive this synchronous call; no project World is ticked.
+    bool renderScenePreview(RenderTargetHandle target, const RenderScene& scene,
+                            const PreviewSceneCamera& camera, uint32_t clearRgba,
+                            const std::function<void(uint16_t)>& beforeDraw = {});
 
     LayerHandle createLayer(const LayerDesc& desc) override;
     void releaseLayer(LayerHandle layer) override;

@@ -117,6 +117,8 @@ public:
         uint32_t layerMask = 0xFFFFFFFFu);
     void clearOverlayCamera2DOverride();
     bool hasOverlayCamera2DOverride() const noexcept;
+    /// Read the viewport override for frame extraction/culling. False leaves output unchanged.
+    bool overlayCamera2DOverride(OverlayCamera2D& output) const noexcept;
 
     // Editor/diagnostic presentation filter. The source RenderScene remains
     // complete and the override is applied only to the packet passed to

@@ -1972,6 +1972,33 @@ void Renderer::render(const RenderScene& scene)
     _impl->prevMainProjection = _impl->mainProjection;
 }
 
+void Renderer::renderPreviewScene(const RenderScene& scene, const PreviewSceneCamera& camera,
+    uint16_t framebuffer, uint16_t width, uint16_t height, uint8_t firstView, uint32_t clearRgba)
+{
+    if (!isInitialized() || !width || !height) return;
+    detail::configureRenderViewOrder(_impl->adapter);
+    detail::FrameContext frame;
+    frame.view = camera.view; frame.projection = camera.projection;
+    frame.cameraPosition = camera.position;
+    detail::FrameDrawLists lists;
+    detail::buildFrameDrawLists(scene, _impl->resources.meshes(),
+        _impl->resources.materials(), frame, lists);
+    detail::PassExecContext ctx{_impl->adapter, _impl->shaderPool, scene,
+        _impl->resources.meshes(), _impl->resources.textures(),
+        _impl->resources.materials(), 0, 0, width, height, frame,
+        static_cast<uint8_t>(firstView + 1u), bgfx::FrameBufferHandle{framebuffer}};
+    ctx.drawLists = &lists;
+    detail::ForwardOpaquePass opaque;
+    opaque.execute(ctx);
+    _impl->adapter.setViewClearRaw(ctx.viewId, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+        clearRgba, 1.0f, 0);
+    ctx.viewId = static_cast<uint8_t>(firstView + 2u);
+    detail::TransparentPass transparent;
+    transparent.execute(ctx);
+    detail::Forward2DOpaquePass overlay(static_cast<uint8_t>(firstView + 3u));
+    overlay.execute(ctx);
+}
+
 void Renderer::resize(uint32_t width, uint32_t height)
 {
     if (!_impl || !_impl->adapter.isInitialized()) {

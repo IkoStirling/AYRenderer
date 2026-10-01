@@ -321,8 +321,10 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
 
     // §P2 L5 (2026-08-24) — `worldOverride` arg dropped (was unused).
     adapter.setTransform(item.world);
-    adapter.setVertexBuffer(mesh.vertexBuffer);
-    const bool wireframe = bindDrawIndexBuffer(
+    if (item.particleBatch) {
+        if (!adapter.bindParticleBatch(*item.particleBatch)) { result.skip = true; return result; }
+    } else adapter.setVertexBuffer(mesh.vertexBuffer);
+    const bool wireframe = item.particleBatch ? false : bindDrawIndexBuffer(
         adapter, mesh, drawRange,
         mode == SubmitMode::TransparentSurface && ctx.wireframe);
     if (mode == SubmitMode::TransparentSurface) {
@@ -331,6 +333,11 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
             material.premultipliedAlpha,
             material.doubleSided,
             reversesWinding(item.world));
+        if (item.particleBatch && material.blendMode==BlendMode::Additive) {
+            state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LEQUAL
+                | BGFX_STATE_BLEND_FUNC_SEPARATE(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_ONE,
+                    BGFX_STATE_BLEND_ZERO, BGFX_STATE_BLEND_ONE);
+        }
         if (wireframe) state |= BGFX_STATE_PT_LINES;
         adapter.setState(state);
     }
