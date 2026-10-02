@@ -753,6 +753,12 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 
     for (const SortedTransparentItem& entry : sortedItems) {
         const DrawItem* pItem = entry.item;
+        if (pItem->particleBatch && pItem->particleBatch->world3D
+            && pItem->particleBatch->gpuStream && pItem->particleBatch->submitGpu) {
+            pItem->particleBatch->submitGpu(pItem->particleBatch->gpuStream, viewId);
+            ++drawCount;
+            continue;
+        }
         const auto matIt = ctx.materials.find(pItem->material.id);
         if (matIt == ctx.materials.end()) {
             continue;

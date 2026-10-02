@@ -71,6 +71,12 @@ void buildFrameDrawLists(
             }
             continue;
         }
+        if (item.particleBatch && item.particleBatch->world3D
+            && item.particleBatch->gpuStream && item.particleBatch->submitGpu) {
+            output.transparent3D.push_back(
+                {&item, distanceSquared(item, frame.cameraPosition)});
+            continue;
+        }
         if (!item.mesh.isValid() || !item.material.isValid()) {
             ++output.stats.invalidHandles;
             continue;

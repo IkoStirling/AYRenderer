@@ -9,9 +9,11 @@ struct ParticleDrawData {
     std::vector<ParticleVertex> vertices;
     std::vector<uint16_t> indices;
     /// Optional renderer-owned GPU stream. Borrowed through synchronous render;
-    /// no GPU handles escape. Submission runs in the globally sorted overlay lane.
+    /// no GPU handles escape. World 3D streams enter the transparent pass.
     void* gpuStream=nullptr;
     void (*submitGpu)(void*,uint16_t)=nullptr;
+    bool world3D=false;
+    float sortPosition[3]{};
 };
 inline constexpr uint16_t kParticleComputeView=243;
 inline constexpr const char* kParticlePhoskiaSource = R"(

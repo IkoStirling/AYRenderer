@@ -193,6 +193,8 @@ TEST_CASE(selection_mask_precedes_postprocess_and_composite_follows_present)
                          viewId) - kRenderViewRemap.begin();
     };
     CHECK(rankOf(bgfx::ViewId{243}) < rankOf(bgfx::ViewId{246}));
+    CHECK(rankOf(bgfx::ViewId{243}) < rankOf(bgfx::ViewId{0}));
+    CHECK(rankOf(bgfx::ViewId{243}) < rankOf(ayt::render::kTransparentDeferredViewId));
     CHECK(rankOf(bgfx::ViewId{246}) < rankOf(bgfx::ViewId{10}));
     CHECK(rankOf(ayt::render::kTransparentDeferredViewId)
           < rankOf(TransparentPass::kSelectionStableMaskViewId));

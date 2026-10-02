@@ -85,4 +85,30 @@ TEST_CASE(rejects_missing_material_before_any_pass_consumes_the_item)
     CHECK(lists.transparent3D.empty());
 }
 
+TEST_CASE(routes_gpu_world_particles_through_transparent_sorting)
+{
+    std::unordered_map<uint64_t, GpuMesh> meshes;
+    std::unordered_map<uint64_t, GpuMaterial> materials;
+    ParticleDrawData batch;
+    batch.world3D = true;
+    batch.gpuStream = &batch;
+    batch.submitGpu = [](void*, uint16_t) {};
+    RenderScene scene;
+    DrawItem particle;
+    particle.particleBatch = &batch;
+    particle.world(2, 3) = 8.0f;
+    scene.add(particle);
+
+    FrameContext frame;
+    frame.cameraPosition = ayt::math::FVector3(0.0f, 0.0f, 0.0f);
+    FrameDrawLists lists;
+    buildFrameDrawLists(scene, meshes, materials, frame, lists);
+
+    CHECK(lists.transparent3D.size() == 1u);
+    CHECK(lists.transparent3D[0].item->particleBatch == &batch);
+    CHECK(lists.transparent3D[0].distanceSquared == 64.0f);
+    CHECK(lists.overlay2D.empty());
+    CHECK(lists.stats.invalidHandles == 0u);
+}
+
 TEST_SUITE_END
