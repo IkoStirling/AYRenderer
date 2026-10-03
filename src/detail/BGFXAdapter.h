@@ -84,6 +84,8 @@ public:
 
     // World matrix: true AYMath → column-major for bgfx::setTransform.
     void setTransform(const ayt::math::Float4x4& world);
+    uint32_t availableInstances(uint32_t requested, uint16_t stride) const;
+    bool bindInstances(const void* data, uint32_t count, uint16_t stride);
     void setVertexBuffer(bgfx::VertexBufferHandle vb, uint32_t start = 0,
                          uint32_t count = UINT32_MAX);
     void setIndexBuffer(bgfx::IndexBufferHandle ib, uint32_t start = 0,

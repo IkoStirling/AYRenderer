@@ -12,6 +12,7 @@
 
 namespace ayt::render::detail
 {
+struct InstancingStats;
 
 // Phase 4 — shadow depth draw loop (program acquire + cast-only iteration).
 class ShadowCaster {
@@ -33,10 +34,14 @@ public:
                          const std::vector<const DrawItem*>& items,
                          const std::unordered_map<uint64_t, GpuMesh>& meshes,
                          const std::unordered_map<uint64_t, GpuTexture>& textures,
-                         const std::unordered_map<uint64_t, GpuMaterial>& materials);
+                         const std::unordered_map<uint64_t, GpuMaterial>& materials,
+                         ayt::shader::ShaderResourcePool* instancePool = nullptr,
+                         InstancingStats* stats = nullptr);
 
 private:
     ayt::shader::ShaderResource _program;
+    ayt::shader::ShaderResource _instancedProgram;
+    bool _instancedAcquireFailed = false;
     ayt::shader::BindingId      _skeletonBinding = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _castSkinnedBinding = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _solidBinding = ayt::shader::InvalidBinding;

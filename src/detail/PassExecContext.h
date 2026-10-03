@@ -115,6 +115,7 @@ class DepthHazePass;
 // one at a time; F1 leaves everything nullptr-compatible).
 class FrameGraph;
 struct FrameDrawLists;
+struct InstancingStats;
 class RenderResourceBlackboard;
 
 
@@ -381,6 +382,8 @@ struct PassExecContext {
     // placement preserves legacy aggregate initializers. nullptr keeps direct
     // unit contexts on their compatibility path.
     RenderResourceBlackboard* resourceBlackboard = nullptr;
+    bool rigidInstancing = false;
+    InstancingStats* instancingStats = nullptr;
 
 };
 

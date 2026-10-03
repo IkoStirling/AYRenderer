@@ -1,5 +1,27 @@
 # AYRenderer 测试维护
 
+## 2026-10-03 场景规模化三阶段
+
+- 静态 culling 的六面/near/未知 bounds/变形回退/稳定 jitter 与 Motion 重入回归归属 Contracts。
+- Scene Camera：Entity focused 6/6、Entity 全量与 Renderer provider/Host 覆盖/撤销回归通过。
+- Instancing：Contracts 125、Geometry 96、SceneMaterial 71、PostProcess 252 通过；Shader
+  前端/IR/实例属性与 s_5_0 编译通过。实际命令/输出保存在根 `out/render-scale-stage*-*.log`。
+- `AYRenderer_InstancingGpu` 属于 `Test_TAAGpu.cpp` / Gpu 组，必须在独立进程运行：
+  `$env:AY_TAA_GPU_TEST='d3d11'`（或 `d3d12`），再运行 `AYRenderer_GpuTests.exe --suite AYRenderer_InstancingGpu`。
+  隐藏窗口、无编辑器输入；两后端各 1 case/20 assertions 实际通过，6→2 draws，法线和阴影
+  readback 一致。未设置环境变量会显式 skip，不得把 Noop/skip 计为 real-GPU 验收。
+- `AYEditorShell_Demo` 已重建；新功能的完整 Edit/Play 交互和大场景性能仍需用户实际验收。
+- 最终定向层：Shader 278、Contracts 125、SceneMaterial 71、Geometry 96、LightingShadow
+  137、PostProcess 252 全部通过；Entity 全量、camera 6/6、Editor 353/353 通过。
+- 补跑真实 GPU TAA 暴露 `taa_production_shader_fixed_grid_depth_and_missing_velocity` 的
+  9 个失败断言（8 个 history feedback、1 个混合边缘）；单独进程仍复现。用 AYShader
+  提交前的 Lexer/Parser/Semantic/IR/BGFX 源码在 `out/render-scale-baseline` 隔离重编/重链接，
+  未修改的生产 TAAPass 仍输出同样数值：中心约 0.4578，夹具期望约 0.45965。
+  本轮实例化不经过该 TAA 夹具，旧编译器也复现，不能将此项宣称为通过或归因于合批。
+  需另行核对 history 拒绝与夹具契约；本轮不放宽断言或更改生产 TAA 掩盖失败。
+  MotionVectorGpu（静态/移动/蒙皮/两投影/8 jitter phases）通过。
+  最终 Instancing+Motion 联合门禁在 D3D11/D3D12 各为 2/2 cases、792/792 assertions。
+
 ## 2026-10-03 编辑器线程迁移阶段 1 定向验证
 
 - `Test_RenderSceneOwnership.cpp` 归属 Contracts，新增 8 个 CPU 所有权/生命周期用例，

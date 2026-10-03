@@ -14,6 +14,7 @@
 #include "detail/DebugOverlay.h"
 #include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
 #include "detail/FrameDrawLists.h"
+#include "detail/RigidInstancing.h"
 #include "detail/ForwardOpaquePass.h"
 #include "detail/FXAAPass.h"
 #include "detail/SMAAPass.h"
@@ -376,6 +377,7 @@ struct Renderer::Impl {
     detail::RenderResourceBlackboard resourceBlackboard;
     detail::FrameDrawLists        frameDrawLists;
     bool                         frustumCullingEnabled = true;
+    bool                         rigidInstancingEnabled = true;
 
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
@@ -1878,6 +1880,9 @@ void Renderer::render(const RenderScene& scene)
         &_impl->frameDrawLists,
         &_impl->resourceBlackboard,
     };
+    detail::InstancingStats instancingStats{};
+    ctx.rigidInstancing = _impl->rigidInstancingEnabled;
+    ctx.instancingStats = &instancingStats;
 
     static uint32_t s_compositeLog = 0;
     if (s_compositeLog < 3) {
@@ -1963,6 +1968,7 @@ void Renderer::render(const RenderScene& scene)
     const auto& visibility = _impl->frameDrawLists.stats;
     _impl->debugOverlay.setVisibilityStats(visibility.frustumTested,
         visibility.frustumCulled, visibility.frustumBypassed);
+    _impl->debugOverlay.setInstancingStats(instancingStats.draws, instancingStats.objects);
 
     // §5.5 cleanup (2026-07-22) — the F1-diagnostic lastFrameShadowFbo
     // cache update is removed. Consumers that need the current shadow
@@ -2012,6 +2018,16 @@ void Renderer::renderPreviewScene(const RenderScene& scene, const PreviewSceneCa
 void Renderer::setFrustumCullingEnabled(bool enabled)
 {
     if (_impl) _impl->frustumCullingEnabled = enabled;
+}
+
+void Renderer::setRigidInstancingEnabled(bool enabled)
+{
+    if (_impl) _impl->rigidInstancingEnabled = enabled;
+}
+
+bool Renderer::rigidInstancingEnabled() const noexcept
+{
+    return _impl && _impl->rigidInstancingEnabled;
 }
 
 bool Renderer::frustumCullingEnabled() const noexcept

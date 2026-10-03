@@ -161,6 +161,8 @@ private:
     // §P5 B4b (2026-07-22) �?Phoskia GBuffer VS/FS program handle
     // (mirror ShadowCaster::_program).
     ayt::shader::ShaderResource _program;
+    ayt::shader::ShaderResource _instancedProgram;
+    bool _instancedAcquireFailed = false;
     // Imported 3D cutouts retain their existing raw .sc compatibility
     // sibling. WorldLit2D uses the current Phoskia fragment-discard path.
     ayt::shader::ShaderResource _alphaCutoutProgram;

@@ -9,6 +9,7 @@
 #include "detail/RasterConvention.h"
 #include "detail/RenderPass.h"
 #include "detail/RenderResourceBlackboard.h"
+#include "detail/RigidInstancing.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -575,7 +576,9 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
     uint32_t skippedEmptyRange = 0;
     uint32_t alphaCutoutCount = 0;
     uint32_t worldLit2DCount = 0;
-    for (const DrawItem* itemPtr : drawLists.gbufferOpaque) {
+    std::vector<RigidInstanceData> instanceData;
+    for (size_t itemIndex = 0; itemIndex < drawLists.gbufferOpaque.size(); ++itemIndex) {
+        const DrawItem* itemPtr = drawLists.gbufferOpaque[itemIndex];
         const DrawItem& item = *itemPtr;
         const bool worldLit2D = isWorldLit2DItem(item);
         if (!item.mesh.isValid() || !item.material.isValid()) {
@@ -619,7 +622,31 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
             ++skippedInvalidShader;
             continue;
         }
-        shader::ShaderResource& drawProgram =
+        const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
+        if (drawRange.indexCount == 0) {
+            ++skippedEmptyRange;
+            continue;
+        }
+        size_t instanceCount = 1;
+        if (ctx.rigidInstancing && !ctx.wireframe && !worldLit2D && !needsAlphaCutout) {
+            const auto limit = ctx.adapter.availableInstances(256, sizeof(RigidInstanceData));
+            if (limit >= 2 && collectRigidInstances(drawLists.gbufferOpaque,
+                itemIndex, mesh, limit, instanceData) >= 2) {
+                if (!_instancedProgram.isValid() && !_instancedAcquireFailed) {
+                    _instancedProgram = ctx.pool.acquire(
+                        rigidInstancedSource(kGBufferPhoskiaSource), "gbuffer-rigid-instances-v1");
+                    _instancedAcquireFailed = !_instancedProgram.isValid();
+                    if (_instancedAcquireFailed) {
+                        std::fprintf(stderr, "[GBufferPass] instancing compile failed; using individual draws\n");
+                    }
+                }
+                if (_instancedProgram.isValid() && ctx.adapter.bindInstances(
+                    instanceData.data(), uint32_t(instanceData.size()), sizeof(RigidInstanceData))) {
+                    instanceCount = instanceData.size();
+                }
+            }
+        }
+        shader::ShaderResource& drawProgram = instanceCount >= 2 ? _instancedProgram :
             worldLit2D ? _worldLit2DProgram
                        : (needsAlphaCutout ? _alphaCutoutProgram : _program);
         worldLit2DCount += worldLit2D ? 1u : 0u;
@@ -862,12 +889,6 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         tryBindWhiteTexture(drawProgram, ctx.adapter, "aoMap", aoBound);
         tryBindWhiteTexture(drawProgram, ctx.adapter, "emissiveMap", emissiveBound);
 
-        const DrawIndexRange drawRange = resolveDrawIndexRange(item, mesh);
-        if (drawRange.indexCount == 0) {
-            ++skippedEmptyRange;
-            continue;
-        }
-
         // LEQUAL is intentional here. Imported character assets frequently
         // contain exactly coincident overlay surfaces (face/eye/mouth,
         // garment/trim). LESS makes the base surface win forever; LEQUAL plus
@@ -884,7 +905,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         ctx.adapter.setStateOpaqueLEQUAL(
             material.doubleSided, reversesWinding(item.world), wireframe);
 
-        if (!worldLit2D) {
+        if (!worldLit2D && instanceCount == 1) {
             tryUploadBonePalette(
                 drawProgram,
                 drawProgram.getUniformBlockBinding("Skeleton"),
@@ -909,6 +930,11 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         // for colorOverride fallback above.
         drawProgram.submit(submitCtx);
         ++drawCount;
+        if (instanceCount >= 2 && ctx.instancingStats) {
+            ++ctx.instancingStats->draws;
+            ctx.instancingStats->objects += uint32_t(instanceCount);
+        }
+        itemIndex += instanceCount - 1;
     }
 
     static uint32_t s_routeLogFrame = 0;
@@ -973,6 +999,8 @@ void GBufferPass::destroyResources(BGFXAdapter& adapter)
     _buildStamp = "";
     _producedThisFrame = false;
     _program.reset();
+    _instancedProgram.reset();
+    _instancedAcquireFailed = false;
     _alphaCutoutProgram.reset();
     _worldLit2DProgram.reset();
     _acquireFailed = false;

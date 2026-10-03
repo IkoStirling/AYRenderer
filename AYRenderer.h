@@ -51,6 +51,10 @@ public:
     /// Disable for comparisons or hosts with unbounded custom vertex deformation.
     void setFrustumCullingEnabled(bool enabled);
     bool frustumCullingEnabled() const noexcept;
+    /// Merge contiguous compatible rigid opaque GBuffer/shadow submissions.
+    /// Transparent, skinned, cutout and custom Forward draws retain their order.
+    void setRigidInstancingEnabled(bool enabled);
+    bool rigidInstancingEnabled() const noexcept;
     void endFrame();
 
     void resize(uint32_t width, uint32_t height);

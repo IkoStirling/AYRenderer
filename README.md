@@ -17,6 +17,13 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 相机切换和显式 notifyCameraCut 统一重置 TAA/Motion/曝光历史。推荐游戏入口在
 AYEntity 的 PerspectiveCameraComponent，而不是逐帧调用 Host override。
 
+`setRigidInstancingEnabled` 默认开启：GBuffer 与 solid Shadow 合并连续同 mesh/material/
+range/state 的非蒙皮不透明提交，保留源顺序。透明、cutout、Morph、2D、选择描边、线框
+及自定义 Forward 保持逐对象；Motion 仍逐对象匹配 current/previous world，不共享历史。
+`getFrameStats().instancedDrawCalls/instancedObjects` 按几何提交计数（阴影 cascade 会重复）。
+48-byte 仿射数据兼容非均匀缩放/shear；不同镜像绕序拆批，退化变换或后端/瞬态容量不足
+回退逐对象。新 shader 仍走 Phoskia/pool，无新增 raw-SC 分支。验收见 R6-5 与测试文档。
+
 ### 编辑器线程迁移状态（2026-10-03）
 
 `RendererSubSystem` 的场景提取已使用 `RenderScene::DrawDataOwnership::OwnedCpu`：

@@ -7,6 +7,8 @@
 #include "detail/PassExecContext.h"
 #include "detail/BgfxMatrix.h"
 #include "AYShader/ShaderResourcePool.h"
+#include "detail/RigidInstancing.h"
+#include "detail/ShadowCaster.h"
 
 #include <array>
 #include <algorithm>
@@ -211,6 +213,114 @@ struct TaaGpuFixture {
 
 } // namespace
 #endif
+
+TEST_SUITE(AYRenderer_InstancingGpu)
+
+TEST_CASE(rigid_gbuffer_and_shadow_batches_match_individual_draws)
+{
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated AY_TAA_GPU_TEST=d3d11/d3d12");
+    TaaGpuFixture f;
+    const bool ready=f.initialize(backend);
+    CHECK(ready); if (!ready) return;
+    CHECK(f.adapter.availableInstances(6,sizeof(RigidInstanceData)) >= 6);
+    struct Vertex { float p[3], n[3], uv[2], t[4], ids[4], weights[4]; };
+    const Vertex vertices[]={
+      {{-.25f,-.25f,.25f},{0,0,1},{0,0},{1,0,0,1},{0,0,0,0},{1,0,0,0}},
+      {{ .25f,-.25f,.25f},{0,0,1},{1,0},{1,0,0,1},{0,0,0,0},{1,0,0,0}},
+      {{0,.25f,.25f},{0,0,1},{.5f,1},{1,0,0,1},{0,0,0,0},{1,0,0,0}}};
+    const uint16_t indices[]={0,1,2};
+    bgfx::VertexLayout layout;
+    layout.begin().add(bgfx::Attrib::Position,3,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Normal,3,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::TexCoord0,2,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Tangent,4,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Indices,4,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Weight,4,bgfx::AttribType::Float).end();
+    GpuMesh mesh;
+    mesh.vertexBuffer=f.adapter.createVertexBuffer(vertices,sizeof(vertices),layout);
+    mesh.indexBuffer=f.adapter.createIndexBuffer(indices,sizeof(indices));
+    mesh.indexCount=3;
+    CHECK(bgfx::isValid(mesh.vertexBuffer)); CHECK(bgfx::isValid(mesh.indexBuffer));
+    std::unordered_map<uint64_t,GpuMesh> meshes{{1,mesh}};
+    std::unordered_map<uint64_t,GpuMaterial> materials;
+    materials[1].shader=f.program; materials[1].doubleSided=true;
+    materials[1].hasColorOverride=true; materials[1].colorOverride={.8f,.2f,.1f,1};
+    std::unordered_map<uint64_t,GpuTexture> textures;
+    ayt::render::RenderScene scene;
+    for (int i=0;i<6;++i) {
+        ayt::render::DrawItem item;
+        item.mesh.id=1; item.material.id=1; item.motionObjectId=i+1;
+        item.world(0,0)=i<3 ? .7f : -.7f;
+        item.world(1,1)=.9f; item.world(0,1)=.1f;
+        item.world(2,0)=.1f;
+        item.world(0,3)=float(i%3-1)*.65f;
+        item.world(1,3)=i<3 ? -.45f : .45f;
+        scene.add(item);
+    }
+    FrameContext frame;
+    frame.view=frame.projection=ayt::math::Float4x4::identity();
+    frame.cameraPosition={0,0,-3};
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,kSize,kSize,frame};
+    GBufferPass gbuffer; gbuffer.setGbufferSize(kSize,kSize);
+    const auto normalReadback=bgfx::createTexture2D(kSize,kSize,false,1,
+        bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
+    f.textures.push_back(normalReadback);
+    CHECK(bgfx::isValid(normalReadback));
+    auto readNormals=[&]() {
+        bgfx::blit(8,normalReadback,0,0,gbuffer.gbufferNormalRt());
+        std::vector<uint8_t> result(kSize*kSize*4);
+        const auto readyFrame=bgfx::readTexture(normalReadback,result.data());
+        for(int i=0;i<120 && f.adapter.gpuFrameCounter()<readyFrame;++i) f.adapter.endFrame();
+        CHECK(f.adapter.gpuFrameCounter()>=readyFrame);
+        return result;
+    };
+    CHECK(gbuffer.execute(ctx)==6);
+    const auto baseline=readNormals();
+    ctx.rigidInstancing=true;
+    InstancingStats stats{}; ctx.instancingStats=&stats;
+    CHECK(gbuffer.execute(ctx)==2);
+    const auto batched=readNormals();
+    CHECK(stats.draws==2); CHECK(stats.objects==6);
+    size_t colored=0, differing=0;
+    for(size_t i=0;i<baseline.size();++i) {
+        if(baseline[i]) ++colored;
+        if(std::abs(int(baseline[i])-int(batched[i]))>1) ++differing;
+    }
+    CHECK(colored>100); CHECK(differing==0);
+
+    std::vector<const ayt::render::DrawItem*> casters;
+    for(const auto& item : scene.items()) casters.push_back(&item);
+    ShadowCaster shadow; shadow.ensureProgram(f.pool);
+    CHECK(shadow.isProgramReady());
+    auto drawShadows=[&](bool instanced) {
+        f.adapter.setViewFrameBuffer(0,f.target);
+        f.adapter.setViewRect(0,0,0,kSize,kSize);
+        f.adapter.setViewTransform(0,frame.view,frame.projection);
+        f.adapter.setViewClearRaw(0,BGFX_CLEAR_COLOR,0);
+        const auto draws=shadow.drawCasters(f.adapter,0,BGFX_STATE_WRITE_RGB|BGFX_STATE_WRITE_A,
+            casters,meshes,textures,materials,instanced ? &f.pool : nullptr,&stats);
+        CHECK(draws==(instanced ? 2u : 6u));
+        return f.readTarget();
+    };
+    const auto shadowBaseline=drawShadows(false);
+    const auto shadowBatch=drawShadows(true);
+    float error=0; size_t covered=0;
+    for(size_t i=0;i<shadowBaseline.size();++i) {
+        if(shadowBaseline[i][3]>.5f) ++covered;
+        for(int c=0;c<4;++c) error=std::max(error,std::abs(shadowBaseline[i][c]-shadowBatch[i][c]));
+    }
+    CHECK(covered>40); CHECK(error<.0001f);
+    std::cout << "[Instancing GPU] GBuffer 6->2 normals differing=" << differing
+              << " shadow 6->2 maxError=" << error << '\n';
+    shadow.destroy(f.adapter); gbuffer.destroyResources(f.adapter);
+    f.adapter.destroy(mesh.vertexBuffer); f.adapter.destroy(mesh.indexBuffer);
+#else
+    SKIP_TEST("Instancing GPU regression requires Windows D3D harness");
+#endif
+}
+TEST_SUITE_END
 
 TEST_SUITE(AYRenderer_SkyOutputGpu)
 

@@ -419,7 +419,9 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
             adapter.setStateDepthOnlyWrite();
             casterDrawCount += _shadowCaster.drawCasters(
                 adapter, slotViewId, casterState,
-                drawLists.shadowCasters, meshes, textures, materials);
+                drawLists.shadowCasters, meshes, textures, materials,
+                ctx.rigidInstancing && !ctx.wireframe ? &ctx.pool : nullptr,
+                ctx.instancingStats);
         }
     } else {
         _mapResources.bindShadowView(adapter, viewId, effectiveSize);
@@ -455,7 +457,9 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
 
         casterDrawCount = _shadowCaster.drawCasters(
             adapter, viewId, casterState, drawLists.shadowCasters,
-            meshes, textures, materials);
+            meshes, textures, materials,
+            ctx.rigidInstancing && !ctx.wireframe ? &ctx.pool : nullptr,
+            ctx.instancingStats);
     }
 
     // A touched shadow view clears the map even when there are no drawable

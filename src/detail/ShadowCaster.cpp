@@ -6,6 +6,7 @@
 #include "detail/Draw2D.h"
 #include "detail/RasterConvention.h"
 #include "detail/RenderPass.h"
+#include "detail/RigidInstancing.h"
 
 #include <bgfx/bgfx.h>
 
@@ -82,6 +83,8 @@ bool envForceScCaster()
 void ShadowCaster::destroy(BGFXAdapter& /*adapter*/)
 {
     _program.reset();
+    _instancedProgram.reset();
+    _instancedAcquireFailed = false;
     _maskProgram.reset();
     _skeletonBinding   = ayt::shader::InvalidBinding;
     _castSkinnedBinding = ayt::shader::InvalidBinding;
@@ -226,12 +229,16 @@ uint32_t ShadowCaster::drawCasters(
     const std::vector<const DrawItem*>& items,
     const std::unordered_map<uint64_t, GpuMesh>& meshes,
     const std::unordered_map<uint64_t, GpuTexture>& textures,
-    const std::unordered_map<uint64_t, GpuMaterial>& materials)
+    const std::unordered_map<uint64_t, GpuMaterial>& materials,
+    ayt::shader::ShaderResourcePool* instancePool,
+    InstancingStats* stats)
 {
     const bool casterReady = _program.isValid();
     uint32_t drawCount = 0;
 
-    for (const DrawItem* itemPtr : items) {
+    std::vector<RigidInstanceData> instanceData;
+    for (size_t itemIndex = 0; itemIndex < items.size(); ++itemIndex) {
+        const DrawItem* itemPtr = items[itemIndex];
         if (itemPtr == nullptr) {
             continue;
         }
@@ -279,6 +286,24 @@ uint32_t ShadowCaster::drawCasters(
             continue;
         }
 
+        size_t instanceCount = 1;
+        if (instancePool && casterReady && !alphaMask) {
+            const auto limit = adapter.availableInstances(256, sizeof(RigidInstanceData));
+            if (limit >= 2 && collectRigidInstances(items, itemIndex, mesh, limit, instanceData) >= 2) {
+                if (!_instancedProgram.isValid() && !_instancedAcquireFailed) {
+                    _instancedProgram = instancePool->acquire(
+                        rigidInstancedSource(kShadowCasterPhoskiaSource, true), "shadow-rigid-instances-v1");
+                    _instancedAcquireFailed = !_instancedProgram.isValid();
+                    if (_instancedAcquireFailed) {
+                        std::fprintf(stderr, "[ShadowCaster] instancing compile failed; using individual draws\n");
+                    }
+                }
+                if (_instancedProgram.isValid() && adapter.bindInstances(
+                    instanceData.data(), uint32_t(instanceData.size()), sizeof(RigidInstanceData))) {
+                    instanceCount = instanceData.size();
+                }
+            }
+        }
         adapter.setTransform(item.world);
         adapter.setVertexBuffer(mesh.vertexBuffer, 0, UINT32_MAX);
         adapter.setIndexBuffer(mesh.indexBuffer, drawRange.firstIndex,
@@ -303,12 +328,12 @@ uint32_t ShadowCaster::drawCasters(
         }
 
         ayt::shader::ShaderResource& drawProgram =
-            alphaMask ? _maskProgram : _program;
+            instanceCount >= 2 ? _instancedProgram : (alphaMask ? _maskProgram : _program);
         if (casterReady) {
             const uint8_t castSkinnedValue =
                 (item.boneMatrices != nullptr && item.jointCount > 0) ? 1u : 0u;
 
-            tryUploadBonePalette(drawProgram,
+            if (instanceCount == 1) tryUploadBonePalette(drawProgram,
                                  alphaMask ? _maskSkeletonBinding : _skeletonBinding,
                                  alphaMask ? _maskCastSkinnedBinding : _castSkinnedBinding,
                                  castSkinnedValue,
@@ -404,12 +429,13 @@ uint32_t ShadowCaster::drawCasters(
                 tryBindWhiteTexture(drawProgram, adapter, "opacityMap", opacityBound);
             }
 
-            if (!alphaMask && _solidBinding != ayt::shader::InvalidBinding) {
+            const auto solidBinding = drawProgram.getUniformBinding("casterSolidTest");
+            if (!alphaMask && solidBinding != ayt::shader::InvalidBinding) {
                 // bgfx Vec4 slot (Phoskia float property also lands as Vec4).
                 const float solidVal[4] = {
                     ayt::render::ShadowDiagnostics::casterSolidEnabled() ? 1.0f : 0.0f,
                     0.0f, 0.0f, 0.0f};
-                drawProgram.setUniform(_solidBinding, solidVal, sizeof(solidVal));
+                drawProgram.setUniform(solidBinding, solidVal, sizeof(solidVal));
             }
 
             ayt::shader::DrawCallContext sub;
@@ -426,6 +452,11 @@ uint32_t ShadowCaster::drawCasters(
                            BGFX_DISCARD_ALL);
         }
         ++drawCount;
+        if (instanceCount >= 2 && stats) {
+            ++stats->draws;
+            stats->objects += uint32_t(instanceCount);
+        }
+        itemIndex += instanceCount - 1;
     }
 
     return drawCount;

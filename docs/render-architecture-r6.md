@@ -115,12 +115,13 @@ R6-3c 验证：FrameGraph 可裁剪 slot 不进入 `execute()`；禁用、正常
 
 验收：关闭、resize、管线切换和 shader 失败均不会让消费者读取 stale handle。
 
-### R6-5：DrawListBuilder（第一阶段已完成）
+### R6-5：DrawListBuilder（静态剔除与刚性合批已完成）
 
 - 每帧一次完成 opaque/cutout/transparent/shadow/overlay 分桶和稳定排序。
 - 第一阶段已复用过滤结果，仍逐对象 submit；GBuffer、MotionVector、ForwardOpaque、Forward2DOpaque、Transparent 与 Shadow 共用同一份分类结果。
 - 静态 3D frustum cull 已接入共享列表：使用有效 mesh local AABB、非抖动 VP、两像素边界；未知/无效 bounds、蒙皮、Morph、粒子、2D 和选择描边保守不剔除。Shadow caster/fitting 列表在相机剔除前构建，保持屏幕外投影。
-- 第二阶段再对相同 mesh/material/state 的非蒙皮对象启用 bgfx instancing。
+- 第二阶段已对连续相同 mesh/material/range/state 的 rigid opaque GBuffer/solid Shadow
+  启用 bgfx instancing；原有逐对象路径保留为关闭对照与安全回退。
 
 验收：画面与 draw 顺序不变；CPU pass 时间下降；透明排序和 MotionVector stable id 不回归。
 
@@ -139,6 +140,24 @@ dispatch snapshot 在调用前后核对 registration，不能使用已撤销 Wor
 VS 2026 Insider Debug：AYEntity_PerspectiveCameraTests 6/6、AYEntityTest 全量、
 Renderer SceneMaterial 71/71、PostProcess 252/252 通过；SDK doctor 0 错误/警告。
 这是 CPU/Noop 集成门禁，实际 Play 镜头切换和 GPU 历史 reset 仍需图像验收。
+
+规模化第三刀（2026-10-03）：GBuffer 和 solid Shadow 通过 `RigidInstancing` 收集连续
+兼容 draw，最多 256 个/批，再受后端 transient instance capacity 限制。只有足够容量、
+有效实例 program 和成功绑定才前进多个 source item；编译失败锁存并回退，绝不丢对象。
+三列 vec4（48 bytes）保留 affine linear + translation；VS 用 cofactor/determinant 构造
+逆转置法线，兼容非均匀缩放与 shear。镜像绕序不同、退化/非有限/极端矩阵拆批/回退。
+Shader 新增 `instance0..4` 的 vec4 vertex-only 契约（不占 fragment varying），仍由
+Phoskia → IR → BGFX converter → shaderc → pool 编译，没有新 raw-SC 特例。
+透明、cutout、蒙皮、Morph、2D、选择描边、线框、Forward custom material 不进入首版。
+Motion 暂不合批，继续逐对象读取/提交原列表的 stable-id current/previous world/pose，
+因此新增合批没有修改它的历史匹配或透明 reactive 覆盖顺序。
+`setRigidInstancingEnabled(false)` 为关闭对照；公开统计记录实际 instancedDrawCalls 和
+instancedObjects（按 Pass/cascade 提交计数，不是去重 Entity）。关闭时不收集实例/编译变体。
+D3D11/D3D12 隐藏窗口 readback 各通过 1/1 用例、20/20 断言：6 个非均匀/shear/镜像
+对象的 GBuffer 与 Shadow 均由 6 draws 降为 2，法线差异 0、阴影最大误差 0。
+这证明该夹具的图像一致与提交减少，不能推导所有场景的帧率提升。用户编辑器画面仍待验收。
+补充门禁：旧 TAA fixed-grid GPU 用例有 9 个断言失败，隔离旧 Shader 编译器仍得到相同
+结果；生产 TAAPass 未被本轮修改。记录于 testing.md，待独立复核，不计为整体 GPU 全绿。
 
 ### R6-6：诊断与真 GPU 门禁（已完成）
 

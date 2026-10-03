@@ -6,6 +6,13 @@
 #include <limits>
 #include <AYMath/MathUtils.h>
 #include "detail/MotionVectorPass.h"
+#include "detail/RigidInstancing.h"
+#include "detail/GBufferPass.h"
+#include "AYShader/BGFXConverter.h"
+#include "AYShader/Lexer.h"
+#include "AYShader/Parser.h"
+#include "AYShader/Ir.h"
+#include "AYRenderer/ShadowShaderSources.h"
 
 using namespace ayt::render;
 using namespace ayt::render::detail;
@@ -24,6 +31,74 @@ DrawItem item(uint64_t mesh, uint64_t material, float z = 0.0f)
 } // namespace
 
 TEST_SUITE(AYRenderer_FrameDrawLists_R6)
+
+TEST_CASE(rigid_instance_columns_preserve_affine_geometry_and_reject_deformation)
+{
+    GpuMesh mesh;
+    DrawItem draw = item(1,1);
+    draw.world(0,0) = -2; draw.world(1,1) = 3; draw.world(2,2) = 4;
+    draw.world(0,1) = 0.5f;
+    draw.world(0,3) = 7; draw.world(1,3) = 8; draw.world(2,3) = 9;
+    RigidInstanceData data{};
+    CHECK(packRigidInstance(draw, mesh, data));
+    for (int r=0; r<3; ++r) {
+        const float reconstructed = data.columns[0][r] + 2*data.columns[1][r]
+            + 3*data.columns[2][r] + data.columns[r][3];
+        const float expected = draw.world(r,0) + 2*draw.world(r,1)
+            + 3*draw.world(r,2) + draw.world(r,3);
+        CHECK(reconstructed == expected);
+    }
+    mesh.hasSkinWeights=true; CHECK_FALSE(packRigidInstance(draw,mesh,data));
+    mesh.hasSkinWeights=false; mesh.hasMorphTargets=true;
+    CHECK_FALSE(packRigidInstance(draw,mesh,data)); mesh.hasMorphTargets=false;
+    draw.outlineHull=true; CHECK_FALSE(packRigidInstance(draw,mesh,data)); draw.outlineHull=false;
+    draw.world(2,2)=0; CHECK_FALSE(packRigidInstance(draw,mesh,data));
+    draw.world(2,2)=4; draw.world(3,0)=0.1f; CHECK_FALSE(packRigidInstance(draw,mesh,data));
+    draw.world(3,0)=0; draw.world(1,3)=std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(packRigidInstance(draw,mesh,data));
+}
+
+TEST_CASE(rigid_runs_do_not_reorder_or_merge_incompatible_submissions)
+{
+    GpuMesh mesh;
+    std::vector<DrawItem> draws(5, item(1,1));
+    draws[2].material.id=2;
+    std::vector<const DrawItem*> list;
+    for (const auto& draw : draws) list.push_back(&draw);
+    std::vector<RigidInstanceData> data;
+    BGFXAdapter unavailable;
+    CHECK(unavailable.availableInstances(256,sizeof(RigidInstanceData))==0);
+    CHECK_FALSE(unavailable.bindInstances(nullptr,6,sizeof(RigidInstanceData)));
+    CHECK(collectRigidInstances(list,0,mesh,256,data)==2);
+    CHECK(collectRigidInstances(list,3,mesh,1,data)==1);
+    draws[1].firstIndex=3; CHECK(collectRigidInstances(list,0,mesh,256,data)==1);
+    draws[1].firstIndex=0; draws[1].world(0,0)=-1;
+    CHECK(collectRigidInstances(list,0,mesh,256,data)==1);
+    draws[1].world(0,0)=1; draws[1].jointCount=1;
+    CHECK(collectRigidInstances(list,0,mesh,256,data)==1);
+}
+
+TEST_CASE(builtin_instanced_variants_lower_through_phoskia)
+{
+    using namespace ayt::shader;
+    using namespace ayt::shader::phoskia;
+    for (bool shadow : {false,true}) {
+        const std::string source = rigidInstancedSource(shadow
+            ? kShadowCasterPhoskiaSource : kGBufferPhoskiaSourceCStr, shadow);
+        Lexer lexer(source); std::vector<Token> tokens; lexer.tokenize(tokens);
+        Parser parser(tokens); auto ast=parser.parse();
+        ir::IRGenerator generator; auto ir=generator.generate(*ast);
+        AYBGFXConverter converter; BGFXConvertResult result;
+        converter.convertBGFX(ir,result);
+        CHECK(result.success);
+        if (!result.success || result.materialStages.empty()) continue;
+        const auto& stages = result.materialStages.front();
+        CHECK(stages.vertex.find("i_data0") != std::string::npos);
+        CHECK(stages.vertex.find("u_viewProj") != std::string::npos);
+        CHECK(stages.vertex.find("u_modelViewProj") == std::string::npos);
+        CHECK(stages.fragment.find("i_data0") == std::string::npos);
+    }
+}
 
 TEST_CASE(classifies_and_stably_sorts_all_render_domains_once)
 {

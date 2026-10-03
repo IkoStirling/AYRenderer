@@ -167,6 +167,9 @@ struct RenderFrameStats {
     uint32_t frustumTested = 0;
     uint32_t frustumCulled = 0;
     uint32_t frustumBypassed = 0;
+    // Geometry submissions (including repeated shadow cascades), not unique entities.
+    uint32_t instancedDrawCalls = 0;
+    uint32_t instancedObjects = 0;
 };
 
 struct ClearDesc {

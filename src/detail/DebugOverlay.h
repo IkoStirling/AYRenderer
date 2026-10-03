@@ -35,6 +35,10 @@ public:
     void setArchitectureStats(const RenderGraphFrameStats& graph,
                               const RenderResourceFrameStats& resources);
     void setVisibilityStats(uint32_t tested, uint32_t culled, uint32_t bypassed);
+    void setInstancingStats(uint32_t draws, uint32_t objects) {
+        _stats.instancedDrawCalls = draws;
+        _stats.instancedObjects = objects;
+    }
 
     const RenderFrameStats& stats() const noexcept { return _stats; }
 

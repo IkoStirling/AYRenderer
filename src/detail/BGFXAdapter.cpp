@@ -13,6 +13,24 @@
 
 namespace ayt::render::detail
 {
+uint32_t BGFXAdapter::availableInstances(uint32_t requested, uint16_t stride) const
+{
+    if (!_initialized || isNoopBackend() || !stride || stride % 16) return 0;
+    const auto* caps = bgfx::getCaps();
+    if (!caps || !(caps->supported & BGFX_CAPS_INSTANCING)) return 0;
+    return bgfx::getAvailInstanceDataBuffer(requested, stride);
+}
+
+bool BGFXAdapter::bindInstances(const void* data, uint32_t count, uint16_t stride)
+{
+    if (!data || count < 2 || availableInstances(count, stride) < count) return false;
+    bgfx::InstanceDataBuffer buffer{};
+    bgfx::allocInstanceDataBuffer(&buffer, count, stride);
+    if (!buffer.data || buffer.num < count) return false;
+    std::memcpy(buffer.data, data, size_t(count) * stride);
+    bgfx::setInstanceDataBuffer(&buffer);
+    return true;
+}
 
 // Process-wide bgfx lifetime. Unit tests construct many Renderer
 // instances back-to-back; calling bgfx::shutdown() between them on the
