@@ -1,5 +1,45 @@
 # AYRenderer Design
 
+## 2026-10-03 — 编辑器渲染线程迁移：阶段 1 CPU 数据所有权
+
+已实现：`RenderScene` 新增显式 `OwnedCpu` 模式，`RendererSubSystem` 的提取场景默认使用它。
+复制发生在 `add()` 内，而不是场景 builder 返回之后；因此 builder 的局部数组也可在返回前
+安全捕获。复制完整 `skeletonJointCount`（非零时）而非仅 draw palette，保留 MotionVector
+需要的完整骨架；骨骼映射按 `jointCount` 复制。2D 参数、CPU 粒子顶点/索引和排序元数据按值
+复制。无指针 draw 不额外分配；有数据 draw 的只读 backing 由 `shared_ptr<const ...>` 持有，
+场景复制、移动和源场景 clear 不使其失效。复制赋值使用 copy/swap，避免分配失败发布悬空数据。
+可见性过滤使用 OwnedCpu 目标；默认 Borrowed 场景和现有独立宿主的同步契约不变。
+
+尚未实现：独立编辑器提交线程、帧 mailbox、资源租约、UI 帧快照和异步查询结果。
+`ParticleDrawData::gpuStream/submitGpu` 仍是同步借用，`hasBorrowedGpuStreams()` 明确暴露此边界；
+此函数返回 false 也不代表 mesh/material handles 被保活。`_scenePacketValid` 只是有效性握手，
+不是 Renderer 或 UI backend 的线程安全保证。现有 `DisplayList` 含动态 Widget traversal，不能
+直接送往 worker；bgfx 的内部 GPU 线程也不等同于引擎独立 API/Pass 提交线程。
+
+后续实现顺序：
+
+1. UI 完整帧使用自包含值命令，展开动态子树，保留 painter order、字形/路径与资源 lease；
+   不让 render worker 调用 `Widget`、ECS 或 `EditorSession`。
+2. 单一 executor 负责 bgfx init、资源创建/上传/释放、Pass、UI replay、frame、shutdown。
+   resize、子窗口、preview、GPU 粒子 compute/draw 和热重载也必须走同一资源/控制队列。
+3. 主线程发布场景+相机+灯光+UI 不可变 packet。最多三个 slot（producer/active/pending），
+   可覆盖未启动旧帧；资源/控制命令按序且不可丢。结果包含 requestId 和 scene/window generation，
+   stale picking/preview/统计不得回写新场景。已有同步路径保留作为基线，不能用全局锁冒充并行。
+4. shutdown 停止接收帧、排空控制命令、join，再销毁 World、Widget、窗口和 backend。
+   开启默认并行前覆盖 Edit/Play/Stop、2D/3D/蒙皮/CPU-GPU 粒子、preview、浮动窗口、resize、
+   连续 picking 和退出；录帧比较布局、遮挡、轮廓，测量主线程/提交线程与帧积压。
+
+阶段 1 定向证据：`RendererSceneOwnershipTests`（producer scope、复制/移动/clear/扩容、完整
+骨架、兼容 overload、GPU 借用边界、可见性过滤和 subsystem 默认模式）。需要重编所有
+`RenderScene` ABI 消费者，不能只替换 lib。
+
+2026-10-03 验证：VS 2026 Insider Debug 重编 `AYEditorShell_Demo` 与依赖链；
+`AYRenderer_ContractsTests` 117/117、`AYRenderer_GeometryTests` 96/96、
+`AYRenderer_SceneMaterialTests` 69/69；`AYEditor_UnitTests` 重跑 353/353。
+编辑器全量首次有恢复目录轮转用例失败，定向重跑及全量重跑均通过，未将其宣称为已修复。
+computer-use 实际窗口检查了启动、视口选中/Inspector 回填、Play、Pause、Stop、放大/恢复；
+这些是现有同步基线的回归，不是独立线程或性能验收。跨线程测试只验证 CPU scene backing。
+
 ## 2026-09-23 — 基础画质第四刀：Bloom 金字塔与自动曝光
 
 - Bloom 从单层半分辨率横/纵模糊升级为 1/2 → 1/4 → 1/8 → 1/16 的能量守恒降采样金字塔，再以 tent filter 逐级上采样并与较高分辨率层合并；最终仍发布兼容的 `BloomBlurB`，PostProcess 和外部调用点不需要改写。

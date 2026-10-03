@@ -418,9 +418,9 @@ void RendererSubSystem::update(float /*deltaTime*/)
 {
     // Billboard extraction needs the camera for this presentation frame.
     syncMainCamera();
-    // Presentation builds the complete CPU render packet on the main thread.
-    // The render callback only consumes this stable scene; GameLoop waits for
-    // the previous consumer before the next packet is mutated.
+    // Presentation copies pointer-backed CPU data at add() on the main
+    // thread. GPU streams still require the existing synchronous lifetime.
+    // No concurrent backend/UI ownership is implied by the packet-valid flag.
     _scene.clear();
     if (_sceneBuilder) {
         _sceneBuilder(_scene);
@@ -775,7 +775,7 @@ void RendererSubSystem::renderScenePass()
         }
     }
     if (hasVisibilityFilter && !visibility.allVisible()) {
-        RenderScene presentationScene;
+        RenderScene presentationScene(RenderScene::DrawDataOwnership::OwnedCpu);
         copyVisibleSceneForPresentation(
             _scene, presentationScene, visibility);
         _renderer.render(presentationScene);

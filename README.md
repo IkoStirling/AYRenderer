@@ -6,6 +6,16 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 
 测试入口、功能分组、夹具隔离与用例清单维护见 [`docs/testing.md`](docs/testing.md)。
 
+### 编辑器线程迁移状态（2026-10-03）
+
+`RendererSubSystem` 的场景提取已使用 `RenderScene::DrawDataOwnership::OwnedCpu`：
+每次 `add()` 立即复制骨骼矩阵/映射、2D 参数和 CPU 粒子顶点/索引，场景副本共享只读 backing。
+直接构造的 `RenderScene` 默认仍是同步 Borrowed 模式，兼容原有独立宿主。
+GPU 粒子 stream/callback 仍借用；mesh/material id 也不等于 GPU 资源租约。
+`hasBorrowedGpuStreams()` 只检查已知 GPU 借用边界，不能证明整帧可跨线程。
+**当前尚未启用编辑器独立提交线程**；UI 控件回调、GPU 资源命令、子窗口和 bgfx 生命周期
+必须完成统一 owner-thread 接管后才能启用。迁移阶段与验收见 [`design.md`](design.md)。
+
 ---
 
 ## 状态

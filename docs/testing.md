@@ -1,5 +1,19 @@
 # AYRenderer 测试维护
 
+## 2026-10-03 编辑器线程迁移阶段 1 定向验证
+
+- `Test_RenderSceneOwnership.cpp` 归属 Contracts，新增 8 个 CPU 所有权/生命周期用例，
+  包括 producer scope 退出、完整骨架、场景复制/移动/clear/扩容和另一线程持有 CPU 副本。
+- VS 2026 Insider Debug 实际通过 Contracts 117/117、Geometry 96/96、SceneMaterial 69/69，
+  编辑器全量重跑 353/353，`AYEditorShell_Demo` 构建通过。
+- 编辑器全量首次有一个恢复会话用例失败，定向与全量重跑通过；该间歇失败未在本次修改中修复。
+- 实际窗口烟测覆盖启动、视口 picking/Inspector、Play/Pause/Stop、放大/恢复和正常退出；
+  CPU 所有权验证不等于完整引擎独立 render owner、GPU stream lease 或 UI 并行验证。
+- `RenderScene` 布局变更必须重编消费者；本次先统一 MSVC 环境并重建依赖，确认 Ninja
+  已重新记录头文件依赖，不能用旧零依赖对象文件作为 ABI 回归证据。
+
+下表是 2026-09-28 的历史完整层统计，阶段 1 的新增用例与实际定向数量见上。
+
 ## 分组与统计
 
 2026-09-28 Windows Debug 实际注册 909 个用例，完整层按功能拆成 10 个独立程序。

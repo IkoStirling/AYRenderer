@@ -15,6 +15,7 @@ set(AYRENDERER_TEST_Contracts_SOURCES
     Test_RenderPipelineTypedLookup_R6.cpp
     Test_RenderResourceBlackboard_R6.cpp
     Test_SceneBuilderOwnership.cpp
+    Test_RenderSceneOwnership.cpp
     Test_SceneVisibility.cpp
     Test_ShadowDepthCodec.cpp
     Test_ShadowMatrixBuilder.cpp

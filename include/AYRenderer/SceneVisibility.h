@@ -27,8 +27,9 @@ struct SceneVisibilityFilter {
         ? filter.worldLit2D : filter.cameraOverlay2D;
 }
 
-// Copies references only. DrawPayload2D and bone data retain the same
-// synchronous borrowed-lifetime contract as RenderScene::add(DrawItem).
+// The destination's ownership mode decides whether accepted draw data is
+// borrowed or copied. An OwnedCpu destination may outlive the source's CPU
+// storage; GPU stream/resource lifetimes still require an owner-thread fence.
 inline void copyVisibleSceneForPresentation(
     const RenderScene& source,
     RenderScene& destination,

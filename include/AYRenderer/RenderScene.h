@@ -5,6 +5,8 @@
 #include "AYRenderer/ParticleDraw.h"
 
 #include <vector>
+#include <memory>
+#include <utility>
 
 namespace ayt::render
 {
@@ -111,12 +113,50 @@ struct OverlayCamera2D {
 // public value type, so every consumer must be rebuilt when its layout changes.
 class RenderScene {
 public:
+    enum class DrawDataOwnership {
+        Borrowed,
+        OwnedCpu,
+    };
+
+    /// OwnedCpu copies pointer-backed CPU data at add(), while the producer's
+    /// arrays are still alive. Copies of this scene share immutable backing.
+    /// GPU stream callbacks and mesh/material handles are NOT resource leases:
+    /// an owner-thread resource fence is still required before asynchronous use.
+    RenderScene() = default;
+    explicit RenderScene(DrawDataOwnership ownership)
+        : _ownership(ownership) {}
+
+    RenderScene(const RenderScene&) = default;
+    RenderScene(RenderScene&&) noexcept = default;
+    RenderScene& operator=(const RenderScene& other) {
+        if (this != &other) {
+            RenderScene copy(other);
+            swap(copy);
+        }
+        return *this;
+    }
+    RenderScene& operator=(RenderScene&&) noexcept = default;
+    void swap(RenderScene& other) noexcept {
+        _items.swap(other._items);
+        std::swap(_overlayCamera2D, other._overlayCamera2D);
+        std::swap(_ownership, other._ownership);
+        _ownedDrawData.swap(other._ownedDrawData);
+    }
+
     void clear() {
         _items.clear();
+        _ownedDrawData.clear();
         _overlayCamera2D = {};
     }
 
-    void add(const DrawItem& item) { _items.push_back(item); }
+    void add(const DrawItem& item);
+
+    [[nodiscard]] DrawDataOwnership drawDataOwnership() const noexcept {
+        return _ownership;
+    }
+    /// Reports the borrowed GPU-stream boundary even in an OwnedCpu scene.
+    /// This is a necessary check, not a complete asynchronous-safety guarantee.
+    [[nodiscard]] bool hasBorrowedGpuStreams() const noexcept;
 
     void add(MeshHandle mesh, MaterialHandle material,
              const ayt::math::Float4x4& world = ayt::math::Float4x4::identity())
@@ -129,7 +169,7 @@ public:
         item.jointCount   = 0;
         item.sortKey      = 0;
         item.shadowFlags  = kShadowCastAndReceive;
-        _items.push_back(item);
+        add(item);
     }
 
     void add(MeshHandle mesh, MaterialHandle material,
@@ -144,7 +184,7 @@ public:
         item.boneMatrices = boneMatrices;
         item.jointCount = (boneMatrices != nullptr) ? jointCount : 0;
         item.shadowFlags = kShadowCastAndReceive;
-        _items.push_back(item);
+        add(item);
     }
 
     const std::vector<DrawItem>& items() const noexcept { return _items; }
@@ -171,6 +211,9 @@ private:
     // ABI note: RenderScene crosses static-library boundaries. Keep this
     // field tail-appended and clean-rebuild every consumer after changes.
     OverlayCamera2D _overlayCamera2D{};
+    struct OwnedDrawData;
+    DrawDataOwnership _ownership = DrawDataOwnership::Borrowed;
+    std::vector<std::shared_ptr<const OwnedDrawData>> _ownedDrawData;
 };
 
 // §P5.5 A (2026-07-23) — host-facing multi-light DataSource. Drives

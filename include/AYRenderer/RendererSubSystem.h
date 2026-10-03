@@ -163,14 +163,12 @@ private:
     void onWindowResize(const ayt::event::WindowResizeEvent& e);
 
     Renderer           _renderer;
-    RenderScene        _scene;
+    // Capture CPU payloads while each scene-builder producer is still alive.
+    // The backend/UI lifecycle remains single submission-thread until phase 2.
+    RenderScene        _scene{RenderScene::DrawDataOwnership::OwnedCpu};
     SceneBuildCallback _sceneBuilder;
-    // §P1 L2 (2026-08-24) — atomic valid flag so the scene packet
-    // can't be torn between the renderFrame() polling path and the
-    // renderScenePass() consumer path if a future caller drives them
-    // from different threads (editor preview pane on worker thread,
-    // say). Today both are main-thread, but the load cost is zero and
-    // it future-proofs the contract.
+    // Validity handshake only: this atomic does not make the Renderer,
+    // builders, borrowed GPU streams, or UI backend safe for concurrent use.
     uint64_t           _scenePacketFrame = 0;
     float              _scenePacketInterpolationAlpha = 0.0f;
     std::atomic<bool>  _scenePacketValid{false};
