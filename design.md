@@ -10,7 +10,9 @@
 场景复制、移动和源场景 clear 不使其失效。复制赋值使用 copy/swap，避免分配失败发布悬空数据。
 可见性过滤使用 OwnedCpu 目标；默认 Borrowed 场景和现有独立宿主的同步契约不变。
 
-尚未实现：独立编辑器提交线程、帧 mailbox、资源租约、UI 帧快照和异步查询结果。
+尚未实现：独立编辑器提交线程、帧 mailbox、资源租约、完整 UI 资源交接和异步查询结果。
+阶段 2 已在 AYUI 提供自包含普通绘制/SVG 快照及 populate/flush 边界；借用纹理和离屏 pass
+仍拒绝，见 [UI 帧快照契约](../AYUI/design.md#ui-帧快照与线程边界2026-10-03)。
 `ParticleDrawData::gpuStream/submitGpu` 仍是同步借用，`hasBorrowedGpuStreams()` 明确暴露此边界；
 此函数返回 false 也不代表 mesh/material handles 被保活。`_scenePacketValid` 只是有效性握手，
 不是 Renderer 或 UI backend 的线程安全保证。现有 `DisplayList` 含动态 Widget traversal，不能
