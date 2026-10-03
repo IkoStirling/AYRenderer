@@ -11,7 +11,7 @@
 - `RenderPipeline` 仍按注册顺序执行 `RenderPass`，但带 slot 的 Pass 已由编译后的 `FrameGraph` live decision 控制是否 dispatch；资源黑板已覆盖时域历史、Deferred 主链与 Bloom 链的可消费输出。
 - `Renderer::render()` 同时负责 Pass 查找、状态预备、效果门禁、资源声明、semantic 选择和执行上下文拼装。
 - `PassExecContext` 通过多个具体 Pass 指针传递生产者状态，新增效果容易继续增加横向耦合。
-- 几何 Pass 已复用每帧一次生成的共享 DrawList 做领域分桶与稳定排序；保守起见尚未启用 frustum cull、状态排序合批与 instancing。
+- 几何 Pass 已复用每帧一次生成的共享 DrawList 做领域分桶与稳定排序，已启用可靠静态 bounds 的保守视锥剔除；状态排序合批与 instancing 尚未启用。
 - 自动化测试已覆盖契约与 shader 编译，但真实 D3D11 capture、GPU 时间和资源带宽基线仍不完整；D3D12 完整恢复可延后，但必须保持可诊断、失败不闪退。
 
 因此 R6 期间默认不新增独立画质 Pass。例外仅限修复现有 Pass、诊断视图和为架构收口服务的内部节点。
@@ -119,10 +119,17 @@ R6-3c 验证：FrameGraph 可裁剪 slot 不进入 `execute()`；禁用、正常
 
 - 每帧一次完成 opaque/cutout/transparent/shadow/overlay 分桶和稳定排序。
 - 第一阶段已复用过滤结果，仍逐对象 submit；GBuffer、MotionVector、ForwardOpaque、Forward2DOpaque、Transparent 与 Shadow 共用同一份分类结果。
-- frustum cull 暂缓：必须先统一静态、蒙皮、透明描边和阴影接收体的可靠 bounds 策略，避免以 CPU 优化引入物体错误消失。
+- 静态 3D frustum cull 已接入共享列表：使用有效 mesh local AABB、非抖动 VP、两像素边界；未知/无效 bounds、蒙皮、Morph、粒子、2D 和选择描边保守不剔除。Shadow caster/fitting 列表在相机剔除前构建，保持屏幕外投影。
 - 第二阶段再对相同 mesh/material/state 的非蒙皮对象启用 bgfx instancing。
 
 验收：画面与 draw 顺序不变；CPU pass 时间下降；透明排序和 MotionVector stable id 不回归。
+
+规模化第一刀（2026-10-03）：`setFrustumCullingEnabled` 默认开启，用于关闭对照；
+`DrawItem::allowFrustumCulling=false` 用于未提供保守包围盒的自定义顶点位移。
+公开帧统计记录 tested/culled/bypassed；此计数按 draw/submesh，不等于 Entity 数。
+Contracts 122、Geometry 96、SceneMaterial 69、PostProcess 252 共 539 用例通过。
+六面、near/w=0 交界、负/非均匀缩放、未知 bounds、固定 jitter 边界与重新入镜
+Motion 历史都有回归；真实 GPU 图像/性能验收仍需独立执行，不能以 CPU 用例替代。
 
 ### R6-6：诊断与真 GPU 门禁（已完成）
 

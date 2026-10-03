@@ -96,6 +96,9 @@ struct DrawItem {
     uint64_t                   motionObjectId = 0;
     // Borrowed batch data must outlive synchronous render(); particle draws cast no shadows.
     const ParticleDrawData* particleBatch = nullptr;
+    /// Disable for custom vertex displacement with no conservative mesh bounds.
+    /// Skin/morph/particle/2D/selection draws already bypass static culling.
+    bool allowFrustumCulling = true;
 };
 
 // Camera used by the camera-overlay 2D composition domain. It is independent

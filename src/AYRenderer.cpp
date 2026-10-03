@@ -375,6 +375,7 @@ struct Renderer::Impl {
     detail::FrameGraph            frameGraph{adapter, renderTargetPool};
     detail::RenderResourceBlackboard resourceBlackboard;
     detail::FrameDrawLists        frameDrawLists;
+    bool                         frustumCullingEnabled = true;
 
     detail::RenderResourceManager resources;
     detail::DebugOverlay          debugOverlay;
@@ -1318,6 +1319,12 @@ void Renderer::render(const RenderScene& scene)
         ? taaPassPtr->jitteredProjection()
         : _impl->mainProjection;
     frame.cameraPosition   = _impl->mainCameraPosition;
+    frame.frustumCulling = _impl->frustumCullingEnabled;
+    frame.cullingViewProjection = _impl->mainProjection * _impl->mainView;
+    frame.cullingHomogeneousDepth = _impl->adapter.capsHomogeneousDepth();
+    // Two pixels cover the TAA sample footprint without changing each phase.
+    frame.cullingMarginX = 4.0f / std::max<uint16_t>(_impl->viewportW, 1);
+    frame.cullingMarginY = 4.0f / std::max<uint16_t>(_impl->viewportH, 1);
     frame.lightDirection   = _impl->directionalLightDir.normalize();
     frame.lightColor       = _impl->directionalLightColor;
     // P0 — wall-clock seconds since Renderer::initialize(). Field
@@ -1953,6 +1960,9 @@ void Renderer::render(const RenderScene& scene)
     resourceStats.persistentHistoryResources =
         blackboardStats.persistentHistoryResources;
     _impl->debugOverlay.setArchitectureStats(graphStats, resourceStats);
+    const auto& visibility = _impl->frameDrawLists.stats;
+    _impl->debugOverlay.setVisibilityStats(visibility.frustumTested,
+        visibility.frustumCulled, visibility.frustumBypassed);
 
     // §5.5 cleanup (2026-07-22) — the F1-diagnostic lastFrameShadowFbo
     // cache update is removed. Consumers that need the current shadow
@@ -1997,6 +2007,16 @@ void Renderer::renderPreviewScene(const RenderScene& scene, const PreviewSceneCa
     transparent.execute(ctx);
     detail::Forward2DOpaquePass overlay(static_cast<uint8_t>(firstView + 3u));
     overlay.execute(ctx);
+}
+
+void Renderer::setFrustumCullingEnabled(bool enabled)
+{
+    if (_impl) _impl->frustumCullingEnabled = enabled;
+}
+
+bool Renderer::frustumCullingEnabled() const noexcept
+{
+    return _impl && _impl->frustumCullingEnabled;
 }
 
 void Renderer::resize(uint32_t width, uint32_t height)

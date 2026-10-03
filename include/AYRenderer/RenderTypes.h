@@ -163,6 +163,10 @@ struct RenderFrameStats {
     // order above remains stable for source and aggregate compatibility.
     RenderGraphFrameStats graph;
     RenderResourceFrameStats resources;
+    // Camera-only static geometry visibility; shadow submissions are separate.
+    uint32_t frustumTested = 0;
+    uint32_t frustumCulled = 0;
+    uint32_t frustumBypassed = 0;
 };
 
 struct ClearDesc {

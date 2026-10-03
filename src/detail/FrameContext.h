@@ -119,6 +119,14 @@ struct FrameContext {
     // packed material scalars, depth, material model.
     bool              gbufferDebugEnabled  = false;
     uint8_t           gbufferDebugChannel  = 0; // GBufferDebugChannel
+
+    // Stable CPU visibility, independent of the jittered raster projection.
+    // Direct pass/unit contexts opt in explicitly; Renderer enables it.
+    bool frustumCulling = false;
+    ayt::math::Float4x4 cullingViewProjection = ayt::math::Float4x4::identity();
+    float cullingMarginX = 0.0f;
+    float cullingMarginY = 0.0f;
+    bool cullingHomogeneousDepth = false;
 };
 
 } // namespace ayt::render::detail

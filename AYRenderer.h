@@ -47,6 +47,10 @@ public:
     // Use with UIRenderBackend (view 2) so chrome pixels are not left uncleared.
     void beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uint16_t fbHeight);
     void render(const RenderScene& scene);
+    /// Static camera-frustum culling defaults on; shadows remain independent.
+    /// Disable for comparisons or hosts with unbounded custom vertex deformation.
+    void setFrustumCullingEnabled(bool enabled);
+    bool frustumCullingEnabled() const noexcept;
     void endFrame();
 
     void resize(uint32_t width, uint32_t height);

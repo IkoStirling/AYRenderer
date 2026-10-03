@@ -3,6 +3,9 @@
 #include "detail/FrameDrawLists.h"
 
 #include <unordered_map>
+#include <limits>
+#include <AYMath/MathUtils.h>
+#include "detail/MotionVectorPass.h"
 
 using namespace ayt::render;
 using namespace ayt::render::detail;
@@ -109,6 +112,138 @@ TEST_CASE(routes_gpu_world_particles_through_transparent_sorting)
     CHECK(lists.transparent3D[0].distanceSquared == 64.0f);
     CHECK(lists.overlay2D.empty());
     CHECK(lists.stats.invalidHandles == 0u);
+}
+
+TEST_CASE(static_frustum_culls_camera_geometry_but_preserves_offscreen_shadows)
+{
+    std::unordered_map<uint64_t, GpuMesh> meshes;
+    meshes[1].localBoundsValid = true;
+    std::unordered_map<uint64_t, GpuMaterial> materials;
+    materials[1].blendMode = BlendMode::Opaque;
+    materials[2].blendMode = BlendMode::Alpha;
+    RenderScene scene;
+    scene.add(item(1, 1, 3));
+    for (const auto& p : {ayt::math::FVector3{-10, 0, 3}, {10, 0, 3},
+                          {0, -10, 3}, {0, 10, 3}, {0, 0, -3}, {0, 0, 15}}) {
+        auto draw = item(1, 1, p.z);
+        draw.world(0, 3) = p.x;
+        draw.world(1, 3) = p.y;
+        scene.add(draw);
+    }
+    scene.add(item(1, 2, 15));
+    FrameContext frame;
+    frame.frustumCulling = true;
+    frame.cullingViewProjection = ayt::math::lh::perspective(
+        ayt::math::radians(90.0f), 1.0f, 1.0f, 10.0f);
+    FrameDrawLists lists;
+    buildFrameDrawLists(scene, meshes, materials, frame, lists);
+    CHECK(lists.opaque3D.size() == 1u);
+    CHECK(lists.transparent3D.empty());
+    CHECK(lists.shadowCasters.size() == 7u);
+    CHECK(lists.shadowBoundsItems.size() == 8u);
+    CHECK(lists.stats.frustumTested == 8u);
+    CHECK(lists.stats.frustumCulled == 7u);
+    frame.frustumCulling = false;
+    buildFrameDrawLists(scene, meshes, materials, frame, lists);
+    CHECK(lists.opaque3D.size() == 7u);
+    CHECK(lists.transparent3D.size() == 1u);
+}
+
+TEST_CASE(static_bounds_are_conservative_at_near_plane_and_with_negative_nonuniform_scale)
+{
+    std::unordered_map<uint64_t, GpuMesh> meshes;
+    meshes[1].localBoundsValid = true;
+    std::unordered_map<uint64_t, GpuMaterial> materials;
+    materials[1].blendMode = BlendMode::Opaque;
+    RenderScene scene;
+    scene.add(item(1, 1, 1.0f)); // intersects near plane
+    scene.add(item(1, 1, 0.0f)); // camera inside; corners straddle w=0
+    auto scaled = item(1, 1, 3.0f);
+    scaled.world(0, 0) = -8;
+    scaled.world(1, 1) = 0.25f;
+    scaled.world(0, 3) = 5;
+    scene.add(scaled); // origin outside, extent intersects
+    FrameContext frame;
+    frame.frustumCulling = true;
+    frame.cullingViewProjection = ayt::math::lh::perspective(
+        ayt::math::radians(90.0f), 1.0f, 0.1f, 10.0f);
+    FrameDrawLists lists;
+    buildFrameDrawLists(scene, meshes, materials, frame, lists);
+    CHECK(lists.opaque3D.size() == 3u);
+}
+
+TEST_CASE(unknown_or_deformed_bounds_fail_open_and_selection_never_uses_static_bounds)
+{
+    std::unordered_map<uint64_t, GpuMesh> meshes;
+    meshes[1].localBoundsValid = true;
+    meshes[2].localBoundsValid = true;
+    meshes[2].hasSkinWeights = true;
+    meshes[3].localBoundsValid = true;
+    meshes[3].hasMorphTargets = true;
+    meshes[4].localBoundsValid = true;
+    meshes[4].localBoundsMin.x = std::numeric_limits<float>::quiet_NaN();
+    std::unordered_map<uint64_t, GpuMaterial> materials;
+    materials[1].blendMode = BlendMode::Opaque;
+    RenderScene scene;
+    for (uint64_t mesh : {2u, 3u, 4u, 5u}) scene.add(item(mesh, 1, 100));
+    auto selected = item(1, 1, 100);
+    selected.outlineHull = true;
+    scene.add(selected);
+    auto displaced = item(1, 1, 100);
+    displaced.allowFrustumCulling = false;
+    scene.add(displaced);
+    auto invalid = item(1, 1, 100);
+    invalid.world(0, 0) = std::numeric_limits<float>::infinity();
+    scene.add(invalid);
+    FrameContext frame;
+    frame.frustumCulling = true;
+    FrameDrawLists lists;
+    buildFrameDrawLists(scene, meshes, materials, frame, lists);
+    CHECK(lists.opaque3D.size() == 7u);
+    CHECK(lists.selectionOutlines.size() == 1u);
+    CHECK(lists.stats.frustumBypassed == 7u);
+}
+
+TEST_CASE(stable_frustum_margin_keeps_subpixel_edge_and_ignores_raster_jitter)
+{
+    std::unordered_map<uint64_t, GpuMesh> meshes;
+    meshes[1].localBoundsValid = true;
+    std::unordered_map<uint64_t, GpuMaterial> materials;
+    materials[1].blendMode = BlendMode::Opaque;
+    RenderScene scene;
+    auto edge = item(1, 1, 0.5f);
+    edge.world(0, 3) = 1.501f;
+    scene.add(edge);
+    FrameContext frame;
+    frame.frustumCulling = true;
+    frame.cullingMarginX = 0.002f;
+    FrameDrawLists lists;
+    for (float phase : {-0.01f, 0.01f}) {
+        frame.projection(0, 3) = phase;
+        buildFrameDrawLists(scene, meshes, materials, frame, lists);
+        CHECK(lists.opaque3D.size() == 1u);
+    }
+    frame.cullingMarginX = 0;
+    buildFrameDrawLists(scene, meshes, materials, frame, lists);
+    CHECK(lists.opaque3D.empty());
+    // GL-style clip depth keeps z in [-w, w], unlike zero-to-one.
+    RenderScene behind;
+    behind.add(item(1, 1, -0.75f));
+    frame.cullingHomogeneousDepth = true;
+    buildFrameDrawLists(behind, meshes, materials, frame, lists);
+    CHECK(lists.opaque3D.size() == 1u);
+    frame.cullingHomogeneousDepth = false;
+    buildFrameDrawLists(behind, meshes, materials, frame, lists);
+    CHECK(lists.opaque3D.empty());
+}
+
+TEST_CASE(culled_object_reentry_does_not_reuse_nonconsecutive_motion_history)
+{
+    MotionHistoryCache history;
+    const auto world = ayt::math::Float4x4::identity();
+    history.commit(1, 1, world, nullptr, 0, 1);
+    CHECK(history.find(1, 1, 0, 2) != nullptr);
+    CHECK(history.find(1, 1, 0, 3) == nullptr);
 }
 
 TEST_SUITE_END

@@ -28,6 +28,9 @@ struct FrameDrawListStats {
     uint32_t overlay2D = 0;
     uint32_t shadowCasters = 0;
     uint32_t selectionOutlines = 0;
+    uint32_t frustumTested = 0;
+    uint32_t frustumCulled = 0;
+    uint32_t frustumBypassed = 0;
 };
 
 // Immutable per-frame classification shared by geometry passes. Lists retain

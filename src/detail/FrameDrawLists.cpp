@@ -30,6 +30,53 @@ bool transparentBefore(const SortedTransparentItem& lhs,
     return lhs.distanceSquared > rhs.distanceSquared;
 }
 
+// A transformed local AABB is a convex hexahedron. Reject only when all eight
+// corners lie outside one clip half-space (no divide by w / near-plane traps).
+// Fail open for unknown/deformed/non-affine data, never guess unit-cube bounds.
+bool outsideFrustum(const DrawItem& item, const GpuMesh& mesh,
+                    const FrameContext& frame, bool& tested) noexcept
+{
+    tested = false;
+    if (!item.allowFrustumCulling || item.outlineHull || item.payload
+        || item.particleBatch || item.boneMatrices || item.jointCount
+        || mesh.hasSkinWeights || mesh.hasMorphTargets || !mesh.localBoundsValid)
+        return false;
+    const auto& lo = mesh.localBoundsMin;
+    const auto& hi = mesh.localBoundsMax;
+    for (int axis = 0; axis < 3; ++axis) {
+        if (!std::isfinite(lo[axis]) || !std::isfinite(hi[axis])
+            || lo[axis] > hi[axis]) return false;
+    }
+    if (item.world(3, 0) != 0.0f || item.world(3, 1) != 0.0f
+        || item.world(3, 2) != 0.0f || item.world(3, 3) != 1.0f)
+        return false;
+    if (!std::isfinite(frame.cullingMarginX) || !std::isfinite(frame.cullingMarginY))
+        return false;
+    const auto m = frame.cullingViewProjection * item.world;
+    bool outside[6] = {true, true, true, true, true, true};
+    for (uint32_t corner = 0; corner < 8; ++corner) {
+        const float p[4] = {(corner & 1) ? hi.x : lo.x,
+                            (corner & 2) ? hi.y : lo.y,
+                            (corner & 4) ? hi.z : lo.z, 1.0f};
+        float c[4] = {};
+        for (int row = 0; row < 4; ++row) {
+            for (int col = 0; col < 4; ++col) c[row] += m(row, col) * p[col];
+            if (!std::isfinite(c[row])) return false;
+        }
+        const float padX = std::max(0.0f, frame.cullingMarginX) * std::fabs(c[3]);
+        const float padY = std::max(0.0f, frame.cullingMarginY) * std::fabs(c[3]);
+        const float planes[6] = {c[0] + c[3] + padX, c[3] - c[0] + padX,
+                                 c[1] + c[3] + padY, c[3] - c[1] + padY,
+                                 frame.cullingHomogeneousDepth ? c[2] + c[3] : c[2],
+                                 c[3] - c[2]};
+        for (int plane = 0; plane < 6; ++plane)
+            outside[plane] = outside[plane] && planes[plane] < -1.0e-5f;
+    }
+    tested = true;
+    for (bool rejected : outside) if (rejected) return true;
+    return false;
+}
+
 } // namespace
 
 void FrameDrawLists::clear()
@@ -109,6 +156,20 @@ void buildFrameDrawLists(
             continue;
         }
 
+        // Camera visibility must NOT truncate shadow casters/scene fitting.
+        if (frame.frustumCulling) {
+            bool tested = false;
+            const auto meshIt = meshes.find(item.mesh.id);
+            const bool rejected = meshIt != meshes.end()
+                && outsideFrustum(item, meshIt->second, frame, tested);
+            if (tested) ++output.stats.frustumTested;
+            else ++output.stats.frustumBypassed;
+            if (rejected) {
+                ++output.stats.frustumCulled;
+                continue;
+            }
+        }
+
         if (item.outlineHull) {
             output.selectionOutlines.push_back(&item);
         }
@@ -141,7 +202,6 @@ void buildFrameDrawLists(
     output.stats.selectionOutlines =
         static_cast<uint32_t>(output.selectionOutlines.size());
 
-    (void)meshes; // Reserved for conservative bounds/frustum culling.
 }
 
 const FrameDrawLists& resolveFrameDrawLists(const PassExecContext& ctx,

@@ -37,6 +37,7 @@ void DebugOverlay::onBeginFrame()
     _stats.graph = {};
     _stats.graph.peakTransientTargets = _peakTransientTargets;
     _stats.resources = {};
+    setVisibilityStats(0, 0, 0);
     const auto now = std::chrono::steady_clock::now();
     if (_lastFrameStart.time_since_epoch().count() != 0) {
         const float cadenceMs = std::chrono::duration<float, std::milli>(
@@ -70,6 +71,13 @@ void DebugOverlay::setArchitectureStats(
     _stats.graph = graph;
     _stats.graph.peakTransientTargets = _peakTransientTargets;
     _stats.resources = resources;
+}
+
+void DebugOverlay::setVisibilityStats(uint32_t tested, uint32_t culled, uint32_t bypassed)
+{
+    _stats.frustumTested = tested;
+    _stats.frustumCulled = culled;
+    _stats.frustumBypassed = bypassed;
 }
 
 void DebugOverlay::pushFrameCadence(float frameMs)
@@ -265,8 +273,10 @@ void DebugOverlay::onEndFrame(uint32_t drawCalls, uint32_t sceneItems,
                         _stats.resources.invalidResources,
                         _stats.resources.persistentHistoryResources);
 
+    bgfx::dbgTextPrintf(col, row + 4, 0x07, "Frustum tested %u culled %u bypass %u",
+        _stats.frustumTested, _stats.frustumCulled, _stats.frustumBypassed);
     const uint16_t maxRows = static_cast<uint16_t>(height / kCellH);
-    uint16_t passRow = static_cast<uint16_t>(row + 4);
+    uint16_t passRow = static_cast<uint16_t>(row + 5);
     for (const auto& pass : _stats.passes) {
         if (passRow >= maxRows) break;
         bgfx::dbgTextPrintf(col, passRow++, 0x07, "%-14s dc=%3u cpu=%5.2f gpu=%5.2f",

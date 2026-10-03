@@ -6,6 +6,13 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 
 测试入口、功能分组、夹具隔离与用例清单维护见 [`docs/testing.md`](docs/testing.md)。
 
+### 场景规模化（2026-10-03）
+
+共享 DrawList 已启用保守静态 3D 视锥剔除；非抖动相机与两像素边界保持 TAA 稳定。
+屏幕外 Shadow caster 不受相机剔除影响。蒙皮/Morph/粒子/2D/选择描边暂不剔除。
+自定义顶点位移需关闭 draw 的 `allowFrustumCulling`；全局关闭对照使用
+`Renderer::setFrustumCullingEnabled(false)`。统计与限制见 [R6-5](docs/render-architecture-r6.md)。
+
 ### 编辑器线程迁移状态（2026-10-03）
 
 `RendererSubSystem` 的场景提取已使用 `RenderScene::DrawDataOwnership::OwnedCpu`：

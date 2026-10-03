@@ -34,6 +34,7 @@ public:
                           const bgfx::Stats* gpuStats);
     void setArchitectureStats(const RenderGraphFrameStats& graph,
                               const RenderResourceFrameStats& resources);
+    void setVisibilityStats(uint32_t tested, uint32_t culled, uint32_t bypassed);
 
     const RenderFrameStats& stats() const noexcept { return _stats; }
 
