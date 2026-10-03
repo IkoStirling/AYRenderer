@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cmath>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -78,6 +79,29 @@ std::unordered_map<RendererSubSystem*, OverlayCameraOverride>
 std::unordered_map<RendererSubSystem*, SceneVisibilityFilter>
     g_sceneVisibilityFilters;
 
+struct OwnedCameraProvider {
+    uint64_t registrationId;
+    const void* owner;
+    SceneCameraProvider callback;
+};
+struct SceneCameraProviders {
+    std::vector<OwnedCameraProvider> providers;
+    uint64_t activeIdentity = 0;
+    uint64_t cutGeneration = 0;
+};
+std::unordered_map<RendererSubSystem*, SceneCameraProviders> g_sceneCameras;
+uint64_t g_nextCameraProviderId = 1;
+
+bool validSceneCamera(const SceneCamera3D& camera)
+{
+    if (!camera.identity || !std::isfinite(camera.position.x)
+        || !std::isfinite(camera.position.y) || !std::isfinite(camera.position.z)) return false;
+    for (int i = 0; i < 16; ++i)
+        if (!std::isfinite(camera.view.ptr()[i]) || !std::isfinite(camera.projection.ptr()[i]))
+            return false;
+    return true;
+}
+
 bool sceneBuilderIsRegistered(RendererSubSystem* renderer,
                               std::uint64_t registrationId)
 {
@@ -126,6 +150,7 @@ void clearAllCameraOverrides(RendererSubSystem* renderer)
     g_matrixCameraOverrides.erase(renderer);
     g_overlayCameraOverrides.erase(renderer);
     g_sceneVisibilityFilters.erase(renderer);
+    g_sceneCameras.erase(renderer);
 }
 
 
@@ -551,6 +576,15 @@ void RendererSubSystem::clearSceneBuildersForOwner(const void* owner)
 {
     if (owner == nullptr) return;
     _scenePacketValid.store(false, std::memory_order_release);
+    bool removedCamera = false;
+    {
+        std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+        auto found = g_sceneCameras.find(this);
+        if (found != g_sceneCameras.end())
+            removedCamera = std::erase_if(found->second.providers,
+                [owner](const OwnedCameraProvider& entry) { return entry.owner == owner; }) != 0;
+    }
+    if (removedCamera) _renderer.notifyCameraCut();
     std::lock_guard<std::mutex> lock(g_sceneBuilderMutex);
     auto it = g_sceneBuilders.find(this);
     if (it == g_sceneBuilders.end()) return;
@@ -560,6 +594,20 @@ void RendererSubSystem::clearSceneBuildersForOwner(const void* owner)
     if (it->second.empty()) {
         g_sceneBuilders.erase(it);
     }
+}
+
+void RendererSubSystem::setSceneCameraProviderForOwner(
+    const void* owner, SceneCameraProvider provider)
+{
+    if (!owner || !provider) return;
+    _scenePacketValid.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+        auto& entries = g_sceneCameras[this].providers;
+        std::erase_if(entries, [owner](const OwnedCameraProvider& e) { return e.owner == owner; });
+        entries.push_back({g_nextCameraProviderId++, owner, std::move(provider)});
+    }
+    _renderer.notifyCameraCut();
 }
 
 
@@ -700,6 +748,51 @@ void RendererSubSystem::syncMainCamera()
                        / static_cast<float>(safeHeight);
 
     MatrixCameraOverride matrixOverride;
+    SceneCamera3D sceneCamera;
+    bool hasSceneCamera = false;
+    if (!_cameraOverride) {
+        std::vector<OwnedCameraProvider> providers;
+        {
+            std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+            providers = g_sceneCameras[this].providers;
+        }
+        for (const auto& provider : providers) {
+            // A preceding provider may detach another World; do not invoke
+            // a copied callback after its owner has been unregistered.
+            bool registered = false;
+            {
+                std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+                const auto& live = g_sceneCameras[this].providers;
+                registered = std::any_of(live.begin(), live.end(), [&](const auto& entry) {
+                    return entry.registrationId == provider.registrationId;
+                });
+            }
+            if (!registered) continue;
+            SceneCamera3D candidate;
+            if (provider.callback(candidate) && validSceneCamera(candidate)) {
+                std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+                const auto& live = g_sceneCameras[this].providers;
+                if (std::none_of(live.begin(), live.end(), [&](const auto& entry) {
+                    return entry.registrationId == provider.registrationId;
+                })) continue;
+                sceneCamera = candidate;
+                hasSceneCamera = true;
+                break;
+            }
+        }
+    }
+    const uint64_t identity = _cameraOverride ? UINT64_MAX
+        : (hasSceneCamera ? sceneCamera.identity : 0);
+    const uint64_t generation = hasSceneCamera ? sceneCamera.cutGeneration : 0;
+    bool cut = false;
+    {
+        std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
+        auto& state = g_sceneCameras[this];
+        cut = state.activeIdentity != identity || state.cutGeneration != generation;
+        state.activeIdentity = identity;
+        state.cutGeneration = generation;
+    }
+    if (cut) _renderer.notifyCameraCut();
     bool hasMatrixOverride = false;
     if (_cameraOverride) {
         std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
@@ -717,6 +810,8 @@ void RendererSubSystem::syncMainCamera()
         _renderer.setMainCameraLookAtPerspective(
             _camEye, _camAt, _camUp,
             _camFovYDegrees, aspect, 0.1f, 100.0f);
+    } else if (hasSceneCamera) {
+        _renderer.setMainCamera(sceneCamera.view, sceneCamera.projection, sceneCamera.position);
     } else {
         // Default elevated 3/4 view (Editor freecam replaces via setCameraLookAt).
         _renderer.setMainCameraLookAtPerspective(

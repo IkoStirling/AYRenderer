@@ -362,6 +362,9 @@ public:
     // GBuffer world-position reprojection. Defaults disabled. Enabling it
     // disables both spatial AA alternatives; Forward pipelines ignore it.
     void setTaaEnabled(bool enabled);
+    /// Explicit discontinuity: invalidate TAA, object velocity and exposure
+    /// histories without changing feature settings or waiting for thresholds.
+    void notifyCameraCut();
     bool taaEnabled() const noexcept;
     // Session-only diagnostics: 0 final, 1 rejection, 2 feedback, 3 clipping,
     // 4 motion in pixels, 5 reprojected history. Never written into history.

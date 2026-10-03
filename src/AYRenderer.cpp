@@ -2963,6 +2963,12 @@ bool Renderer::taaEnabled() const noexcept
     return _impl != nullptr && _impl->taaEnabled;
 }
 
+void Renderer::notifyCameraCut()
+{
+    if (_impl) _impl->invalidateTemporalResources(
+        detail::ResourceInvalidationReason::CameraCut);
+}
+
 void Renderer::setTaaDebugView(uint8_t mode)
 {
     if (!_impl) return;

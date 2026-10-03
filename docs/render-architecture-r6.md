@@ -131,6 +131,15 @@ Contracts 122、Geometry 96、SceneMaterial 69、PostProcess 252 共 539 用例�
 六面、near/w=0 交界、负/非均匀缩放、未知 bounds、固定 jitter 边界与重新入镜
 Motion 历史都有回归；真实 GPU 图像/性能验收仍需独立执行，不能以 CPU 用例替代。
 
+规模化第二刀（2026-10-03）：3D Scene 相机 provider 在几何提取前同步，优先级为
+Host/Edit override > 活动 World 选主 > 默认镜头。World teardown 撤销 provider；
+dispatch snapshot 在调用前后核对 registration，不能使用已撤销 World 回调。
+相机来源/identity/cutGeneration 变化调用 notifyCameraCut，统一失效 TAA、Motion 和曝光历史。
+组件/持久化/选主契约见 AYEntity README 与项目 SDK 3d.camera.view，不额外创建相机渲染 Pass。
+VS 2026 Insider Debug：AYEntity_PerspectiveCameraTests 6/6、AYEntityTest 全量、
+Renderer SceneMaterial 71/71、PostProcess 252/252 通过；SDK doctor 0 错误/警告。
+这是 CPU/Noop 集成门禁，实际 Play 镜头切换和 GPU 历史 reset 仍需图像验收。
+
 ### R6-6：诊断与真 GPU 门禁（已完成）
 
 - 调试视图：MotionVector、SSAO、TAA history/resolve、Shadow atlas。

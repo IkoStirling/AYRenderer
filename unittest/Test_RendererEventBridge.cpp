@@ -63,6 +63,65 @@ void resetBootstrapForTest()
 
 TEST_SUITE(RendererEventBridge)
 
+TEST_CASE(scene_camera_is_current_before_extraction_and_host_override_wins)
+{
+    resetBootstrapForTest();
+    RendererSubSystem sub;
+    CHECK(sub.initialize());
+    int owner = 0;
+    bool active = true;
+    int calls = 0;
+    sub.setSceneCameraProviderForOwner(&owner, [&](SceneCamera3D& frame) {
+        ++calls;
+        frame.identity = 7;
+        frame.position = {1, 2, 3};
+        frame.view = ayt::math::lh::lookAt(frame.position, {1, 2, 4}, {0, 1, 0});
+        frame.projection = ayt::math::lh::perspective(1.0f, sub.viewportAspect(), 0.1f, 100);
+        return active;
+    });
+    float observed = 0;
+    sub.addSceneBuilderForOwner(&owner, [&](RenderScene&) {
+        observed = sub.renderer().mainCameraPosition().x;
+    });
+    sub.update(0);
+    CHECK(observed == 1);
+    const int previousCalls = calls;
+    sub.setCameraLookAt({9, 2, 3}, {0, 0, 0}, {0, 1, 0});
+    sub.update(0);
+    CHECK(observed == 9);
+    CHECK(calls == previousCalls);
+    sub.clearCameraOverride();
+    sub.update(0);
+    CHECK(observed == 1);
+    active = false;
+    sub.update(0);
+    CHECK(observed == kDefaultEditorCameraEyeX);
+    sub.clearSceneBuildersForOwner(&owner);
+    const int detachedCalls = calls;
+    sub.update(0);
+    CHECK(calls == detachedCalls);
+    sub.shutdown();
+}
+
+TEST_CASE(camera_dispatch_does_not_invoke_revoked_world_provider)
+{
+    resetBootstrapForTest();
+    RendererSubSystem sub;
+    CHECK(sub.initialize());
+    int firstOwner = 0, secondOwner = 0, revokedCalls = 0;
+    sub.setSceneCameraProviderForOwner(&firstOwner, [&](SceneCamera3D&) {
+        sub.clearSceneBuildersForOwner(&secondOwner);
+        return false;
+    });
+    sub.setSceneCameraProviderForOwner(&secondOwner, [&](SceneCamera3D&) {
+        ++revokedCalls;
+        return false;
+    });
+    sub.update(0);
+    CHECK(revokedCalls == 0);
+    sub.shutdown();
+}
+
 TEST_CASE(Bridge_WindowResize_ForwardsToRenderer) {
     auto& bus = ayt::event::EventBus::instance();
     const auto baseline = bus.listenerCount(ayt::event::WindowResizeEvent::kTypeId);

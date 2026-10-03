@@ -13,6 +13,10 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 自定义顶点位移需关闭 draw 的 `allowFrustumCulling`；全局关闭对照使用
 `Renderer::setFrustumCullingEnabled(false)`。统计与限制见 [R6-5](docs/render-architecture-r6.md)。
 
+场景 3D 相机通过 World-scoped provider 在几何提取前同步，Host/Edit 覆盖优先；
+相机切换和显式 notifyCameraCut 统一重置 TAA/Motion/曝光历史。推荐游戏入口在
+AYEntity 的 PerspectiveCameraComponent，而不是逐帧调用 Host override。
+
 ### 编辑器线程迁移状态（2026-10-03）
 
 `RendererSubSystem` 的场景提取已使用 `RenderScene::DrawDataOwnership::OwnedCpu`：

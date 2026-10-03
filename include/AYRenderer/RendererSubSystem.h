@@ -55,6 +55,15 @@ using CompositeUiPass = std::function<void(bool skipViewportPanel, CompositeUiPh
 // Returns false if no window is available yet.
 using WindowProvider = std::function<bool(void*& outHandle, uint32_t& outWidth, uint32_t& outHeight)>;
 
+struct SceneCamera3D {
+    ayt::math::Float4x4 view = ayt::math::Float4x4::identity();
+    ayt::math::Float4x4 projection = ayt::math::Float4x4::identity();
+    ayt::math::FVector3 position{};
+    uint64_t identity = 0; // nonzero, includes World/component generation
+    uint64_t cutGeneration = 0;
+};
+using SceneCameraProvider = std::function<bool(SceneCamera3D&)>;
+
 // GameLoop subsystem: owns Renderer, submits frames via render callback.
 class RendererSubSystem : public ayt::game::ISubSystem {
 public:
@@ -93,6 +102,10 @@ public:
     void setSceneBuilder(SceneBuildCallback callback);
     void addSceneBuilderForOwner(const void* owner, SceneBuildCallback callback);
     void clearSceneBuildersForOwner(const void* owner);
+    /// Advanced integration boundary, not a gameplay setter. Provider runs on
+    /// the submission owner before geometry extraction; Host override wins.
+    /// clearSceneBuildersForOwner also detaches this provider before teardown.
+    void setSceneCameraProviderForOwner(const void* owner, SceneCameraProvider provider);
     Renderer& renderer();
     RenderScene& renderScene();
 
@@ -102,6 +115,8 @@ public:
                          const ayt::math::FVector3& at,
                          const ayt::math::FVector3& up,
                          float fovYDegrees = 50.0f);
+    /// Host/Edit override with non-jittered LH matrices; clears back to Scene
+    /// selection through clearCameraOverride(). Not a serialized game camera.
     void setCameraMatrices(const ayt::math::Float4x4& view,
                            const ayt::math::Float4x4& projection,
                            const ayt::math::FVector3& position);
