@@ -1,5 +1,15 @@
 # AYRenderer Design
 
+## 2026-10-04 — CPU 变形网格可选线框构建
+
+Renderer::createMesh32 保留五参数 ABI，新增六参数 bool buildWireframe 重载。
+RenderResourceManager::uploadMeshInternal 的默认值为 true；既有 create/loadMesh 路径维持线框。
+false 跳过 O(triangle) 的特征边提取、去重和线框 index buffer 创建，保留 solid VB/IB 与 bounds。
+bindDrawIndexBuffer 在没有线框 buffer 时按现有契约回退 solid。调用仍在提交 owner 线程，
+GPU handles 由 Renderer 管理；未引入 dynamic VB、并发提交或借用 CPU payload。
+AYAvatar 对每次 CPU 变形上传默认 false，可按 upload 参数显式开启检查。
+RenderResourceTests 在 Noop backend 验证默认线框存在、禁用时无 buffer、相同几何数/bounds 及完整销毁。
+
 ## 2026-10-03 — 编辑器渲染线程迁移：阶段 1 CPU 数据所有权
 
 已实现：`RenderScene` 新增显式 `OwnedCpu` 模式，`RendererSubSystem` 的提取场景默认使用它。

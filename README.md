@@ -6,6 +6,14 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 
 测试入口、功能分组、夹具隔离与用例清单维护见 [`docs/testing.md`](docs/testing.md)。
 
+### CPU 变形网格上传（2026-10-04）
+
+高级 Host 可用 `Renderer::createMesh32(..., false)` 跳过特征线提取及线框 GPU 索引。
+原五参数重载仍默认构建线框；solid 几何、local bounds 与 owner-thread 复制/销毁契约不变。
+禁用线框的网格在全局 wireframe 模式下回退 solid。AYAvatar::Presenter 默认使用此选项，
+需要线框检查时 `upload(frame, resolver, true)`。此优化仍重建 GPU mesh，不是动态 buffer 更新。
+RenderResourceTests 验证两种上传的 solid buffers、bounds、线框索引与销毁。
+
 ### 场景规模化（2026-10-03）
 
 共享 DrawList 已启用保守静态 3D 视锥剔除；非抖动相机与两像素边界保持 TAA 稳定。

@@ -2218,6 +2218,16 @@ MeshHandle Renderer::loadMesh(const std::string& path)
     return _impl->resources.loadMesh(path);
 }
 
+MeshHandle Renderer::createMesh32(const void* vertices, uint32_t vertexCount,
+                                  const VertexLayoutDesc& layout, const uint32_t* indices,
+                                  uint32_t indexCount, bool buildWireframe)
+{
+    if (!_impl || !_impl->adapter.isInitialized()) {
+        return {};
+    }
+    return _impl->resources.createMesh32(vertices, vertexCount, layout, indices, indexCount, buildWireframe);
+}
+
 bool Renderer::hasMorphTargets(MeshHandle mesh) const noexcept
 {
     return _impl != nullptr && _impl->resources.hasMorphTargets(mesh);

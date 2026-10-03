@@ -70,6 +70,15 @@ public:
                             const VertexLayoutDesc& layout,
                             const uint32_t* indices,
                             uint32_t indexCount);
+    /// Advanced host upload option: false omits feature-line extraction and its GPU index buffer.
+    /// Solid rendering/bounds are preserved; global wireframe falls back to solid for this mesh.
+    /// Copies input data on the renderer owner thread. Existing five-argument uploads keep wireframe enabled.
+    MeshHandle createMesh32(const void* vertices,
+                            uint32_t vertexCount,
+                            const VertexLayoutDesc& layout,
+                            const uint32_t* indices,
+                            uint32_t indexCount,
+                            bool buildWireframe);
     MeshHandle loadMesh(const std::string& path);
     bool hasMorphTargets(MeshHandle mesh) const noexcept;
     uint32_t morphTargetCount(MeshHandle mesh) const noexcept;

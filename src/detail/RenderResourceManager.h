@@ -35,7 +35,7 @@ public:
                             uint32_t vertexCount,
                             const VertexLayoutDesc& layout,
                             const uint32_t* indices,
-                            uint32_t indexCount);
+                            uint32_t indexCount, bool buildWireframe = true);
     struct MeshMorphContractDesc {
         bool     hasMorphTargets = false;
         uint32_t targetCount = 0;
@@ -206,7 +206,7 @@ private:
                                   uint32_t indexCount,
                                   bool use32BitIndices,
                                   bool hasSkinWeights = false,
-                                  const MeshMorphContractDesc& morph = {});
+                                  const MeshMorphContractDesc& morph = {}, bool buildWireframe = true);
 };
 
 } // namespace ayt::render::detail

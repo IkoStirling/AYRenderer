@@ -3,6 +3,7 @@
 
 #include "AYResource/assetsImpl/Mesh.h"
 #include "AYResource/AssetPath.h"
+#include "detail/RenderResourceManager.h"
 #include <filesystem>
 
 #include "AYIO/File.h"
@@ -84,6 +85,43 @@ bool writeBinaryFile(const std::string& path, const std::vector<ayt::math::UInt8
 } // namespace
 
 TEST_SUITE(RenderResourceTests)
+
+TEST_CASE(optional_wireframe_upload_preserves_solid_geometry_and_bounds)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    BGFXAdapter adapter;
+    BGFXInitParams init;
+    init.backend = Backend::Noop;
+    CHECK(adapter.initialize(init));
+    ayt::shader::ShaderResourcePool shaders;
+    RenderResourceManager resources(adapter, shaders);
+    const float vertices[] = {0, 0, 0, 2, 0, 0, 0, 3, 0};
+    const uint32_t indices[] = {0, 1, 2};
+    auto layout = VertexLayoutDesc::position3();
+    auto standard = resources.createMesh32(vertices, 3, layout, indices, 3);
+    auto solid = resources.createMesh32(vertices, 3, layout, indices, 3, false);
+    CHECK(standard.isValid());
+    CHECK(solid.isValid());
+    if (standard.isValid() && solid.isValid()) {
+        const auto& a = resources.meshes().at(standard.id);
+        const auto& b = resources.meshes().at(solid.id);
+        CHECK(a.wireframeIndexCount == 6);
+        CHECK(bgfx::isValid(a.wireframeIndexBuffer));
+        CHECK(b.wireframeIndexCount == 0);
+        CHECK_FALSE(bgfx::isValid(b.wireframeIndexBuffer));
+        CHECK(bgfx::isValid(b.vertexBuffer) && bgfx::isValid(b.indexBuffer));
+        CHECK(a.vertexCount == b.vertexCount && a.indexCount == b.indexCount);
+        CHECK(a.localBoundsValid && b.localBoundsValid);
+        CHECK(b.localBoundsMin.x == 0 && b.localBoundsMin.y == 0);
+        CHECK(b.localBoundsMax.x == 2 && b.localBoundsMax.y == 3);
+    }
+    resources.destroyMesh(standard);
+    resources.destroyMesh(solid);
+    CHECK(resources.meshes().empty());
+    resources.shutdown();
+    adapter.shutdown();
+}
 
 TEST_CASE(texture_cache_reuses_same_key)
 {

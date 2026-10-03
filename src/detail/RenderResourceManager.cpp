@@ -398,7 +398,8 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
                                                      uint32_t indexCount,
                                                      bool use32BitIndices,
                                                      bool hasSkinWeights,
-                                                     const MeshMorphContractDesc& morph)
+                                                     const MeshMorphContractDesc& morph,
+                                                     bool buildWireframe)
 {
     MeshHandle out;
     if (!_adapter.isInitialized() || vertices == nullptr || indices == nullptr
@@ -443,39 +444,41 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
     mesh.vertexBuffer = _adapter.createVertexBuffer(vertices, vertexBytes, bgfxLayout);
     mesh.indexBuffer  = _adapter.createIndexBuffer(indices, indexBytes, indexFlags);
 
-    std::vector<WireframePosition> wirePositions;
-    const bool hasWirePositions = extractWireframePositions(
-        vertices, vertexCount, vertexStride, layout, wirePositions);
-    if (use32BitIndices) {
-        const auto wireIndices = hasWirePositions
-            ? buildFeatureWireframeIndices(
-                static_cast<const uint32_t*>(indices), indexCount,
-                wirePositions.data(), vertexCount)
-            : buildTriangleWireframeIndices(
-                static_cast<const uint32_t*>(indices), indexCount);
-        mesh.wireframeIndexCount = static_cast<uint32_t>(wireIndices.size());
-        if (!wireIndices.empty()) {
-            mesh.wireframeIndexBuffer = _adapter.createIndexBuffer(
-                wireIndices.data(),
-                static_cast<uint32_t>(wireIndices.size() * sizeof(uint32_t)),
-                BGFX_BUFFER_INDEX32);
+    if (buildWireframe) {
+        std::vector<WireframePosition> wirePositions;
+        const bool hasWirePositions = extractWireframePositions(
+            vertices, vertexCount, vertexStride, layout, wirePositions);
+        if (use32BitIndices) {
+            const auto wireIndices = hasWirePositions
+                ? buildFeatureWireframeIndices(
+                    static_cast<const uint32_t*>(indices), indexCount,
+                    wirePositions.data(), vertexCount)
+                : buildTriangleWireframeIndices(
+                    static_cast<const uint32_t*>(indices), indexCount);
+            mesh.wireframeIndexCount = static_cast<uint32_t>(wireIndices.size());
+            if (!wireIndices.empty()) {
+                mesh.wireframeIndexBuffer = _adapter.createIndexBuffer(
+                    wireIndices.data(),
+                    static_cast<uint32_t>(wireIndices.size() * sizeof(uint32_t)),
+                    BGFX_BUFFER_INDEX32);
+            }
+        } else {
+            const auto wireIndices = hasWirePositions
+                ? buildFeatureWireframeIndices(
+                    static_cast<const uint16_t*>(indices), indexCount,
+                    wirePositions.data(), vertexCount)
+                : buildTriangleWireframeIndices(
+                    static_cast<const uint16_t*>(indices), indexCount);
+            mesh.wireframeIndexCount = static_cast<uint32_t>(wireIndices.size());
+            if (!wireIndices.empty()) {
+                mesh.wireframeIndexBuffer = _adapter.createIndexBuffer(
+                    wireIndices.data(),
+                    static_cast<uint32_t>(wireIndices.size() * sizeof(uint16_t)),
+                    BGFX_BUFFER_NONE);
+            }
         }
-    } else {
-        const auto wireIndices = hasWirePositions
-            ? buildFeatureWireframeIndices(
-                static_cast<const uint16_t*>(indices), indexCount,
-                wirePositions.data(), vertexCount)
-            : buildTriangleWireframeIndices(
-                static_cast<const uint16_t*>(indices), indexCount);
-        mesh.wireframeIndexCount = static_cast<uint32_t>(wireIndices.size());
-        if (!wireIndices.empty()) {
-            mesh.wireframeIndexBuffer = _adapter.createIndexBuffer(
-                wireIndices.data(),
-                static_cast<uint32_t>(wireIndices.size() * sizeof(uint16_t)),
-                BGFX_BUFFER_NONE);
-        }
-    }
 
+    }
     if (!bgfx::isValid(mesh.vertexBuffer) || !bgfx::isValid(mesh.indexBuffer)) {
         std::fprintf(stderr,
                      "[RenderResourceManager] GPU mesh upload failed (stride=%u verts=%u indices=%u)\n",
@@ -506,10 +509,10 @@ MeshHandle RenderResourceManager::createMesh32(const void* vertices,
                                                uint32_t vertexCount,
                                                const VertexLayoutDesc& layout,
                                                const uint32_t* indices,
-                                               uint32_t indexCount)
+                                               uint32_t indexCount, bool buildWireframe)
 {
     return uploadMeshInternal(vertices, vertexCount, layout.strideBytes(), layout, indices,
-                              indexCount, true);
+                              indexCount, true, false, {}, buildWireframe);
 }
 
 MeshHandle RenderResourceManager::createMeshFromResourceData(const void* vertices,
