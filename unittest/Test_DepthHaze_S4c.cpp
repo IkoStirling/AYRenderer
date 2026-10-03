@@ -12,6 +12,8 @@
 #include "detail/RenderViewOrder.h"
 #include "detail/SSAOPass.h"
 
+#include <algorithm>
+#include <iterator>
 #include <limits>
 #include <iostream>
 #include <string>
@@ -169,36 +171,31 @@ TEST_CASE(deferred_pipeline_matches_data_dependencies) {
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
     CHECK(order.size() == 44u);
-    CHECK(order[14] == 14u);  // SSAO
-    CHECK(order[15] == 8u);   // Lighting
-    CHECK(order[16] == 13u);  // DepthHaze
-    CHECK(order[17] == 9u);   // Deferred Transparent
-    CHECK(order[18] == 244u); // Stable selection silhouette
-    CHECK(order[19] == 253u); // Selection visibility mask
-    CHECK(order[20] == 243u); // GPU particle compute
-    CHECK(order[21] == 246u); // Camera-overlay 2D
-    CHECK(order[22] == 10u);  // BloomExtract
-    CHECK(order[23] == 11u);  // BloomBlurH
-    CHECK(order[24] == 26u);  // Bloom downsample quarter
-    CHECK(order[25] == 27u);  // Bloom downsample eighth
-    CHECK(order[26] == 28u);  // Bloom downsample sixteenth
-    CHECK(order[27] == 29u);  // Bloom upsample eighth
-    CHECK(order[28] == 30u);  // Bloom upsample quarter
-    CHECK(order[29] == 12u);  // Bloom final half-res resolve
-    CHECK(order[30] == 31u);  // Auto exposure
-    CHECK(order[31] == 15u);  // PostProcess
-    CHECK(order[32] == 5u);   // TAA
-    CHECK(order[33] == 17u);  // FXAA
-    CHECK(order[34] == 247u); // SMAA edge detection
-    CHECK(order[35] == 248u); // SMAA blend weights
-    CHECK(order[36] == 249u); // SMAA neighborhood blend
-    CHECK(order[37] == 4u);   // ColorGrading
-    CHECK(order[38] == 16u);  // Present
-    CHECK(order[39] == 245u); // Optional TAA diagnostics, never history
-    CHECK(order[40] == 250u); // GBufferDebug
-    CHECK(order[41] == 254u); // Selection screen-space composite
-    CHECK(order[42] == 251u); // Editor orientation axis
-    CHECK(order[43] == 252u); // Transform gizmo
+    const auto rank = [&order](bgfx::ViewId view) {
+        return std::find(order.begin(), order.end(), view);
+    };
+
+    // Both 3D transparent particles and the 2D overlay consume the compute
+    // output. Scheduling compute earlier must preserve the HDR/post chain.
+    CHECK(std::count(order.begin(), order.end(), 243u) == 1);
+    CHECK(rank(243u) < rank(9u));
+    CHECK(rank(243u) < rank(246u));
+
+    const bgfx::ViewId dependencyChain[] = {
+        7, 3, 14,       // GBuffer, motion vectors, SSAO
+        8, 13, 9,      // Lighting, opaque haze, transparent composition
+        244, 253, 246, // Selection masks, camera-overlay 2D
+        10, 11, 26, 27, 28, 29, 30, 12, // Bloom pyramid and resolve
+        31, 15,        // Exposure before tone mapping
+        5, 17, 247, 248, 249, 4, 16, // AA, color grading, present
+        245, 250, 254, 251, 252 // Diagnostics and editor overlays
+    };
+    for (std::size_t index = 0; index < std::size(dependencyChain); ++index) {
+        CHECK(std::count(order.begin(), order.end(), dependencyChain[index]) == 1);
+        if (index != 0) {
+            CHECK(rank(dependencyChain[index - 1]) < rank(dependencyChain[index]));
+        }
+    }
 }
 
 TEST_CASE(forward_pipeline_keeps_haze_as_safe_noop_before_transparent) {

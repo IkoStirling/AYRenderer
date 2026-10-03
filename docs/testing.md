@@ -64,6 +64,8 @@ out/build/windows-debug/AYRuntime/AYRenderer/unittest/AYRenderer_ShaderTests.exe
   避免依赖其他套件先运行。
 - GPU 默认明确跳过。显式设置 `AY_TAA_GPU_TEST=d3d11` 或 `d3d12` 后运行 gpu 层，
   才能验收真实设备；Noop 回归不能替代真实 GPU 覆盖。
+- 后处理 View 顺序回归按依赖先后检查，不绑定数组绝对下标；GPU 粒子 compute
+  必须早于 3D Transparent 与 2D overlay，且不能改变 HDR、后处理和覆盖层的顺序。
 
 ```powershell
 pwsh -NoProfile -File scripts/tests/verify-module-test-inventory.ps1 -Module AYRenderer

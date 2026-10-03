@@ -15,6 +15,7 @@ inline constexpr std::size_t kRenderViewCapacity = 256u;
 // actual data dependencies. SSAO consumes GBuffer and completes before
 // Lighting, which applies AO only to ambient/IBL. Opaque haze then completes
 // before transparent composition, and Bloom consumes the resulting HDR color.
+// GPU particle compute runs before both transparent 3D and overlay 2D draws.
 inline constexpr std::array<bgfx::ViewId, 44> kRenderViewOrder = {
     243, 1, 18, 19, 20, 21, 22, 23, 24, 25,
     2, 0,
