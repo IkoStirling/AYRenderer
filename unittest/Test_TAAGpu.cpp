@@ -128,7 +128,7 @@ struct TaaGpuFixture {
     std::vector<Pixel> resolve(TaaJitter jitter, float previousDepth,
                               bool velocityValid, bool mixedSky, float bias,
                               float storedDepth = -2.0f, bool historyValid = true,
-                              float velocityPixels = 0.0f) {
+                              float velocityPixels = 0.0f, float debugMode = 0.0f) {
         std::vector<Pixel> current(kSize * kSize), history(current.size());
         std::vector<Pixel> world(current.size(), Pixel{0, 0, 0.2f, 1});
         std::vector<Pixel> surface(current.size(), Pixel{0, 0, 0, 1});
@@ -148,7 +148,7 @@ struct TaaGpuFixture {
         }
         // A quarter-texel velocity exercises four-tap depth validation.
         if (mixedSky) for (auto& v : velocity) v[0] = 0.25f / kSize;
-        return dispatch(jitter, current, history, world, surface, velocity, historyValid);
+        return dispatch(jitter, current, history, world, surface, velocity, historyValid, debugMode);
     }
 
     std::vector<Pixel> dispatch(TaaJitter jitter,
@@ -430,6 +430,36 @@ TEST_CASE(taa_production_shader_fixed_grid_depth_and_missing_velocity)
     CHECK(std::abs(outside[y * kSize + x][0] - expected) < 0.0001f);
 #else
     SKIP_TEST("Real GPU regression currently requires the Windows D3D test harness");
+#endif
+}
+
+TEST_CASE(taa_debug_views_execute_after_geometry_branch)
+{
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated AY_TAA_GPU_TEST=d3d11/d3d12");
+    TaaGpuFixture fixture;
+    const bool ready = fixture.initialize(backend);
+    CHECK(ready);
+    if (!ready) return;
+    const auto center = size_t(16 * kSize + 16);
+    const float current = .2f + .5f * 16.5f / kSize;
+    // A malformed else-if used to enclose the rest of main in the sky
+    // branch: geometry bypassed history mixing AND all five debug views.
+    const std::array<Pixel, 5> expected = {{
+        {0,1,0,1}, {.92f,.92f,.92f,1}, {0,0,0,1},
+        {.5f,.5f,.5f,1}, {current+.002f,current+.002f,current+.002f,1}}};
+    for (int mode = 1; mode <= 5; ++mode) {
+        const auto pixels = fixture.resolve({}, .8f, true, false, .002f,
+                                            -2, true, 0, float(mode));
+        for (size_t c = 0; c < 4; ++c)
+            CHECK(std::abs(pixels[center][c] - expected[mode-1][c]) < .0001f);
+    }
+    const auto rejected = fixture.resolve({}, .8f, false, false, .002f,
+                                          -2, true, 0, 1);
+    CHECK(rejected[center] == (Pixel{1,0,0,1}));
+#else
+    SKIP_TEST("TAA GPU regression requires Windows D3D harness");
 #endif
 }
 

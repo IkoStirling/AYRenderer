@@ -1,5 +1,25 @@
 # AYRenderer 测试维护
 
+## 2026-10-03 TAA fixed-grid 断言修复
+
+- 根因在 AYShader，不是 ABI、实例合批或 TAA 权重预期：Phoskia `else if` 被错误恢复，
+  历史混合/debug/return 被吸入 sky 分支；Lexer 也截断双字符运算符，编译入口忽略了
+  非空 recovery AST 的 parser errors。修复通用编译链路，pool cache schema 更新为 v5。
+- 原用例的 8 个 history feedback 和 1 个混合边缘失败全部恢复通过，容差未放宽；
+  增加实体路径五种 debug mode 与 missing-motion rejection 的真实 GPU 回归。
+- VS 2026 Insider Debug：D3D11、D3D12 各 8 suites/10 cases/6339 assertions 全部通过，
+  覆盖 fixed-grid、support confidence、resident ping-pong、real GBuffer rejection、
+  sloped/recursive edge、Motion、Instancing、Sky。原静态边缘少量覆盖率波动仍在，
+  不把门禁通过描述成所有画面完全无波动或完整编辑器视觉验收。
+- CPU 定向结果：Shader fast 150、integration 280；Renderer Contracts 125、SceneMaterial
+  71、Geometry 96、LightingShadow 137、PostProcess 252、Shader 11，全部实际通过。
+  最终联合 CTest 曾有 SceneMaterial 启动 `operation not permitted`（未运行），单独重跑
+  71/71 通过；不能把首次未启动写成用例通过。构建 PDB 占用在单线程重试后完成。
+- 根输出日志：`out/taa-fix-d3d11.log`、`out/taa-fix-d3d12.log`；CPU 详细记录
+  `out/taa-fix-final-cpu.log` + `out/taa-fix-final-scene.log`，编译器/Shader 独立门禁
+  `out/taa-fix-final-shader.log`。SDK doctor：68 capabilities/52 modules，0 errors/0 warnings。
+  `AYEditorShell_Demo` 已重建；未自动打开或完成用户场景交互验收。
+
 ## 2026-10-03 场景规模化三阶段
 
 - 静态 culling 的六面/near/未知 bounds/变形回退/稳定 jitter 与 Motion 重入回归归属 Contracts。
@@ -18,7 +38,7 @@
   提交前的 Lexer/Parser/Semantic/IR/BGFX 源码在 `out/render-scale-baseline` 隔离重编/重链接，
   未修改的生产 TAAPass 仍输出同样数值：中心约 0.4578，夹具期望约 0.45965。
   本轮实例化不经过该 TAA 夹具，旧编译器也复现，不能将此项宣称为通过或归因于合批。
-  需另行核对 history 拒绝与夹具契约；本轮不放宽断言或更改生产 TAA 掩盖失败。
+  此失败随后已定位并修复，见上方 TAA fixed-grid 专项记录；三阶段原始证据保留。
   MotionVectorGpu（静态/移动/蒙皮/两投影/8 jitter phases）通过。
   最终 Instancing+Motion 联合门禁在 D3D11/D3D12 各为 2/2 cases、792/792 assertions。
 

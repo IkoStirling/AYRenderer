@@ -157,7 +157,9 @@ D3D11/D3D12 隐藏窗口 readback 各通过 1/1 用例、20/20 断言：6 个非
 对象的 GBuffer 与 Shadow 均由 6 draws 降为 2，法线差异 0、阴影最大误差 0。
 这证明该夹具的图像一致与提交减少，不能推导所有场景的帧率提升。用户编辑器画面仍待验收。
 补充门禁：旧 TAA fixed-grid GPU 用例有 9 个断言失败，隔离旧 Shader 编译器仍得到相同
-结果；生产 TAAPass 未被本轮修改。记录于 testing.md，待独立复核，不计为整体 GPU 全绿。
+结果；生产 TAAPass 未被本轮修改。后续专项已定位为 AYShader 的 else-if/运算符/语法
+错误门禁缺陷并修复；未修改 TAA 算法或容差。D3D11/12 各 10 cases/6339 assertions
+通过，含新 debug mode 回归，详见 testing.md 的 2026-10-03 TAA fixed-grid 修复记录。
 
 ### R6-6：诊断与真 GPU 门禁（已完成）
 
