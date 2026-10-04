@@ -1,5 +1,17 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 第6项：作者工具/编译隔离
+
+共享生产frontend/IR与BGFX Emit的报告核心、CLI analyze 和现有Editor DSL面板已接入。
+Compiler类型环境隔离、legacy语义失败和默认资源options有回归。最终CPU12入口全过
+（144.47s，Shader152/716+336/1583）；Editor349/6033及独立装配入口通过。
+D3D11/12各9 suites/22 cases/8958 assertions，无skip、容差不变。
+inventory Shader488/2、Renderer943/10、Editor350/2；CLI JSON成功/失败路径通过。
+初次Editor inventory空数组来自未构建DefaultEditorModuleAssemblyTest，补建后核对通过，
+不是被跳过的测试。记录日志out/phoskia-expansion-6-verified-cpu.log、editor-full.log、
+editor-assembly.log、d3d11/d3d12.log、inventory-* 与cli-verified/invalid.json。
+源码分析成功不代表GPU验证，报告成本不是GPU时间；作者功能限制见AYShader README。
+
 ## 2026-10-04 Phoskia 第5项：Compute 实际调度
 
 D3D11/12 各9 suites /22 cases /8958 assertions，无 skip、容差未放宽。
