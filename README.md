@@ -4,6 +4,10 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 
 完整设计见 [`design.md`](design.md)。
 
+Phoskia 值结构体（2026-10-04）已回读构造、字段修改、helper 传参/返回和 bool 字段。
+D3D11/12 Phoskia 组各 9 cases / 2242 assertions 通过，无 skip；不是 GPU buffer
+struct 布局扩展，不支持直接结构体 UBO/storage 上传。
+
 纯数学 helper 函数（2026-10-04）设备测试已覆盖 vertex/fragment 前向调用、提前
 return、循环、bool/uint 和生成名字碰撞。D3D11/12 完整设备组各 18 cases /
 8513 assertions 通过，无 skip；结构体和模块复用尚待后续阶段。

@@ -1,5 +1,13 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 第 4c 项：值结构体
+
+CPU 12 入口通过（124.42s）；D3D11/12 Phoskia 组各 9 cases / 2242 assertions，
+无 skip、原容差不变。struct 用例验证 constructor、字段改写、helper 参数/返回及 bool。
+日志 out/phoskia-expansion-4-struct-final-cpu.log、同前缀 d3d11/d3d12.log；
+inventory Shader 474/2、Renderer 940/10，SDK doctor 0/0。前一阶段完整 9-suite
+设备组已通过，module include 与 compute 设备 closure 尚未完成。
+
 ## 2026-10-04 Phoskia 第 4b 项：纯数学函数
 
 完整 CPU 12 入口通过（125.56s）；D3D11/12 各 9 suites / 18 cases / 8513 assertions，

@@ -276,6 +276,26 @@ TEST_CASE(phoskia_integer_boolean_and_mixed_block_uploads_match_gpu_values) {
 #endif
 }
 
+TEST_CASE(phoskia_value_structs_execute_construction_fields_and_helpers) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    PhoskiaGpuFixture fixture;
+    const bool initialized = fixture.initialize(backend);
+    CHECK(initialized);
+    if (!initialized) return;
+    const auto source = "fn scale(s:Surface, value:float):Surface { return Surface(s.tint * value, s.gain, s.enabled); } "
+        "fn shade(s:Surface):vec3 { if (s.enabled) { return s.tint * s.gain; } return vec3(0.0); } "
+        "struct Surface { vec3 tint; float gain; bool enabled; } "
+        "material Probe { vertex { in p : position; return vec4(p, 1.0); } fragment { "
+        "let s = Surface(vec3(0.1, 0.2, 0.3), 2.0, true); let scaled = scale(s, 0.5); "
+        "scaled.gain = 4.0; return vec4(shade(scaled), 1.0); } }";
+    checkPixels(fixture.renderSource(source), {.2f,.4f,.6f,1});
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
+
 TEST_CASE(phoskia_typed_helpers_execute_returns_loops_and_forward_calls) {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");
