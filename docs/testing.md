@@ -1,5 +1,19 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 加固第四阶段
+
+- 资源池编译配置、key 与磁盘目录使用同一请求快照；错误热重载版本不会成功缓存，
+  恢复版本得到新绑定。Shader fast 150/695 assertions、integration 299/1026 assertions
+  与 Renderer Shader 11/84 assertions 全通过，联合 27.58 秒。
+- D3D11 与 D3D12 各 9 suites/13 cases/7285 assertions 实际通过，无 skip；覆盖 Phoskia、
+  TAA（support/resident/rejection/edge）、motion vector、实例化及天空输出。
+- 独立 AYEditorShell_Demo 最新重建成功，未替换 pid 69276 的运行版本，未宣称视觉验收。
+  SDK doctor：72 capabilities/53 modules/158 symbols，0 errors/0 warnings。
+- 日志：out/render-phoskia-stage4-red-tests.log（配置竞态先复现）、
+  out/render-phoskia-stage4-fixed-tests.log、out/render-phoskia-stage4-final-tests.log、
+  out/render-phoskia-stage4-d3d11.log、out/render-phoskia-stage4-d3d12.log、
+  out/render-phoskia-stage4-editor-build.log 与 out/render-phoskia-stage4-sdk.log。
+
 ## 2026-10-04 Phoskia 加固第三阶段
 
 - Compute 前端/IR/后端契约修复，缓存 schema v8。Shader fast 150/695 assertions、
