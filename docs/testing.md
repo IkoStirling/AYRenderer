@@ -1,5 +1,20 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 加固第六阶段
+
+- Vector conversion 曾复制首分量：真实 D3D11 红测试 128 个数值断言失败，修复后保留
+  分量，并对 D3D 显式截取后转换；scalar splat、Mat3 上传与缺分量拒绝都有对照。
+- Shader fast 150/695 assertions、integration 301/1044 assertions 实际通过（23.49 秒）。
+  Renderer 10 个完整组通过（75.23 秒）；其中普通 gpu 组 14 个明确 skip，不作设备证据。
+- 独立 D3D11/12 各 9 suites/14 cases/7691 assertions 实际通过，无 skip；单独 Phoskia
+  GPU 为 4 cases/1352 assertions。原 1e-4 数值容差和 TAA/Shadow 测试验收线未降低。
+- SDK doctor 72 capabilities/53 modules/158 symbols，0 errors/0 warnings；cache schema v9。
+- 日志：out/render-phoskia-stage6-red-gpu.log、out/render-phoskia-stage6-red-text.log、
+  out/render-phoskia-stage6-shader-final.log、out/render-phoskia-stage6-renderer-full.log、
+  out/render-phoskia-stage6-full-d3d11.log、out/render-phoskia-stage6-full-d3d12.log 与
+  out/render-phoskia-stage6-sdk.log。初次仅恢复 GLSL ctor 的尝试在 D3D 出现 X3014，
+  最终显式 swizzle 后全量通过。
+
 ## 2026-10-04 Phoskia 加固第五阶段
 
 - 关闭期间的旧请求不得回填资源池。红测试先复现 6 个失败断言；内部 lifecycle epoch

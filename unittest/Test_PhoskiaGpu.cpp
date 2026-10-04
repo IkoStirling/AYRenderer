@@ -213,4 +213,36 @@ TEST_CASE(phoskia_small_vectors_arrays_and_shadowed_uniforms_match_gpu_values) {
 #endif
 }
 
+TEST_CASE(phoskia_vector_constructors_preserve_components_and_matrix_uploads) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated AY_TAA_GPU_TEST=d3d11/d3d12");
+    PhoskiaGpuFixture fixture;
+    const bool initialized = fixture.initialize(backend);
+    CHECK(initialized);
+    if (!initialized) return;
+    const float color[4] = {.2f,.4f,.6f,.8f};
+    const auto bindColor = [&](const auto& program) {
+        program.setUniform(program.getUniformBinding("colorValue"), color, sizeof(color));
+    };
+    checkPixels(fixture.render("uniform vec4 colorValue;", "return vec4(colorValue);", bindColor), {.2f,.4f,.6f,.8f});
+    checkPixels(fixture.render("uniform vec4 colorValue;", "return vec4(vec3(colorValue), 1.0);", bindColor), {.2f,.4f,.6f,1});
+    checkPixels(fixture.render("uniform vec4 colorValue;", "return vec4(vec2(vec3(colorValue)), 0.6, 0.8);", bindColor), {.2f,.4f,.6f,.8f});
+    const float shortVectorData[3] = {.2f,.4f,.6f};
+    checkPixels(fixture.render("uniform vec3 colorValue;", "return vec4(vec3(colorValue), 1.0);",
+        [&](const auto& program) { program.setUniform(program.getUniformBinding("colorValue"), shortVectorData, sizeof(shortVectorData)); }), {.2f,.4f,.6f,1});
+    checkPixels(fixture.render("", "return vec4(0.25);"), {.25f,.25f,.25f,.25f});
+    const float transform[9] = {2,0,0, 0,3,0, 0,0,4};
+    checkPixels(fixture.render("uniform mat3 transform;", "return vec4(transform * vec3(0.1, 0.2, 0.3), 1.0);",
+        [&](const auto& program) { program.setUniform(program.getUniformBinding("transform"), transform, sizeof(transform)); }), {.2f,.6f,1.2f,1});
+    auto invalid = fixture.pool.acquire("material Invalid { vertex { return vec4(0.0) } fragment { return vec4(vec3(1.0)) } }");
+    CHECK(!invalid.isValid());
+    CHECK(!fixture.pool.lastCompileErrors().empty());
+    if (!fixture.pool.lastCompileErrors().empty())
+        CHECK(fixture.pool.lastCompileErrors().front().find("requires at least 4") != std::string::npos);
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
+
 TEST_SUITE_END
