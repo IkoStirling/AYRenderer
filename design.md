@@ -1,5 +1,14 @@
 # AYRenderer Design
 
+## 2026-10-04 — Phoskia 模块依赖设备闭环
+
+Test_PhoskiaGpu 通过 compileFromFile 使用相对 .phoskia 引用，包含 struct 与 helper。
+保持根源码与模块时间戳不变、仅修改函数乘数，回读从 (0.2,0.4,0.6,1) 变为
+(0.3,0.6,0.9,1)，source/binary miss 均为 2。没有 raw-SC 替代测试路径。
+D3D11/12 完整 9-suite 设备组各 20 cases / 8721 assertions 通过，无 skip；
+RGBA32F 每通道 1e-4 不变。日志 out/phoskia-expansion-4-module-d3d11.log / d3d12.log。
+模块展开、依赖身份、错误映射与语言预算由 AYShader 管理，不增加 Renderer 的编译实现。
+
 ## 2026-10-04 — CPU 变形网格可选线框构建
 
 Renderer::createMesh32 保留五参数 ABI，新增六参数 bool buildWireframe 重载。

@@ -1,5 +1,13 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 第 4d 项：模块依赖
+
+D3D11/12 完整设备组各 9 suites / 20 cases / 8721 assertions 通过，无 skip，
+回读容差不变。新增 module 用例证明同时间戳内容修改取得新编译结果。
+日志 out/phoskia-expansion-4-module-d3d11.log / d3d12.log；CPU 全量日志为
+out/phoskia-expansion-4-module-final-cpu.log。模块 inventory Shader 479/2、
+Renderer 941/10，SDK doctor 0/0。Compute dispatch/readback 与作者工具还在实施。
+
 ## 2026-10-04 Phoskia 第 4c 项：值结构体
 
 CPU 12 入口通过（124.42s）；D3D11/12 Phoskia 组各 9 cases / 2242 assertions，

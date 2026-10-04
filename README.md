@@ -4,13 +4,17 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 
 完整设计见 [`design.md`](design.md)。
 
+Phoskia 模块引用设备验证位于 Test_PhoskiaGpu：仅改变被包含模块内容并保留时间戳，
+相同根源码仍取得新程序，RGBA32F 回读值随模块函数变化。使用生产资源池文件入口，
+不手写替代 .sc；语言/依赖边界见 AYShader README。
+
 Phoskia 值结构体（2026-10-04）已回读构造、字段修改、helper 传参/返回和 bool 字段。
 D3D11/12 Phoskia 组各 9 cases / 2242 assertions 通过，无 skip；不是 GPU buffer
 struct 布局扩展，不支持直接结构体 UBO/storage 上传。
 
 纯数学 helper 函数（2026-10-04）设备测试已覆盖 vertex/fragment 前向调用、提前
 return、循环、bool/uint 和生成名字碰撞。D3D11/12 完整设备组各 18 cases /
-8513 assertions 通过，无 skip；结构体和模块复用尚待后续阶段。
+8513 assertions 通过，无 skip；结构体和模块复用由后续阶段补齐。
 
 Phoskia 受限循环设备证据（2026-10-04）：Test_PhoskiaGpu 覆盖可见索引赋值不影响
 推进、嵌套 int 运算和 uniform/local 名字遮蔽。D3D11/12 各 7 cases / 2039 assertions

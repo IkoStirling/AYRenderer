@@ -138,6 +138,42 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
 
+TEST_CASE(phoskia_modules_recompile_changed_content_on_device) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    namespace fs = std::filesystem;
+    const auto root = fs::temp_directory_path() / ("phoskia_module_gpu_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root);
+    struct Cleanup { fs::path path; ~Cleanup() { std::error_code ec; fs::remove_all(path,ec); } } cleanup{root};
+    const auto sourcePath = (root/"probe.phoskia").string();
+    const auto modulePath = (root/"math.phoskia").string();
+    CHECK(ayt::io::File::writeAllText(sourcePath,
+        "include \"math.phoskia\";\nmaterial Probe { vertex { in p : position; return vec4(p,1.0); } "
+        "fragment { return vec4(shade(Surface(vec3(0.1,0.2,0.3))),1.0); } }"));
+    CHECK(ayt::io::File::writeAllText(modulePath,
+        "struct Surface { vec3 tint; } fn shade(s:Surface):vec3 { return s.tint * 2.0; }\n"));
+    const auto stamp = fs::last_write_time(modulePath);
+    PhoskiaGpuFixture fixture;
+    const bool initialized = fixture.initialize(backend);
+    CHECK(initialized);
+    if (!initialized) return;
+    auto first = fixture.pool.compileFromFile(sourcePath);
+    checkPixels(fixture.renderResource(first), {.2f,.4f,.6f,1});
+    CHECK(ayt::io::File::writeAllText(modulePath,
+        "struct Surface { vec3 tint; } fn shade(s:Surface):vec3 { return s.tint * 3.0; }\n"));
+    fs::last_write_time(modulePath,stamp);
+    auto second = fixture.pool.compileFromFile(sourcePath);
+    checkPixels(fixture.renderResource(second), {.3f,.6f,.9f,1});
+    CHECK(fixture.pool.cacheStats().sourceMisses == 2);
+    CHECK(fixture.pool.cacheStats().binaryMisses == 2);
+    fixture.pool.release(first);
+    fixture.pool.release(second);
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
+
 TEST_CASE(phoskia_offline_package_prewarm_matches_device_without_shaderc) {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");
