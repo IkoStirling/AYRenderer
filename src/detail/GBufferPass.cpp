@@ -1,4 +1,5 @@
 #include "detail/GBufferPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 #include "AYRenderer/RenderTypes.h"
 #include "detail/BgfxMatrix.h"
@@ -1094,3 +1095,12 @@ void GBufferPass::cacheAttachments(BGFXAdapter& adapter)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendGBufferPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(embeddedShader("gbuffer",kGBufferPhoskiaSource));
+    jobs.push_back(embeddedShader("gbuffer_2d",kWorldLit2DGBufferPhoskiaSource));
+    jobs.push_back(embeddedShader("gbuffer_instances",rigidInstancedSource(kGBufferPhoskiaSource)));
+    jobs.push_back(rawShader("gbuffer_cutout",kGBufferAlphaCutoutVertexSc,kGBufferAlphaCutoutFragmentSc,kGBufferAlphaCutoutVaryingSc));
+}
+}

@@ -38,6 +38,11 @@ public:
     Renderer(Renderer&&) noexcept;
     Renderer& operator=(Renderer&&) noexcept;
 
+    /// Initializes the device and matching production shader packages beside
+    /// the executable. Published games/Release default never invoke shaderc; missing,
+    /// stale or corrupt packages fail real-device initialization with a report.
+    /// Debug development and an explicit authoring editor role retain source
+    /// compilation/hot reload; authoring installs carry relative compiler tools.
     bool initialize(const InitDesc& desc);
     void shutdown();
     bool isInitialized() const noexcept;

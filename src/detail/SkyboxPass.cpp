@@ -1,4 +1,5 @@
 #include "detail/SkyboxPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 #include "detail/BgfxMatrix.h"
 #include "detail/FrameContext.h"
@@ -565,3 +566,9 @@ uint32_t SkyboxPass::execute(PassExecContext& ctx)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendSkyboxPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(embeddedShader("skybox",kSkyboxPhoskiaSource));
+}
+}

@@ -1,4 +1,5 @@
 #include "detail/PresentPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 #include "detail/FgResource.h"
 #include "detail/GpuResources.h"
@@ -133,3 +134,9 @@ void PresentPass::destroyResources(BGFXAdapter& adapter)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendPresentPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(embeddedShader("present",kPresentPhoskiaSource));
+}
+}

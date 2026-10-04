@@ -1,4 +1,5 @@
 #include "detail/TAAPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 #include "detail/BgfxMatrix.h"
 #include "detail/FgResource.h"
@@ -890,3 +891,9 @@ void TAAPass::destroyResources(BGFXAdapter& adapter)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendTAAPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(embeddedShader("taa",kTaaPhoskiaSource));
+}
+}

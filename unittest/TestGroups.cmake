@@ -124,6 +124,7 @@ set(AYRENDERER_TEST_UI_SOURCES
     Test_UIVectorPath.cpp)
 
 set(AYRENDERER_TEST_Shader_SOURCES
+    Test_ShaderProduction.cpp
     Test_PbrShader.cpp
     Test_ShadowConfig.cpp
     Test_ShadowPhoskiaEmit.cpp)

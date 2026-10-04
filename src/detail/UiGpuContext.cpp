@@ -1,4 +1,5 @@
 #include "detail/UiGpuContext.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 
 
@@ -901,3 +902,10 @@ void UiGpuContext::releaseTextTexture(BGFXAdapter& adapter, uint16_t textureIdx)
 
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendUiGpuContextShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(rawShader("ui_flat",kVsUi,kFsUi,kVaryingDef));
+    jobs.push_back(rawShader("ui_sdf",kVsUiSdf,kFsUiSdf,kVaryingDefUiSdf));
+}
+}

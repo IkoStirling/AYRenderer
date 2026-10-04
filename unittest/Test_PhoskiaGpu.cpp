@@ -4,6 +4,10 @@
 #include "AYTest.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "AYShader/ShaderBuild.h"
+#include "AYShader/ShadercDriver.h"
+#include "detail/BuiltinShaderCatalog.h"
+#include "detail/ShaderProduction.h"
+#include "detail/ShaderPoolSetup.h"
 #include "AYShader/detail/ComputeResourceAccess.h"
 #include <AYIO/File.h>
 #include "detail/BGFXAdapter.h"
@@ -330,6 +334,15 @@ TEST_CASE(phoskia_offline_package_prewarm_matches_device_without_shaderc) {
     CHECK(fixture.pool.cacheStats().sourceMisses == 0);
     fixture.pool.release(handles[0]);
     handles.clear();
+    CHECK(fixture.pool.installPrecompiled(loaded,errors));
+    fixture.pool.setRuntimeCompilationEnabled(false);
+    const auto normal = fixture.pool.compileFromFile(sourcePath);
+    CHECK(normal.isValid());
+    checkPixels(fixture.renderResource(normal, [&](const auto& program) {
+        program.setUniformBlock(program.getUniformBlockBinding("Data"),payload,sizeof(payload));
+    }), {.1f,.2f,.3f,1});
+    CHECK(fixture.pool.cacheStats().binaryMisses == 0);
+    CHECK(fixture.pool.cacheStats().sourceMisses == 0);
     auto mismatched = loaded;
     mismatched.platform = "linux"; mismatched.profile = "430";
     fixture.pool.setPlatform("linux"); fixture.pool.setGLSLProfile("430");
@@ -617,4 +630,62 @@ TEST_CASE(phoskia_vector_constructors_preserve_components_and_matrix_uploads) {
 #endif
 }
 
+TEST_CASE(phoskia_complete_engine_catalog_installs_on_real_device_without_compiler) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    const auto jobs=ayt::render::detail::builtinShaderJobs();
+    ayt::shader::ShaderBuildManifest manifest;
+    manifest.target={AY_SHADER_SHADERC_HINT,"windows","s_5_0",{AY_SHADER_BGFX_COMMON_HINT,AY_SHADER_BGFX_SRC_HINT}};
+    manifest.variantBudget=128;manifest.jobs=jobs;
+    ayt::shader::ShaderBuildSession session;ayt::shader::ShaderBuildReport report;
+    session.build(manifest,report);CHECK(report.success);if(!report.success)return;
+    PhoskiaGpuFixture fixture;const bool initialized=fixture.initialize(backend);CHECK(initialized);if(!initialized)return;
+    fixture.pool.setShadercExecutable("missing-engine-compiler.exe");
+    const auto packageRoot=std::filesystem::temp_directory_path()/("engine_production_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup { std::filesystem::path root; ~Cleanup() {std::error_code ec;std::filesystem::remove_all(root,ec);} } cleanup{packageRoot};
+    struct Environment {
+        std::string name, previous; bool existed;
+        Environment(const char* key,const std::string& value):name(key),existed(std::getenv(key)!=nullptr) {
+            if(existed) previous=std::getenv(key);_putenv_s(key,value.c_str());
+        }
+        ~Environment() {_putenv_s(name.c_str(),existed?previous.c_str():"");}
+    } rootOverride("AY_SHADER_PACKAGE_ROOT",packageRoot.string()), compilationOverride("AY_SHADER_RUNTIME_COMPILE","");
+    std::vector<std::string> errors;
+    CHECK(ayt::shader::writeShaderBuildPackage(report,(packageRoot/"windows-s_5_0"/"engine").string(),errors));
+    const auto policy=(packageRoot/"production.policy").string();
+    CHECK(ayt::io::File::writeAllText(policy,"AYPhoskiaProduction/1\n"));
+    const bool configured=ayt::render::detail::configureShaderPool(fixture.pool);
+    CHECK(configured);if(!configured)return;
+    for(const auto& job:jobs) {
+        const auto program=job.vertexSc.empty()?fixture.pool.acquire(job.sourceText,"device-catalog"):
+            fixture.pool.acquireFromBgfxSc(job.vertexSc,job.fragmentSc,job.varyingSc,"device-catalog");
+        CHECK_MSG(program.isValid(),job.name.c_str());
+    }
+    CHECK(fixture.pool.cacheStats().binaryMisses==0);
+    CHECK(fixture.pool.cacheStats().sourceMisses==0);
+    CHECK(!fixture.pool.acquire("material Missing {vertex {return vec4(0.0)} fragment {return vec4(1.0)}}").isValid());
+    CHECK(ayt::io::File::writeAllText(policy,"unknown-policy\n"));
+    CHECK(!ayt::render::detail::configureShaderPool(fixture.pool));
+    CHECK(ayt::io::File::writeAllText(policy,"AYPhoskiaProduction/1\n"));
+    CHECK(ayt::io::File::writeAllText((packageRoot/"authoring.policy").string(),"AYPhoskiaAuthoring/1\n"));
+    // Relocated authoring products must not depend on build-machine hints.
+    const auto authoringTools=packageRoot/"authoring";
+    std::filesystem::create_directories(authoringTools);
+    CHECK(!ayt::render::detail::configureShaderPool(fixture.pool));
+    std::filesystem::copy_file(AY_SHADER_SHADERC_HINT,authoringTools/"shaderc.exe");
+    std::filesystem::copy(AY_SHADER_BGFX_COMMON_HINT,authoringTools/"include-common",std::filesystem::copy_options::recursive);
+    std::filesystem::copy(AY_SHADER_BGFX_SRC_HINT,authoringTools/"include-src",std::filesystem::copy_options::recursive);
+    struct DefaultCompilerRestore { ~DefaultCompilerRestore() {ayt::shader::AYShadercDriver::setDefaultExecutable(AY_SHADER_SHADERC_HINT);} } defaultCompilerRestore;
+    CHECK(ayt::render::detail::configureShaderPool(fixture.pool));
+    const auto edited=fixture.pool.acquire("material Edited {vertex {in p : position; return vec4(p,1.0)} fragment {return vec4(0.2,0.4,0.6,1.0)}}");
+    CHECK(edited.isValid());
+    const auto editedPixels=fixture.renderResource(edited);
+    CHECK(editedPixels.size()==PhoskiaGpuFixture::size*PhoskiaGpuFixture::size);
+    for(const auto& pixel:editedPixels) for(size_t channel=0;channel<4;++channel)
+        CHECK(std::abs(pixel[channel]-Pixel{0.2f,0.4f,0.6f,1.0f}[channel])<1e-4f);
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
 TEST_SUITE_END

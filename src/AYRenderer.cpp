@@ -990,6 +990,11 @@ bool Renderer::initialize(const InitDesc& desc)
     _impl->viewportX       = 0;
     _impl->viewportY       = 0;
     _impl->shaderPoolReady = detail::configureShaderPool(_impl->shaderPool);
+    if (!_impl->shaderPoolReady && _impl->adapter.capsRendererType()!=bgfx::RendererType::Noop) {
+        std::fprintf(stderr,"[Renderer] Shader startup failed; initialization cancelled.\n");
+        shutdown();
+        return false;
+    }
     if (_impl->shaderPoolReady) {
         _impl->shaderPool.resolvePlatformFromRenderer();
     }

@@ -1,4 +1,5 @@
 #include "detail/FXAAPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 #include "detail/FgResource.h"
 #include "detail/GpuResources.h"
@@ -419,3 +420,9 @@ void FXAAPass::destroyResources(BGFXAdapter& adapter)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendFXAAPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(rawShader("fxaa",kFxaaVertexSc,kFxaaFragmentSc,kFxaaVaryingSc));
+}
+}

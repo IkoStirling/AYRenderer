@@ -62,6 +62,14 @@ target_link_libraries(AYRenderer PRIVATE
 )
 
 # UI text uses AYFont (FreeType glyph atlas).
+add_executable(AYRenderer_ShaderBuild tools/RendererShaderBuild.cpp)
+target_link_libraries(AYRenderer_ShaderBuild PRIVATE AYRenderer)
+target_include_directories(AYRenderer_ShaderBuild PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_definitions(AYRenderer_ShaderBuild PRIVATE
+    AY_SHADER_SHADERC_HINT="${AY_SHADER_SHADERC_PATH}"
+    AY_SHADER_BGFX_COMMON_HINT="${AY_SHADER_BGFX_COMMON_DIR}"
+    AY_SHADER_BGFX_SRC_HINT="${AY_SHADER_BGFX_SRC_DIR}")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AYShaderProduction.cmake")
 
 if(MSVC)
     # bgfx/bx headers require conforming preprocessor and __cplusplus on MSVC.

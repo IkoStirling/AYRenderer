@@ -1,5 +1,23 @@
 # AYRenderer Design
 
+## 2026-10-05 — Phoskia 默认生产接入
+
+内部 BuiltinShaderCatalog 汇集实际 Pass 的 63 个源/变体，Lighting 覆盖0..8 shadow slots和hard/PCF，
+其余为当前已声明源/实例化变体；新增或改源必须更新清单，启动 coverage 校验拒绝旧 engine 包。
+AYProductionShaders 增量依赖 builder（链接实际源）、shaderc 和 include文本
+（.sh/.sc/.h/.inc/.glsl/.hlsl）；标准目标默认 staging。
+项目代码构建仍走 ay_add_game_executable；独立第三方目标须显式使用 staging helper。
+
+configureShaderPool 先确定活动 backend，再装载 engine/project 并应用严格/开发策略。
+包根使用 exe 路径，显式 AY_SHADER_PACKAGE_ROOT 必须存在；非法策略/文件系统异常都报告失败。
+Release 和发布 policy 不探测编译器，缺变体不可静默临时编译；开发 Debug 保留 watch 和错误快照。
+安装在 bgfx API 线程进行。整体初始化失败由 Renderer shutdown 回收已安装资源，Noop 测试例外保留。
+收尾增加ParticleUnlit及Entity rigid fallback，后者与Entity共享实际字节，总清单63项。
+标准Editor的build/install显式authoring.policy可覆盖Release默认严格，保持动态预览/DSL编译；
+安装作者工具附带shaderc/include-common/include-src，优先exe相对路径。发布游戏只用production.policy，
+不携带作者工具。AY_SHADER_RUNTIME_COMPILE显式值最终优先，两种policy同时存在时authoring角色优先。
+源码现有遗留 raw 编译统一复用 AYShader，不新增 Pass 绕过 Phoskia。
+
 ## 2026-10-04 Phoskia Compute 验证
 
 Test_PhoskiaGpu 真实 dispatch 并回读 compute→graphics、shared/global atomicAdd、

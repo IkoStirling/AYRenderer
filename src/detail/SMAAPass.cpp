@@ -1,4 +1,5 @@
 #include "detail/SMAAPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 #include "detail/FgResource.h"
 #include "detail/GpuResources.h"
@@ -738,3 +739,11 @@ void SMAAPass::destroyResources(BGFXAdapter& adapter)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendSMAAPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(rawShader("smaa_edge",kSmaaVertexSc,kSmaaEdgeFragmentSc,kSmaaVaryingSc));
+    jobs.push_back(rawShader("smaa_weight",kSmaaVertexSc,kSmaaWeightFragmentSc,kSmaaVaryingSc));
+    jobs.push_back(rawShader("smaa_neighborhood",kSmaaVertexSc,kSmaaNeighborhoodFragmentSc,kSmaaVaryingSc));
+}
+}

@@ -3,6 +3,7 @@ set(AY_RESOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource")
 include("${AY_SHADER_ROOT}/cmake/AYBgfx.cmake")
 
 add_executable(AYRenderer_Demo RotatingCubeDemo.cpp)
+ay_stage_production_shaders(AYRenderer_Demo)
 
 target_link_libraries(AYRenderer_Demo PRIVATE
     AYRenderer

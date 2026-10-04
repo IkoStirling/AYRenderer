@@ -1,4 +1,5 @@
 #include "detail/PostProcessPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 #include "detail/BloomBlurPass.h"  // Legacy direct-context fallback.
 #include "detail/BloomPipeline.h"
@@ -539,3 +540,10 @@ bgfx::FrameBufferHandle PostProcessPass::selectSourceFbo(
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendPostProcessPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(embeddedShader("post_process",kPostProcessPhoskiaSource));
+    jobs.push_back(embeddedShader("post_passthrough",kPostProcessPassthroughSource));
+}
+}

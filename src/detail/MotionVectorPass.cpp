@@ -1,4 +1,5 @@
 #include "detail/MotionVectorPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 #include "AYRenderer/RenderTypes.h"
 #include "detail/BgfxMatrix.h"
@@ -762,3 +763,10 @@ void MotionVectorPass::destroyResources(BGFXAdapter& adapter)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendMotionVectorPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(embeddedShader("motion",kMotionVectorPhoskiaSource));
+    jobs.push_back(embeddedShader("motion_cutout",kMotionVectorCutoutPhoskiaSource));
+}
+}

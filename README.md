@@ -1,5 +1,23 @@
 # AYRenderer
 
+## 默认离线 shader 生产流程（2026-10-05）
+
+标准编辑器及 `ay_add_game_executable` 自动构建/部署 63 项内置 shader 清单，
+覆盖当前 2D/3D、实例化、阴影、后处理、AA、选中覆盖层与 UI。构建入口为内部工具
+`AYRenderer_ShaderBuild platform profile package-directory`；清单引用实际 Pass 源，非测试副本。
+CMake 的 `AY_PRODUCTION_SHADER_PLATFORM/PROFILE` 可选择编译目标，Windows 默认 windows/s_5_0，
+同时用于 D3D11/12。跨编译尚无 host-tool 集成，明确拒绝；其他后端需重新离线构建并设备验证。
+
+Renderer 启动按可执行文件而非 cwd 查找 `Shaders`，只消费活动后端的 engine/project 包；
+engine 覆盖不足、摘要错误、策略非法或目标不匹配均可报告。Release 默认不启用运行时 shaderc，
+发布的 Debug 项目也由 `production.policy` 强制严格；开发 Debug 保留编译/热重载。
+已有正常 acquire 会复用安装的字节，不需要各 Pass 维护预热句柄。Noop 测试保持原有兼容行为。
+自定义源/宏集合不是 CMake 自动扫描游戏目录，而由 ProjectBuild 的选定内容闭包负责。
+标准编辑器采用 authoring.policy（含Release），保留动态预览与DSL源编译；install同时携带
+shaderc和include根，按exe相对位置发现，不依赖开发机路径。游戏ProjectBuild仍严格，
+作者工具与发布游戏不混用角色策略。第三方 install 可调用内部
+ay_install_production_shaders，将包安装在目标可执行文件旁。
+
 AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调度、视口、几何提交、场景数据收集，并通过 **AYShader `ShaderResource`** 绑定 Phoskia 材质（不自行编译 shader、不在材质路径上暴露 bgfx program/uniform handle）。
 
 完整设计见 [`design.md`](design.md)。

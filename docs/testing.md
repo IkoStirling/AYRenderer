@@ -1,5 +1,34 @@
 # AYRenderer 测试维护
 
+## 2026-10-05 默认 Phoskia 生产链路
+
+最终shader-full/renderer-full/resource-full/editor-full共19个CTest入口全部通过（231.88s），
+Editor主套350用例/6064断言；动画作者core三入口补建后通过。设备回读单独运行，不能把
+便携CTest的GPU opt-in跳过当作D3D设备验证。SDK doctor 73能力/53模块/165入口，0错0警告。
+最终CPU日志：out/phoskia-production-roles-cpu.log。
+
+### 本轮验证
+
+- ShaderBuildTests：5用例/115断言，包括严格缺变体、同源不同label命中、释放后重建、
+  冲突事务回滚、模块版本及超过260字符的包路径。
+- Test_ShaderProduction：实际63项清单编译、普通source/raw acquire复用和旧清单拒绝。
+- D3D11、D3D12独立进程各23用例/9174断言，无跳过。新增完整清单用例通过生产
+  configureShaderPool读取包及policy（编译器设为不存在路径），普通acquire无编译miss；
+  作者角色用搬迁后的相对shaderc/include编译新预览并像素回读，缺工具拒绝；原有UBO、
+  Compute、模块/函数、pixel readback、TAA与实例化门禁保持原容差。
+  日志：out/phoskia-production-roles-d3d11.log（75.232s）、
+  out/phoskia-production-roles-d3d12.log（146.595s）。
+- ProjectBuild默认程序/模块发布与失败保留旧输出通过；Windows深目录失败已修复。
+- 标准编辑器构建及install规则成功生成schema3 engine包，安装后63项stage摘要逐项匹配。
+  编辑器使用authoring.policy并附带相对compiler/include；游戏production.policy仍严格。
+  一次整合重建曾受并行AYScriptTasks.cpp错误阻挡，随后成功重建Editor与Entity；之后另一次
+  AYEditorStage重建遇到并行AYLogiaPackage.cpp编译错误。install规则用最近成功构建验证，
+  不等于持续变化中AYScript最新源码全树验收；未修改或提交该模块。
+
+首轮同时运行CPU与GPU时，旧TAA rejection探针曾在程序获取阶段失败；独立单例1004断言
+和后续D3D11/12整组均通过，未改变测试容差。尚未单独证实首次失败根因，不将并发编译
+竞争写成确定结论；设备回归保持隔离、串行。CPU入口中的可选外部FBXfixture仍可能跳过。
+
 ## 2026-10-04 Phoskia 第6项：作者工具/编译隔离
 
 共享生产frontend/IR与BGFX Emit的报告核心、CLI analyze 和现有Editor DSL面板已接入。

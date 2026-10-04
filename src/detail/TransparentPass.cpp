@@ -1,4 +1,5 @@
 #include "detail/TransparentPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 #include "detail/RasterConvention.h"
 #include "detail/GpuResources.h"
 #include "detail/ShadowPass.h"
@@ -891,3 +892,9 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendTransparentPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(embeddedShader("selection_outline",kSelectionOutlinePhoskiaSource));
+}
+}

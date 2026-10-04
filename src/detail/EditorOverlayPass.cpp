@@ -1,4 +1,5 @@
 #include "detail/EditorOverlayPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 #include "AYShader/ShaderResource.h"
 
 #include "AYMath/MathUtils.h"
@@ -1123,3 +1124,9 @@ uint32_t EditorOverlayPass::execute(PassExecContext& ctx)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendEditorOverlayPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(rawShader("orientation_axis",kAxisVertexShader,kAxisFragmentShader,kAxisVaryingDef));
+}
+}

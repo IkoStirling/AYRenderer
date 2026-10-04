@@ -1,4 +1,5 @@
 #include "detail/ColorGradingPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 #include "detail/FgResource.h"
 #include "detail/GpuResources.h"
@@ -328,3 +329,9 @@ void ColorGradingPass::destroyResources(BGFXAdapter& adapter)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendColorGradingPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(embeddedShader("color_grading",kColorGradingPhoskiaSource));
+}
+}

@@ -1,4 +1,5 @@
 #include "detail/GBufferDebugPass.h"
+#include "detail/BuiltinShaderCatalog.h"
 
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
@@ -358,3 +359,9 @@ void GBufferDebugPass::destroyResources(BGFXAdapter& adapter)
 }
 
 } // namespace ayt::render::detail
+
+namespace ayt::render::detail {
+void appendGBufferDebugPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
+    jobs.push_back(embeddedShader("gbuffer_debug",kGBufferDebugPhoskiaSource));
+}
+}
