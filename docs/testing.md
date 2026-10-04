@@ -1,5 +1,20 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 六项扩展：第 1 项类型与绑定
+
+- D3D11/12 完整设备回归各 9 suites / 15 cases / 8166 assertions，通过且无 skip。
+  新用例覆盖整数/布尔字上传（含 UINT32_MAX）、整数向量与数组、混合 std140 块、
+  Mat3 padding 和跨块同名字段；既有 TAA、Motion、实例化与天空回读门禁保持通过。
+- Renderer 10 个 CPU/契约测试组全部通过；普通 GPU 组的 skip 不作为设备证据。
+  Shader 最终 fast 152 cases / 716 assertions，integration 310 / 1132，全通过。
+  初次新增的拒绝用例使用了错误的 uniform block 测试语法，改为 uniformblock 后复测通过。
+- 清单 Shader 462 / 2 partitions、Renderer 936 / 10 partitions，无遗漏或重复；
+  SDK doctor 0 errors / 0 warnings，独立编辑器重建成功，未替换运行中的旧编辑器。
+- 日志：out/phoskia-expansion-1-verified-cpu.log（Shader 拒绝用例修订前）、
+  out/phoskia-expansion-1-boundary-final-test.log（Shader 最终复测）、
+  out/phoskia-expansion-1-verified-d3d11.log、out/phoskia-expansion-1-verified-d3d12.log、
+  out/phoskia-expansion-1-verified-sdk.log。
+
 ## 2026-10-04 Phoskia 加固第九阶段与交付状态
 
 - 删除源码红测试 4 assertions 失败，修复后删除/重建/再删除及独立 handle 对照通过。

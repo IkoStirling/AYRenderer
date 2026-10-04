@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -85,6 +86,11 @@ struct PhoskiaGpuFixture {
         const std::function<void(const ayt::shader::ShaderResource&)>& bind = {}) {
         const auto source = "material Probe { " + declarations +
             " vertex { in position : position; return vec4(position, 1.0) } fragment { " + body + " } }";
+        return renderSource(source, bind);
+    }
+
+    std::vector<Pixel> renderSource(const std::string& source,
+        const std::function<void(const ayt::shader::ShaderResource&)>& bind = {}) {
         auto program = pool.acquire(source);
         CHECK(program.isValid());
         if (!program.isValid()) {
@@ -119,6 +125,93 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(phoskia_integer_boolean_and_mixed_block_uploads_match_gpu_values) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated AY_TAA_GPU_TEST=d3d11/d3d12");
+    PhoskiaGpuFixture fixture;
+    const bool initialized = fixture.initialize(backend);
+    CHECK(initialized);
+    if (!initialized) return;
+    const int32_t signedValue = -7;
+    const uint32_t unsignedValue = 4000000001u;
+    for (uint32_t flag : {0u, 1u}) {
+        checkPixels(fixture.render("uniform int signedValue; uniform uint unsignedValue; uniform bool enabled;",
+            "let r = 0.0; let g = 0.0; let b = 0.0; if (signedValue == -7) { r = 1.0 } "
+            "if (unsignedValue - uint(4000000000.0) == uint(1)) { g = 1.0 } "
+            "if (enabled) { b = 1.0 } return vec4(r, g, b, 1.0);",
+            [&](const auto& program) {
+                program.setUniform(program.getUniformBinding("signedValue"), &signedValue, sizeof(signedValue));
+                program.setUniform(program.getUniformBinding("unsignedValue"), &unsignedValue, sizeof(unsignedValue));
+                program.setUniform(program.getUniformBinding("enabled"), &flag, sizeof(flag));
+            }), {1, 1, static_cast<float>(flag), 1});
+    }
+    // std140 vec3 + float share a slot; float[2] has 16-byte stride.
+    const auto source = "uniformblock Camera { vec3 position; float gain; float weights[2]; } "
+        "material Probe { vertex { in p : position; return vec4(p, 1.0) } "
+        "fragment { return vec4(Camera.position * Camera.gain, Camera.weights[1]) } }";
+    std::array<uint8_t, 48> payload{};
+    const float position[3] = {.2f, .3f, .4f};
+    const float gain = 2.0f, weight = .75f;
+    std::memcpy(payload.data(), position, sizeof(position));
+    std::memcpy(payload.data() + 12, &gain, sizeof(gain));
+    std::memcpy(payload.data() + 32, &weight, sizeof(weight));
+    checkPixels(fixture.renderSource(source, [&](const auto& program) {
+        auto block = program.getUniformBlockBinding("Camera");
+        CHECK(block != ayt::shader::InvalidBinding);
+        CHECK(program.getUniformBlockSize(block) == 48);
+        CHECK(program.getUniformBlockFieldOffset(block, "weights") == 16);
+        program.setUniformBlock(block, payload.data(), payload.size());
+    }), {.4f, .6f, .8f, .75f});
+    const int32_t signedVector[4] = {-3, 9, 13, 0};
+    const uint32_t maxWord = UINT32_MAX;
+    checkPixels(fixture.render("uniform uint maxWord; uniform bool maxFlag;",
+        "let value = 0.0; if (maxWord == uint(0) - uint(1) && maxFlag) { value = 1.0 } return vec4(value);",
+        [&](const auto& program) {
+            program.setUniform(program.getUniformBinding("maxWord"), &maxWord, sizeof(maxWord));
+            program.setUniform(program.getUniformBinding("maxFlag"), &maxWord, sizeof(maxWord));
+        }), {1,1,1,1});
+    const uint32_t unsignedVector[4] = {4000000001u, 23u, 41u, 0};
+    checkPixels(fixture.render("uniform ivec3 signedVector; uniform uvec3 unsignedVector;",
+        "return vec4(float(signedVector.x), float(signedVector.y), float(unsignedVector.y), float(unsignedVector.z));",
+        [&](const auto& program) {
+            program.setUniform(program.getUniformBinding("signedVector"), signedVector, sizeof(signedVector));
+            program.setUniform(program.getUniformBinding("unsignedVector"), unsignedVector, sizeof(unsignedVector));
+        }), {-3, 9, 23, 41});
+    const int32_t integerSlots[8] = {-3,0,0,0, 9,0,0,0};
+    const uint32_t enabled = 1;
+    checkPixels(fixture.render("uniform int values[2]; property enabled = true;",
+        "let alpha = 0.0; if (enabled) { alpha = 1.0 } return vec4(float(values[0]), float(values[1]), 0.0, alpha);",
+        [&](const auto& program) {
+            program.setUniform(program.getUniformBinding("values"), integerSlots, sizeof(integerSlots));
+            program.setUniform(program.getUniformBinding("enabled"), &enabled, sizeof(enabled));
+        }), {-3,9,0,1});
+    const auto matrixSource = "uniformblock FrameData { mat3 basis; uint marker; float gain[1]; } "
+        "uniformblock OtherData { float marker; } material Probe { "
+        "vertex { in p : position; return vec4(p, 1.0) } fragment { "
+        "let alpha = OtherData.marker; if (FrameData.marker == uint(123)) { alpha = alpha + 0.1 } "
+        "return vec4(FrameData.basis * vec3(0.1, 0.2, 0.3) * FrameData.gain[0], alpha) } }";
+    std::array<uint8_t, 80> matrixPayload{};
+    const float matrixSlots[12] = {2,0,0,0, 0,3,0,0, 0,0,4,0};
+    const uint32_t marker = 123;
+    const float unitGain = 1, otherMarker = .25f;
+    std::memcpy(matrixPayload.data(), matrixSlots, sizeof(matrixSlots));
+    std::memcpy(matrixPayload.data() + 48, &marker, sizeof(marker));
+    std::memcpy(matrixPayload.data() + 64, &unitGain, sizeof(unitGain));
+    std::array<uint8_t, 16> otherPayload{};
+    std::memcpy(otherPayload.data(), &otherMarker, sizeof(otherMarker));
+    checkPixels(fixture.renderSource(matrixSource, [&](const auto& program) {
+        auto block = program.getUniformBlockBinding("FrameData");
+        CHECK(program.getUniformBlockSize(block) == 80);
+        CHECK(program.getUniformBlockFieldOffset(block, "gain") == 64);
+        program.setUniformBlock(block, matrixPayload.data(), matrixPayload.size());
+        program.setUniformBlock(program.getUniformBlockBinding("OtherData"), otherPayload.data(), otherPayload.size());
+    }), {.2f, .6f, 1.2f, .35f});
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
 
 TEST_CASE(phoskia_arithmetic_branches_and_uniform_upload_match_gpu_values) {
 #ifdef _WIN32
