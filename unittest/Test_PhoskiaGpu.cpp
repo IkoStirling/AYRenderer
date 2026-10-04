@@ -276,6 +276,31 @@ TEST_CASE(phoskia_integer_boolean_and_mixed_block_uploads_match_gpu_values) {
 #endif
 }
 
+TEST_CASE(phoskia_typed_helpers_execute_returns_loops_and_forward_calls) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    PhoskiaGpuFixture fixture;
+    const bool initialized = fixture.initialize(backend);
+    CHECK(initialized);
+    if (!initialized) return;
+    const auto source = "fn helper(value:float):float { if (value < 0.0) { return 0.125; } "
+        "let sum = 0.0; for (i in range(4)) { sum = sum + value; } return twice(sum); } "
+        "fn twice(value:float):float { return value * 2.0; } "
+        "fn tint(value:vec3, gain:float):vec3 { return value * gain; } "
+        "fn project(p:vec3):vec4 { return vec4(p, 1.0); } "
+        "material Probe { vertex { in p : position; return project(p); } fragment { "
+        "let rgb = tint(vec3(helper(-1.0), helper(0.0625), 0.25), 1.0); return vec4(rgb, 1.0); } }";
+    checkPixels(fixture.renderSource(source), {.125f,.5f,.25f,1});
+    checkPixels(fixture.renderSource("fn enabled(flag:bool):uint { if (flag) { return uint(123); } return uint(7); } "
+        "fn branch(value:float):float { if (value > 0.0) { let local = vec3(value); } return value; } "
+        "material Probe { uniform float ayt_fn_0; vertex { in p : position; return vec4(p, 1.0); } "
+        "fragment { let ayt_arg_0 = 0.25; return vec4(float(enabled(true)), float(enabled(false)), branch(ayt_arg_0), 1.0); } }"), {123,7,.25f,1});
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
+
 TEST_CASE(phoskia_bounded_loops_keep_private_progress_and_scope_on_device) {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");

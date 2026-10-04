@@ -1,5 +1,13 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 第 4b 项：纯数学函数
+
+完整 CPU 12 入口通过（125.56s）；D3D11/12 各 9 suites / 18 cases / 8513 assertions，
+无 skip、原容差不变。Helper 测试回读 vertex/fragment 前向调用、提前 return、
+循环、bool/uint 及生成符号碰撞；不会用 shaderc 成功代替设备执行。
+日志 out/phoskia-expansion-4-function-final-cpu.log、同前缀 d3d11/d3d12.log。
+inventory Shader 473/2、Renderer 939/10，SDK doctor 0/0；struct/module 后续实施。
+
 ## 2026-10-04 Phoskia 第 4a 项：受限循环
 
 D3D11/12 独立 Phoskia 组各 7 cases / 2039 assertions，无 skip；索引赋值、
