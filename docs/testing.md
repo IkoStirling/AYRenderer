@@ -1,5 +1,23 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 加固第九阶段与交付状态
+
+- 删除源码红测试 4 assertions 失败，修复后删除/重建/再删除及独立 handle 对照通过。
+  Shader fast 150/695 assertions、integration 308/1118 assertions，26.60 秒全部通过。
+- 第九阶段重建后 Renderer 10 组全部通过（76.37 秒）；D3D11/12 Phoskia 各
+  4 cases/1352 assertions 无 skip。完整设备组在第八阶段各 14/7691 已通过，第九阶段
+  只改变文件删除监听失效通路，没有改渲染算法、二进制生成或缓存 schema。
+- SDK doctor 0 errors/0 warnings；Shader 清单更新为 458 cases/2 partitions，无遗漏/重复。
+  独立编辑器最新重建成功：out/build/render-phoskia-20261004/AYRuntime/AYEditor/AYEditorShell_Demo.exe。
+  运行中的旧编辑器/并行任务未替换；此处不宣称完成用户视觉验收。
+- 本轮按至少 3 小时要求实施，开始为北京时间 2026-10-04 14:02:27；主线外增加
+  compute、配置快照、shutdown、向量分量、声明检查、缓存边界与文件删除等独立修复。
+  AYShader design.md 保留已解决问题、证据及后续边界，不能视为语言/后端全部完备。
+- 日志：out/render-phoskia-stage9-red.log、out/render-phoskia-stage9-build.log、
+  out/render-phoskia-stage9-shader.log、out/render-phoskia-stage9-renderer.log、
+  out/render-phoskia-stage9-d3d11.log、out/render-phoskia-stage9-d3d12.log、
+  out/render-phoskia-stage9-sdk.log 与 out/render-phoskia-stage9-inventory.log。
+
 ## 2026-10-04 Phoskia 加固第八阶段与全量收尾
 
 - raw stage 边界碰撞红测试 3 assertions 失败；长度编码后拒绝非法 B，不命中有效 A。
