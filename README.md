@@ -4,6 +4,10 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 
 完整设计见 [`design.md`](design.md)。
 
+Phoskia Compute 第5项使用生产 pool 调度，在 D3D11/12 验证 compute→vertex 数据、
+shared/global atomicAdd、buffer/group barrier、两种组数量及 compute→RGBA32F image 回读。
+资源归 pool，native bridge 仅 Renderer 内部借用；详见 AYShader README 的线程/预算/同步限制。
+
 Phoskia 模块引用设备验证位于 Test_PhoskiaGpu：仅改变被包含模块内容并保留时间戳，
 相同根源码仍取得新程序，RGBA32F 回读值随模块函数变化。使用生产资源池文件入口，
 不手写替代 .sc；语言/依赖边界见 AYShader README。

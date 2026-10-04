@@ -1,5 +1,19 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 第5项：Compute 实际调度
+
+D3D11/12 各9 suites /22 cases /8958 assertions，无 skip、容差未放宽。
+Test_PhoskiaGpu 增加 compute→graphics、shared/global atomicAdd、屏障、组数量
+与 RGBA32F image 回读，以及线程/所属池/过期 token/参数预算拒绝。
+CPU 12入口最终串行回归中 Renderer10入口与 Shader fast 通过；Compute golden
+输出变化（include/context 与空行）修订后，Shader integration 单独重跑见
+out/phoskia-expansion-5-shader-verified.log（331/1533全过）；全量基底 closed-cpu.log。
+首次并发 CPU/GPU 中 Bloom shaderc 无输出返回失败，单独和后续串行均通过，
+不将其归因为已证实的算法问题。完整设备日志为 expansion-5-final-d3d11/d3d12.log。
+inventory Shader483/2、Renderer943/10；SDK doctor0/0，独立 Editor 重建完成。
+Windows compiler 替换回归的 exe 写入允许最多250ms短时重试，失败不继续构建，
+不重试 shaderc，也不放宽缓存 miss/新 key 的断言；实际 golden 尾部空行保留。
+
 ## 2026-10-04 Phoskia 第 4d 项：模块依赖
 
 D3D11/12 完整设备组各 9 suites / 20 cases / 8721 assertions 通过，无 skip，

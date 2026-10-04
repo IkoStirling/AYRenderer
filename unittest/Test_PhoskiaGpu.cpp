@@ -4,6 +4,7 @@
 #include "AYTest.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "AYShader/ShaderBuild.h"
+#include "AYShader/detail/ComputeResourceAccess.h"
 #include <AYIO/File.h>
 #include "detail/BGFXAdapter.h"
 #include "detail/FullscreenPassGeometry.h"
@@ -18,6 +19,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -89,6 +91,15 @@ struct PhoskiaGpuFixture {
         return texture;
     }
 
+    std::vector<Pixel> readImage(bgfx::TextureHandle image) {
+        bgfx::blit(2,readback,0,0,image);
+        std::vector<Pixel> pixels(size*size);
+        const auto ready=bgfx::readTexture(readback,pixels.data());
+        for(int frame=0;frame<120 && adapter.gpuFrameCounter()<ready;++frame) adapter.endFrame();
+        CHECK(adapter.gpuFrameCounter()>=ready);
+        return pixels;
+    }
+
     std::vector<Pixel> render(const std::string& declarations, const std::string& body,
         const std::function<void(const ayt::shader::ShaderResource&)>& bind = {}) {
         const auto source = "material Probe { " + declarations +
@@ -137,6 +148,110 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(phoskia_compute_atomics_barriers_and_image_dispatch_read_back) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    PhoskiaGpuFixture fixture;
+    const bool initialized = fixture.initialize(backend);
+    CHECK(initialized);
+    if (!initialized) return;
+    auto count = fixture.pool.acquire("[numthreads(4,1,1)] compute Count { shared uint sum[1]; "
+        "storage result : rwstructuredbuffer<uint> binding 0; "
+        "if (thread_id.x == uint(0)) { sum[0] = uint(0); } barrier(); "
+        "atomicAdd(sum[0],uint(1)); barrier(); result[thread_id.x] = sum[0] + dispatch_id.x; }");
+    auto imageKernel = fixture.pool.acquire("[numthreads(4,4,1)] compute Output { storage counts : structuredbuffer<uint> binding 0; "
+        "storage target : rwimage2d<vec4> binding 1; "
+        "let color = float(counts[thread_id.x + uint(4)]) * 0.0625; imageStore(target,ivec2(int(thread_id.x),int(thread_id.y)),vec4(color,0.5,0.75,1.0)); }");
+    CHECK(count.isValid()); CHECK(imageKernel.isValid());
+    if (!count.isValid() || !imageKernel.isValid()) { for(const auto& error:fixture.pool.compileErrorsSnapshot()) std::cerr<<error<<'\n'; return; }
+    auto buffer = fixture.pool.createStorageBuffer("uint",8);
+    auto image = fixture.pool.createStorageImage(4,4);
+    CHECK(buffer.isValid()); CHECK(image.isValid());
+    if(!buffer.isValid() || !image.isValid()) return;
+    std::string error;
+    CHECK(fixture.pool.dispatch(count,{0,2,1,1},{{count.getStorageBufferBinding("result"),buffer}},&error));
+    CHECK(fixture.pool.dispatch(imageKernel,{1,1,1,1},{{imageKernel.getStorageBufferBinding("counts"),buffer}},
+        {{imageKernel.getStorageImageBinding("target"),image}},&error));
+    checkPixels(fixture.readImage(ayt::shader::detail::ComputeResourceAccess::borrowImageTexture(fixture.pool,image)),{.375f,.5f,.75f,1});
+    auto global = fixture.pool.acquire("[numthreads(4,1,1)] compute Global { storage result : rwstructuredbuffer<uint> binding 0; "
+        "if (thread_id.x == uint(0)) { result[0] = uint(0); } memoryBarrierBuffer(); "
+        "atomicAdd(result[0],uint(1)); memoryBarrierBuffer(); let sum = result[0]; "
+        "result[thread_id.x + uint(4)] = sum; }");
+    CHECK(global.isValid());
+    CHECK(fixture.pool.dispatch(global,{0,1,1,1},{{global.getStorageBufferBinding("result"),buffer}},&error));
+    CHECK(fixture.pool.dispatch(imageKernel,{1,1,1,1},{{imageKernel.getStorageBufferBinding("counts"),buffer}},
+        {{imageKernel.getStorageImageBinding("target"),image}},&error));
+    checkPixels(fixture.readImage(ayt::shader::detail::ComputeResourceAccess::borrowImageTexture(fixture.pool,image)),{.25f,.5f,.75f,1});
+    const auto stale = image;
+    CHECK(fixture.pool.releaseStorageImage(image));
+    CHECK(!fixture.pool.dispatch(imageKernel,{1,1,1,1},{{imageKernel.getStorageBufferBinding("counts"),buffer}},
+        {{imageKernel.getStorageImageBinding("target"),stale}},&error));
+    CHECK(fixture.pool.releaseStorageBuffer(buffer));
+    fixture.pool.release(count);fixture.pool.release(imageKernel);fixture.pool.release(global);
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
+
+TEST_CASE(phoskia_compute_dispatch_writes_buffer_consumed_by_graphics) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    PhoskiaGpuFixture fixture;
+    const bool initialized = fixture.initialize(backend);
+    CHECK(initialized);
+    if (!initialized) return;
+    auto kernel = fixture.pool.acquire("[numthreads(4,1,1)] compute Probe { storage colors : rwstructuredbuffer<vec4> binding 0; "
+        "let index = int(thread_id.x); if (index < 3) { colors[index] = vec4(0.2,0.4,0.6,1.0); } }");
+    CHECK(kernel.isValid());
+    if (!kernel.isValid()) { for (const auto& error : fixture.pool.compileErrorsSnapshot()) std::cerr << error << '\n'; return; }
+    auto buffer = fixture.pool.createStorageBuffer("vec4",3);
+    CHECK(buffer.isValid());
+    if (!buffer.isValid()) return;
+    std::string error;
+    const auto binding = kernel.getStorageBufferBinding("colors");
+    CHECK(binding != ayt::shader::InvalidBinding);
+    CHECK(kernel.getStorageImageBinding("colors") == ayt::shader::InvalidBinding);
+    CHECK(!fixture.pool.createStorageBuffer("vec3",3).isValid());
+    CHECK(!fixture.pool.createStorageBuffer("uint",0).isValid());
+    const uint32_t seed = 7;
+    CHECK(!fixture.pool.createStorageBuffer("uint",3,&seed,sizeof(seed)).isValid());
+    CHECK(!fixture.pool.createStorageImage(0,4).isValid());
+    CHECK(!fixture.pool.dispatch(kernel,{UINT16_MAX,1,1,1},{{binding,buffer}},&error));
+    CHECK(!fixture.pool.dispatch(kernel,{0,65536,1,1},{{binding,buffer}},&error));
+    CHECK(!fixture.pool.dispatch(kernel,{0,1,1,1},{{binding,buffer},{binding,buffer}},&error));
+    CHECK(!fixture.pool.dispatch(kernel,{0,0,1,1},{{binding,buffer}},&error));
+    CHECK(!error.empty());
+    CHECK(!fixture.pool.dispatch(kernel,{0,1,1,1},{},&error));
+    bool foreignThreadAccepted = true;
+    std::thread worker([&] { foreignThreadAccepted = fixture.pool.dispatch(kernel,{0,1,1,1},{{binding,buffer}}); });
+    worker.join();
+    CHECK(!foreignThreadAccepted);
+    ayt::shader::ShaderResourcePool other;
+    auto foreignBuffer = buffer;
+    CHECK(!other.releaseStorageBuffer(foreignBuffer));
+    CHECK(foreignBuffer.id == buffer.id);
+    other.release(kernel); CHECK(kernel.isValid());
+    CHECK(!other.dispatch(kernel,{0,1,1,1},{{binding,buffer}},&error));
+    bgfx::setViewMode(0,bgfx::ViewMode::Sequential);
+    CHECK(fixture.pool.dispatch(kernel,{0,1,1,1},{{binding,buffer}},&error));
+    auto native = ayt::shader::detail::ComputeResourceAccess::borrowVertexBuffer(fixture.pool,buffer);
+    CHECK(bgfx::isValid(native));
+    checkPixels(fixture.renderSource("material Probe { vertex { in p : position; in c : color; out tint : color; "
+        "tint = c; return vec4(p,1.0); } fragment { in tint : color; return tint; } }",[&](const auto&) {
+        bgfx::setVertexBuffer(1,native,0,3);
+    }),{.2f,.4f,.6f,1});
+    const auto stale = buffer;
+    CHECK(fixture.pool.releaseStorageBuffer(buffer));
+    CHECK(!fixture.pool.dispatch(kernel,{0,1,1,1},{{binding,stale}},&error));
+    CHECK(!bgfx::isValid(ayt::shader::detail::ComputeResourceAccess::borrowVertexBuffer(fixture.pool,stale)));
+    fixture.pool.release(kernel);
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
 
 TEST_CASE(phoskia_modules_recompile_changed_content_on_device) {
 #ifdef _WIN32

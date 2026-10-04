@@ -1,5 +1,12 @@
 # AYRenderer Design
 
+## 2026-10-04 Phoskia Compute 验证
+
+Test_PhoskiaGpu 真实 dispatch 并回读 compute→graphics、shared/global atomicAdd、
+buffer/group barrier 与 RGBA32F image。固定顺序 views 0→1→2；只借用 pool native
+资源、不转移所有权。拒绝外池/外线程/过期句柄、不完整或错误类型 binding 与越界 dispatch。
+GPU 回读容差保持每通道 1e-4，线程形状不替代上层对元素下标和跨组竞争的证明。
+
 ## 2026-10-04 — Phoskia 模块依赖设备闭环
 
 Test_PhoskiaGpu 通过 compileFromFile 使用相对 .phoskia 引用，包含 struct 与 helper。
