@@ -1,5 +1,17 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 加固第一阶段
+
+- 独立 VS 2026 Insider Debug 构建：`out/build/render-phoskia-20261004`。
+  AYShader 关闭 BGFX 未实现 stage-body 语句的静默成功路径，缓存语义 v6。
+- Shader fast 150/150、integration 284/284；D3D11 与 D3D12 各 8 suites/10 cases/
+  6339 assertions 通过，无 skip。Renderer 生产算法和既有 GPU 容差未修改。
+- 根日志：`out/render-phoskia-stage1-final-tests.log`、
+  `out/render-phoskia-stage1-d3d11.log`、`out/render-phoskia-stage1-d3d12.log`。
+  初次未知 IR 测试夹具缺少 vertex，修正夹具后全量重跑通过；首次 CTest 的 CMD 正则
+  转义未选中测试，不计作通过，最终使用 PowerShell 正则实际执行。
+- 这些结果验证编译链和上述生产 Pass 的 GPU 回归，不代表完整编辑器视觉验收。
+
 ## 2026-10-03 TAA fixed-grid 断言修复
 
 - 根因在 AYShader，不是 ABI、实例合批或 TAA 权重预期：Phoskia `else if` 被错误恢复，
