@@ -1,5 +1,19 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 六项扩展：第 3 项离线构建与预热
+
+- 完整 D3D11/12 各 9 suites / 16 cases / 8243 assertions 通过；离线包 GPU 用例
+  覆盖混合 std140 绑定、读取后预热、不依赖 shaderc 及真实 backend 检查。
+- 添加 binding 摘要后的最终回读：Phoskia 两设备各 6 cases / 1904 assertions 无 skip，
+  原 1e-4 容差不变。包读取失败不产生部分可用列表，预热失败释放本次句柄。
+- CPU 12 入口全部通过；最终 Shader 摘要回归 152/716 + 317/1255。Shader 清单
+  469 / 2 partitions，Renderer 937 / 10 partitions；SDK doctor 0 errors/0 warnings。
+  CLI 实际构建示例 2 variants；独立编辑器重建成功，未替换运行进程或做视觉验收。
+- 日志：out/phoskia-expansion-3-verified-cpu.log、out/phoskia-expansion-3-integrity-tests.log、
+  out/phoskia-expansion-3-verified-d3d11.log、out/phoskia-expansion-3-verified-d3d12.log、
+  out/phoskia-expansion-3-integrity-d3d11.log、out/phoskia-expansion-3-integrity-d3d12.log、
+  out/phoskia-expansion-3-integrity-cli.log。工具/API 边界见 AYShader README/design。
+
 ## 2026-10-04 Phoskia 六项扩展：第 2 项缓存与热重载
 
 - CPU 12 个 CTest 入口全通过（118.23 秒）：Shader 152/716 + 314/1175，Renderer

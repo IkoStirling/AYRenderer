@@ -1,5 +1,10 @@
+#if defined(_WIN32) && !defined(NOMINMAX)
+#define NOMINMAX
+#endif
 #include "AYTest.h"
 #include "AYShader/ShaderResourcePool.h"
+#include "AYShader/ShaderBuild.h"
+#include <AYIO/File.h>
 #include "detail/BGFXAdapter.h"
 #include "detail/FullscreenPassGeometry.h"
 #include "detail/GpuResources.h"
@@ -8,6 +13,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -92,6 +99,11 @@ struct PhoskiaGpuFixture {
     std::vector<Pixel> renderSource(const std::string& source,
         const std::function<void(const ayt::shader::ShaderResource&)>& bind = {}) {
         auto program = pool.acquire(source);
+        return renderResource(program, bind);
+    }
+
+    std::vector<Pixel> renderResource(const ayt::shader::ShaderResource& program,
+        const std::function<void(const ayt::shader::ShaderResource&)>& bind = {}) {
         CHECK(program.isValid());
         if (!program.isValid()) {
             for (const auto& error : pool.lastCompileErrors()) std::cerr << error << '\n';
@@ -125,6 +137,57 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(phoskia_offline_package_prewarm_matches_device_without_shaderc) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    namespace fs = std::filesystem;
+    const auto root = fs::temp_directory_path() / ("phoskia_package_gpu_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root);
+    struct Cleanup { fs::path path; ~Cleanup() { std::error_code ec; fs::remove_all(path,ec); } } cleanup{root};
+    const auto sourcePath = (root/"probe.phoskia").string();
+    CHECK(ayt::io::File::writeAllText(sourcePath,
+        "uniformblock Data { vec3 color; float gain; } material Probe { "
+        "vertex { in p : position; return vec4(p, 1.0) } fragment { return vec4(Data.color * Data.gain, 1.0) } }"));
+    ayt::shader::ShaderBuildManifest manifest;
+    manifest.target = {AY_SHADER_SHADERC_HINT,"windows","s_5_0",{AY_SHADER_BGFX_COMMON_HINT,AY_SHADER_BGFX_SRC_HINT}};
+    manifest.jobs = {{"probe","default",sourcePath,{}}};
+    ayt::shader::ShaderBuildSession session;
+    ayt::shader::ShaderBuildReport built, loaded;
+    session.build(manifest,built);
+    CHECK(built.success);
+    if (!built.success) return;
+    std::vector<std::string> errors;
+    CHECK(ayt::shader::writeShaderBuildPackage(built,(root/"package").string(),errors));
+    const bool packageValid = ayt::shader::readShaderBuildPackage((root/"package").string(),loaded);
+    CHECK(packageValid);
+    if (!packageValid) return;
+    PhoskiaGpuFixture fixture;
+    const bool initialized = fixture.initialize(backend);
+    CHECK(initialized);
+    if (!initialized) return;
+    fixture.pool.setShadercExecutable("nonexistent/offline-prewarm-must-not-compile.exe");
+    std::vector<ayt::shader::ShaderResource> handles;
+    CHECK(ayt::shader::prewarmShaderBuild(fixture.pool,loaded,handles,errors));
+    CHECK(handles.size() == 1);
+    if (handles.size() != 1) return;
+    const float payload[4] = {.2f,.4f,.6f,.5f};
+    checkPixels(fixture.renderResource(handles[0], [&](const auto& program) {
+        program.setUniformBlock(program.getUniformBlockBinding("Data"),payload,sizeof(payload));
+    }), {.1f,.2f,.3f,1});
+    CHECK(fixture.pool.cacheStats().sourceMisses == 0);
+    fixture.pool.release(handles[0]);
+    handles.clear();
+    auto mismatched = loaded;
+    mismatched.platform = "linux"; mismatched.profile = "430";
+    fixture.pool.setPlatform("linux"); fixture.pool.setGLSLProfile("430");
+    CHECK(!ayt::shader::prewarmShaderBuild(fixture.pool,mismatched,handles,errors));
+    CHECK(handles.empty()); // Explicit pool settings cannot disguise real D3D.
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
 
 TEST_CASE(phoskia_integer_boolean_and_mixed_block_uploads_match_gpu_values) {
 #ifdef _WIN32
