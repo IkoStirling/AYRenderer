@@ -1,5 +1,16 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 加固第七阶段
+
+- 声明语义红测试 25 个断言失败；UBO 类型/声明顺序、字段与重复检查、property
+  初始化器诊断修复后 Shader 两个 CTest 入口全部通过（25.16 秒）。随后新增的
+  program/IR 拒绝入口回归单独通过 1 case/18 assertions，无 skip。
+- 独立 AYEditorShell_Demo 与全部 Renderer test groups 重建成功。未替换运行中的旧
+  编辑器，重建不等同于视觉验收。cache schema v10；后续最终 GPU 验证另记录。
+- 日志：out/render-phoskia-stage7-red.log、out/render-phoskia-stage7-shader.log、
+  out/render-phoskia-stage7-entry.log、out/render-phoskia-stage7-build.log 与
+  out/render-phoskia-stage7-sdk.log。
+
 ## 2026-10-04 Phoskia 加固第六阶段
 
 - Vector conversion 曾复制首分量：真实 D3D11 红测试 128 个数值断言失败，修复后保留
