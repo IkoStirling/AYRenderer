@@ -1,5 +1,19 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 加固第三阶段
+
+- Compute 前端/IR/后端契约修复，缓存 schema v8。Shader fast 150/695 assertions、
+  integration 297/1003 assertions 普通模式全部通过（25.12 秒），无 skip。
+- Renderer Shader 11/84 assertions 通过；现有 Phoskia 真实回读在 D3D11/12 各
+  3 cases/946 assertions 通过。这是材质路径的回归证据，不等于 compute 的 GPU 调度验收。
+- 日志：out/render-phoskia-stage3-red-tests.log（22 个先复现失败断言）、
+  out/render-phoskia-stage3-shader-final.log、out/render-phoskia-stage3-cpu-tests.log
+  （Shader 首轮 uvec 构造器遗漏已修复，Renderer Shader 组通过）、
+  out/render-phoskia-stage3-d3d11.log 与 out/render-phoskia-stage3-d3d12.log。
+- SDK doctor 第三阶段实际通过：72 capabilities / 53 modules / 158 symbols，0 errors / 0
+  warnings。此前并行音频接口 Doxygen 错误已由该任务修正，本任务未改其接口；根 SDK
+  文件仅局部暂存渲染对应 hunk，保护同文件音频改动。
+
 ## 2026-10-04 Phoskia 加固第二阶段
 
 - 新增独立 `AYRenderer_PhoskiaGpu`，归属 Gpu 测试组，使用隐藏窗口和既有
