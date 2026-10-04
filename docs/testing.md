@@ -1,5 +1,16 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 加固第五阶段
+
+- 关闭期间的旧请求不得回填资源池。红测试先复现 6 个失败断言；内部 lifecycle epoch
+  修复后，旧请求报告 cancelled，新请求重新生成 IR，取消请求不写磁盘成功条目。
+- Shader fast 150/695 assertions、integration 300/1042 assertions，Renderer Shader
+  11/84 assertions 均通过，联合 26.74 秒。D3D11/12 Phoskia 各 3/946 assertions 通过。
+- SDK doctor：72 capabilities/53 modules/158 symbols，0 errors/0 warnings；公开布局不变。
+- 日志：out/render-phoskia-stage5-red-tests.log、out/render-phoskia-stage5-fixed-tests.log、
+  out/render-phoskia-stage5-final-tests.log（含磁盘检查）、out/render-phoskia-stage5-d3d11.log、
+  out/render-phoskia-stage5-d3d12.log 与 out/render-phoskia-stage5-sdk.log。
+
 ## 2026-10-04 Phoskia 加固第四阶段
 
 - 资源池编译配置、key 与磁盘目录使用同一请求快照；错误热重载版本不会成功缓存，
