@@ -276,6 +276,26 @@ TEST_CASE(phoskia_integer_boolean_and_mixed_block_uploads_match_gpu_values) {
 #endif
 }
 
+TEST_CASE(phoskia_bounded_loops_keep_private_progress_and_scope_on_device) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    PhoskiaGpuFixture fixture;
+    const bool initialized = fixture.initialize(backend);
+    CHECK(initialized);
+    if (!initialized) return;
+    checkPixels(fixture.render("uniform float index;",
+        "let sum = 0.0; let outside = 0.25; for (index in range(4)) { "
+        "sum = sum + float(index); index = -1; let outside = 8.0; } "
+        "return vec4(sum / 6.0, outside, 0.5, 1.0);"), {1,.25f,.5f,1});
+    checkPixels(fixture.render("", "let sum = 0.0; let ayt_loop_0 = 0.5; "
+        "for (i in range(4)) { for (j in range(2)) { sum = sum + float(i + j); } } "
+        "return vec4(sum / 16.0, ayt_loop_0, 0.25, 1.0);"), {1,.5f,.25f,1});
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
+
 TEST_CASE(phoskia_arithmetic_branches_and_uniform_upload_match_gpu_values) {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");

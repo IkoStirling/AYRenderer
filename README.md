@@ -4,6 +4,10 @@ AYRenderer 是 AY Engine 的**渲染器子系统**：基于 bgfx，负责帧调�
 
 完整设计见 [`design.md`](design.md)。
 
+Phoskia 受限循环设备证据（2026-10-04）：Test_PhoskiaGpu 覆盖可见索引赋值不影响
+推进、嵌套 int 运算和 uniform/local 名字遮蔽。D3D11/12 各 7 cases / 2039 assertions
+通过；使用独立进程与 RGBA32F 回读，未降低容差。语言限制以 AYShader README 为准。
+
 测试入口、功能分组、夹具隔离与用例清单维护见 [`docs/testing.md`](docs/testing.md)。
 
 ### CPU 变形网格上传（2026-10-04）

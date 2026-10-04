@@ -1,5 +1,13 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 第 4a 项：受限循环
+
+D3D11/12 独立 Phoskia 组各 7 cases / 2039 assertions，无 skip；索引赋值、
+嵌套循环、uniform/local 遮蔽回读通过。完整 CPU 12 入口通过，Shader 152/716 +
+319/1289；清单 Shader 471/2、Renderer 938/10，SDK doctor 0/0。
+日志 out/phoskia-expansion-4-loop-final-cpu.log 与同前缀 d3d11/d3d12.log。
+普通 CTest 的 GPU skip 不算设备证明。函数/struct/module 仍待后续语言阶段。
+
 ## 2026-10-04 Phoskia 六项扩展：第 3 项离线构建与预热
 
 - 完整 D3D11/12 各 9 suites / 16 cases / 8243 assertions 通过；离线包 GPU 用例
