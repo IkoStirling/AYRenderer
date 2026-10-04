@@ -1,5 +1,26 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 加固第二阶段
+
+- 新增独立 `AYRenderer_PhoskiaGpu`，归属 Gpu 测试组，使用隐藏窗口和既有
+  `AY_TAA_GPU_TEST=d3d11/d3d12` 开关。未启用设备测试时显式 skip，不计为 GPU 验收。
+- GPU 定位并修复标量 uniform 的物理槽与逻辑类型错配，以及 arbitrary sampler 名称的
+  错误 stage 覆盖。回读检查运算结合性、条件/else-if、4/16-byte scalar、Mat4、Vec4、
+  短 Vec3、scalar array、单元素数组、property 上传、局部/分支遮蔽和两种 sampler 顺序。
+- Shader fast 150/695 assertions、integration 290/950 assertions；D3D11/12 各
+  9 suites/13 cases/7285 assertions，全部实际通过。未修改原 TAA/Shadow/Motion 算法或容差。
+- 六个 CPU 目标实际通过：Contracts 125、SceneMaterial 71、Geometry 96、
+  LightingShadow 137、PostProcess 252、Shader 11 cases。golden 源文件结尾空行同步
+  后重新构建复制并在非 regen 模式重跑 Shader 两层，均通过（23.06 秒）。
+- 日志：`out/render-phoskia-stage2-uniform-tests.log`、
+  `out/render-phoskia-stage2-all-d3d11.log`、`out/render-phoskia-stage2-all-d3d12.log`。
+- CPU/Shader 最终日志：`out/render-phoskia-stage2-cpu-final.log`（渲染六组）、
+  `out/render-phoskia-stage2-shader-final.log`（golden 修正后的 Shader 两层）。
+  新 shadowing 用例先捕获 D3DCompile X4000（initializer 读未初始化同名局部），生成
+  独立局部名后数值回读通过。golden 更新仅为 Vec4 物理声明和逻辑分量读，不替代 GPU 证据。
+- 最新完整编辑器重建暂被并行 AYAudio 的 `pullOneFrame` 未定义阻断；该模块有并行 dirty，
+  本任务未修改它，也未把先前成功构建描述成已含最新 Shader 修改的编辑器验证版本。
+
 ## 2026-10-04 Phoskia 加固第一阶段
 
 - 独立 VS 2026 Insider Debug 构建：`out/build/render-phoskia-20261004`。

@@ -137,4 +137,5 @@ set(AYRENDERER_TEST_Audit_SOURCES
     Test_AuditP5Invariants.cpp)
 
 set(AYRENDERER_TEST_Gpu_SOURCES
+    Test_PhoskiaGpu.cpp
     Test_TAAGpu.cpp)
