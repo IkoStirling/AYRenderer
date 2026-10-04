@@ -153,6 +153,42 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
 
+TEST_CASE(phoskia_explicit_texture_helpers_read_real_resources) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    PhoskiaGpuFixture fixture; const bool initialized = fixture.initialize(backend);
+    CHECK(initialized); if (!initialized) return;
+    const Pixel color = {.2f,.4f,.6f,.8f};
+    const auto texture = fixture.input(color); CHECK(bgfx::isValid(texture));
+    for (const auto& sampling : {"sample(t,uv)", "sampleLod(t,uv,0.0)"}) {
+        const auto source = std::string("fn outer(t:sampler2D,uv:vec2):vec4 { return inner(t,uv); } ") +
+            "fn inner(t:sampler2D,uv:vec2):vec4 { return " + sampling + "; } material Probe { texture2d tex; "
+            "vertex { in p:position; return vec4(p,1.0) } fragment { return outer(tex,vec2(0.5)); } }";
+        checkPixels(fixture.renderSource(source,[&](const auto& program) {
+            program.setTexture(0, program.getTextureBinding("tex"), toShaderTexture(texture));
+        }),color);
+    }
+    std::array<Pixel,6> faces; faces.fill(color);
+    const auto cube = bgfx::createTextureCube(1,false,1,bgfx::TextureFormat::RGBA32F,BGFX_SAMPLER_POINT,bgfx::copy(faces.data(),sizeof(faces)));
+    CHECK(bgfx::isValid(cube)); if (bgfx::isValid(cube)) fixture.textures.push_back(cube);
+    const std::string cubeSource = "fn read(t:samplerCube,direction:vec3):vec4 { return sampleLod(t,direction,0.0); } "
+        "material Probe { texturecube tex; vertex { in p:position; return vec4(p,1.0) } "
+        "fragment { return read(tex,vec3(1.0,0.0,0.0)); } }";
+    checkPixels(fixture.renderSource(cubeSource,[&](const auto& program) {
+        program.setTexture(0, program.getTextureBinding("tex"),toShaderTexture(cube));
+    }),color);
+    const std::string vertexSource = "fn read(t:sampler2D,uv:vec2):vec4 { return sampleLod(t,uv,0.0); } "
+        "material Probe { texture2d tex; vertex { in p:position; out tint:color; tint=read(tex,vec2(0.5)); return vec4(p,1.0) } "
+        "fragment { in tint:color; return tint; } }";
+    checkPixels(fixture.renderSource(vertexSource,[&](const auto& program) {
+        program.setTexture(0, program.getTextureBinding("tex"),toShaderTexture(texture));
+    }),color);
+#else
+    SKIP_TEST("Requires Windows real-device fixture");
+#endif
+}
+
 TEST_CASE(phoskia_compute_atomics_barriers_and_image_dispatch_read_back) {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");

@@ -1,5 +1,11 @@
 # AYRenderer Design
 
+## 2026-10-05 — Phoskia语言扩展1设备门禁
+
+Test_PhoskiaGpu新增显式sampler2D转传/隐式与显式LOD、samplerCube读取和vertex显式LOD
+经varying回读，使用真实RGBA32F资源及原每通道1e-4容差。无新Pass或绕过Phoskia的提交路径。
+D3D11/12整组各24用例/9445断言全过，无skip；新用例271断言。日志out/phoskia-language-1-d3d11/d3d12.log。
+
 ## 2026-10-05 — Phoskia 默认生产接入
 
 内部 BuiltinShaderCatalog 汇集实际 Pass 的 63 个源/变体，Lighting 覆盖0..8 shadow slots和hard/PCF，
