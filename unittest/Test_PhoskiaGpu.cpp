@@ -153,6 +153,52 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
 
+TEST_CASE(phoskia_gpu_struct_layout_upload_and_storage_read_write_match_pixels) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    PhoskiaGpuFixture fixture; CHECK(fixture.initialize(backend));
+    std::array<float,12> block{};
+    block[0]=.1f; block[4]=.2f; block[5]=.4f; block[6]=.6f; block[7]=.5f; block[8]=.3f;
+    checkPixels(fixture.renderSource("struct Surface { vec3 tint; float gain; } uniformblock Params { float prefix; Surface surface; float suffix; } "
+        "material M { vertex {in p:position; return vec4(p,1.0)} fragment {let s=Params.surface; return vec4(s.tint*s.gain,Params.prefix+Params.suffix);} }",
+        [&](const auto& program) {
+            const auto binding=program.getUniformBlockBinding("Params");
+            CHECK(program.getUniformBlockSize(binding)==48);
+            CHECK(program.getUniformBlockFieldOffset(binding,"surface.gain")==28);
+            program.setUniformBlock(binding,block.data(),sizeof(block));
+        }),{.1f,.2f,.3f,.4f});
+    const std::string source="struct Surface { vec3 tint; float gain; int index; bool enabled; } "
+        "[numthreads(4,4,1)] compute Probe { storage input:structuredbuffer<Surface> binding 0; storage values:rwstructuredbuffer<Surface> binding 1; "
+        "storage image:rwimage2d<vec4> binding 2; let id=thread_id; let item=int(id.x)+int(id.y)*4; values[item]=input[item]; values[item].gain=0.5; "
+        "let s=values[item]; imageStore(image,ivec2(id.xy),vec4(s.tint*s.gain,float(s.index))); }";
+    auto kernel=fixture.pool.acquire(source); CHECK(kernel.isValid());
+    if (!kernel.isValid()) {for(const auto& e:fixture.pool.lastCompileErrors())std::cerr<<e<<'\n';return;}
+    const auto binding=kernel.getStorageBufferBinding("values");
+    CHECK(kernel.getStorageBufferElementStride(binding)==32);
+    size_t offset=0,size=0; CHECK(kernel.getStorageBufferFieldLayout(binding,"index",offset,size)); CHECK(offset==16 && size==4);
+    std::array<uint8_t,512> bytes{}; const float tint[4]={.2f,.4f,.6f,1}; const int index=1;
+    for(size_t item=0;item<16;++item) {std::memcpy(bytes.data()+32*item,tint,16); std::memcpy(bytes.data()+32*item+16,&index,4); bytes[32*item+20]=1;}
+    const auto inputBinding=kernel.getStorageBufferBinding("input");
+    auto input=fixture.pool.createStorageBuffer(kernel,inputBinding,16,bytes.data(),bytes.size()); CHECK(input.isValid());
+    auto values=fixture.pool.createStorageBuffer(kernel,binding,16); CHECK(values.isValid());
+    CHECK(!fixture.pool.createStorageBuffer(kernel,binding,16,bytes.data(),bytes.size()).isValid());
+    CHECK(!fixture.pool.createStorageBuffer(kernel,inputBinding,16,bytes.data(),bytes.size()-1).isValid());
+    auto image=fixture.pool.createStorageImage(4,4); CHECK(image.isValid());
+    std::string error;
+    auto wrong=fixture.pool.acquire("struct Surface { vec4 tint; float gain; int index; bool enabled; } compute Wrong {storage values:rwstructuredbuffer<Surface> binding 0; values[0]=Surface(vec4(1.0),1.0,1,true);}");
+    CHECK(wrong.isValid());
+    CHECK(!fixture.pool.dispatch(wrong,{0,1,1,1},{{wrong.getStorageBufferBinding("values"),values}},&error));
+    CHECK(!fixture.pool.dispatch(kernel,{0,1,1,1},{{inputBinding,input},{binding,input}},{{kernel.getStorageImageBinding("image"),image}},&error));
+    bgfx::setViewMode(0,bgfx::ViewMode::Sequential);
+    CHECK(fixture.pool.dispatch(kernel,{0,1,1,1},{{inputBinding,input},{binding,values}},{{kernel.getStorageImageBinding("image"),image}},&error));
+    checkPixels(fixture.readImage(ayt::shader::detail::ComputeResourceAccess::borrowImageTexture(fixture.pool,image)),{.1f,.2f,.3f,1});
+    CHECK(fixture.pool.releaseStorageBuffer(input)); CHECK(fixture.pool.releaseStorageBuffer(values)); CHECK(fixture.pool.releaseStorageImage(image));
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
+
 TEST_CASE(phoskia_explicit_texture_helpers_read_real_resources) {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");
@@ -258,6 +304,11 @@ TEST_CASE(phoskia_compute_dispatch_writes_buffer_consumed_by_graphics) {
     CHECK(!fixture.pool.createStorageBuffer("uint",0).isValid());
     const uint32_t seed = 7;
     CHECK(!fixture.pool.createStorageBuffer("uint",3,&seed,sizeof(seed)).isValid());
+    const Pixel seedColors[3]={{.2f,.4f,.6f,1},{.2f,.4f,.6f,1},{.2f,.4f,.6f,1}};
+    auto initializedReadonly=fixture.pool.createStorageBuffer("vec4",3,seedColors,sizeof(seedColors));
+    CHECK(initializedReadonly.isValid());
+    CHECK(!fixture.pool.dispatch(kernel,{0,1,1,1},{{binding,initializedReadonly}},&error));
+    CHECK(fixture.pool.releaseStorageBuffer(initializedReadonly));
     CHECK(!fixture.pool.createStorageImage(0,4).isValid());
     CHECK(!fixture.pool.dispatch(kernel,{UINT16_MAX,1,1,1},{{binding,buffer}},&error));
     CHECK(!fixture.pool.dispatch(kernel,{0,65536,1,1},{{binding,buffer}},&error));

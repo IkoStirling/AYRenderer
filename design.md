@@ -1,5 +1,11 @@
 # AYRenderer Design
 
+2026-10-05 Phoskia语言扩展2设备验收：Test_PhoskiaGpu增加flat struct的std140
+UBO真实像素、std430 readonly CPU上传→rw整元素与字段写入→RGBA32F image回读。
+同名异布局、错payload长度、readonly写权限和别名绑定拒绝。使用隔离后台设备，
+不改Renderer生产Pass、不绕过Phoskia。测试定位并促成AYShader拦截BGFX禁止的
+CPU初始化compute-write buffer组合；细节及当前语言边界见AYShader/design.md。
+
 ## 2026-10-05 — Phoskia语言扩展1设备门禁
 
 Test_PhoskiaGpu新增显式sampler2D转传/隐式与显式LOD、samplerCube读取和vertex显式LOD
