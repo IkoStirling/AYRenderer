@@ -1,5 +1,19 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 加固第八阶段与全量收尾
+
+- raw stage 边界碰撞红测试 3 assertions 失败；长度编码后拒绝非法 B，不命中有效 A。
+  缓存 v11，磁盘持久化/旧 v10 隔离、配置快照及 shutdown 回归保持通过。
+- 最终 CPU 12 个 CTest 入口全部通过（96.32 秒）：Shader fast 150/695 assertions、
+  integration 307/1103 assertions；Renderer 10 组，普通 GPU 组 14 skips 明确不作设备证据。
+- D3D11/12 设备回读结果见 out/render-phoskia-final-d3d11.log 与
+  out/render-phoskia-final-d3d12.log；每组 9 suites/14 cases/7691 assertions，原验收容差不变。
+- Renderer 清单 935 cases/10 partitions、Shader 457/2 partitions 无遗漏/重复。
+  SDK doctor 0 errors/0 warnings；独立编辑器完整重建成功，运行中的旧进程未替换。
+- 日志：out/render-phoskia-stage8-red.log、out/render-phoskia-final-cpu.log、
+  out/render-phoskia-final-rebuild.log、out/render-phoskia-final-sdk.log、
+  out/render-phoskia-final-inventory.log 与 out/render-phoskia-final-shader-inventory.log。
+
 ## 2026-10-04 Phoskia 加固第七阶段
 
 - 声明语义红测试 25 个断言失败；UBO 类型/声明顺序、字段与重复检查、property
