@@ -1,5 +1,16 @@
 # AYRenderer 测试维护
 
+## 2026-10-04 Phoskia 六项扩展：第 2 项缓存与热重载
+
+- CPU 12 个 CTest 入口全通过（118.23 秒）：Shader 152/716 + 314/1175，Renderer
+  10 组；Shader 清单 466 cases / 2 partitions。大写 .SH 同时间戳变更补测也通过。
+- D3D11/12 Phoskia 各 5 cases / 1827 assertions 实际回读，无 skip；本阶段只改变
+  缓存/修订/监听/诊断，不改渲染算法。第 1 项完整设备组各 15/8166 的门禁保持独立记录。
+- SDK doctor 0 errors/0 warnings；独立编辑器重建成功，未替换运行中的旧进程。
+- 日志：out/phoskia-expansion-2-final-cpu.log、out/phoskia-expansion-2-d3d11.log、
+  out/phoskia-expansion-2-d3d12.log、out/phoskia-expansion-2-upper-case.log、
+  out/phoskia-expansion-2-sdk.log；红测试及设计边界见 AYShader/design.md。
+
 ## 2026-10-04 Phoskia 六项扩展：第 1 项类型与绑定
 
 - D3D11/12 完整设备回归各 9 suites / 15 cases / 8166 assertions，通过且无 skip。
