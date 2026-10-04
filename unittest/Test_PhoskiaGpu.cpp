@@ -153,11 +153,38 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
 
+TEST_CASE(phoskia_runtime_loop_limits_are_clamped_once_and_do_not_depend_on_index_writes) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    PhoskiaGpuFixture fixture; const bool initialized=fixture.initialize(backend); CHECK(initialized); if(!initialized) return;
+    const std::string source="fn sum(n:int):float {let result=0.0; for(i in range(n,8)) {result=result+float(i)+1.0; n=0; i=-1;} "
+        "for(i in range(n,8)) {result=result+100.0;} return result;} material Probe {uniform int count; "
+        "vertex {in p:position; return vec4(p,1.0)} fragment {return vec4(sum(count));}}";
+    for(const int count:{-1,0,3,8,99}) {
+        const auto actualCount=(std::min)((std::max)(count,0),8);
+        const float expected=static_cast<float>(actualCount*(actualCount+1)/2);
+        checkPixels(fixture.renderSource(source,[&](const auto& program) {program.setUniform(program.getUniformBinding("count"),&count,sizeof(count));}),{expected,expected,expected,expected});
+    }
+    auto kernel=fixture.pool.acquire("[numthreads(4,4,1)] compute M {storage input:structuredbuffer<int> binding 0; storage image:rwimage2d<vec4> binding 1; "
+        "let id=thread_id; let index=int(id.x)+int(id.y)*4; let result=0.0; for(i in range(input[index],8)) {result=result+1.0;} imageStore(image,ivec2(id.xy),vec4(result));}");
+    CHECK(kernel.isValid()); if(!kernel.isValid()) {for(const auto& e:fixture.pool.lastCompileErrors())std::cerr<<e<<'\n';return;}
+    std::array<int,16> counts; counts.fill(5);
+    auto input=fixture.pool.createStorageBuffer("int",16,counts.data(),sizeof(counts)); CHECK(input.isValid());
+    auto image=fixture.pool.createStorageImage(4,4); CHECK(image.isValid());
+    std::string error; CHECK(fixture.pool.dispatch(kernel,{0,1,1,1},{{kernel.getStorageBufferBinding("input"),input}},{{kernel.getStorageImageBinding("image"),image}},&error));
+    checkPixels(fixture.readImage(ayt::shader::detail::ComputeResourceAccess::borrowImageTexture(fixture.pool,image)),{5,5,5,5});
+    CHECK(fixture.pool.releaseStorageBuffer(input)); CHECK(fixture.pool.releaseStorageImage(image));
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
+
 TEST_CASE(phoskia_gpu_struct_layout_upload_and_storage_read_write_match_pixels) {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");
     if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
-    PhoskiaGpuFixture fixture; CHECK(fixture.initialize(backend));
+    PhoskiaGpuFixture fixture; const bool initialized=fixture.initialize(backend); CHECK(initialized); if(!initialized) return;
     std::array<float,12> block{};
     block[0]=.1f; block[4]=.2f; block[5]=.4f; block[6]=.6f; block[7]=.5f; block[8]=.3f;
     checkPixels(fixture.renderSource("struct Surface { vec3 tint; float gain; } uniformblock Params { float prefix; Surface surface; float suffix; } "

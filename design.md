@@ -1,5 +1,9 @@
 # AYRenderer Design
 
+2026-10-05 Phoskia语言扩展3设备验收：Test_PhoskiaGpu增加带上限runtime int循环。
+验证负数/零/超上限、进入时锁定count、修改可见index、同层limit作用域及Compute
+readonly计数buffer→image回读；容差保持1e-4，生产Pass仍经Phoskia/BGFX生成。
+
 2026-10-05 Phoskia语言扩展2设备验收：Test_PhoskiaGpu增加flat struct的std140
 UBO真实像素、std430 readonly CPU上传→rw整元素与字段写入→RGBA32F image回读。
 同名异布局、错payload长度、readonly写权限和别名绑定拒绝。使用隔离后台设备，
