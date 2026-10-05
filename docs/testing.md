@@ -1,5 +1,17 @@
 # AYRenderer 测试维护
 
+## 2026-10-06 SSR v1
+
+VS2026 Insider Debug 构建目录 out/build/render-phoskia-20261004。
+新增 Test_Ssr 覆盖 finite settings、默认关闭、HDR graph、append-only ID/view order。
+Test_PhoskiaGpu 的两个 SSR 探针验证 sky/rough/miss 保持原 HDR，以及不同表面命中、
+confidence 和 BRDF/IBL 镜面替换的逐像素对应，容差1e-4。
+内置目录64变体，EditorShell部署和面板存在性回归；不把这些证据称为用户视觉验收。
+早期 shader 材质 return 覆盖诊断、loop implicit sample 的大程序问题均已修正；
+loop 改为 explicit LOD0；矩阵改用独立场景 uniform 避免 frame builtin 重名。
+最终日志 render-ssr-final-*：D3D11/D3D12 每设备2用例441断言均通过（含非原点相机）；
+production64变体构建与 EditorShell1用例53断言通过。renderer-full 非GPU9入口全过。
+
 ## 2026-10-05 Phoskia生产稳定性收尾
 
 当前语言、版本与生命周期权威已归并到[AYShader design当前契约](../../AYShader/design.md#current-contract)，

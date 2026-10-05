@@ -1,8 +1,17 @@
 # AYRenderer
 
+## 新画面能力：SSR v1（2026-10-06）
+
+Deferred 在 Lighting 后、DepthHaze/Transparent 前提供不透明 SSR；默认关闭。
+高级 Host 使用 `setSsrSettings`，Editor Render 面板提供开关、强度及
+0 composite / 1 hit confidence / 2 reflected radiance 调试。需要活动 IBL v2，
+屏幕外/遮挡/粗糙度超限回退原 IBL；命中替换 split-sum 镜面项，保留 diffuse/direct/emissive。
+全分辨率有界 8..64 步 + 4 次二分；无独立时域历史、Hi-Z 或粗糙反射滤波，
+不支持透明/折射/完整镜子。新增程序加入默认离线生产清单，不绕过 Phoskia。
+
 ## 默认离线 shader 生产流程（2026-10-05）
 
-标准编辑器及 `ay_add_game_executable` 自动构建/部署 63 项内置 shader 清单，
+标准编辑器及 `ay_add_game_executable` 自动构建/部署 64 项内置 shader 清单，
 覆盖当前 2D/3D、实例化、阴影、后处理、AA、选中覆盖层与 UI。构建入口为内部工具
 `AYRenderer_ShaderBuild platform profile package-directory`；清单引用实际 Pass 源，非测试副本。
 CMake 的 `AY_PRODUCTION_SHADER_PLATFORM/PROFILE` 可选择编译目标，Windows 默认 windows/s_5_0，

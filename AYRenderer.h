@@ -3,6 +3,7 @@
 
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
+#include "AYRenderer/SsrSettings.h"
 
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathUtils.h"
@@ -413,6 +414,11 @@ public:
     ayt::math::FVector3 depthHazeColor() const noexcept;
     // Convenience: density + fog color (does not change enabled/strength).
     void setDepthHazeParams(float density, const ayt::math::FVector3& fogColor);
+
+    /// Deferred opaque SSR; misses retain IBL. Requires an active IBL v2 cube.
+    /// Owner-thread settings are sanitized; disabled/zero strength allocates nothing.
+    void setSsrSettings(const SsrSettings& settings);
+    SsrSettings ssrSettings() const noexcept;
 
     // §S2 v1 — SSAO knobs → FrameContext each frame.
     // Renderer defaults: enabled=false, strength=0 (K-SSAO-1 zero alloc).

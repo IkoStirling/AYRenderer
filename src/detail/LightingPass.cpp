@@ -1552,6 +1552,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // handle / no SkyboxPass / texture missing from ctx.textures.
     bool cubeActive = false;
     bool iblV2Active = false;
+    _iblActiveThisFrame = false;
     float iblMaxLod = 0.0f;
     if (ctx.skyboxPass != nullptr
         && ctx.skyboxPass->hasCubeTexture()) {
@@ -1628,7 +1629,9 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
                             sizeof(cubeActivePad));
     }
     const shader::BindingId iblV2ActiveBinding =
+        // Publication is valid only for this frame, not merely retained cube handles.
         _program.getUniformBinding("iblV2Active");
+    _iblActiveThisFrame = iblV2Active;
     if (iblV2ActiveBinding != shader::InvalidBinding) {
         const float value[4] = {
             iblV2Active ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f

@@ -93,12 +93,14 @@ constexpr std::array<RenderPassResourceRead, 8> kLightingReads = {{
     optional(Id::SkyColor),
     optional(Id::SSAO),
 }};
-constexpr std::array<RenderPassResourceWrite, 2> kLightingWrites = {{
+constexpr std::array<RenderPassResourceWrite, 3> kLightingWrites = {{
+    output(Id::OpaqueLightingColor, Life::External, Format::RGBA16F),
     output(Id::SceneColor, Life::External, Format::RGBA16F,
            Extent::Full, true),
     output(Id::SceneDepth, Life::External, Format::D24S8),
 }};
-constexpr std::array<RenderPassResourceRead, 5> kHazeReads = {{
+constexpr std::array<RenderPassResourceRead, 6> kHazeReads = {{
+    optional(Id::SsrColor),
     required(Id::SceneColor),
     optional(Id::GBufferNormal),
     optional(Id::GBufferWorldPosition),
@@ -223,11 +225,18 @@ constexpr std::array<RenderPassResourceRead, 6> kGBufferDebugReads = {{
 }};
 
 constexpr std::span<const RenderPassResourceRead> noReads{};
+constexpr std::array<RenderPassResourceRead, 5> kSsrReads = {{
+    required(Id::OpaqueLightingColor), required(Id::GBufferAlbedo),
+    required(Id::GBufferNormal), required(Id::GBufferWorldPosition), required(Id::GBufferSurface),
+}};
+constexpr std::array<RenderPassResourceWrite, 1> kSsrWrites = {{
+    output(Id::SsrColor, Life::Transient, Format::RGBA16F),
+}};
 constexpr std::span<const RenderPassResourceWrite> noWrites{};
 
-const std::array<RenderPassContract, 22>& contracts() noexcept
+const std::array<RenderPassContract, 23>& contracts() noexcept
 {
-    static const std::array<RenderPassContract, 22> table = {{
+    static const std::array<RenderPassContract, 23> table = {{
         {RenderPassSlot::Shadow, "Shadow", noReads, kShadowWrites, false},
         {RenderPassSlot::Skybox, "Skybox", noReads, kSkyboxWrites, false},
         {RenderPassSlot::ForwardOpaque, "ForwardOpaque", kForwardReads,
@@ -266,6 +275,7 @@ const std::array<RenderPassContract, 22>& contracts() noexcept
          kMotionVectorWrites, false},
         {RenderPassSlot::AutoExposure, "AutoExposure", kAutoExposureReads,
          kAutoExposureWrites, false},
+        {RenderPassSlot::SSR, "SSR", kSsrReads, kSsrWrites, false},
     }};
     return table;
 }
@@ -373,7 +383,7 @@ const char* renderPassResourceName(RenderPassResourceId resource) noexcept
         "SelectionMask", "PresentedColor", "BloomPyramidQuarter",
         "BloomPyramidEighth", "BloomPyramidSixteenth",
         "BloomPyramidUpEighth", "BloomPyramidUpQuarter",
-        "AutoExposureHistory", "AutoExposure",
+        "AutoExposureHistory", "AutoExposure", "SsrColor", "OpaqueLightingColor",
     }};
     const auto index = static_cast<std::size_t>(resource);
     return index < names.size() ? names[index] : "UnknownResource";

@@ -107,6 +107,7 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     // liveness. Recording every graph-managed slot here lets the compiled
     // plan actively suppress disabled or disconnected concrete passes.
     graph.setExecutionEligibility(RenderPassSlot::SSAO, input.ssao);
+    graph.setExecutionEligibility(RenderPassSlot::SSR, input.ssr);
     graph.setExecutionEligibility(RenderPassSlot::DepthHaze, input.haze);
     graph.setExecutionEligibility(RenderPassSlot::BloomExtract,
                                   input.bloomExtract);
@@ -123,11 +124,12 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
                                   input.colorGrading);
     graph.setExecutionEligibility(RenderPassSlot::Present, input.finalLdr);
 
-    if (input.ssao || input.taa) {
+    if (input.ssao || input.taa || input.ssr) {
         // These are multiple logical views of one pass-owned MRT. FrameGraph
         // borrows the FBO only for dependency/lifetime description; concrete
         // passes continue binding the individual attachments directly.
         graph.importExternal(FgResourceId::GBufferNormal, input.gbuffer);
+        if (input.ssr) graph.importExternal(FgResourceId::GBufferAlbedo, input.gbuffer);
         graph.importExternal(FgResourceId::GBufferWorldPosition,
                              input.gbuffer);
         graph.importExternal(FgResourceId::GBufferSurface, input.gbuffer);
@@ -164,12 +166,20 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
                                   FgResourceId::SSAOTexture);
     }
 
+    if (input.ssr) {
+        graph.addResource(FgResourceId::SsrColor,
+                          graphTextureDesc(RenderPassSlot::SSR, RenderPassResourceId::SsrColor));
+        graph.addPass({"SSR", {FgResourceId::SceneColor, FgResourceId::GBufferAlbedo,
+                       FgResourceId::GBufferNormal, FgResourceId::GBufferWorldPosition, FgResourceId::GBufferSurface},
+                       {FgResourceId::SsrColor}, true, false, executionSlot(RenderPassSlot::SSR)});
+        result.hdrSceneSource = FgResourceId::SsrColor;
+    }
     if (input.haze) {
         graph.addResource(FgResourceId::HazeColor,
                           graphTextureDesc(RenderPassSlot::DepthHaze,
                                            RenderPassResourceId::HazeColor));
         graph.addPass({contractName(RenderPassSlot::DepthHaze),
-                       {FgResourceId::SceneColor},
+                       {result.hdrSceneSource},
                        {FgResourceId::HazeColor},
                        true, false,
                        executionSlot(RenderPassSlot::DepthHaze)});

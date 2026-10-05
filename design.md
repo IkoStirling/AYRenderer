@@ -1,5 +1,23 @@
 # AYRenderer Design
 
+## 2026-10-06 新画面功能：SSR v1
+
+链路：GBuffer/SSAO → Lighting(HDR) → SSRColor(RGBA16F, full) →
+DepthHaze → Transparent/2D overlay → Bloom/Exposure → PostProcess/AA/Present。
+SSR view32 在 view8 和13之间；slot22、Fg26/27 append-only。
+FrameGraph 声明依赖/分配/失效，Blackboard 只在本帧成功 submit 后发布；
+失败保留 Lighting，不能采旧 SSR 结果。Forward 不挂载，关闭/零强度无节点/目标/提交。
+使用 jittered 投影匹配当前 GBuffer；view-space LH +Z 追踪，天空 coverage 及
+finite thickness/self-hit/facing/屏幕边界检查，最多64步与4次二分。
+场景矩阵使用 ssrViewMatrix/ssrProjectionMatrix，列主序上传，避免与 Phoskia
+内建 viewMatrix/projectionMatrix（全屏 identity view）重名；GPU 回归覆盖平移相机。
+追踪循环只用 sampleLod(...,0)，禁止隐式梯度采样造成 D3D 强制展开和巨大程序。
+命中以 BRDF LUT/Fresnel/ambientStrength/materialAO/同 Lighting 五 tap SSAO
+权重替换已有 IBL specular，不叠加重复能量。IBL 本帧 latch 防止关闭环境后用残留 cube。
+材质阶段 return 是输出赋值，新 shader 必须单一出口；不能用 helper 的 early-return 语义。
+首版仅不透明 PBR，粗糙度淡出到 IBL；不含 Hi-Z、rough-cone filtering、
+独立反射历史、透明或离屏几何。CPU/编译/GPU探针不是用户场景视觉验收。
+
 ## 2026-10-05 Phoskia生产稳定性收尾
 
 ShaderProduction装载内置目录复用AYShader validateShaderBuildCoverage：检查显式

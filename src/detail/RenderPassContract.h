@@ -46,6 +46,8 @@ enum class RenderPassResourceId : uint8_t {
     BloomPyramidUpQuarter,
     AutoExposureHistory,
     AutoExposure,
+    SsrColor,
+    OpaqueLightingColor,
     Count,
 };
 

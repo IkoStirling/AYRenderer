@@ -97,7 +97,8 @@ public:
         return _lightingFbo.idx != UINT16_MAX && _programReady;
     }
     bool producedThisFrame() const noexcept { return _producedThisFrame; }
-    void resetFrameState() noexcept { _producedThisFrame = false; }
+    void resetFrameState() noexcept { _producedThisFrame = false; _iblActiveThisFrame = false; }
+    bool iblActiveThisFrame() const noexcept { return _iblActiveThisFrame; }
 
     // Stub accessors — return invalid handle / 0 until B5 wires
     // real GPU state. The output FBO is the consumer-side binding
@@ -252,6 +253,7 @@ private:
     // Append-only: the renderer test suite also protects the legacy pass ABI.
     // Generated only when the immutable source cube changes.
     IblResources _iblResources;
+    bool _iblActiveThisFrame = false;
 };
 
 // §P5.5 B (2026-07-23) — Bug fix #3: externalize the cache-key

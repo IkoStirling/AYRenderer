@@ -57,6 +57,10 @@ bgfx::FrameBufferHandle selectSceneColorSourceFbo(
         }
     }
 
+    if (ctx.resourceBlackboard != nullptr) {
+        const auto* ssr = ctx.resourceBlackboard->findProduced(BlackboardResourceId::SsrColor);
+        if (ssr != nullptr && BGFXAdapter::isValid(ssr->framebuffer)) return ssr->framebuffer;
+    }
     if (deferredPath && lighting != nullptr
         && BGFXAdapter::isValid(lighting->framebuffer)) {
         return lighting->framebuffer;

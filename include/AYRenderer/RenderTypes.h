@@ -456,6 +456,7 @@ enum class RenderPassSlot : uint8_t {
     // Scene-linear luminance metering with persistent 1x1 exposure history.
     // Append-only ABI value 21; disabled by default.
     AutoExposure = 21,
+    SSR = 22,
 };
 
 enum class ColorGradingPreset : uint8_t {

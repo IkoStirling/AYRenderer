@@ -321,6 +321,7 @@ const char* blackboardResourceName(BlackboardResourceId id) noexcept
     case BlackboardResourceId::AutoExposureRead: return "AutoExposureRead";
     case BlackboardResourceId::AutoExposureWrite: return "AutoExposureWrite";
     case BlackboardResourceId::AutoExposure: return "AutoExposure";
+    case BlackboardResourceId::SsrColor: return "SsrColor";
     case BlackboardResourceId::Count: break;
     }
     return "Unknown";

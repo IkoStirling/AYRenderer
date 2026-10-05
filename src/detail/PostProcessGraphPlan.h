@@ -36,6 +36,7 @@ struct PostProcessGraphPlanInput {
     bool smaa = false;
     bool colorGrading = false;
     bool smaaIntermediatePointSampled = false;
+    bool ssr = false;
 };
 
 struct PostProcessGraphPlanResult {

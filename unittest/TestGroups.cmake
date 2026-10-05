@@ -2,6 +2,7 @@
 set(AYRENDERER_TEST_GROUPS Contracts SceneMaterial Geometry LightingShadow PostProcess FrameGraph UI Shader Audit Gpu)
 
 set(AYRENDERER_TEST_Contracts_SOURCES
+    Test_Ssr.cpp
     Test_BgfxMatrix.cpp
     Test_FgResource_F1.cpp
     Test_FrameDrawLists_R6.cpp

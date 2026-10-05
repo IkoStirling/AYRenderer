@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYMath/MathTypes.h"
+#include "AYRenderer/SsrSettings.h"
 
 #include <cstdint>
 
@@ -127,6 +128,7 @@ struct FrameContext {
     float cullingMarginX = 0.0f;
     float cullingMarginY = 0.0f;
     bool cullingHomogeneousDepth = false;
+    SsrSettings ssr;
 };
 
 } // namespace ayt::render::detail

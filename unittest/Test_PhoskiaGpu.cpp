@@ -13,6 +13,8 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/FullscreenPassGeometry.h"
 #include "detail/GpuResources.h"
+#include "AYRenderer/SsrShaderSources.h"
+#include "detail/BgfxMatrix.h"
 
 #include <array>
 #include <algorithm>
@@ -153,6 +155,95 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(ssr_production_shader_preserves_sky_rough_surfaces_and_misses) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    PhoskiaGpuFixture f; CHECK(f.initialize(backend));
+    if (!f.adapter.isInitialized()) return;
+    auto scene = f.input({2.0f, 0.25f, 0.5f, 1.0f});
+    auto world = f.input({0,0,2,1}); auto coverage = f.input({0,0,0,1});
+    auto rough = f.input({0.5f,0.5f,0,1}); auto smooth = f.input({0.5f,0.5f,0,0.1f});
+    auto sky = f.input({0,0,0,0}); auto lut = f.input({1,0,0,1});
+    std::array<uint8_t,24> black{};
+    auto cube = bgfx::createTextureCube(1,false,1,bgfx::TextureFormat::RGBA8,0,bgfx::copy(black.data(),24));
+    CHECK(bgfx::isValid(cube)); if(!bgfx::isValid(cube))return; f.textures.push_back(cube);
+    auto program = f.pool.acquire(ayt::render::kSsrPhoskiaSource, ayt::render::kSsrCacheKey);
+    CHECK(program.isValid());
+    for(int mode=0;mode<3;++mode) {
+        auto pixels=f.renderResource(program,[&](const auto& p){
+            auto tex=[&](const char* n,bgfx::TextureHandle t){auto b=p.getTextureBinding(n);CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(t));};
+            tex("sceneColor",scene);tex("worldPosition",world);tex("geometryCoverage",mode==0?sky:coverage);
+            tex("normalRoughness",mode==1?rough:smooth);tex("albedoMetallic",scene);tex("ssaoTexture",sky);
+            tex("prefilteredSpecularCube",cube);tex("brdfLut",lut);
+            auto identity=ayt::math::Float4x4::identity();
+            p.setUniform(p.getUniformBinding("ssrViewMatrix"),&identity,64);
+            p.setUniform(p.getUniformBinding("ssrProjectionMatrix"),&identity,64);
+            auto u=[&](const char* n,Pixel v){p.setUniform(p.getUniformBinding(n),v.data(),16);};
+            u("cameraPosition",{0,0,0,0});u("traceParams",{1,30,0.2f,48});
+            u("materialParams",{0,0.6f,0,0});u("iblParams",{1,0,0,0});u("ssaoParams",{0,0.25f,0.25f,0});
+        });
+        checkPixels(pixels,{2.0f,0.25f,0.5f,1});
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(ssr_trace_hits_a_different_surface_and_replaces_ibl_energy) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    PhoskiaGpuFixture f; CHECK(f.initialize(backend)); if(!f.adapter.isInitialized())return;
+    for (float shift : {0.0f, 5.0f}) {
+    auto probeView=ayt::math::Float4x4::identity(); probeView.row[0].w=-shift;
+    float probeUpload[16]; toBgfxColumnMajor(probeView,probeUpload);
+    checkPixels(f.render("uniform mat4 ssrProbeView", "return ssrProbeView * vec4(5.0,0.0,0.0,1.0)",
+        [&](const auto& p){p.setUniform(p.getUniformBinding("ssrProbeView"),probeUpload,64);}),{5-shift,0,0,1});
+    std::array<Pixel,16> positions{},normals{};
+    for(int y=0;y<4;++y) for(int x=0;x<4;++x) {
+        float px=(x+0.5f)*0.5f-1.0f,py=1.0f-(y+0.5f)*0.5f,z=x==0?2.0f:2.55f;
+        positions[y*4+x]={px+shift,py,z,1};
+        if(x==0) {
+            float l=std::sqrt(px*px+py*py+z*z);
+            float nx=px/l-0.8f,ny=py/l,nz=z/l-0.6f;
+            float nl=std::sqrt(nx*nx+ny*ny+nz*nz);
+            normals[y*4+x]={nx/nl*0.5f+0.5f,ny/nl*0.5f+0.5f,nz/nl*0.5f+0.5f,0.05f};
+        } else normals[y*4+x]={0,0.5f,0.5f,0.05f};
+    }
+    auto grid=[&](const auto& data){auto t=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,
+        BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(data.data(),sizeof(data)));f.textures.push_back(t);return t;};
+    auto world=grid(positions),normal=grid(normals),scene=f.input({2,2,2,1}),surface=f.input({0,0,0,1}),albedo=f.input({1,1,1,1}),lut=f.input({1,0,0,1});
+    std::array<uint8_t,24> black{};auto cube=bgfx::createTextureCube(1,false,1,bgfx::TextureFormat::RGBA8,0,bgfx::copy(black.data(),24));f.textures.push_back(cube);
+    auto p=f.pool.acquire(ayt::render::kSsrPhoskiaSource,ayt::render::kSsrCacheKey);
+    std::vector<Pixel> confidence;
+    for(int debug : {1,0}) {
+        auto pixels=f.renderResource(p,[&](const auto& shader){
+            auto tex=[&](const char* n,bgfx::TextureHandle t){auto b=shader.getTextureBinding(n);shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(t));};
+            tex("sceneColor",scene);tex("worldPosition",world);tex("normalRoughness",normal);tex("geometryCoverage",surface);
+            tex("albedoMetallic",albedo);tex("ssaoTexture",surface);tex("brdfLut",lut);tex("prefilteredSpecularCube",cube);
+            auto identity=ayt::math::Float4x4::identity();
+            auto view=identity; view.row[0].w=-shift;
+            float viewUpload[16]; toBgfxColumnMajor(view,viewUpload);
+            shader.setUniform(shader.getUniformBinding("ssrViewMatrix"),viewUpload,64);
+            shader.setUniform(shader.getUniformBinding("ssrProjectionMatrix"),&identity,64);
+            auto u=[&](const char* n,Pixel v){shader.setUniform(shader.getUniformBinding(n),v.data(),16);};
+            u("cameraPosition",{shift,0,0,0});u("traceParams",{1,3,0.02f,48});u("materialParams",{0,0.6f,float(debug),0});u("iblParams",{1,0,0,0});u("ssaoParams",{0,0.25f,0.25f,0});
+        });
+        CHECK(pixels.size()==16); if(pixels.size()!=16)return;
+        if(debug==1) {confidence=pixels;CHECK(std::any_of(pixels.begin(),pixels.end(),[](auto v){return v[0]>0.1f;}));}
+        else for(size_t i=0;i<pixels.size();++i) {
+            std::cerr << "[SSR hit] pixel=" << i << " confidence=" << confidence[i][0] << " composite=" << pixels[i][0] << '\n';
+            CHECK(std::isfinite(pixels[i][0]));
+            CHECK(std::abs(pixels[i][0]-(2.0f+2.0f*confidence[i][0]))<0.0001f);
+        }
+    }
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
 
 TEST_CASE(phoskia_release_package_relocation_and_repeated_gpu_lifetimes_preserve_pixels) {
 #ifdef _WIN32
