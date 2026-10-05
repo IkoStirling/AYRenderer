@@ -1,5 +1,56 @@
 # AYRenderer 测试维护
 
+## 2026-10-05 Phoskia生产稳定性收尾
+
+当前语言、版本与生命周期权威已归并到[AYShader design当前契约](../../AYShader/design.md#current-contract)，
+下方旧阶段计数/格式只适用于记录当时。使用方法集中于AYShader README，SDK同步当前契约。
+
+本轮Debug Shader full345/2562、fast152/716，非GPU renderer-full的9个入口全过（119.15s）。
+Release Shader同一用例/断言集合全过（两个入口37.65s）；Release Renderer Shader入口
+通过（28.35s），包括63项目录、缺失/更名/宏不匹配、8次装卸和陈旧句柄拒绝。
+标准Debug与Release各重建63个windows/s_5_0 engine变体，schema4，不改变生成语义身份。
+真实D3D11/D3D12在Debug和Release独立进程串行全部通过，每组27用例/12334断言，零跳过；
+设备JSON和日志保留在out（Release D3D11另补独立报告，避免CTest后续覆盖前一组统计）。
+新增迁移包压力用例每设备16次组合draw/Compute/回读/释放，维持1e-4容差，资源计数恢复基线。
+
+CPU生命周期/热重载套件每轮2用例/829断言；Release连续10轮全部通过，110.54s、
+8290断言，共320次包读取及320个生命周期循环（含重复安装）、160次离线warm、120次失败/修复循环。
+保留完整每轮报告、基线JSON和失败即停汇总：out/phoskia-stability-soak-release。
+复现runner为AYShader/tools/ProductionStability.ps1，Repeat1..50，输出目录必须新建。
+这不是小时级soak，不代替Editor人工视觉、完整游戏导出或其他平台验收。
+
+性能参考（Release压力第1轮，同机CPU/Noop微基线，单位ms；p95 nearest-rank）：
+
+| 路径 | 样本数 | median | p95 |
+|---|---:|---:|---:|
+| 离线warm（含compiler/include内容身份） | 16 | 103.011 | 109.530 |
+| 包读取/校验 | 32 | 3.443 | 3.987 |
+| 安装 | 32 | 0.076 | 0.100 |
+| 生产包acquire | 32 | 0.034 | 0.054 |
+| 释放后重新获取 | 32 | 0.035 | 0.052 |
+| 开发文件cache hit | 12 | 9.793 | 11.542 |
+| 热重载修复编译 | 12 | 254.090 | 285.568 |
+
+生产包命中无需启动compiler；开发warm仍做源码/依赖内容检查，不应拿开发编译接口替代
+已保留句柄的逐帧submit。数据是小程序微基线，不设跨机器绝对耗时断言；完整样本统计见汇总。
+gpuLifecycleRoundTrip含CPU提交、帧同步、GPU回读和销毁等待，不是纯shader GPU时间。
+
+| 4×4设备生命周期端到端（16样本） | median ms | p95 ms |
+|---|---:|---:|
+| Debug D3D11 | 13.671 | 15.319 |
+| Debug D3D12 | 16.636 | 20.038 |
+| Release D3D11 | 10.192 | 11.169 |
+| Release D3D12 | 5.528 | 6.305 |
+
+原始设备输出：out/phoskia-stability-debug-d3d11-raw.log、debug-d3d12-raw.log、
+release-d3d11-final.log、release-d3d12-raw.log（后三者同phoskia-stability-前缀）。
+该表包含首次生命周期，不排除首样本；不能用于比较backend纯GPU吞吐或完整帧预算。
+
+本轮实际修复成功命中后仍保留旧诊断的问题；新覆盖门禁的负向用例发现并修复模块prepare
+重置先前job错误的情况。首次失败日志仍保留，最终全量以stability系列日志为准。
+SDK doctor 73能力/53模块/172符号、0错误/0警告；本轮相关README/design/SDK链接检查0死链。
+既有偶发并行程序获取失败首次根因仍未证实，不能把串行全过写成已经定位；SDK维持beta。
+
 ## 2026-10-05 默认 Phoskia 生产链路
 
 最终shader-full/renderer-full/resource-full/editor-full共19个CTest入口全部通过（231.88s），

@@ -15,6 +15,7 @@
 #include "detail/GpuResources.h"
 
 #include <array>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -152,6 +153,72 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(phoskia_release_package_relocation_and_repeated_gpu_lifetimes_preserve_pixels) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    const auto root=std::filesystem::temp_directory_path()/("phoskia_release_stress_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup {std::filesystem::path path; ~Cleanup(){std::error_code ec;std::filesystem::remove_all(path,ec);}} cleanup{root};
+    const std::string source="struct S {vec3 tint; float gain;} uniformblock Data {S surface;} "
+        "fn accumulate(n:int):float {let r=0.0; for(i in range(n,8)){r=r+0.25;} return r;} "
+        "fn lookup(t:sampler2D,uv:vec2):vec4 {return sample(t,uv);} material Probe {texture2d color; uniform int count; "
+        "vertex {in p:position; return vec4(p,1.0)} fragment {return lookup(color,vec2(0.5))*vec4(Data.surface.tint*(Data.surface.gain+accumulate(count)),1.0);}}";
+    const std::string compute="struct S {vec3 tint; float gain;} [numthreads(4,4,1)] compute Probe {"
+        "storage seed:structuredbuffer<S> binding 0; storage image:rwimage2d<vec4> binding 1; let s=seed[0]; "
+        "let r=0.0; for(i in range(int(s.gain),8)){r=r+0.25;} imageStore(image,ivec2(thread_id.xy),vec4(s.tint*r,1.0));}";
+    ayt::shader::ShaderBuildManifest manifest;
+    manifest.target={AY_SHADER_SHADERC_HINT,"windows","s_5_0",{AY_SHADER_BGFX_COMMON_HINT,AY_SHADER_BGFX_SRC_HINT}};
+    ayt::shader::ShaderBuildJob a,b; a.name="surface";a.variant="default";a.sourceText=source;
+    b.name="kernel";b.variant="default";b.sourceText=compute;manifest.jobs={a,b};
+    ayt::shader::ShaderBuildSession session;ayt::shader::ShaderBuildReport report,loaded;
+    session.build(manifest,report); CHECK(report.success);if(!report.success)return;
+    std::vector<std::string> errors;
+    CHECK(ayt::shader::writeShaderBuildPackage(report,(root/"original").string(),errors));
+    std::filesystem::rename(root/"original",root/"relocated");
+    CHECK(ayt::shader::readShaderBuildPackage((root/"relocated").string(),loaded));
+    CHECK(ayt::shader::validateShaderBuildCoverage(manifest,loaded,errors));
+    PhoskiaGpuFixture fixture;const bool initialized=fixture.initialize(backend);CHECK(initialized);if(!initialized)return;
+    fixture.pool.setRuntimeCompilationEnabled(false);fixture.pool.setShadercExecutable("missing-release-compiler.exe");
+    fixture.pool.setBgfxIncludeDirs({});
+    const auto tex=fixture.input({1,1,1,1});CHECK(bgfx::isValid(tex));if(!bgfx::isValid(tex))return;
+    for(int frame=0;frame<3;++frame)fixture.adapter.endFrame();
+    const auto programs=bgfx::getStats()->numPrograms,uniforms=bgfx::getStats()->numUniforms;
+    const auto buffers=bgfx::getStats()->numDynamicVertexBuffers,textures=bgfx::getStats()->numTextures;
+    std::vector<double> timings;
+    for(int cycle=0;cycle<16;++cycle) {
+        const auto start=std::chrono::steady_clock::now();
+        CHECK(fixture.pool.installPrecompiled(loaded,errors));
+        auto surface=fixture.pool.acquire(source);auto kernel=fixture.pool.acquire(compute);
+        CHECK(surface.isValid() && kernel.isValid());if(!surface.isValid() || !kernel.isValid())return;
+        const float data[4]={.2f,.4f,.6f,.5f};const int count=2;
+        checkPixels(fixture.renderResource(surface,[&](const auto& shader){
+            shader.setUniformBlock(shader.getUniformBlockBinding("Data"),data,sizeof(data));
+            shader.setUniform(shader.getUniformBinding("count"),&count,sizeof(count));
+            shader.setTexture(0,shader.getTextureBinding("color"),toShaderTexture(tex));
+        }),{.2f,.4f,.6f,1});
+        const float seed[4]={.2f,.4f,.6f,4};
+        auto buffer=fixture.pool.createStorageBuffer(kernel,kernel.getStorageBufferBinding("seed"),1,seed,sizeof(seed));
+        auto image=fixture.pool.createStorageImage(4,4); CHECK(buffer.isValid() && image.isValid());
+        if(!buffer.isValid() || !image.isValid())return;
+        std::string error;
+        CHECK(fixture.pool.dispatch(kernel,{0,1,1,1},{{kernel.getStorageBufferBinding("seed"),buffer}},{{kernel.getStorageImageBinding("image"),image}},&error));
+        checkPixels(fixture.readImage(ayt::shader::detail::ComputeResourceAccess::borrowImageTexture(fixture.pool,image)),{.2f,.4f,.6f,1});
+        CHECK(fixture.pool.releaseStorageBuffer(buffer));CHECK(fixture.pool.releaseStorageImage(image));
+        CHECK(fixture.pool.cacheStats().sourceMisses==0 && fixture.pool.cacheStats().binaryMisses==0);
+        fixture.pool.shutdown();CHECK(!surface.isValid() && !kernel.isValid());
+        for(int frame=0;frame<3;++frame)fixture.adapter.endFrame();
+        CHECK(bgfx::getStats()->numPrograms==programs);CHECK(bgfx::getStats()->numUniforms==uniforms);
+        CHECK(bgfx::getStats()->numDynamicVertexBuffers==buffers);CHECK(bgfx::getStats()->numTextures==textures);
+        timings.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count());
+    }
+    std::sort(timings.begin(),timings.end());
+    std::cout<<"[PhoskiaBaseline] {\"metric\":\"gpuLifecycleRoundTrip\",\"backend\":\""<<backend<<"\",\"samples\":16,\"medianMs\":"
+        <<timings[8]<<",\"p95Ms\":"<<timings[14]<<",\"maxMs\":"<<timings.back()<<"}\n";
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
 
 TEST_CASE(phoskia_runtime_loop_limits_are_clamped_once_and_do_not_depend_on_index_writes) {
 #ifdef _WIN32

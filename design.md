@@ -1,5 +1,18 @@
 # AYRenderer Design
 
+## 2026-10-05 Phoskia生产稳定性收尾
+
+ShaderProduction装载内置目录复用AYShader validateShaderBuildCoverage：检查显式
+name/variant、源码/展开模块/宏/target，不仅数量或runtimeKey集合。包解析/摘要校验
+先于覆盖检查，覆盖失败不安装；project额外组合仍由项目显式清单声明。
+Test_ShaderProduction反复装卸完整63项目录，测试陈旧句柄失效和零动态编译miss。
+Test_PhoskiaGpu迁移immutable包后反复16次install→纹理helper/struct UBO/runtime loop
+draw→struct Compute image→RGBA32F回读→资源释放/shutdown，像素容差1e-4，销毁后
+program/uniform/buffer/texture计数恢复基线。严格池配置不存在的compiler和空include。
+性能JSON的gpuLifecycleRoundTrip包含CPU提交、帧/回读/销毁等待，不等同纯kernel时间。
+模块语言/缓存权威集中在[AYShader当前契约](../AYShader/design.md#current-contract)；
+以下历史设备/格式记录仅适用于当时版本。最终结果及日志见docs/testing.md。
+
 2026-10-05 Phoskia语言扩展3设备验收：Test_PhoskiaGpu增加带上限runtime int循环。
 验证负数/零/超上限、进入时锁定count、修改可见index、同层limit作用域及Compute
 readonly计数buffer→image回读；容差保持1e-4，生产Pass仍经Phoskia/BGFX生成。
@@ -362,7 +375,7 @@ computer-use 实际窗口检查了启动、视口选中/Inspector 回填、Play�
 
 > **文档状态**：2026-09-12 已对齐当前代码与可选高级效果执行策略；R0–R5 主管线已落地。
 > **实现状态**：Forward 仍为产品默认，Deferred 通过 `makeDeferred()` 显式启用。Shadow、GBuffer、MotionVector、Lighting、Transparent、Bloom、DepthHaze、SSAO、PostProcess、TAA、FXAA、SMAA、ColorGrading、Present、UI 和 GBufferDebug 已接入 Pass 调度。PostProcess 产出 FrameGraph `FinalLdrColor`，TAA/FXAA/SMAA 与 ColorGrading 作为可选 LDR 节点提升 `PresentSource`，Present 保持唯一 backbuffer 边界；静态审核/修复已完成，等待真实 GPU capture 验收。
-> **活动执行计划**：[`docs/execution-plan.md`](execution-plan.md)（P0–P6 队列、§5 segfault 约束、§5.4 隔离实验、附录 B/C/D 索引）。本文件是目标架构，与代码不一致时以代码与 execution-plan 为准。
+> **活动执行计划**：[`docs/execution-plan.md`](docs/execution-plan.md)（P0–P6 队列、§5 segfault 约束、§5.4 隔离实验、附录 B/C/D 索引）。本文件是目标架构，与代码不一致时以代码与 execution-plan 为准。
 > **关联文档**：[`docs/gbuffer-current.md`](docs/gbuffer-current.md)（当前 MRT/数据契约）、[`AYShader/design.md` §8.5](../AYShader/design.md)（opaque handle contract）、[`AYShader/README.md`](../AYShader/README.md)。
 
 ---

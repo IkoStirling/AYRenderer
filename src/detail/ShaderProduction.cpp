@@ -54,14 +54,12 @@ bool loadProductionShaderPackages(shader::ShaderResourcePool& pool,
                 if(!pool.matchesCompilationTarget(report.platform,report.profile)
                     || name!=report.platform+"-"+report.profile) throw std::runtime_error("Shader package target mismatch");
                 if(std::string_view(kind)=="engine") {
-                    std::set<std::string> entries;
-                    for(const auto& entry:report.entries) entries.insert(entry.runtimeKey);
-                    for(const auto& job:builtinShaderJobs()) {
-                        const bool raw=!job.vertexSc.empty();
-                        const auto source=raw?shader::detail::frameShaderCacheFields({job.vertexSc,job.fragmentSc,job.varyingSc}):job.sourceText;
-                        if(!entries.count(shader::detail::shaderRuntimeKey(raw?"bgfx-sc":"phoskia",source,job.defines,report.platform,report.profile)))
-                            throw std::runtime_error("Engine shader catalog is stale/incomplete: "+job.name+"/"+job.variant);
-                    }
+                    shader::ShaderBuildManifest requiredCatalog;
+                    requiredCatalog.target.platform=report.platform;
+                    requiredCatalog.target.profile=report.profile;
+                    requiredCatalog.variantBudget=128;
+                    requiredCatalog.jobs=builtinShaderJobs();
+                    if(!shader::validateShaderBuildCoverage(requiredCatalog,report,errors)) return false;
                     engineFound=true;
                 }
                 reports.push_back(std::move(report));

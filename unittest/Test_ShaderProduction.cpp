@@ -22,6 +22,11 @@ TEST_CASE(complete_catalog_prewarms_normal_paths_without_compiler) {
     session.build(manifest,report); CHECK(report.success);
     if(!report.success) {for(const auto& e:report.errors) CHECK_MSG(false,e.c_str());return;}
     std::vector<std::string> errors;
+    CHECK(ayt::shader::validateShaderBuildCoverage(manifest,report,errors));
+    auto renamed=report; renamed.entries.front().name="renamed-same-bytes";
+    CHECK(!ayt::shader::validateShaderBuildCoverage(manifest,renamed,errors));
+    auto wrongMacro=report; wrongMacro.entries.front().defines={"MISSING=1"};
+    CHECK(!ayt::shader::validateShaderBuildCoverage(manifest,wrongMacro,errors));
     const auto package=root/"windows-s_5_0"/"engine";
     CHECK(ayt::shader::writeShaderBuildPackage(report,package.string(),errors));
     bgfx::Init init;init.type=bgfx::RendererType::Noop;
@@ -38,6 +43,15 @@ TEST_CASE(complete_catalog_prewarms_normal_paths_without_compiler) {
             CHECK_MSG(resource.isValid(),job.name.c_str());
         }
         CHECK(pool.cacheStats().binaryMisses==0); CHECK(pool.cacheStats().sourceMisses==0);
+        // Repeated full catalog ownership changes must invalidate old tokens.
+        for(int cycle=0;cycle<8;++cycle) {
+            const auto& job=jobs.front();
+            auto old=job.vertexSc.empty()?pool.acquire(job.sourceText):pool.acquireFromBgfxSc(job.vertexSc,job.fragmentSc,job.varyingSc);
+            CHECK(old.isValid()); pool.shutdown(); CHECK(!old.isValid());
+            CHECK(loadProductionShaderPackages(pool,root,true,errors));
+            CHECK(pool.cacheStats().binaryMisses==0); CHECK(pool.cacheStats().sourceMisses==0);
+            bgfx::frame(); bgfx::frame(); bgfx::frame();
+        }
         CHECK(!pool.acquire("material Missing {vertex {return vec4(0.0)} fragment {return vec4(1.0)}}").isValid());
         CHECK(!loadProductionShaderPackages(pool,root/"missing",true,errors));
         CHECK(loadProductionShaderPackages(pool,root/"missing",false,errors));
