@@ -5,6 +5,7 @@
 #include "AYRenderer/RenderTypes.h"
 #include "AYRenderer/SsrSettings.h"
 #include "AYRenderer/VolumetricSettings.h"
+#include "AYRenderer/DeferredDecal.h"
 
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathUtils.h"
@@ -423,6 +424,12 @@ public:
     /// Deferred-only medium, owner-thread setter; copied finite settings, default off.
     void setVolumetricSettings(const VolumetricSettings& settings);
     VolumetricSettings volumetricSettings() const noexcept;
+    /// Owner-thread, copies up to16 positive-scale projectors in stable order.
+    /// Texture resources must remain alive through rendering. No ECS serialization yet.
+    void setDeferredDecals(const std::vector<DeferredDecal>& decals);
+    const std::vector<DeferredDecal>& deferredDecals() const noexcept;
+    void setDeferredDecalsEnabled(bool enabled);
+    bool deferredDecalsEnabled() const noexcept;
 
     // §S2 v1 — SSAO knobs → FrameContext each frame.
     // Renderer defaults: enabled=false, strength=0 (K-SSAO-1 zero alloc).

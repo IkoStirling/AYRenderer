@@ -149,10 +149,10 @@ TEST_CASE(camera_overlay_2d_is_mounted_after_3d_transparent_in_deferred) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
     CHECK(desc.contains(RenderPassSlot::Forward2DOpaque));
-    CHECK(desc.passes.size() == 22);
-    CHECK(desc.passes[9] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[10] == RenderPassSlot::Forward2DOpaque);
-    CHECK(desc.passes[11] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes.size() == 23);
+    CHECK(desc.passes[10] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[11] == RenderPassSlot::Forward2DOpaque);
+    CHECK(desc.passes[12] == RenderPassSlot::BloomExtract);
 }
 
 // === 3. Payload default + round-trip ================================

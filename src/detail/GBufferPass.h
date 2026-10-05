@@ -98,6 +98,8 @@ public:
     // stubs so external resizing code can be wired without an ABI
     // churn when B4 lands.
     void setGbufferSize(uint16_t width, uint16_t height) noexcept;
+    // Decal graph preparation needs the base depth before dispatch. No clear/draw.
+    void prepareOutput(BGFXAdapter& adapter) { ensure(adapter, _gbufferW, _gbufferH); }
     void destroyResources(BGFXAdapter& adapter);
 
     // §P5 B4b (2026-07-22) �?lazy Phoskia GBuffer VS/FS acquire.

@@ -15,6 +15,11 @@
 #include "detail/GpuResources.h"
 #include "AYRenderer/SsrShaderSources.h"
 #include "AYRenderer/VolumetricShaderSources.h"
+#include "AYRenderer/DeferredDecalShaderSources.h"
+#include "detail/DeferredDecalPass.h"
+#include "detail/PostProcessGraphPlan.h"
+#include "detail/RenderResourceBlackboard.h"
+#include "detail/PassExecContext.h"
 #include "detail/BgfxMatrix.h"
 
 #include <array>
@@ -156,6 +161,96 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(deferred_decal_real_pass_ping_pong_resize_and_borrowed_depth_lifetime) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    auto grid=[&](Pixel value){std::array<Pixel,16> data;data.fill(value);auto h=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,BGFX_TEXTURE_RT|BGFX_SAMPLER_POINT,bgfx::copy(data.data(),sizeof(data)));f.textures.push_back(h);return h;};
+    auto a=grid({.2f,.4f,.6f,.3f}),n=grid({.5f,.5f,1,.8f}),w=grid({0,0,0,.4f}),surface=grid({.1f,.2f,.3f,1});
+    auto depth=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::D24S8,BGFX_TEXTURE_RT);
+    CHECK(bgfx::isValid(depth));f.textures.push_back(depth);
+    bgfx::TextureHandle attachments[5]={a,n,w,surface,depth};
+    auto base=bgfx::createFrameBuffer(5,attachments,false);CHECK(bgfx::isValid(base));
+    struct BaseCleanup{bgfx::FrameBufferHandle h;~BaseCleanup(){if(bgfx::isValid(h))bgfx::destroy(h);}} cleanup{base};
+    f.adapter.setViewFrameBuffer(50,base);f.adapter.setViewRect(50,0,0,4,4);
+    f.adapter.setViewClearRaw(50,BGFX_CLEAR_DEPTH,0,.37f,0);bgfx::touch(50);f.adapter.endFrame();
+    f.adapter.setViewClearRaw(50,BGFX_CLEAR_NONE,0,1,0);
+    auto checkDepth=[&](){checkPixels(f.render("texture2d sampledDepth","return vec4(vec3(sample(sampledDepth,vec2(0.5)).r),1.0)",
+        [&](const auto& shader){auto b=shader.getTextureBinding("sampledDepth");shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(depth));}),{.37f,.37f,.37f,1});};
+    FrameContext frame;frame.decalsEnabled=true;ayt::render::RenderScene scene;
+    std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;std::unordered_map<uint64_t,GpuMaterial> materials;
+    RenderResourceBlackboard bb;FrameGraph graph(f.adapter);DeferredDecalPass pass;
+    struct PassCleanup{DeferredDecalPass& p;BGFXAdapter& a;~PassCleanup(){p.destroyResources(a);}} passCleanup{pass,f.adapter};
+    ayt::render::DeferredDecal red,blue;red.color={1,0,0};blue.color={0,0,1};red.opacity=blue.opacity=.5f;
+    std::vector<ayt::render::DeferredDecal> decals={red,blue};
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame,0,base};
+    ctx.resourceBlackboard=&bb;ctx.frameGraph=&graph;ctx.decals=&decals;
+    for(int i=0;i<3;++i)f.adapter.endFrame();auto baseline=bgfx::getStats()->numTextures;
+    for(int cycle=0;cycle<3;++cycle) {
+        CHECK(pass.prepare(f.adapter,4,4,depth,cycle+1));CHECK(bgfx::isValid(pass.output(2)));
+        bb.beginFrame();bb.publishGBuffer(base,a,n,w,surface,depth,4,4,cycle+1,true);
+        PostProcessGraphPlanInput in;in.width=in.height=4;in.sceneColor=base;in.gbuffer=pass.output(2);in.baseGBuffer=base;in.decals=true;
+        CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);CHECK(pass.execute(ctx)==2);
+        BlackboardGBufferView result;CHECK(bb.resolveGBuffer(result));CHECK(result.framebuffer.idx==pass.output(2).idx);CHECK(result.depth.idx==depth.idx);
+        for(int i=0;i<3;++i)f.adapter.endFrame();CHECK(bgfx::getStats()->numTextures==baseline+8);
+        checkDepth(); // Neither a fullscreen clear nor WRITE_Z may alter base depth.
+        auto pixels=f.render("texture2d result", "return sample(result,vec2(0.5))",[&](const auto& shader){auto b=shader.getTextureBinding("result");shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(result.albedo));});
+        CHECK(pixels.size()==16);for(const auto& p:pixels){CHECK(std::abs(p[0]-.3f)<.008f);CHECK(std::abs(p[1]-.1f)<.008f);CHECK(std::abs(p[2]-.65f)<.008f);}
+        // Original group remains authoritative if any later producer cannot bind.
+        bb.beginFrame();bb.publishGBuffer(base,a,n,w,surface,depth,4,4,cycle+1,true);
+        decals[0].albedo.id=999999;CHECK(pass.execute(ctx)==0);CHECK(bb.resolveGBuffer(result));CHECK(result.framebuffer.idx==base.idx);decals[0].albedo={};
+        frame.decalsEnabled=false;CHECK(pass.execute(ctx)==0);frame.decalsEnabled=true;
+    }
+    // Genuine size changes recreate private colors while retaining borrowed depth.
+    auto smallDepth=bgfx::createTexture2D(2,2,false,1,bgfx::TextureFormat::D24S8,BGFX_TEXTURE_RT);
+    CHECK(bgfx::isValid(smallDepth));
+    CHECK(pass.prepare(f.adapter,2,2,smallDepth,4));CHECK(pass.prepare(f.adapter,4,4,depth,5));
+    bgfx::destroy(smallDepth);
+    pass.destroyResources(f.adapter);for(int i=0;i<3;++i)f.adapter.endFrame();CHECK(bgfx::getStats()->numTextures==baseline);
+    checkDepth();
+    // Borrowed base depth/FBO remain valid and can be sampled after decal teardown.
+    auto pixels=f.render("texture2d original","return sample(original,vec2(0.5))",[&](const auto& shader){auto b=shader.getTextureBinding("original");shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(a));});
+    checkPixels(pixels,{.2f,.4f,.6f,.3f});
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(deferred_decal_preserves_metadata_and_updates_color_material_normal) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    std::array<bgfx::TextureHandle,4> outputs{f.targetTexture};
+    for(int i=1;i<4;++i){outputs[i]=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,BGFX_TEXTURE_RT);CHECK(bgfx::isValid(outputs[i]));f.textures.push_back(outputs[i]);}
+    bgfx::destroy(f.target);f.target=bgfx::createFrameBuffer(4,outputs.data(),false);CHECK(bgfx::isValid(f.target));
+    auto a=f.input({.2f,.4f,.6f,.3f}),n=f.input({.5f,.5f,1,.8f}),back=f.input({.5f,.5f,0,.8f});
+    auto w=f.input({0,0,0,.4f}),surface=f.input({.1f,.2f,.3f,1}),sky=f.input({.1f,.2f,.3f,0});
+    auto decal=f.input({.8f,.6f,.4f,.5f}),normal=f.input({.8f,.5f,.9f,1});
+    auto p=f.pool.acquire(ayt::render::kDeferredDecalPhoskiaSource,ayt::render::kDeferredDecalCacheKey);
+    for(int mode=0;mode<5;++mode) {
+        auto pixels=f.renderResource(p,[&](const auto& shader){
+            auto tex=[&](const char* name,bgfx::TextureHandle h){auto b=shader.getTextureBinding(name);CHECK(b!=ayt::shader::InvalidBinding);shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(h));};
+            tex("sourceAlbedo",a);tex("sourceNormal",mode==4?back:n);tex("sourceWorld",w);tex("sourceSurface",mode==3?sky:surface);tex("decalAlbedo",decal);tex("decalNormal",normal);
+            auto matrix=ayt::math::Float4x4::identity();if(mode==0)matrix.row[0].w=3;
+            float upload[16];toBgfxColumnMajor(matrix,upload);shader.setUniform(shader.getUniformBinding("decalWorldToLocal"),upload,64);
+            auto u=[&](const char* name,Pixel v){auto b=shader.getUniformBinding(name);CHECK(b!=ayt::shader::InvalidBinding);shader.setUniform(b,v.data(),16);};
+            u("decalTangent",{1,0,0,0});u("decalBitangent",{0,1,0,0});u("decalFacing",{0,0,1,.1f});
+            u("decalTint",{1,mode==2?1.f:0.f,mode==2?1.f:0.f,mode==2?1.f:.5f});
+            u("decalMaterial",{.2f,.9f,1,1});u("decalOptions",{mode==2?1.f:0.f,mode==2?1.f:0.f,0,0});
+        });
+        const bool changed=mode==1||mode==2;
+        checkPixels(pixels,!changed?Pixel{.2f,.4f,.6f,.3f}:mode==1?Pixel{.6f,.2f,.3f,.6f}:Pixel{.5f,.5f,.5f,.6f});
+        Pixel expectedNormal=mode==4?Pixel{.5f,.5f,0,.8f}:Pixel{.5f,.5f,1,changed?.5f:.8f};
+        if(mode==2)expectedNormal={.65811388f,.5f,.97434165f,.5f};
+        checkPixels(f.readImage(outputs[1]),expectedNormal);
+        checkPixels(f.readImage(outputs[2]),{0,0,0,.4f});
+        checkPixels(f.readImage(outputs[3]),{.1f,.2f,.3f,mode==3?0.f:1.f});
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
 
 TEST_CASE(volumetric_shader_matches_extinction_scattering_local_box_and_shadow) {
 #ifdef _WIN32

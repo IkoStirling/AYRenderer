@@ -131,6 +131,7 @@ struct FrameContext {
     bool cullingHomogeneousDepth = false;
     SsrSettings ssr;
     VolumetricSettings volumetric;
+    bool decalsEnabled = false;
 };
 
 } // namespace ayt::render::detail

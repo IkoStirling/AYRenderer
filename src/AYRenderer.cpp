@@ -13,6 +13,7 @@
 #include "detail/DepthHazePipeline.h"
 #include "detail/SsrPass.h"
 #include "detail/VolumetricPass.h"
+#include "detail/DeferredDecalPass.h"
 #include "detail/DebugOverlay.h"
 #include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
 #include "detail/FrameDrawLists.h"
@@ -203,6 +204,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::Shadow,
         RenderPassSlot::Skybox,         // §Skybox0 (2026-07-23)
         RenderPassSlot::GBuffer,
+        RenderPassSlot::DeferredDecal,
         RenderPassSlot::MotionVector,
         RenderPassSlot::SSAO,
         RenderPassSlot::Lighting,
@@ -318,6 +320,8 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::SsrPass>();
     case RenderPassSlot::Volumetric:
         return std::make_unique<detail::VolumetricPass>();
+    case RenderPassSlot::DeferredDecal:
+        return std::make_unique<detail::DeferredDecalPass>();
     // §A1 SSAO MVP (2026-07-24) — SSAO pass factory. Only mounted
     // when the pipeline desc includes RenderPassSlot::SSAO (i.e.
     // a Deferred desc or a custom desc that opts in). makeDefault()
@@ -490,6 +494,8 @@ struct Renderer::Impl {
     bool                           ssaoEnabled  = false;
     SsrSettings                    ssr;
     VolumetricSettings             volumetric;
+    bool                          decalsEnabled = false;
+    std::vector<DeferredDecal>     decals;
     float                          ssaoStrength = 0.0f;
     float                          ssaoRadius   = 0.5f;
     float                          ssaoBias     = 0.025f;
@@ -762,6 +768,9 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // new-pass FBO allocation).
     if (detail::GBufferPass* gbufferPass =
             pipeline.findPass<detail::GBufferPass>()) {
+        if (auto* decal = pipeline.findPass<detail::DeferredDecalPass>()) {
+            if (adapter.isInitialized()) decal->destroyResources(adapter);
+        }
         if (adapter.isInitialized()) {
             gbufferPass->destroyResources(adapter);
         }
@@ -1090,6 +1099,9 @@ void Renderer::shutdown()
     }
     if (detail::GBufferPass* gbufferPass =
             _impl->pipeline.findPass<detail::GBufferPass>()) {
+        if (auto* decal = _impl->pipeline.findPass<detail::DeferredDecalPass>()) {
+            if (_impl->adapter.isInitialized()) decal->destroyResources(_impl->adapter);
+        }
         if (_impl->adapter.isInitialized()) {
             gbufferPass->destroyResources(_impl->adapter);
         }
@@ -1389,6 +1401,7 @@ void Renderer::render(const RenderScene& scene)
     frame.hazeEnabled      = _impl->depthHazeEnabled;
     frame.ssr = _impl->ssr;
     frame.volumetric = _impl->volumetric;
+    frame.decalsEnabled = _impl->decalsEnabled;
     frame.hazeStrength     = detail::sanitizeDepthHazeStrength(
         _impl->depthHazeStrength);
     frame.hazeDensity      = detail::sanitizeDepthHazeDensity(
@@ -1813,6 +1826,19 @@ void Renderer::render(const RenderScene& scene)
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
     }
     graphInput.haze = hazePassEnabled;
+    auto* decalPass = _impl->pipeline.findPass<detail::DeferredDecalPass>();
+    if (decalPass && (!frame.decalsEnabled || _impl->decals.empty() || !decalPass->isEnabled())
+        && detail::BGFXAdapter::isValid(decalPass->output(1)) && _impl->adapter.isInitialized())
+        decalPass->destroyResources(_impl->adapter);
+    if (backendReady && frame.decalsEnabled && !_impl->decals.empty()
+        && decalPass && decalPass->isEnabled() && gbufferPassPtr && gbufferPassPtr->isEnabled()) {
+        gbufferPassPtr->prepareOutput(_impl->adapter);
+        if (decalPass->prepare(_impl->adapter, fgW, fgH, gbufferPassPtr->gbufferDepthRt(), gbufferPassPtr->targetGeneration())) {
+            graphInput.decals = true;
+            graphInput.baseGBuffer = gbufferPassPtr->gbufferFbo();
+            graphInput.gbuffer = decalPass->output(_impl->decals.size());
+        }
+    }
     const auto* fogPass = _impl->pipeline.findPass<detail::VolumetricPass>();
     graphInput.volumetric = backendReady && frame.volumetric.enabled && frame.volumetric.density > 0
         && fogPass && fogPass->isEnabled() && gbufferPassPtr && gbufferPassPtr->isEnabled()
@@ -1925,6 +1951,7 @@ void Renderer::render(const RenderScene& scene)
     detail::InstancingStats instancingStats{};
     ctx.rigidInstancing = _impl->rigidInstancingEnabled;
     ctx.instancingStats = &instancingStats;
+    ctx.decals = &_impl->decals;
 
     static uint32_t s_compositeLog = 0;
     if (s_compositeLog < 3) {
@@ -3101,11 +3128,28 @@ ColorGradingPreset Renderer::colorGradingPreset() const noexcept
 
 // SSR host settings survive pipeline replacement, but never store GPU handles.
 void Renderer::setVolumetricSettings(const VolumetricSettings& settings) {
+    // Independent of decal authoring.
     if (_impl) _impl->volumetric = sanitizeVolumetricSettings(settings);
 }
 VolumetricSettings Renderer::volumetricSettings() const noexcept {
     return _impl ? _impl->volumetric : VolumetricSettings{};
 }
+void Renderer::setDeferredDecals(const std::vector<DeferredDecal>& decals) {
+    if (!_impl) return;
+    std::vector<DeferredDecal> copy;
+    for (const auto& input : decals) {
+        if (copy.size() == kMaxDeferredDecals) break;
+        auto d = sanitizeDeferredDecal(input);
+        if (d.opacity > 0) copy.push_back(d);
+    }
+    _impl->decals = std::move(copy);
+}
+const std::vector<DeferredDecal>& Renderer::deferredDecals() const noexcept {
+    static const std::vector<DeferredDecal> empty;
+    return _impl ? _impl->decals : empty;
+}
+void Renderer::setDeferredDecalsEnabled(bool enabled) { if (_impl) _impl->decalsEnabled = enabled; }
+bool Renderer::deferredDecalsEnabled() const noexcept { return _impl && _impl->decalsEnabled; }
 void Renderer::setSsrSettings(const SsrSettings& settings) {
     if (_impl) _impl->ssr = sanitizeSsrSettings(settings);
 }

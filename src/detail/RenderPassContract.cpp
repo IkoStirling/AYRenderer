@@ -74,7 +74,8 @@ constexpr std::array<RenderPassResourceRead, 1> kMotionVectorReads = {{
 constexpr std::array<RenderPassResourceWrite, 1> kMotionVectorWrites = {{
     output(Id::MotionVectors, Life::Persistent, Format::RGBA16F),
 }};
-constexpr std::array<RenderPassResourceRead, 4> kSsaoReads = {{
+constexpr std::array<RenderPassResourceRead, 5> kSsaoReads = {{
+    optional(Id::DecalGBuffer),
     required(Id::GBufferNormal),
     required(Id::GBufferWorldPosition),
     required(Id::GBufferSurface),
@@ -83,7 +84,8 @@ constexpr std::array<RenderPassResourceRead, 4> kSsaoReads = {{
 constexpr std::array<RenderPassResourceWrite, 1> kSsaoWrites = {{
     output(Id::SSAO, Life::Transient, Format::RGBA8),
 }};
-constexpr std::array<RenderPassResourceRead, 8> kLightingReads = {{
+constexpr std::array<RenderPassResourceRead, 9> kLightingReads = {{
+    optional(Id::DecalGBuffer),
     required(Id::GBufferAlbedo),
     required(Id::GBufferNormal),
     required(Id::GBufferWorldPosition),
@@ -165,7 +167,8 @@ constexpr std::array<RenderPassResourceRead, 5> kAutoExposureReads = {{
 constexpr std::array<RenderPassResourceWrite, 1> kAutoExposureWrites = {{
     output(Id::AutoExposure, Life::PersistentHistory, Format::RGBA16F),
 }};
-constexpr std::array<RenderPassResourceRead, 5> kTaaReads = {{
+constexpr std::array<RenderPassResourceRead, 6> kTaaReads = {{
+    optional(Id::DecalGBuffer),
     required(Id::FinalLdrColor),
     required(Id::GBufferWorldPosition),
     optional(Id::MotionVectors),
@@ -221,7 +224,8 @@ constexpr std::array<RenderPassResourceWrite, 1> kBackbufferWrites = {{
     output(Id::PresentedColor, Life::External, Format::RGBA8,
            Extent::Backbuffer),
 }};
-constexpr std::array<RenderPassResourceRead, 6> kGBufferDebugReads = {{
+constexpr std::array<RenderPassResourceRead, 7> kGBufferDebugReads = {{
+    optional(Id::DecalGBuffer),
     required(Id::PresentedColor),
     required(Id::GBufferAlbedo),
     required(Id::GBufferNormal),
@@ -231,7 +235,8 @@ constexpr std::array<RenderPassResourceRead, 6> kGBufferDebugReads = {{
 }};
 
 constexpr std::span<const RenderPassResourceRead> noReads{};
-constexpr std::array<RenderPassResourceRead, 5> kSsrReads = {{
+constexpr std::array<RenderPassResourceRead, 6> kSsrReads = {{
+    optional(Id::DecalGBuffer),
     required(Id::OpaqueLightingColor), required(Id::GBufferAlbedo),
     required(Id::GBufferNormal), required(Id::GBufferWorldPosition), required(Id::GBufferSurface),
 }};
@@ -239,6 +244,13 @@ constexpr std::array<RenderPassResourceWrite, 1> kSsrWrites = {{
     output(Id::SsrColor, Life::Transient, Format::RGBA16F),
 }};
 constexpr std::span<const RenderPassResourceWrite> noWrites{};
+constexpr std::array<RenderPassResourceRead, 5> kDecalReads = {{
+    required(Id::GBufferAlbedo), required(Id::GBufferNormal), required(Id::GBufferWorldPosition), required(Id::GBufferSurface), required(Id::GBufferDepth),
+}};
+constexpr std::array<RenderPassResourceWrite, 5> kDecalWrites = {{
+    kGBufferWrites[0], kGBufferWrites[1], kGBufferWrites[2], kGBufferWrites[3],
+    output(Id::DecalGBuffer, Life::Persistent, Format::Unknown),
+}};
 constexpr std::array<RenderPassResourceRead, 5> kVolumetricReads = {{
     required(Id::OpaqueLightingColor), required(Id::GBufferWorldPosition), required(Id::GBufferSurface),
     optional(Id::SsrColor), optional(Id::HazeColor),
@@ -247,9 +259,9 @@ constexpr std::array<RenderPassResourceWrite, 1> kVolumetricWrites = {{
     output(Id::VolumetricColor, Life::Transient, Format::RGBA16F),
 }};
 
-const std::array<RenderPassContract, 24>& contracts() noexcept
+const std::array<RenderPassContract, 25>& contracts() noexcept
 {
-    static const std::array<RenderPassContract, 24> table = {{
+    static const std::array<RenderPassContract, 25> table = {{
         {RenderPassSlot::Shadow, "Shadow", noReads, kShadowWrites, false},
         {RenderPassSlot::Skybox, "Skybox", noReads, kSkyboxWrites, false},
         {RenderPassSlot::ForwardOpaque, "ForwardOpaque", kForwardReads,
@@ -290,6 +302,7 @@ const std::array<RenderPassContract, 24>& contracts() noexcept
          kAutoExposureWrites, false},
         {RenderPassSlot::SSR, "SSR", kSsrReads, kSsrWrites, false},
         {RenderPassSlot::Volumetric, "Volumetric", kVolumetricReads, kVolumetricWrites, false},
+        {RenderPassSlot::DeferredDecal, "DeferredDecal", kDecalReads, kDecalWrites, true},
     }};
     return table;
 }
@@ -399,6 +412,7 @@ const char* renderPassResourceName(RenderPassResourceId resource) noexcept
         "BloomPyramidUpEighth", "BloomPyramidUpQuarter",
         "AutoExposureHistory", "AutoExposure", "SsrColor", "OpaqueLightingColor",
         "VolumetricColor",
+        "DecalGBuffer",
     }};
     const auto index = static_cast<std::size_t>(resource);
     return index < names.size() ? names[index] : "UnknownResource";

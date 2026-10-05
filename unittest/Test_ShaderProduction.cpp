@@ -14,7 +14,7 @@ TEST_CASE(complete_catalog_prewarms_normal_paths_without_compiler) {
     namespace fs=std::filesystem;
     const auto root=fs::temp_directory_path()/("shader_production_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     struct Cleanup { fs::path root; ~Cleanup() {std::error_code ec;fs::remove_all(root,ec);} } cleanup{root};
-    const auto jobs=builtinShaderJobs(); CHECK(jobs.size()==65);
+    const auto jobs=builtinShaderJobs(); CHECK(jobs.size()==66);
     ayt::shader::ShaderBuildManifest manifest;
     manifest.target={AY_SHADER_SHADERC_HINT,"windows","s_5_0",{AY_SHADER_BGFX_COMMON_HINT,AY_SHADER_BGFX_SRC_HINT}};
     manifest.variantBudget=128; manifest.jobs=jobs;

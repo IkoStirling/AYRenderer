@@ -458,6 +458,7 @@ enum class RenderPassSlot : uint8_t {
     AutoExposure = 21,
     SSR = 22,
     Volumetric = 23,
+    DeferredDecal = 24,
 };
 
 enum class ColorGradingPreset : uint8_t {

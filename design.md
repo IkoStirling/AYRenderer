@@ -1,5 +1,20 @@
 # AYRenderer Design
 
+## 2026-10-06 Deferred Decal v1
+
+slot24；view34..49 在GBuffer7后、Motion3/SSAO14前。Renderer 有界复制16个
+高级Host descriptor，过滤非有限/奇异/镜像/剪切变换和零opacity；正交基正尺度允许非等比。
+只在启用且列表非空时 prepare 原 GBuffer depth，再创建2组4色MRT并借用depth。
+MRT不拥有深度，FBO destroyTextures=false，先销毁Decal组再销毁原GBuffer。
+FG BaseGBuffer(29) 是原始输入；标准GB颜色ID导入最终parity目标，由Decal节点写入，
+深度仍导入原目标。Blackboard只在全部draw成功后发布coherent组；缺纹理/程序失败
+保留原GBuffer，本帧不会消费部分或上帧Decal。resize同时核对depth句柄和base generation。
+DecalGBuffer契约标记让Lighting/SSAO等拒绝晚到的Decal，不把重复GB写入视为已满足依赖。
+view顺序保障ping/pong无反馈；normal neutral保留接收者normal，扰动使用receiver切线基。
+关闭/空列表无graph节点、分配、submit；下一次Renderer::render释放旧私有目标。
+首版每项全屏RGBA8/RGBA16F复制，约40 B/pixel私有颜色，16项仅硬上限不是性能目标；
+无ECS/序列化/透明贴花/投影体裁剪draw或贴花atlas；资源纹理由Renderer资产表拥有。
+
 ## 2026-10-06 Volumetric v1
 
 View33 在13之后、9之前；slot23/Fg28 append-only。FG 拥有 RGBA16F 全尺寸

@@ -36,6 +36,7 @@
 // mutation, not frame-state mutation.
 
 #include "AYRenderer/RenderScene.h"
+#include "AYRenderer/DeferredDecal.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
@@ -384,6 +385,7 @@ struct PassExecContext {
     RenderResourceBlackboard* resourceBlackboard = nullptr;
     bool rigidInstancing = false;
     InstancingStats* instancingStats = nullptr;
+    const std::vector<DeferredDecal>* decals = nullptr; // borrowed immutable per-dispatch host copy
 
 };
 

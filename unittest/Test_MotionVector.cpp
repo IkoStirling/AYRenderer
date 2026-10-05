@@ -80,7 +80,9 @@ TEST_CASE(motion_vector_is_deferred_only_between_gbuffer_and_ssao)
         const std::size_t motion = passIndex(desc, RenderPassSlot::MotionVector);
         const std::size_t ssao = passIndex(desc, RenderPassSlot::SSAO);
         const std::size_t lighting = passIndex(desc, RenderPassSlot::Lighting);
-        CHECK(motion == gbuffer + 1u);
+        const size_t decal = passIndex(desc, RenderPassSlot::DeferredDecal);
+        CHECK(decal == gbuffer + 1u);
+        CHECK(motion == decal + 1u);
         CHECK(ssao == motion + 1u);
         CHECK(lighting == ssao + 1u);
     }
@@ -98,7 +100,11 @@ TEST_CASE(motion_vector_view_executes_after_gbuffer_before_ssao_and_lighting)
     const auto lighting = std::find(order.begin(), order.end(),
         ayt::render::detail::LightingPass::kLightingViewId);
     CHECK(gbuffer != order.end());
-    CHECK(motion == gbuffer + 1);
+    const auto decalFirst = std::find(order.begin(), order.end(), 34);
+    const auto decalLast = std::find(order.begin(), order.end(), 49);
+    CHECK(decalFirst == gbuffer + 1);
+    CHECK(decalLast == decalFirst + 15);
+    CHECK(motion == decalLast + 1);
     CHECK(ssao == motion + 1);
     CHECK(lighting == ssao + 1);
     CHECK(std::count(order.begin(), order.end(),

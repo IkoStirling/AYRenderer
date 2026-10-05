@@ -109,6 +109,7 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     graph.setExecutionEligibility(RenderPassSlot::SSAO, input.ssao);
     graph.setExecutionEligibility(RenderPassSlot::SSR, input.ssr);
     graph.setExecutionEligibility(RenderPassSlot::Volumetric, input.volumetric);
+    graph.setExecutionEligibility(RenderPassSlot::DeferredDecal, input.decals);
     graph.setExecutionEligibility(RenderPassSlot::DepthHaze, input.haze);
     graph.setExecutionEligibility(RenderPassSlot::BloomExtract,
                                   input.bloomExtract);
@@ -125,16 +126,22 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
                                   input.colorGrading);
     graph.setExecutionEligibility(RenderPassSlot::Present, input.finalLdr);
 
-    if (input.ssao || input.taa || input.ssr || input.volumetric) {
+    if (input.ssao || input.taa || input.ssr || input.volumetric || input.decals) {
         // These are multiple logical views of one pass-owned MRT. FrameGraph
         // borrows the FBO only for dependency/lifetime description; concrete
         // passes continue binding the individual attachments directly.
         graph.importExternal(FgResourceId::GBufferNormal, input.gbuffer);
-        if (input.ssr) graph.importExternal(FgResourceId::GBufferAlbedo, input.gbuffer);
+        if (input.ssr || input.decals) graph.importExternal(FgResourceId::GBufferAlbedo, input.gbuffer);
         graph.importExternal(FgResourceId::GBufferWorldPosition,
                              input.gbuffer);
         graph.importExternal(FgResourceId::GBufferSurface, input.gbuffer);
-        graph.importExternal(FgResourceId::GBufferDepth, input.gbuffer);
+        graph.importExternal(FgResourceId::GBufferDepth, input.decals ? input.baseGBuffer : input.gbuffer);
+    }
+    if (input.decals) {
+        graph.importExternal(FgResourceId::BaseGBuffer, input.baseGBuffer);
+        graph.addPass({"DeferredDecal", {FgResourceId::BaseGBuffer},
+                       {FgResourceId::GBufferAlbedo, FgResourceId::GBufferNormal, FgResourceId::GBufferWorldPosition, FgResourceId::GBufferSurface},
+                       true, true, executionSlot(RenderPassSlot::DeferredDecal)});
     }
     if (input.taa) {
         graph.importExternal(FgResourceId::MotionVectors,

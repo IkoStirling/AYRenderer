@@ -154,23 +154,23 @@ TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {
 
 TEST_CASE(deferred_pipeline_matches_data_dependencies) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
-    CHECK(desc.passes.size() == 22u);
+    CHECK(desc.passes.size() == 23u);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
-    CHECK(desc.passes[3] == RenderPassSlot::MotionVector);
-    CHECK(desc.passes[4] == RenderPassSlot::SSAO);
-    CHECK(desc.passes[5] == RenderPassSlot::Lighting);
-    CHECK(desc.passes[7] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[9] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[10] == RenderPassSlot::Forward2DOpaque);
-    CHECK(desc.passes[11] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[12] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[13] == RenderPassSlot::AutoExposure);
-    CHECK(desc.passes[14] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[4] == RenderPassSlot::MotionVector);
+    CHECK(desc.passes[5] == RenderPassSlot::SSAO);
+    CHECK(desc.passes[6] == RenderPassSlot::Lighting);
+    CHECK(desc.passes[8] == RenderPassSlot::DepthHaze);
+    CHECK(desc.passes[10] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[11] == RenderPassSlot::Forward2DOpaque);
+    CHECK(desc.passes[12] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[13] == RenderPassSlot::BloomBlur);
+    CHECK(desc.passes[14] == RenderPassSlot::AutoExposure);
+    CHECK(desc.passes[15] == RenderPassSlot::PostProcess);
 }
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 46u);
+    CHECK(order.size() == 62u);
     const auto rank = [&order](bgfx::ViewId view) {
         return std::find(order.begin(), order.end(), view);
     };

@@ -16,10 +16,10 @@ inline constexpr std::size_t kRenderViewCapacity = 256u;
 // Lighting, which applies AO only to ambient/IBL. Opaque haze then completes
 // before transparent composition, and Bloom consumes the resulting HDR color.
 // GPU particle compute runs before both transparent 3D and overlay 2D draws.
-inline constexpr std::array<bgfx::ViewId, 46> kRenderViewOrder = {
+inline constexpr std::array<bgfx::ViewId, 62> kRenderViewOrder = {
     243, 1, 18, 19, 20, 21, 22, 23, 24, 25,
     2, 0,
-    6, 7, 3, 14,
+    6, 7, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 3, 14,
     8, 32, 13, 33, 9, 244, 253, 246, 10, 11, 26, 27, 28, 29, 30, 12, 31,
     15, 5, 17, 247, 248, 249, 4, 16, 245, 250, 254, 251, 252
 };

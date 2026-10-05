@@ -1,5 +1,22 @@
 # AYRenderer 测试维护
 
+## 2026-10-06 Deferred Decal v1 / 三项新增能力集成收尾
+
+VS2026 Insider Debug，同 out/build/render-phoskia-20261004，production66变体构建部署。
+Test_DeferredDecal：复制所有权/finite/奇异/镜像/剪切拒绝/16容量、无设备不分配、
+FG替换GBuffer依赖、禁用节点裁剪、晚到Decal契约拒绝；Motion测试明确Decal插入位置。
+renderer-full非GPU9入口全过118.60s（out/render-decal-final-cpu.log）；
+EditorShell1用例58断言通过（out/render-decal-final-editor.log），SDK doctor0错误0警告。
+D3D11/D3D12完整PhoskiaGpu各22用例8603断言全过，无skip，分别59.56s/89.23s，
+含66项生产包无compiler装载及SSR/Volume/Decal真实源回读：out/render-features-final-d3d11.log、d3d12.log。
+Decal四附件探针每设备1390断言：颜色/alpha/normal/roughness/metallic更新，
+盒外/天空/背面保持原值；world/AO/model/emissive/coverage保持，FP32探针容差1e-4。
+随后补强实际Pass深度/生命周期探针，每设备531断言全过（out/render-decal-depth-d3d11.log、d3d12.log）：
+两项重叠ping/pong、resize/generation重建、缺纹理原GB回退、禁用无draw、
+私有颜色计数+8并在销毁后归零增量；原depth数值0.37在draw/重建/销毁后不变。
+实际RGBA8合成颜色检查容差.008，明确包含目标量化，不把FP32测试当RGBA8精度。
+用户场景视觉尚待验收；Decal ECS/保存、大量贴花优化与体积透明仍为首版限制。
+
 ## 2026-10-06 Volumetric v1
 
 VS2026 Insider Debug，同 out/build/render-phoskia-20261004；production65变体编译部署。

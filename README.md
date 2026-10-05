@@ -1,5 +1,17 @@
 # AYRenderer
 
+## Deferred Decal v1（2026-10-06）
+
+GBuffer 后、Motion/SSAO/Lighting 前的投影贴花；`setDeferredDecals` 复制最多16项，
+`setDeferredDecalsEnabled` 默认关闭。localToWorld 是正尺度、正交基仿射矩阵；
+local [-1,1] 盒裁剪，+Z 面向接收表面，XY 为 UV。无纹理时也可投纯色贴花。
+支持 optional sRGB albedo/alpha、linear tangent normal，以及 roughness/metallic 混合。
+保留世界位置、AO/模型ID、emissive/coverage 和原深度；稳定列表顺序决定重叠结果。
+两组全尺寸 MRT 交替读写、借用原深度；缺资源不发布部分结果；禁用时下一帧释放私有目标。
+Editor 提供明确标注 test projector 的地面预览及 opacity，不是 ECS 创作/场景保存功能。
+首版是正确性优先的全屏复制，每项一次draw；全尺寸两组颜色约40 bytes/pixel，
+大量贴花尚无tile/culling/atlas优化。仅不透明/切孔接收，不改轮廓、深度或透明材质。
+
 ## 体积光／雾 v1（2026-10-06）
 
 Deferred HDR：Lighting → SSR → DepthHaze → Volumetric → Transparent → Bloom。
@@ -21,7 +33,7 @@ Deferred 在 Lighting 后、DepthHaze/Transparent 前提供不透明 SSR；默�
 
 ## 默认离线 shader 生产流程（2026-10-05）
 
-标准编辑器及 `ay_add_game_executable` 自动构建/部署 65 项内置 shader 清单，
+标准编辑器及 `ay_add_game_executable` 自动构建/部署 66 项内置 shader 清单，
 覆盖当前 2D/3D、实例化、阴影、后处理、AA、选中覆盖层与 UI。构建入口为内部工具
 `AYRenderer_ShaderBuild platform profile package-directory`；清单引用实际 Pass 源，非测试副本。
 CMake 的 `AY_PRODUCTION_SHADER_PLATFORM/PROFILE` 可选择编译目标，Windows 默认 windows/s_5_0，
