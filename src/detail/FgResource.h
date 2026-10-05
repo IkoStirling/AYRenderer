@@ -114,7 +114,8 @@ enum class FgResourceId : uint8_t {
     // Sentinel ── 测试和实现都靠它做数组大小 / 上界判断。
     SsrColor = 26,
     GBufferAlbedo = 27,
-    Count        = 28,
+    VolumetricColor = 28,
+    Count        = 29,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。

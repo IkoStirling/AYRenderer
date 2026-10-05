@@ -14,6 +14,7 @@
 #include "detail/FullscreenPassGeometry.h"
 #include "detail/GpuResources.h"
 #include "AYRenderer/SsrShaderSources.h"
+#include "AYRenderer/VolumetricShaderSources.h"
 #include "detail/BgfxMatrix.h"
 
 #include <array>
@@ -155,6 +156,37 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(volumetric_shader_matches_extinction_scattering_local_box_and_shadow) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    auto scene=f.input({2,2,2,1}),world=f.input({0,0,2,1}),sky=f.input({0,0,0,0}),lit=f.input({1,1,1,1}),dark=f.input({0,0,0,1});
+    auto program=f.pool.acquire(ayt::render::kVolumetricPhoskiaSource,ayt::render::kVolumetricCacheKey);
+    for(int mode=0;mode<6;++mode) {
+        const float density=mode==0?0.f:.1f;
+        const float distance=mode==2?.25f:mode==3?0.f:1.f;
+        const float t=std::exp(-density*distance);
+        const float phaseRatio=mode==5?(.75f/std::pow(2.25f,1.5f)):1.f;
+        const float expected=2*t+(mode==4?0.f:.8f*(1-t)*phaseRatio);
+        auto pixels=f.renderResource(program,[&](const auto& p){
+            auto tex=[&](const char* n,bgfx::TextureHandle h){auto b=p.getTextureBinding(n);CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(h));};
+            tex("sceneColor",scene);tex("worldPosition",world);tex("geometryCoverage",sky);tex("shadowAtlas",mode==4?dark:lit);
+            auto identity=ayt::math::Float4x4::identity();
+            for(const char* n:{"fogInverseViewProjection","fogView","fogShadow0","fogShadow1","fogShadow2"})p.setUniform(p.getUniformBinding(n),&identity,64);
+            auto u=[&](const char* n,Pixel v){auto b=p.getUniformBinding(n);CHECK(b!=ayt::shader::InvalidBinding);p.setUniform(b,v.data(),16);};
+            u("fogCamera",{0,0,0,1});u("fogMedium",{density,.8f,mode==5?.5f:0.f,100});u("fogOptions",{32,0,mode==2||mode==3?1.f:0.f,0});
+            u("fogCenter",{0,0,mode==3?3.f:0.f,0});u("fogExtent",{10,10,.25f,0});u("fogTint",{1,1,1,0});
+            u("fogLightPosition",{0,0,0,0});u("fogLightDirection",{0,0,1,0});u("fogLightColor",{12.5663706f,12.5663706f,12.5663706f,0});u("fogSpot",{0,0,0,0});
+            for(const char* n:{"fogShadowRect0","fogShadowRect1","fogShadowRect2"})u(n,{0,0,1,1});
+            u("fogShadowParams",{0,0,0,mode==4?1.f:0.f});
+        });
+        checkPixels(pixels,{expected,expected,expected,1});
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
 
 TEST_CASE(ssr_production_shader_preserves_sky_rough_surfaces_and_misses) {
 #ifdef _WIN32

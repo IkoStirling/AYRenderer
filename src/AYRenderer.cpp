@@ -12,6 +12,7 @@
 #include "detail/DepthHazePass.h"  // S4b (2026-07-23) — borrowed-ptr source for PassExecContext::depthHazePass + destroyResources.
 #include "detail/DepthHazePipeline.h"
 #include "detail/SsrPass.h"
+#include "detail/VolumetricPass.h"
 #include "detail/DebugOverlay.h"
 #include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
 #include "detail/FrameDrawLists.h"
@@ -207,6 +208,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::Lighting,
         RenderPassSlot::SSR,
         RenderPassSlot::DepthHaze,
+        RenderPassSlot::Volumetric,
         RenderPassSlot::Transparent,
         // The same camera-overlay 2D stage is available in Deferred. It writes
         // the current Lighting/Haze color producer without entering GBuffer.
@@ -314,6 +316,8 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::DepthHazePass>();
     case RenderPassSlot::SSR:
         return std::make_unique<detail::SsrPass>();
+    case RenderPassSlot::Volumetric:
+        return std::make_unique<detail::VolumetricPass>();
     // §A1 SSAO MVP (2026-07-24) — SSAO pass factory. Only mounted
     // when the pipeline desc includes RenderPassSlot::SSAO (i.e.
     // a Deferred desc or a custom desc that opts in). makeDefault()
@@ -485,6 +489,7 @@ struct Renderer::Impl {
     // §S2 v1 — SSAO host knobs (FrameContext defaults stay off).
     bool                           ssaoEnabled  = false;
     SsrSettings                    ssr;
+    VolumetricSettings             volumetric;
     float                          ssaoStrength = 0.0f;
     float                          ssaoRadius   = 0.5f;
     float                          ssaoBias     = 0.025f;
@@ -826,6 +831,9 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     if (auto* ssr = pipeline.findPass<detail::SsrPass>()) {
         if (adapter.isInitialized()) ssr->destroyResources(adapter);
     }
+    if (auto* fog = pipeline.findPass<detail::VolumetricPass>()) {
+        if (adapter.isInitialized()) fog->destroyResources(adapter);
+    }
     // DepthHaze owns only fullscreen geometry and its Phoskia program; the
     // full-resolution HazeColor target is FrameGraph-owned. Release the
     // pass-local GPU objects before pipeline.clear().
@@ -1119,6 +1127,9 @@ void Renderer::shutdown()
     if (auto* ssr = _impl->pipeline.findPass<detail::SsrPass>()) {
         if (_impl->adapter.isInitialized()) ssr->destroyResources(_impl->adapter);
     }
+    if (auto* fog = _impl->pipeline.findPass<detail::VolumetricPass>()) {
+        if (_impl->adapter.isInitialized()) fog->destroyResources(_impl->adapter);
+    }
     if (detail::DepthHazePass* depthHazePass =
             _impl->pipeline.findPass<detail::DepthHazePass>()) {
         if (_impl->adapter.isInitialized()) {
@@ -1377,6 +1388,7 @@ void Renderer::render(const RenderScene& scene)
     // §S4d — DepthHaze knobs (Editor / host). Defaults keep haze off.
     frame.hazeEnabled      = _impl->depthHazeEnabled;
     frame.ssr = _impl->ssr;
+    frame.volumetric = _impl->volumetric;
     frame.hazeStrength     = detail::sanitizeDepthHazeStrength(
         _impl->depthHazeStrength);
     frame.hazeDensity      = detail::sanitizeDepthHazeDensity(
@@ -1801,6 +1813,12 @@ void Renderer::render(const RenderScene& scene)
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
     }
     graphInput.haze = hazePassEnabled;
+    const auto* fogPass = _impl->pipeline.findPass<detail::VolumetricPass>();
+    graphInput.volumetric = backendReady && frame.volumetric.enabled && frame.volumetric.density > 0
+        && fogPass && fogPass->isEnabled() && gbufferPassPtr && gbufferPassPtr->isEnabled()
+        && lightingPassPtr && lightingPassPtr->isEnabled();
+    if (graphInput.volumetric && !detail::BGFXAdapter::isValid(graphInput.gbuffer))
+        graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
     graphInput.bloomExtract = bloomStages.extract;
     graphInput.bloomBlur = bloomStages.blur;
     graphInput.autoExposure = autoExposureStageEnabled;
@@ -3082,6 +3100,12 @@ ColorGradingPreset Renderer::colorGradingPreset() const noexcept
 }
 
 // SSR host settings survive pipeline replacement, but never store GPU handles.
+void Renderer::setVolumetricSettings(const VolumetricSettings& settings) {
+    if (_impl) _impl->volumetric = sanitizeVolumetricSettings(settings);
+}
+VolumetricSettings Renderer::volumetricSettings() const noexcept {
+    return _impl ? _impl->volumetric : VolumetricSettings{};
+}
 void Renderer::setSsrSettings(const SsrSettings& settings) {
     if (_impl) _impl->ssr = sanitizeSsrSettings(settings);
 }

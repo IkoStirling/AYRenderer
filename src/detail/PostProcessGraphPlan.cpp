@@ -108,6 +108,7 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     // plan actively suppress disabled or disconnected concrete passes.
     graph.setExecutionEligibility(RenderPassSlot::SSAO, input.ssao);
     graph.setExecutionEligibility(RenderPassSlot::SSR, input.ssr);
+    graph.setExecutionEligibility(RenderPassSlot::Volumetric, input.volumetric);
     graph.setExecutionEligibility(RenderPassSlot::DepthHaze, input.haze);
     graph.setExecutionEligibility(RenderPassSlot::BloomExtract,
                                   input.bloomExtract);
@@ -124,7 +125,7 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
                                   input.colorGrading);
     graph.setExecutionEligibility(RenderPassSlot::Present, input.finalLdr);
 
-    if (input.ssao || input.taa || input.ssr) {
+    if (input.ssao || input.taa || input.ssr || input.volumetric) {
         // These are multiple logical views of one pass-owned MRT. FrameGraph
         // borrows the FBO only for dependency/lifetime description; concrete
         // passes continue binding the individual attachments directly.
@@ -188,7 +189,14 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
         result.hdrSceneSource = FgResourceId::HazeColor;
     }
 
+    if (input.volumetric) {
+        graph.addResource(FgResourceId::VolumetricColor, graphTextureDesc(RenderPassSlot::Volumetric, RenderPassResourceId::VolumetricColor));
+        graph.addPass({"Volumetric", {result.hdrSceneSource, FgResourceId::GBufferWorldPosition, FgResourceId::GBufferSurface},
+                       {FgResourceId::VolumetricColor}, true, false, executionSlot(RenderPassSlot::Volumetric)});
+        result.hdrSceneSource = FgResourceId::VolumetricColor;
+    }
     if (input.bloomExtract) {
+        // Volume output, if enabled, is the current HDR source.
         graph.addResource(FgResourceId::BloomBright,
                           graphTextureDesc(RenderPassSlot::BloomExtract,
                                            RenderPassResourceId::BloomBright));

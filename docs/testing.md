@@ -1,5 +1,15 @@
 # AYRenderer 测试维护
 
+## 2026-10-06 Volumetric v1
+
+VS2026 Insider Debug，同 out/build/render-phoskia-20261004；production65变体编译部署。
+Test_Volumetric：默认关闭、finite settings、FG依赖/关闭无输出、非法下游顺序拒绝。
+真实生产 Phoskia 源在 D3D11/D3D12 每设备1用例511断言通过：零密度、全局消光
+和单次散射、局部AABB截断/未命中、阴影遮挡、HG正负方向关系；逐像素1e-4。
+日志 out/render-volume-final-d3d11.log / d3d12.log；EditorShell1用例56断言通过，
+out/render-volume-editor.log；不替代用户视觉验收。首版无体积透明/独立历史。
+最终 renderer-full 非GPU9入口全部通过，out/render-volume-final-cpu.log。
+
 ## 2026-10-06 SSR v1
 
 VS2026 Insider Debug 构建目录 out/build/render-phoskia-20261004。

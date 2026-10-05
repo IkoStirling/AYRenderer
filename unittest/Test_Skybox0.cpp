@@ -279,7 +279,7 @@ TEST_CASE(render_pass_slot_skybox_enum_index) {
     // We test the Skybox value directly; downstream tests verify
     // the relative order.
     CHECK(static_cast<uint8_t>(RenderPassSlot::Skybox) == 1u);
-    CHECK(RenderPipelineDesc::makeDeferred().passes.size() == 21u);
+    CHECK(RenderPipelineDesc::makeDeferred().passes.size() == 22u);
 }
 
 TEST_CASE(deferred_pipeline_skybox_slot_order) {

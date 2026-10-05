@@ -32,6 +32,7 @@ enum class BlackboardResourceId : uint8_t {
     AutoExposureWrite,
     AutoExposure,
     SsrColor,
+    VolumetricColor,
     Count,
 };
 

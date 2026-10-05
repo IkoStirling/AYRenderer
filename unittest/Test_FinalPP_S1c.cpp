@@ -403,22 +403,22 @@ TEST_CASE(s1c_make_deferred_slot_table_postprocess_after_bloomblur) {
     // DepthHaze and PostProcess), PostProcess at index 9.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 21);
+    CHECK(desc.passes.size() == 22);
     CHECK(desc.passes[3] == RenderPassSlot::MotionVector);
     CHECK(desc.passes[4] == RenderPassSlot::SSAO);
     CHECK(desc.passes[5] == RenderPassSlot::Lighting);
     CHECK(desc.passes[7] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[8] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[9] == RenderPassSlot::Forward2DOpaque);
-    CHECK(desc.passes[10] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[11] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[13] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[14] == RenderPassSlot::TAA);
-    CHECK(desc.passes[15] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[16] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[17] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[18] == RenderPassSlot::Present);
-    CHECK(desc.passes[19] == RenderPassSlot::UI);
+    CHECK(desc.passes[9] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[10] == RenderPassSlot::Forward2DOpaque);
+    CHECK(desc.passes[11] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[12] == RenderPassSlot::BloomBlur);
+    CHECK(desc.passes[14] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[15] == RenderPassSlot::TAA);
+    CHECK(desc.passes[16] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[17] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[18] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[19] == RenderPassSlot::Present);
+    CHECK(desc.passes[20] == RenderPassSlot::UI);
 }
 
 // === H. setEnabled(false) on PostProcessPass skips dispatch =========

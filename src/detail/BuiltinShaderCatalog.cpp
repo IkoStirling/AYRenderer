@@ -9,6 +9,7 @@
 #include "AYRenderer/ShadowShaderSources.h"
 #include "AYRenderer/SSAOShaderSources.h"
 #include "AYRenderer/SsrShaderSources.h"
+#include "AYRenderer/VolumetricShaderSources.h"
 #include "AYRenderer/ParticleDraw.h"
 #include "AYRenderer/FallbackMeshShaderSources.h"
 #include "AYRenderer/TilemapShaderSources.h"
@@ -28,6 +29,7 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
     for(const auto& [name,source] : {
         std::pair{"auto_exposure",kAutoExposurePhoskiaSource},
         std::pair{"ssr",kSsrPhoskiaSource},
+        std::pair{"volumetric",kVolumetricPhoskiaSource},
         std::pair{"particle_unlit",kParticlePhoskiaSource},
         std::pair{"bloom_extract",kBloomExtractPhoskiaSource},
         std::pair{"bloom_down",kBloomPyramidDownsamplePhoskiaSource},

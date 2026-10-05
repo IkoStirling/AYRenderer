@@ -154,23 +154,23 @@ TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {
 
 TEST_CASE(deferred_pipeline_matches_data_dependencies) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
-    CHECK(desc.passes.size() == 21u);
+    CHECK(desc.passes.size() == 22u);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
     CHECK(desc.passes[3] == RenderPassSlot::MotionVector);
     CHECK(desc.passes[4] == RenderPassSlot::SSAO);
     CHECK(desc.passes[5] == RenderPassSlot::Lighting);
     CHECK(desc.passes[7] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[8] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[9] == RenderPassSlot::Forward2DOpaque);
-    CHECK(desc.passes[10] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[11] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[12] == RenderPassSlot::AutoExposure);
-    CHECK(desc.passes[13] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[9] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[10] == RenderPassSlot::Forward2DOpaque);
+    CHECK(desc.passes[11] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[12] == RenderPassSlot::BloomBlur);
+    CHECK(desc.passes[13] == RenderPassSlot::AutoExposure);
+    CHECK(desc.passes[14] == RenderPassSlot::PostProcess);
 }
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 45u);
+    CHECK(order.size() == 46u);
     const auto rank = [&order](bgfx::ViewId view) {
         return std::find(order.begin(), order.end(), view);
     };
@@ -183,7 +183,7 @@ TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
 
     const bgfx::ViewId dependencyChain[] = {
         7, 3, 14,       // GBuffer, motion vectors, SSAO
-        8, 32, 13, 9,  // Lighting, SSR, opaque haze, transparent composition
+        8, 32, 13, 33, 9,  // Lighting, SSR, opaque haze, transparent composition
         244, 253, 246, // Selection masks, camera-overlay 2D
         10, 11, 26, 27, 28, 29, 30, 12, // Bloom pyramid and resolve
         31, 15,        // Exposure before tone mapping

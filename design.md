@@ -1,5 +1,17 @@
 # AYRenderer Design
 
+## 2026-10-06 Volumetric v1
+
+View33 在13之后、9之前；slot23/Fg28 append-only。FG 拥有 RGBA16F 全尺寸
+VolumetricColor；Blackboard 仅本帧 submit 成功后发布，下游统一 selector 优先于 Haze/SSR。
+依赖 coherent GBuffer、OpaqueLighting、可选 SSR/Haze；关停/密度零/Noop 无目标无draw。
+投影逆矩阵重建天空视线（含正交 near origin），几何限定 ray end；局部 AABB 用 slab
+裁剪积分区间。确定性中点采样避免另添随机抖动，Beer–Lambert/HG 单次散射。
+选灯为原 SceneLights 索引；阴影转到 computeShadowLightOrder 的序号，沿 view-depth
+选择三层 CSM，使用 ShadowPass 的安全采样矩形。独立 fog* 矩阵避免 builtin 重名，
+矩阵仅上传边界转列主序；loop 仅 explicit LOD0、fragment 单一输出出口。
+初版无 froxel/时域降噪，透明后合成尚无体积透射；CPU/GPU探针不替代用户画面验收。
+
 ## 2026-10-06 新画面功能：SSR v1
 
 链路：GBuffer/SSAO → Lighting(HDR) → SSRColor(RGBA16F, full) →

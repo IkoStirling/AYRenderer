@@ -117,9 +117,11 @@ constexpr std::array<RenderPassResourceWrite, 1> kOverlay2DWrites = {{
     output(Id::SceneColor, Life::External, Format::RGBA16F,
            Extent::Full, true),
 }};
-constexpr std::array<RenderPassResourceRead, 2> kBloomExtractReads = {{
+constexpr std::array<RenderPassResourceRead, 4> kBloomExtractReads = {{
     required(Id::SceneColor),
     optional(Id::HazeColor),
+    optional(Id::SsrColor),
+    optional(Id::VolumetricColor),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kBloomExtractWrites = {{
     output(Id::BloomBright, Life::Transient, Format::RGBA16F,
@@ -142,18 +144,22 @@ constexpr std::array<RenderPassResourceWrite, 7> kBloomBlurWrites = {{
     output(Id::BloomPyramidUpQuarter, Life::Transient, Format::RGBA16F,
            Extent::Quarter),
 }};
-constexpr std::array<RenderPassResourceRead, 4> kPostProcessReads = {{
+constexpr std::array<RenderPassResourceRead, 6> kPostProcessReads = {{
     required(Id::SceneColor),
     optional(Id::HazeColor),
+    optional(Id::SsrColor),
+    optional(Id::VolumetricColor),
     optional(Id::BloomBlurB),
     optional(Id::AutoExposure),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kPostProcessWrites = {{
     output(Id::FinalLdrColor, Life::Transient, Format::RGBA8),
 }};
-constexpr std::array<RenderPassResourceRead, 3> kAutoExposureReads = {{
+constexpr std::array<RenderPassResourceRead, 5> kAutoExposureReads = {{
     required(Id::SceneColor),
     optional(Id::HazeColor),
+    optional(Id::SsrColor),
+    optional(Id::VolumetricColor),
     optional(Id::AutoExposureHistory),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kAutoExposureWrites = {{
@@ -233,10 +239,17 @@ constexpr std::array<RenderPassResourceWrite, 1> kSsrWrites = {{
     output(Id::SsrColor, Life::Transient, Format::RGBA16F),
 }};
 constexpr std::span<const RenderPassResourceWrite> noWrites{};
+constexpr std::array<RenderPassResourceRead, 5> kVolumetricReads = {{
+    required(Id::OpaqueLightingColor), required(Id::GBufferWorldPosition), required(Id::GBufferSurface),
+    optional(Id::SsrColor), optional(Id::HazeColor),
+}};
+constexpr std::array<RenderPassResourceWrite, 1> kVolumetricWrites = {{
+    output(Id::VolumetricColor, Life::Transient, Format::RGBA16F),
+}};
 
-const std::array<RenderPassContract, 23>& contracts() noexcept
+const std::array<RenderPassContract, 24>& contracts() noexcept
 {
-    static const std::array<RenderPassContract, 23> table = {{
+    static const std::array<RenderPassContract, 24> table = {{
         {RenderPassSlot::Shadow, "Shadow", noReads, kShadowWrites, false},
         {RenderPassSlot::Skybox, "Skybox", noReads, kSkyboxWrites, false},
         {RenderPassSlot::ForwardOpaque, "ForwardOpaque", kForwardReads,
@@ -276,6 +289,7 @@ const std::array<RenderPassContract, 23>& contracts() noexcept
         {RenderPassSlot::AutoExposure, "AutoExposure", kAutoExposureReads,
          kAutoExposureWrites, false},
         {RenderPassSlot::SSR, "SSR", kSsrReads, kSsrWrites, false},
+        {RenderPassSlot::Volumetric, "Volumetric", kVolumetricReads, kVolumetricWrites, false},
     }};
     return table;
 }
@@ -384,6 +398,7 @@ const char* renderPassResourceName(RenderPassResourceId resource) noexcept
         "BloomPyramidEighth", "BloomPyramidSixteenth",
         "BloomPyramidUpEighth", "BloomPyramidUpQuarter",
         "AutoExposureHistory", "AutoExposure", "SsrColor", "OpaqueLightingColor",
+        "VolumetricColor",
     }};
     const auto index = static_cast<std::size_t>(resource);
     return index < names.size() ? names[index] : "UnknownResource";

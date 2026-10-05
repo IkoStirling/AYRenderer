@@ -2,6 +2,7 @@
 
 #include "AYMath/MathTypes.h"
 #include "AYRenderer/SsrSettings.h"
+#include "AYRenderer/VolumetricSettings.h"
 
 #include <cstdint>
 
@@ -129,6 +130,7 @@ struct FrameContext {
     float cullingMarginY = 0.0f;
     bool cullingHomogeneousDepth = false;
     SsrSettings ssr;
+    VolumetricSettings volumetric;
 };
 
 } // namespace ayt::render::detail

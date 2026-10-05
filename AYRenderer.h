@@ -4,6 +4,7 @@
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
 #include "AYRenderer/SsrSettings.h"
+#include "AYRenderer/VolumetricSettings.h"
 
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathUtils.h"
@@ -419,6 +420,9 @@ public:
     /// Owner-thread settings are sanitized; disabled/zero strength allocates nothing.
     void setSsrSettings(const SsrSettings& settings);
     SsrSettings ssrSettings() const noexcept;
+    /// Deferred-only medium, owner-thread setter; copied finite settings, default off.
+    void setVolumetricSettings(const VolumetricSettings& settings);
+    VolumetricSettings volumetricSettings() const noexcept;
 
     // §S2 v1 — SSAO knobs → FrameContext each frame.
     // Renderer defaults: enabled=false, strength=0 (K-SSAO-1 zero alloc).

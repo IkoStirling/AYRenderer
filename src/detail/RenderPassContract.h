@@ -48,6 +48,7 @@ enum class RenderPassResourceId : uint8_t {
     AutoExposure,
     SsrColor,
     OpaqueLightingColor,
+    VolumetricColor,
     Count,
 };
 

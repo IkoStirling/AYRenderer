@@ -39,6 +39,10 @@ bgfx::FrameBufferHandle selectSceneColorSourceFbo(
     }
 
     // Haze becomes authoritative only after a successful current-frame
+    if (ctx.resourceBlackboard != nullptr) {
+        const auto* fog = ctx.resourceBlackboard->findProduced(BlackboardResourceId::VolumetricColor);
+        if (fog && BGFXAdapter::isValid(fog->framebuffer)) return fog->framebuffer;
+    }
     // submit. Persistent FrameGraph handles alone do not prove freshness.
     if (ctx.resourceBlackboard != nullptr) {
         const BlackboardResourceEntry* haze =

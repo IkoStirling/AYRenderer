@@ -457,6 +457,7 @@ enum class RenderPassSlot : uint8_t {
     // Append-only ABI value 21; disabled by default.
     AutoExposure = 21,
     SSR = 22,
+    Volumetric = 23,
 };
 
 enum class ColorGradingPreset : uint8_t {

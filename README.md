@@ -1,5 +1,15 @@
 # AYRenderer
 
+## 体积光／雾 v1（2026-10-06）
+
+Deferred HDR：Lighting → SSR → DepthHaze → Volumetric → Transparent → Bloom。
+`setVolumetricSettings` 默认关闭；Render 面板提供开关、密度和 Final/透射率/散射诊断。
+8..64 次确定性中点积分，Beer–Lambert 消光 + HG 单次散射；一个按原场景索引选择的
+方向光／点光／Spot，方向光 CSM/Spot 读取本帧阴影；点光全向阴影仍不支持。
+全局或局部轴对齐盒介质，颜色为散射 albedo tint；天空参与积分，零密度无目标/绘制。
+首版全分辨率，无 froxel、噪声介质、多灯累计、多重散射或独立历史；
+透明自身尚未在介质中积分（在雾后合成），不冒充完整体积透明材质。
+
 ## 新画面能力：SSR v1（2026-10-06）
 
 Deferred 在 Lighting 后、DepthHaze/Transparent 前提供不透明 SSR；默认关闭。
@@ -11,7 +21,7 @@ Deferred 在 Lighting 后、DepthHaze/Transparent 前提供不透明 SSR；默�
 
 ## 默认离线 shader 生产流程（2026-10-05）
 
-标准编辑器及 `ay_add_game_executable` 自动构建/部署 64 项内置 shader 清单，
+标准编辑器及 `ay_add_game_executable` 自动构建/部署 65 项内置 shader 清单，
 覆盖当前 2D/3D、实例化、阴影、后处理、AA、选中覆盖层与 UI。构建入口为内部工具
 `AYRenderer_ShaderBuild platform profile package-directory`；清单引用实际 Pass 源，非测试副本。
 CMake 的 `AY_PRODUCTION_SHADER_PLATFORM/PROFILE` 可选择编译目标，Windows 默认 windows/s_5_0，
