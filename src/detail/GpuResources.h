@@ -61,6 +61,8 @@ struct GpuTexture {
     // preserve all existing member offsets in incremental MSVC builds.
     bool cube = false;
     std::vector<uint8_t> cpuRgba8;
+    // Camera-output framebuffer owns this attachment; resource lookup only borrows it.
+    bool borrowed = false;
 };
 
 struct GpuMaterial {

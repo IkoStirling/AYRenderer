@@ -146,6 +146,8 @@ public:
     TextureHandle loadTexture(const std::string& path);
     TextureHandle loadTexture(const std::string& path, bool srgb);
     void destroyTexture(TextureHandle& texture);
+    // Internal attachment registration; framebuffer ownership stays with Renderer.
+    TextureHandle registerBorrowedTexture(bgfx::TextureHandle texture, uint16_t width, uint16_t height);
 
     const std::unordered_map<uint64_t, GpuMesh>& meshes() const { return _meshes; }
     std::unordered_map<uint64_t, GpuMaterial>& materials() { return _materials; }

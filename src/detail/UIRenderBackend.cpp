@@ -1,4 +1,6 @@
 #include "AYRenderer/UIRenderBackend.h"
+#include "detail/RenderViewNamespaces.h"
+static_assert(ayt::render::detail::uiViewCapacity() == ayt::render::UIRenderBackend::kMaxOffscreenPaintsPerFrame);
 
 #include "AYRenderer.h"
 #include "detail/BgfxFontAtlas.h"
@@ -1092,6 +1094,11 @@ struct UIRenderBackend::FrameState {
     uint16_t activeHeight = 0;
     uint8_t activeViewId = kViewId;
     uint16_t nextOffscreenViewId = kFirstLayerViewId;
+    bool reserveOffscreenViews(uint16_t count, uint8_t& first) {
+        const auto next=detail::nextUiViewRange(nextOffscreenViewId,count);
+        if(next==UINT16_MAX) return false;
+        first=static_cast<uint8_t>(next); nextOffscreenViewId=next+count; return true;
+    }
     Renderer* renderer = nullptr;
     uint64_t frameIndex = 0;
     ayt::ui::IRenderBackend::LayerCacheStats layerStats{};
@@ -1431,8 +1438,8 @@ bool UIRenderBackend::renderScenePreview(RenderTargetHandle target,
     const auto fbo = _targetPool->framebuffer(found->second.pooled);
     if (!detail::BGFXAdapter::isValid(fbo)) return false;
     flushColoredRects();
-    const auto first = static_cast<uint8_t>(_frame->nextOffscreenViewId);
-    _frame->nextOffscreenViewId += 4;
+    uint8_t first;
+    if (!_frame->reserveOffscreenViews(4,first)) return false;
     if (beforeDraw) beforeDraw(first);
     _frame->renderer->renderPreviewScene(scene, camera, fbo.idx,
         static_cast<uint16_t>(found->second.desc.width),
@@ -1463,6 +1470,8 @@ void UIRenderBackend::bindRenderTarget(RenderTargetHandle target)
         || !ensureRenderTarget(target.id)) return;
     auto it = frame.renderTargets.find(target.id);
     if (it == frame.renderTargets.end()) return;
+    uint8_t first;
+    if (!frame.reserveOffscreenViews(1,first)) return;
     flushColoredRects();
     frame.savedClipStack = frame.clipStack;
     frame.savedOpacityStack = frame.opacityStack;
@@ -1474,7 +1483,7 @@ void UIRenderBackend::bindRenderTarget(RenderTargetHandle target)
     frame.pathClipDepth = 0;
     frame.currentBlend = ayt::ui::BlendMode::Normal;
     frame.boundTarget = target;
-    frame.activeViewId = static_cast<uint8_t>(frame.nextOffscreenViewId++);
+    frame.activeViewId = first;
     frame.activeWidth = static_cast<uint16_t>(it->second.desc.width);
     frame.activeHeight = static_cast<uint16_t>(it->second.desc.height);
     frame.uiScale = it->second.desc.dpiScale;
@@ -1615,6 +1624,8 @@ bool UIRenderBackend::beginLayerPaint(LayerHandle layer, const LayerPaint& paint
     if (!ensureRenderTarget(ref.target.id)) return false;
     auto targetIt = frame.renderTargets.find(ref.target.id);
     if (targetIt == frame.renderTargets.end()) return false;
+    uint8_t first;
+    if (!frame.reserveOffscreenViews(1,first)) return false;
 
     flushColoredRects();
     frame.savedClipStack = frame.clipStack;
@@ -1631,7 +1642,7 @@ bool UIRenderBackend::beginLayerPaint(LayerHandle layer, const LayerPaint& paint
     frame.originY = ref.backingBounds.minY;
     frame.activeWidth = static_cast<uint16_t>(targetIt->second.desc.width);
     frame.activeHeight = static_cast<uint16_t>(targetIt->second.desc.height);
-    frame.activeViewId = static_cast<uint8_t>(frame.nextOffscreenViewId++);
+    frame.activeViewId = first;
     frame.activeLayer = layer;
     ref.painting = true;
     ref.lastPaintFrame = frame.frameIndex;

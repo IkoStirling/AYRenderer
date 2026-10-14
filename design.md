@@ -1,5 +1,19 @@
 # AYRenderer Design
 
+## 2026-10-14 — 独立相机 Forward 视图
+
+公开 CameraViews recipe 与 renderer-owned CameraOutputHandle；每 batch最多16视图，
+GPU view64..111分配三Pass连续区间，原主管线/编辑器/粒子view保持原编号。
+批量验证身份、矩阵、输出尺寸/生命周期、WorldLit2D与颜色反馈依赖后才提交。
+每视图独立透明排序/视锥/Pass状态，共享Renderer资源句柄；没有共享的时域历史。
+颜色/深度由FBO拥有，ResourceManager仅注册借用附件供材质采样，释放不得重复destroy。
+RendererSubSystem在每视图自己的相机/aspect下提取OwnedCpu packet后恢复主视口；
+主镜头3D mask在presentation副本过滤，原Scene完整保留。该路径明确为Forward，
+完整Deferred多视图仍需独立的Pass/FrameGraph/blackboard/历史与view命名空间设计。
+UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，最大单Pass预算145；
+constexpr容量与公开上限静态交叉检查，防止布局变更后重用同帧GPU view。
+范围、使用方式与实际验收见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
+
 ## 2026-10-06 Deferred Decal v1
 
 slot24；view34..49 在GBuffer7后、Motion3/SSAO14前。Renderer 有界复制16个

@@ -1,5 +1,16 @@
 # AYRenderer
 
+## 相机视口与输出（2026-10-14）
+
+RendererSubSystem::setCameraViewports 配置最多16个独立 Forward 视图，按 viewportId
+先求相机再提取场景。Renderer::renderViews 提交完整验证后的窗口/离屏 batch；
+createCameraOutput/cameraOutputTexture/destroyCameraOutput 管理可采样颜色和深度附件。
+3D DrawItem.cameraLayerMask 独立于物理 mask，主视图和独立视图都支持镜头过滤。
+独立视图不使用主视图的 Deferred、TAA/Motion/曝光历史或编辑器选中视图；WorldLit2D
+在显式 Forward batch 中拒绝。详见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
+CPU/Noop 用例 CameraViews；独立 D3D11 读回用例 CameraViewsGpu。
+离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为145。
+
 ## Deferred Decal v1（2026-10-06）
 
 GBuffer 后、Motion/SSAO/Lighting 前的投影贴花；`setDeferredDecals` 复制最多16项，

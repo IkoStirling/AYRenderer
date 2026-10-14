@@ -312,7 +312,7 @@ void RenderResourceManager::destroyAllTextures()
 {
     for (auto& [id, tex] : _textures) {
         (void)id;
-        _adapter.destroy(tex.handle);
+        if (!tex.borrowed) _adapter.destroy(tex.handle);
     }
     _textures.clear();
     _textureCacheByKey.clear();
@@ -369,7 +369,7 @@ void RenderResourceManager::destroyTextureGpuOnly(uint64_t id)
     if (it == _textures.end()) {
         return;
     }
-    _adapter.destroy(it->second.handle);
+    if (!it->second.borrowed) _adapter.destroy(it->second.handle);
     _textures.erase(it);
 }
 
@@ -1505,6 +1505,16 @@ TextureHandle RenderResourceManager::createDynamicTextureRgba8(uint32_t width,
     return out;
 }
 
+TextureHandle RenderResourceManager::registerBorrowedTexture(bgfx::TextureHandle texture,
+    uint16_t width, uint16_t height) {
+    if (!_adapter.isInitialized() || !bgfx::isValid(texture) || !width || !height) return {};
+    GpuTexture entry;
+    entry.handle = texture; entry.width = width; entry.height = height; entry.borrowed = true;
+    const auto id = _nextTextureId++;
+    _textures.emplace(id,std::move(entry));
+    return TextureHandle{id};
+}
+
 bool RenderResourceManager::updateTextureFromRgba8(TextureHandle texture,
                                                    const uint8_t* pixels)
 {
@@ -1686,7 +1696,7 @@ void RenderResourceManager::destroyTexture(TextureHandle& texture)
 
     const auto it = _textures.find(texture.id);
     if (it != _textures.end()) {
-        _adapter.destroy(it->second.handle);
+        if (!it->second.borrowed) _adapter.destroy(it->second.handle);
         _textures.erase(it);
     }
     texture = {};

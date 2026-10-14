@@ -13,6 +13,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <stdexcept>
 
 
 
@@ -86,8 +87,8 @@ struct OwnedCameraProvider {
 };
 struct SceneCameraProviders {
     std::vector<OwnedCameraProvider> providers;
-    uint64_t activeIdentity = 0;
-    uint64_t cutGeneration = 0;
+    struct History { uint64_t activeIdentity = 0, cutGeneration = 0; };
+    std::unordered_map<int32_t, History> histories;
 };
 std::unordered_map<RendererSubSystem*, SceneCameraProviders> g_sceneCameras;
 uint64_t g_nextCameraProviderId = 1;
@@ -441,6 +442,11 @@ bool RendererSubSystem::initialize()
 void RendererSubSystem::update(float /*deltaTime*/)
 
 {
+    if (!_cameraViewports.empty()) {
+        buildCameraViewPackets();
+        _scenePacketValid.store(true,std::memory_order_release);
+        return;
+    }
     // Billboard extraction needs the camera for this presentation frame.
     syncMainCamera();
     // Presentation copies pointer-backed CPU data at add() on the main
@@ -470,6 +476,8 @@ void RendererSubSystem::fixedUpdate(float /*fixedDeltaTime*/)
 void RendererSubSystem::shutdown()
 
 {
+    _viewPackets.clear();
+    _cameraViewports.clear();
 
     clearAllSceneBuilders(this);
     clearAllCameraOverrides(this);
@@ -750,7 +758,8 @@ void RendererSubSystem::syncMainCamera()
     MatrixCameraOverride matrixOverride;
     SceneCamera3D sceneCamera;
     bool hasSceneCamera = false;
-    if (!_cameraOverride) {
+    const bool hostOverride = _cameraOverride && _activeViewportId == 0;
+    if (!hostOverride) {
         std::vector<OwnedCameraProvider> providers;
         {
             std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
@@ -781,20 +790,20 @@ void RendererSubSystem::syncMainCamera()
             }
         }
     }
-    const uint64_t identity = _cameraOverride ? UINT64_MAX
+    const uint64_t identity = hostOverride ? UINT64_MAX
         : (hasSceneCamera ? sceneCamera.identity : 0);
     const uint64_t generation = hasSceneCamera ? sceneCamera.cutGeneration : 0;
     bool cut = false;
     {
         std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
-        auto& state = g_sceneCameras[this];
+        auto& state = g_sceneCameras[this].histories[_activeViewportId];
         cut = state.activeIdentity != identity || state.cutGeneration != generation;
         state.activeIdentity = identity;
         state.cutGeneration = generation;
     }
-    if (cut) _renderer.notifyCameraCut();
+    if (cut && _activeViewportId == 0) _renderer.notifyCameraCut();
     bool hasMatrixOverride = false;
-    if (_cameraOverride) {
+    if (hostOverride) {
         std::lock_guard<std::mutex> lock(g_cameraOverrideMutex);
         if (const auto found = g_matrixCameraOverrides.find(this);
             found != g_matrixCameraOverrides.end()) {
@@ -806,7 +815,7 @@ void RendererSubSystem::syncMainCamera()
         _renderer.setMainCamera(
             matrixOverride.view, matrixOverride.projection,
             matrixOverride.position);
-    } else if (_cameraOverride) {
+    } else if (hostOverride) {
         _renderer.setMainCameraLookAtPerspective(
             _camEye, _camAt, _camUp,
             _camFovYDegrees, aspect, 0.1f, 100.0f);
@@ -822,6 +831,53 @@ void RendererSubSystem::syncMainCamera()
             ayt::math::FVector3(0.0f, 1.0f, 0.0f),
             50.0f, aspect, 0.1f, 100.0f);
     }
+    _renderer.mainCameraMatrices(_currentCamera.view,_currentCamera.projection);
+    _currentCamera.position = _renderer.mainCameraPosition();
+    _currentCamera.identity = identity;
+    _currentCamera.cutGeneration = generation;
+    _currentCamera.layerMask = hasSceneCamera && !hostOverride ? sceneCamera.layerMask : 0xFFFFFFFFu;
+}
+
+bool RendererSubSystem::setCameraViewports(std::vector<CameraViewportDesc> viewports) {
+    if (_extractingViews || viewports.size() > kMaximumCameraViews) return false;
+    for (size_t i = 0; i < viewports.size(); ++i) {
+        const auto& view = viewports[i];
+        if (view.id < 0 || !view.width || !view.height) return false;
+        if (!view.output.id && (uint32_t(view.x) + view.width > _width || uint32_t(view.y) + view.height > _height)) return false;
+        if (view.output.id && (view.x || view.y || !_renderer.cameraOutputMatches(view.output,view.width,view.height))) return false;
+        for (size_t previous = 0; previous < i; ++previous)
+            if (viewports[previous].id == view.id || (view.output.id && viewports[previous].output.id == view.output.id)) return false;
+    }
+    _cameraViewports = std::move(viewports);
+    _viewPackets.clear(); _scenePacketValid.store(false,std::memory_order_release);
+    _renderer.notifyCameraCut();
+    return true;
+}
+
+void RendererSubSystem::buildCameraViewPackets() {
+    _extractingViews = true;
+    const auto x = _viewportX, y = _viewportY, width = _viewportW, height = _viewportH;
+    auto restore = [&] {
+        _activeViewportId = 0; _viewportX = x; _viewportY = y; _viewportW = width; _viewportH = height;
+        try { syncMainCamera(); } catch (...) { _extractingViews=false; throw; }
+        _extractingViews = false;
+    };
+    std::vector<CameraViewPacket> packets;
+    packets.reserve(_cameraViewports.size());
+    try {
+        for (const auto& viewport : _cameraViewports) {
+            _activeViewportId = viewport.id;
+            _viewportX = viewport.x; _viewportY = viewport.y; _viewportW = viewport.width; _viewportH = viewport.height;
+            syncMainCamera();
+            CameraViewPacket packet;
+            packet.viewport = viewport; packet.camera = _currentCamera;
+            if (_sceneBuilder) _sceneBuilder(packet.scene);
+            if (viewport.id == 0) applySceneCameraOverrides(packet.scene);
+            packets.push_back(std::move(packet));
+        }
+    } catch (...) { restore(); throw; }
+    restore();
+    _viewPackets = std::move(packets);
 }
 
 void RendererSubSystem::applySceneCameraOverrides(RenderScene& scene)
@@ -844,6 +900,24 @@ void RendererSubSystem::applySceneCameraOverrides(RenderScene& scene)
 
 void RendererSubSystem::renderScenePass()
 {
+    if (!_cameraViewports.empty()) {
+        if (!_scenePacketValid.load(std::memory_order_acquire)) buildCameraViewPackets();
+        std::vector<CameraRenderView> views;
+        views.reserve(_viewPackets.size());
+        for (const auto& packet : _viewPackets) {
+            CameraRenderView view;
+            view.id = uint32_t(packet.viewport.id); view.scene = &packet.scene;
+            view.view = packet.camera.view; view.projection = packet.camera.projection; view.position = packet.camera.position;
+            view.layerMask = packet.camera.layerMask;
+            view.x = packet.viewport.x; view.y = packet.viewport.y;
+            view.width = packet.viewport.width; view.height = packet.viewport.height; view.output = packet.viewport.output;
+            views.push_back(view);
+        }
+        const bool submitted = _renderer.renderViews(views);
+        _scenePacketValid.store(false,std::memory_order_release);
+        if (!submitted) throw std::runtime_error("Camera viewport batch has an invalid output or unsupported Forward draw domain");
+        return;
+    }
     syncMainCamera();
 
     // Non-GameLoop editor callers still get a packet on demand. In the staged
@@ -869,13 +943,15 @@ void RendererSubSystem::renderScenePass()
             hasVisibilityFilter = true;
         }
     }
+    RenderScene cameraScene;
+    copyCameraVisibleScene(_scene,cameraScene,_currentCamera.layerMask);
     if (hasVisibilityFilter && !visibility.allVisible()) {
         RenderScene presentationScene(RenderScene::DrawDataOwnership::OwnedCpu);
         copyVisibleSceneForPresentation(
-            _scene, presentationScene, visibility);
+            cameraScene, presentationScene, visibility);
         _renderer.render(presentationScene);
     } else {
-        _renderer.render(_scene);
+        _renderer.render(cameraScene);
     }
     // The packet has been consumed. This also preserves legacy/editor callers
     // that invoke renderFrame() without a preceding GameLoop Presentation tick.

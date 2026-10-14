@@ -202,11 +202,11 @@ TEST_CASE(non_skinned_mesh_omits_skin_channels)
     CHECK_FALSE(mesh.hasSkinWeights());
 
     VertexLayoutDesc layout;
-    CHECK(detail::vertexLayoutFromMesh(mesh, layout));
+    CHECK(ayt::render::detail::vertexLayoutFromMesh(mesh, layout));
     CHECK(layout.strideBytes() == 32u);    // unchanged from pre-Phase-0
 
     bgfx::VertexLayout bgfxLayout;
-    CHECK(detail::buildBgfxVertexLayout(layout, bgfxLayout));
+    CHECK(ayt::render::detail::buildBgfxVertexLayout(layout, bgfxLayout));
     CHECK_FALSE(bgfxLayout.has(bgfx::Attrib::Indices));
     CHECK_FALSE(bgfxLayout.has(bgfx::Attrib::Weight));
 }

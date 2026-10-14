@@ -61,6 +61,7 @@ struct SceneCamera3D {
     ayt::math::FVector3 position{};
     uint64_t identity = 0; // nonzero, includes World/component generation
     uint64_t cutGeneration = 0;
+    uint32_t layerMask = 0xFFFFFFFFu;
 };
 using SceneCameraProvider = std::function<bool(SceneCamera3D&)>;
 
@@ -94,6 +95,14 @@ public:
             ? static_cast<float>(_viewportW) / static_cast<float>(_viewportH)
             : 1.0f;
     }
+    /// Host-owned split-screen/output recipes. Empty restores the legacy main pipeline.
+    /// Nonempty recipes use independent Forward view chains; invalid recipes leave state unchanged.
+    bool setCameraViewports(std::vector<CameraViewportDesc> viewports);
+    const std::vector<CameraViewportDesc>& cameraViewports() const noexcept { return _cameraViewports; }
+    /// Current scene extraction viewport; providers/builders use it to resolve camera components.
+    int32_t activeViewportId() const noexcept { return _activeViewportId; }
+    /// Scene packet count for diagnostics/tests, including the legacy single-view packet.
+    size_t cameraViewPacketCount() const noexcept { return _cameraViewports.empty() ? 1 : _viewPackets.size(); }
 
     // Legacy/global builders remain active regardless of the current ECS
     // World (standalone demos use this path). World-owned builders must use
@@ -171,6 +180,7 @@ private:
     // CPU visibility. This is also called immediately when Editor freecam or
     // viewport aspect changes.
     void syncMainCamera();
+    void buildCameraViewPackets();
 
     // INT-04: WindowResize handler. Triggered by EventBus pump (main thread,
     // sync — Phase 4 contract) when DeviceSubSystem posts a delta. Calls
@@ -182,6 +192,16 @@ private:
     // The backend/UI lifecycle remains single submission-thread until phase 2.
     RenderScene        _scene{RenderScene::DrawDataOwnership::OwnedCpu};
     SceneBuildCallback _sceneBuilder;
+    struct CameraViewPacket {
+        CameraViewportDesc viewport;
+        SceneCamera3D camera;
+        RenderScene scene{RenderScene::DrawDataOwnership::OwnedCpu};
+    };
+    std::vector<CameraViewportDesc> _cameraViewports;
+    std::vector<CameraViewPacket> _viewPackets;
+    int32_t _activeViewportId = 0;
+    bool _extractingViews = false;
+    SceneCamera3D _currentCamera;
     // Validity handshake only: this atomic does not make the Renderer,
     // builders, borrowed GPU streams, or UI backend safe for concurrent use.
     uint64_t           _scenePacketFrame = 0;

@@ -99,6 +99,8 @@ struct DrawItem {
     /// Disable for custom vertex displacement with no conservative mesh bounds.
     /// Skin/morph/particle/2D/selection draws already bypass static culling.
     bool allowFrustumCulling = true;
+    /// 3D visibility membership; 2D payloads use their existing packed layer.
+    uint32_t cameraLayerMask = 1u;
 };
 
 // Camera used by the camera-overlay 2D composition domain. It is independent

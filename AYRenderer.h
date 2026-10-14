@@ -6,6 +6,7 @@
 #include "AYRenderer/SsrSettings.h"
 #include "AYRenderer/VolumetricSettings.h"
 #include "AYRenderer/DeferredDecal.h"
+#include "AYRenderer/CameraViews.h"
 
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathUtils.h"
@@ -13,6 +14,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <span>
 
 namespace ayt::shader {
 class ShaderResourcePool;
@@ -22,16 +24,20 @@ namespace ayt::render
 {
 
 class UIRenderBackend;
+class RendererSubSystem;
 struct PreviewSceneCamera;
 
 namespace detail {
 class BGFXAdapter;
 class RenderTargetPool;
+struct CameraViewsTestAccess;
 }
 
 // High-level renderer: frame loop, resource handles, draw submission.
 // GPU backend details live in src/detail/ only.
 class Renderer {
+    friend struct detail::CameraViewsTestAccess;
+    friend class RendererSubSystem;
 public:
     Renderer();
     ~Renderer();
@@ -55,6 +61,17 @@ public:
     // Use with UIRenderBackend (view 2) so chrome pixels are not left uncleared.
     void beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uint16_t fbHeight);
     void render(const RenderScene& scene);
+    /// Submit up to 16 independent Forward views in one frame. Validates the entire batch
+    /// before submission; each view owns a GPU view range, sorting and visibility context.
+    /// One successful batch per begin/end frame; repeated submission fails without writes.
+    /// Deferred post effects/temporal histories and editor overlays remain on render().
+    bool renderViews(std::span<const CameraRenderView> views);
+    /// Acquire a sampleable RGBA8 + depth output; dimensions are pixels. Failure returns zero.
+    CameraOutputHandle createCameraOutput(uint16_t width, uint16_t height);
+    /// Borrow the color texture for material/UI sampling until destroyCameraOutput/shutdown.
+    TextureHandle cameraOutputTexture(CameraOutputHandle output) const noexcept;
+    /// Release color/depth storage and invalidate the handle; stale handles are harmless.
+    void destroyCameraOutput(CameraOutputHandle output);
     /// Static camera-frustum culling defaults on; shadows remain independent.
     /// Disable for comparisons or hosts with unbounded custom vertex deformation.
     void setFrustumCullingEnabled(bool enabled);
@@ -540,6 +557,7 @@ public:
 
 private:
     friend class UIRenderBackend;
+    bool cameraOutputMatches(CameraOutputHandle output, uint16_t width, uint16_t height) const noexcept;
     void renderPreviewScene(const RenderScene& scene, const PreviewSceneCamera& camera,
                             uint16_t framebuffer, uint16_t width, uint16_t height,
                             uint8_t firstView, uint32_t clearRgba);

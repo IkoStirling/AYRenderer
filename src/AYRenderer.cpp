@@ -4,6 +4,7 @@
 #include "detail/BGFXAdapter.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/CameraMath.h"
+#include "detail/CameraViewsTestAccess.h"
 #include "detail/ColorGradingPass.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
@@ -38,6 +39,7 @@
 #include "detail/RenderPipeline.h"
 #include "detail/RenderTargetPool.h"
 #include "detail/RenderViewOrder.h"
+#include "detail/RenderViewNamespaces.h"
 #include "detail/SSAOPass.h"        // §A1 SSAO MVP (2026-07-24) — SSAOPass factory + FrameGraph SSAOTexture resolve gate.
 #include "detail/SSAOPipeline.h"
 #include "detail/RenderResourceManager.h"
@@ -388,6 +390,18 @@ struct Renderer::Impl {
     detail::FrameGraph            frameGraph{adapter, renderTargetPool};
     detail::RenderResourceBlackboard resourceBlackboard;
     detail::FrameDrawLists        frameDrawLists;
+    struct CameraOutput {
+        bgfx::FrameBufferHandle framebuffer = BGFX_INVALID_HANDLE;
+        TextureHandle texture{};
+        uint16_t width = 0, height = 0;
+    };
+    std::unordered_map<uint64_t, CameraOutput> cameraOutputs;
+    bool cameraViewBatchSubmitted = false, cameraFrameOpen = false;
+    struct RuntimeView {
+        detail::ForwardOpaquePass opaque;
+        detail::TransparentPass transparent;
+    };
+    std::unordered_map<uint32_t, std::unique_ptr<RuntimeView>> runtimeViews;
     bool                         frustumCullingEnabled = true;
     bool                         rigidInstancingEnabled = true;
 
@@ -1062,6 +1076,17 @@ void Renderer::shutdown()
     if (!_impl) {
         return;
     }
+    for (auto& [id, view] : _impl->runtimeViews) {
+        (void)id;
+        if (_impl->adapter.isInitialized()) view->transparent.destroyResources(_impl->adapter);
+    }
+    _impl->runtimeViews.clear();
+    for (auto& [id, output] : _impl->cameraOutputs) {
+        (void)id;
+        _impl->resources.destroyTexture(output.texture);
+        if (_impl->adapter.isInitialized()) _impl->adapter.destroy(output.framebuffer);
+    }
+    _impl->cameraOutputs.clear();
 
     _impl->invalidateTemporalResources(
         detail::ResourceInvalidationReason::Shutdown);
@@ -1258,6 +1283,7 @@ void Renderer::beginFrame(const ClearDesc& clear)
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+    _impl->cameraViewBatchSubmitted = false; _impl->cameraFrameOpen = true;
     _impl->compositeSceneViewId = -1;
     _impl->pipeline.resetFrameStats();
     _impl->debugOverlay.onBeginFrame();
@@ -1272,6 +1298,7 @@ void Renderer::beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uin
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+    _impl->cameraViewBatchSubmitted = false; _impl->cameraFrameOpen = true;
     _impl->pipeline.resetFrameStats();
     _impl->debugOverlay.onBeginFrame();
     _impl->renderTargetPool.beginFrame();
@@ -2084,6 +2111,115 @@ void Renderer::renderPreviewScene(const RenderScene& scene, const PreviewSceneCa
     overlay.execute(ctx);
 }
 
+CameraOutputHandle Renderer::createCameraOutput(uint16_t width, uint16_t height) {
+    if (!isInitialized() || !width || !height) return {};
+    const auto framebuffer = _impl->adapter.createFrameBuffer(width,height,bgfx::TextureFormat::RGBA8,true);
+    if (!bgfx::isValid(framebuffer)) return {};
+    auto texture = _impl->resources.registerBorrowedTexture(
+        _impl->adapter.getFboAttachment(framebuffer,0),width,height);
+    if (!texture.isValid()) { _impl->adapter.destroy(framebuffer); return {}; }
+    static std::atomic<uint64_t> nextOutputId{1};
+    const auto id = nextOutputId.fetch_add(1,std::memory_order_relaxed);
+    _impl->cameraOutputs.emplace(id,Impl::CameraOutput{framebuffer,texture,width,height});
+    return {id};
+}
+TextureHandle Renderer::cameraOutputTexture(CameraOutputHandle output) const noexcept {
+    if (!_impl || !output.id) return {};
+    const auto found = _impl->cameraOutputs.find(output.id);
+    return found != _impl->cameraOutputs.end() ? found->second.texture : TextureHandle{};
+}
+bool Renderer::cameraOutputMatches(CameraOutputHandle output, uint16_t width, uint16_t height) const noexcept {
+    if (!_impl) return false;
+    const auto found = _impl->cameraOutputs.find(output.id);
+    return found != _impl->cameraOutputs.end() && found->second.width == width && found->second.height == height;
+}
+uint16_t detail::CameraViewsTestAccess::framebuffer(const Renderer& renderer, CameraOutputHandle output) noexcept {
+    if (!renderer._impl) return UINT16_MAX;
+    const auto found = renderer._impl->cameraOutputs.find(output.id);
+    return found != renderer._impl->cameraOutputs.end() ? found->second.framebuffer.idx : UINT16_MAX;
+}
+detail::BGFXAdapter* detail::CameraViewsTestAccess::adapter(Renderer& renderer) noexcept {
+    return renderer.bgfxAdapter();
+}
+void Renderer::destroyCameraOutput(CameraOutputHandle output) {
+    if (!_impl) return;
+    const auto found = _impl->cameraOutputs.find(output.id);
+    if (found == _impl->cameraOutputs.end()) return;
+    _impl->resources.destroyTexture(found->second.texture);
+    if (_impl->adapter.isInitialized()) _impl->adapter.destroy(found->second.framebuffer);
+    _impl->cameraOutputs.erase(found);
+}
+
+bool Renderer::renderViews(std::span<const CameraRenderView> views) {
+    if (!isInitialized() || !_impl->cameraFrameOpen || _impl->cameraViewBatchSubmitted
+        || views.empty() || views.size() > kMaximumCameraViews) return false;
+    auto finiteMatrix = [](const math::Float4x4& m) {
+        for (int i = 0; i < 16; ++i) if (!std::isfinite(m.ptr()[i])) return false;
+        return true;
+    };
+    // Validate every recipe before touching any GPU view. The range 64..111 is reserved
+    // for these three-pass runtime chains; editor/particle/main IDs remain unchanged.
+    for (size_t i = 0; i < views.size(); ++i) {
+        const auto& view = views[i];
+        if (!view.scene || !view.width || !view.height || !finiteMatrix(view.view) || !finiteMatrix(view.projection)
+            || !std::isfinite(view.position.x) || !std::isfinite(view.position.y) || !std::isfinite(view.position.z)) return false;
+        for (size_t previous = 0; previous < i; ++previous)
+            if (views[previous].id == view.id || (view.output.id && views[previous].output.id == view.output.id)) return false;
+        if (view.output.id) {
+            const auto found = _impl->cameraOutputs.find(view.output.id);
+            if (found == _impl->cameraOutputs.end() || found->second.width != view.width
+                || found->second.height != view.height || view.x || view.y) return false;
+        } else if (uint32_t(view.x) + view.width > _impl->initDesc.width
+            || uint32_t(view.y) + view.height > _impl->initDesc.height) return false;
+        // WorldLit2D requires the deferred material lane; reject it explicitly in this Forward API.
+        for (const auto& item : view.scene->items()) {
+            if (item.payload && item.payload->renderDomain == RenderDomain2D::WorldLit) return false;
+            const auto material = _impl->resources.materials().find(item.material.id);
+            if (material == _impl->resources.materials().end()) continue;
+            for (const auto& slot : material->second.textures)
+                for (size_t producer = i; producer < views.size(); ++producer) {
+                    const auto target = _impl->cameraOutputs.find(views[producer].output.id);
+                    if (target != _impl->cameraOutputs.end() && target->second.texture.id == slot.texture.id) return false;
+                }
+        }
+    }
+    _impl->cameraViewBatchSubmitted = true;
+    detail::configureRenderViewOrder(_impl->adapter);
+    for (size_t i = 0; i < views.size(); ++i) {
+        const auto& view = views[i];
+        auto& state = _impl->runtimeViews[view.id];
+        if (!state) state = std::make_unique<Impl::RuntimeView>();
+        RenderScene visible;
+        copyCameraVisibleScene(*view.scene,visible,view.layerMask,true);
+        detail::FrameContext frame;
+        frame.view = view.view; frame.projection = view.projection; frame.cameraPosition = view.position;
+        frame.lightDirection = _impl->directionalLightDir.normalize(); frame.lightColor = _impl->directionalLightColor;
+        frame.frustumCulling = _impl->frustumCullingEnabled;
+        detail::FrameDrawLists lists;
+        detail::buildFrameDrawLists(visible,_impl->resources.meshes(),_impl->resources.materials(),frame,lists);
+        const uint8_t firstView = uint8_t(detail::kCameraFirstView + i * 3);
+        const auto fbo = view.output.id ? _impl->cameraOutputs.at(view.output.id).framebuffer
+            : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+        detail::PassExecContext ctx{_impl->adapter,_impl->shaderPool,visible,
+            _impl->resources.meshes(),_impl->resources.textures(),_impl->resources.materials(),
+            view.x,view.y,view.width,view.height,frame,firstView,fbo};
+        ctx.drawLists = &lists;
+        state->opaque.execute(ctx);
+        _impl->adapter.setViewClearRaw(firstView,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,view.clearRgba,1.f,0);
+        ctx.viewId = uint8_t(firstView + 1);
+        state->transparent.execute(ctx);
+        detail::Forward2DOpaquePass overlay(uint8_t(firstView + 2));
+        overlay.execute(ctx);
+    }
+    // Remove detached viewport resources while the device is still alive.
+    for (auto it = _impl->runtimeViews.begin(); it != _impl->runtimeViews.end();) {
+        if (std::none_of(views.begin(),views.end(),[&](const auto& view) { return view.id == it->first; })) {
+            it->second->transparent.destroyResources(_impl->adapter); it = _impl->runtimeViews.erase(it);
+        } else ++it;
+    }
+    return true;
+}
+
 void Renderer::setFrustumCullingEnabled(bool enabled)
 {
     if (_impl) _impl->frustumCullingEnabled = enabled;
@@ -2235,6 +2371,7 @@ void Renderer::endFrame()
         return;
     }
 
+    _impl->cameraFrameOpen = false;
     if (!_impl->pendingScreenshotBase.empty()) {
         _impl->adapter.requestScreenshot(_impl->pendingScreenshotBase);
         _impl->finalizeScreenshotBase = _impl->pendingScreenshotBase;
