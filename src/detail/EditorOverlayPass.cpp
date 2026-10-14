@@ -1083,8 +1083,57 @@ uint32_t EditorOverlayPass::submitSelectionOutline2D(
     return 1;
 }
 
+void EditorOverlayPass::setDebugLines(const std::vector<EditorDebugLine>& lines)
+{
+    const auto equal = [](const EditorDebugLine& a, const EditorDebugLine& b) {
+        return a.color==b.color && a.from.x==b.from.x && a.from.y==b.from.y && a.from.z==b.from.z
+            && a.to.x==b.to.x && a.to.y==b.to.y && a.to.z==b.to.z;
+    };
+    if (lines.size()==_debugLines.size() && std::equal(lines.begin(),lines.end(),_debugLines.begin(),equal)) return;
+    _debugLines=lines;
+    _debugLinesDirty=true;
+}
+void EditorOverlayPass::destroyDebugLines(BGFXAdapter& adapter)
+{
+    if(BGFXAdapter::isValid(_debugVertexBuffer)) adapter.destroy(_debugVertexBuffer);
+    if(BGFXAdapter::isValid(_debugIndexBuffer)) adapter.destroy(_debugIndexBuffer);
+    _debugVertexBuffer=BGFX_INVALID_HANDLE; _debugIndexBuffer=BGFX_INVALID_HANDLE;
+}
+uint32_t EditorOverlayPass::submitDebugLines(PassExecContext& ctx, const FrameContext& frame)
+{
+    if(_debugLinesDirty) {
+        destroyDebugLines(ctx.adapter);
+        if(!_debugLines.empty() && _debugLines.size()<=kMaxEditorDebugLines && ensureOrientationAxisResources(ctx)) {
+            std::vector<AxisVertex> vertices; std::vector<uint16_t> indices;
+            vertices.reserve(_debugLines.size()*2); indices.reserve(_debugLines.size()*2);
+            for(const auto& l:_debugLines) {
+                indices.push_back(appendVertex(vertices,l.from,l.color));
+                indices.push_back(appendVertex(vertices,l.to,l.color));
+            }
+            bgfx::VertexLayout layout; layout.begin().add(bgfx::Attrib::Position,3,bgfx::AttribType::Float)
+                .add(bgfx::Attrib::TexCoord0,2,bgfx::AttribType::Float).add(bgfx::Attrib::Color0,4,bgfx::AttribType::Uint8,true).end();
+            _debugVertexBuffer=ctx.adapter.createVertexBuffer(vertices.data(),static_cast<uint32_t>(vertices.size()*sizeof(AxisVertex)),layout);
+            _debugIndexBuffer=ctx.adapter.createIndexBuffer(indices.data(),static_cast<uint32_t>(indices.size()*sizeof(uint16_t)));
+        }
+        _debugLinesDirty=!_debugLines.empty() && (!BGFXAdapter::isValid(_debugVertexBuffer)||!BGFXAdapter::isValid(_debugIndexBuffer));
+    }
+    if(_debugLines.empty()||!BGFXAdapter::isValid(_debugVertexBuffer)||!BGFXAdapter::isValid(_debugIndexBuffer)) return 0;
+    ctx.adapter.setViewFrameBuffer(kGridViewId,BGFX_INVALID_HANDLE);
+    ctx.adapter.setViewRect(kGridViewId,ctx.viewportX,ctx.viewportY,ctx.viewportWidth,ctx.viewportHeight);
+    ctx.adapter.setViewTransform(kGridViewId,frame.view,_hasUnjitteredProjection?_unjitteredProjection:frame.projection);
+    ctx.adapter.setViewMode(kGridViewId,bgfx::ViewMode::Sequential);
+    ctx.adapter.setTransformIdentity(); ctx.adapter.setVertexBuffer(_debugVertexBuffer);
+    ctx.adapter.setIndexBuffer(_debugIndexBuffer,0,static_cast<uint32_t>(_debugLines.size()*2));
+    // Post-Present overlays have no scene-depth attachment. The generic
+    // alpha-blend helper enables LESS, which would hide these diagnostics.
+    ctx.adapter.setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
+        | BGFX_STATE_BLEND_ALPHA | BGFX_STATE_PT_LINES);
+    ayt::shader::DrawCallContext draw; draw.viewId=kGridViewId; draw.state=0; _axisProgram.submit(draw);
+    return 1;
+}
 void EditorOverlayPass::destroyResources(BGFXAdapter& adapter)
 {
+    destroyDebugLines(adapter); _debugLinesDirty=true;
     destroySelectionOutline2DGeometry(adapter);
     destroyGrid2DGeometry(adapter);
     destroyTransformGizmoGeometry(adapter);
@@ -1119,6 +1168,7 @@ uint32_t EditorOverlayPass::execute(PassExecContext& ctx)
 
     return submitOrientationAxis(ctx, frame)
          + submitGrid2D(ctx, frame)
+         + submitDebugLines(ctx, frame)
          + submitSelectionOutline2D(ctx, frame)
          + submitTransformGizmo(ctx, frame);
 }

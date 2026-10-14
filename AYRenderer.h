@@ -510,6 +510,10 @@ public:
     void setEditorTransformGizmoState(const EditorTransformGizmoState& state);
     EditorTransformGizmoState editorTransformGizmoState() const noexcept;
     void setEditorGrid2DState(const EditorGrid2DState& state);
+    /// Owner-thread owned copy. Reject nonfinite/over-budget batches without
+    /// changing prior geometry. Empty clears; only editor pipelines draw it.
+    bool setEditorDebugLines(const std::vector<EditorDebugLine>& lines);
+    size_t editorDebugLineCount() const noexcept;
     EditorGrid2DState editorGrid2DState() const noexcept;
     void setEditorSelectionOutline2DState(
         const EditorSelectionOutline2DState& state);

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <sys/stat.h>
 
@@ -37,6 +38,24 @@ bool editorOverlayFileExists(const std::string& path)
 } // namespace
 
 TEST_SUITE(AYRenderer_EditorOverlay)
+
+TEST_CASE(debug_lines_are_owned_validated_and_survive_pipeline_rebuild) {
+    Renderer renderer;
+    std::vector<ayt::render::EditorDebugLine> lines{{{1,2,3},{4,5,6},0xff0000ffu}};
+    CHECK(renderer.setEditorDebugLines(lines));
+    lines.clear(); CHECK(renderer.editorDebugLineCount()==1);
+    renderer.configurePipeline(RenderPipelineDesc::makeEditorDeferred());
+    CHECK(renderer.editorDebugLineCount()==1);
+    lines.push_back({{}, {std::numeric_limits<float>::infinity(),0,0},0});
+    CHECK(!renderer.setEditorDebugLines(lines)); CHECK(renderer.editorDebugLineCount()==1);
+    lines.assign(ayt::render::kMaxEditorDebugLines+1,{});
+    CHECK(!renderer.setEditorDebugLines(lines)); CHECK(renderer.editorDebugLineCount()==1);
+    CHECK(renderer.setEditorDebugLines({})); CHECK(renderer.editorDebugLineCount()==0);
+    ayt::render::detail::EditorOverlayPass pass;
+    lines={{{1,2,3},{4,5,6},0xff00ff00u}}; pass.setDebugLines(lines);
+    lines[0].color=0; CHECK(pass.debugLines()[0].color==0xff00ff00u);
+    pass.setDebugLines({}); CHECK(pass.debugLines().empty());
+}
 
 TEST_CASE(editoroverlay_slot_abi_is_13) {
     CHECK(static_cast<uint8_t>(RenderPassSlot::EditorOverlay) == 13u);

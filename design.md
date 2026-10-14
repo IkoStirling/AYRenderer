@@ -1603,3 +1603,20 @@ include/AYRenderer/
 ### 下一步
 
 TAA 当前契约以本页 2026-09-21 基线和 2026-09-23 增量记录为准：固定输出网格、RGBA16F motion/previous-depth/reactive 打包、3×3 最近有效速度 dilation、逐 tap 历史验证和失败帧联动失效。下一步应在 D3D11 Editor 验证静止收敛、相机运动、动态角色、对象生成/删除、Edit/Play 切换、resize/camera-cut 与透明物体边界，并补齐 WorldLit2D 的运动重放；Motion Blur 与多层透明/折射的专用时域契约仍需独立设计。
+
+## Editor physics line overlay (2026-10-14)
+
+EditorDebugLine is a driver-free value type. Renderer owns a validated copy
+(maximum 16384 segments), preserves it across pipeline rebuilds and publishes
+it to EditorOverlayPass. The pass compares content before rebuilding Position3
++ screen-offset2 + ABGR8 geometry, reuses the existing orientation-axis shader
+and submits a line list on sequential view 252 before the transform gizmo.
+The overlay is world-camera based, unjittered and unoccluded; it does not write
+scene depth or participate in simulation. This is not a separate sprite-overlay
+camera path. Vertex/index buffers are destroyed on change, empty batches and
+renderer teardown; a pipeline rebuild recreates them from owned state.
+
+Contract tests cover ownership, invalid batches, clear and pipeline rebuild.
+An isolated Windows D3D11 pixel fixture (AYRenderer_PhysicsDebugGpu, opt-in
+AY_PHYSICS_DEBUG_GPU_TEST) captures both red/green segments and the cleared
+frame; it does not require a visible interactive window.

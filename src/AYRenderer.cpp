@@ -525,6 +525,7 @@ struct Renderer::Impl {
     bool                           viewportOrientationAxisEnabled = false;
     EditorTransformGizmoState      editorTransformGizmo{};
     EditorGrid2DState              editorGrid2D{};
+    std::vector<EditorDebugLine>    editorDebugLines;
     EditorSelectionOutline2DState  editorSelectionOutline2D{};
 
     // Display-referred anti-aliasing is enabled by default. The state lives on
@@ -548,6 +549,7 @@ struct Renderer::Impl {
                 viewportOrientationAxisEnabled);
             editorOverlay->setTransformGizmoState(editorTransformGizmo);
             editorOverlay->setGrid2DState(editorGrid2D);
+            editorOverlay->setDebugLines(editorDebugLines);
             editorOverlay->setSelectionOutline2DState(editorSelectionOutline2D);
         }
     }
@@ -3588,6 +3590,22 @@ void Renderer::setEditorGrid2DState(const EditorGrid2DState& state)
     if (!_impl) return;
     _impl->editorGrid2D = state;
     _impl->applyEditorOverlayKnobs();
+}
+
+bool Renderer::setEditorDebugLines(const std::vector<EditorDebugLine>& lines)
+{
+    if (!_impl || lines.size() > kMaxEditorDebugLines) return false;
+    for (const auto& l : lines) {
+        for (float v : {l.from.x,l.from.y,l.from.z,l.to.x,l.to.y,l.to.z})
+            if (!std::isfinite(v)) return false;
+    }
+    _impl->editorDebugLines = lines;
+    _impl->applyEditorOverlayKnobs();
+    return true;
+}
+size_t Renderer::editorDebugLineCount() const noexcept
+{
+    return _impl ? _impl->editorDebugLines.size() : 0;
 }
 
 EditorGrid2DState Renderer::editorGrid2DState() const noexcept

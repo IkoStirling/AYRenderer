@@ -434,3 +434,19 @@ AYRenderer/
 **里程碑**：R0–R4 + Engine 闭环已完成；R5+ 延后，可启动 AYUI。
 
 测试按 fast/integration/gpu 分层，未启用真实设备时 GPU 用例明确跳过；见[统一测试契约](../../AYDocs/testing.md)。
+
+## Editor diagnostic lines (2026-10-14)
+
+Renderer::setEditorDebugLines takes an owned, finite, bounded world-space ABGR
+line batch. Empty clears; invalid batches preserve prior state. EditorOverlay
+uses view 252 after Present and before UI, the active unjittered camera, and
+no depth test so physics diagnostics remain visible. Generic game pipelines
+do not draw these lines. Geometry is cached until changed and released through
+the existing renderer-owner teardown. See the Physics debug-draw SDK contract.
+
+Local verification: EditorOverlay 14/14 and one isolated D3D11 pixel case passed.
+The actual 256x256 capture contains 205 red and 205 green pixels; the clear
+frame contains neither. The initial depth-state failure is retained at
+`out/physics-debug-20261014/gpu-first-failed.json`; final case report is
+`out/physics-debug-20261014/gpu-final.json`. This is a bounded overlay fixture,
+not a whole-editor interactive or all-backend visual acceptance.

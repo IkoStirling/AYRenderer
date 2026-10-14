@@ -41,6 +41,8 @@ public:
     std::string_view name() const override { return "EditorOverlay"; }
 
     uint32_t execute(PassExecContext& ctx) override;
+    void setDebugLines(const std::vector<EditorDebugLine>& lines);
+    const std::vector<EditorDebugLine>& debugLines() const noexcept { return _debugLines; }
 
     void setOrientationAxisEnabled(bool enabled) noexcept {
         _orientationAxisEnabled = enabled;
@@ -84,6 +86,12 @@ public:
     void destroyResources(BGFXAdapter& adapter);
 
 private:
+    uint32_t submitDebugLines(PassExecContext& ctx, const FrameContext& frame);
+    void destroyDebugLines(BGFXAdapter& adapter);
+    std::vector<EditorDebugLine> _debugLines;
+    bool _debugLinesDirty = true;
+    bgfx::VertexBufferHandle _debugVertexBuffer = BGFX_INVALID_HANDLE;
+    bgfx::IndexBufferHandle _debugIndexBuffer = BGFX_INVALID_HANDLE;
     uint32_t submitOrientationAxis(PassExecContext& ctx,
                                    const FrameContext& frame);
     bool ensureOrientationAxisResources(PassExecContext& ctx);

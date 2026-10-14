@@ -4,6 +4,7 @@
 #include "AYMath/MathTypes.h"
 
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -505,6 +506,14 @@ struct EditorGrid2DState {
     float minorSpacing = 50.0f;
     std::uint32_t majorEvery = 10u;
 };
+
+/// Owned world-space diagnostic segment, ABGR color; EditorOverlay draws it
+/// above scene geometry with the active unjittered camera (no depth occlusion).
+struct EditorDebugLine {
+    ayt::math::FVector3 from{}, to{};
+    uint32_t color = 0xff00ff00u;
+};
+inline constexpr size_t kMaxEditorDebugLines = 16384;
 
 // Editor-only outline for a selected 2D object. Corners are supplied in
 // clockwise or counter-clockwise world order, which supports centered
