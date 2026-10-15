@@ -514,6 +514,9 @@ public:
     /// changing prior geometry. Empty clears; only editor pipelines draw it.
     bool setEditorDebugLines(const std::vector<EditorDebugLine>& lines);
     size_t editorDebugLineCount() const noexcept;
+    /// False: x-ray after Present. True: scene-depth-tested before postprocessing.
+    void setEditorDebugDepthTest(bool enabled);
+    bool editorDebugDepthTest() const noexcept;
     EditorGrid2DState editorGrid2DState() const noexcept;
     void setEditorSelectionOutline2DState(
         const EditorSelectionOutline2DState& state);

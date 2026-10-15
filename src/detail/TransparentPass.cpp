@@ -614,6 +614,7 @@ bool TransparentPass::ensureSelectionResources(
 
 void TransparentPass::destroyResources(BGFXAdapter& adapter) noexcept
 {
+    _debugDraw.destroyResources(adapter);
     destroySelectionTarget(adapter);
     _selectionCompositeGeometry.destroy(adapter);
     _selectionCompositeProgram.reset();
@@ -694,7 +695,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     static const std::vector<const DrawItem*> kNoOutlineItems;
     const auto& outlineItems = outlineEnabled
         ? allOutlineItems : kNoOutlineItems;
-    if (sortedItems.empty() && outlineItems.empty()) {
+    if (sortedItems.empty() && outlineItems.empty() && _debugDraw.debugLines().empty()) {
         return 0;
     }
 
@@ -874,6 +875,8 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
             ++drawCount;
         }
     }
+
+    drawCount += _debugDraw.submitSceneDebugLines(ctx, frame, viewId);
 
     static uint32_t s_routeLogFrame = 0;
     if (s_routeLogFrame < 8) {

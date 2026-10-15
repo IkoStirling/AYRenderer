@@ -41,6 +41,7 @@ public:
     std::string_view name() const override { return "EditorOverlay"; }
 
     uint32_t execute(PassExecContext& ctx) override;
+    uint32_t submitSceneDebugLines(PassExecContext& ctx, const FrameContext& frame, uint8_t viewId);
     void setDebugLines(const std::vector<EditorDebugLine>& lines);
     const std::vector<EditorDebugLine>& debugLines() const noexcept { return _debugLines; }
 
@@ -86,7 +87,7 @@ public:
     void destroyResources(BGFXAdapter& adapter);
 
 private:
-    uint32_t submitDebugLines(PassExecContext& ctx, const FrameContext& frame);
+    uint32_t submitDebugLines(PassExecContext& ctx, const FrameContext& frame, bool sceneDepth = false, uint8_t sceneView = 0);
     void destroyDebugLines(BGFXAdapter& adapter);
     std::vector<EditorDebugLine> _debugLines;
     bool _debugLinesDirty = true;

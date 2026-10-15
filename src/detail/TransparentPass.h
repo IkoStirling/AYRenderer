@@ -3,6 +3,7 @@
 #include "detail/PassExecContext.h"
 #include "detail/FullscreenPassGeometry.h"
 #include "detail/RenderPass.h"
+#include "detail/EditorOverlayPass.h"
 #include "detail/SceneLighting.h"
 #include "AYRenderer/RenderTypes.h"  // ayt::render::BlendMode
 #include "AYShader/ShaderResource.h"
@@ -68,6 +69,7 @@ public:
     std::string_view name() const override { return "Transparent"; }
 
     uint32_t execute(PassExecContext& ctx) override;
+    void setDebugLines(const std::vector<EditorDebugLine>& lines) { _debugDraw.setDebugLines(lines); }
     void destroyResources(BGFXAdapter& adapter) noexcept;
     void setSelectionProjectionJitter(float xPixels,
                                       float yPixels) noexcept {
@@ -80,6 +82,7 @@ public:
     }
 
 private:
+    EditorOverlayPass _debugDraw;
     enum class SubmitMode : uint8_t {
         TransparentSurface,
         SelectionMask,

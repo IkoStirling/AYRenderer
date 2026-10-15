@@ -54,6 +54,28 @@ TEST_CASE(real_d3d11_overlay_pixels_show_both_colors_and_clear) {
     const auto [red,green]=counts(capture("physics-debug-colors.png"));
     std::cerr<<"[Physics debug GPU] red="<<red<<" green="<<green<<'\n';
     CHECK(red>100); CHECK(green>100);
+    const char* materialSource=R"(material DebugOccluder {
+        vertex { in pos : position return modelViewProjection * vec4(pos, 1.0) }
+        fragment { return vec4(0.0,0.0,0.8,1.0) }
+    })";
+    auto material=renderer.createMaterialFromPhoskia(materialSource,"debug_occluder");CHECK(material.isValid());
+    auto mesh=renderer.createUnitCube();CHECK(mesh.isValid());
+    ayt::render::DrawItem item;item.mesh=mesh;item.material=material;
+    item.world=ayt::math::translate(0,0,.2f)*ayt::math::scale(.6f,1.2f,.2f);scene.add(item);
+    auto dominant=[](const auto& image) {
+        size_t count=0;for(size_t i=0;i+3<image.rgba8.size();i+=4) {
+            const auto r=image.rgba8[i],g=image.rgba8[i+1],b=image.rgba8[i+2];
+            if((r>80 && r>g*2 && r>b*2)||(g>80 && g>r*2 && g>b*2)) ++count;
+        }return count;
+    };
+    const auto xray=dominant(capture("physics-debug-xray.png"));
+    renderer.setEditorDebugDepthTest(true);
+    const auto depth=dominant(capture("physics-debug-depth-forward.png"));
+    std::cerr<<"[Physics debug depth GPU] xray="<<xray<<" visible="<<depth<<'\n';
+    CHECK(depth>30 && depth+40<xray);
+    renderer.configurePipeline(ayt::render::RenderPipelineDesc::makeEditorDeferred());
+    const auto deferredDepth=dominant(capture("physics-debug-depth-deferred.png"));
+    CHECK(deferredDepth>30 && deferredDepth+40<xray);
     CHECK(renderer.setEditorDebugLines({}));
     const auto cleared=counts(capture("physics-debug-cleared.png"));
     CHECK(cleared.first==0 && cleared.second==0);

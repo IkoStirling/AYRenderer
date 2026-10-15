@@ -286,4 +286,10 @@ TEST_CASE(make_editor_deferred_inserts_overlay_after_present) {
     CHECK(desc.contains(RenderPassSlot::GBufferDebug));
 }
 
+TEST_CASE(debug_depth_mode_survives_pipeline_reconfiguration) {
+    Renderer renderer;CHECK(!renderer.editorDebugDepthTest());renderer.setEditorDebugDepthTest(true);
+    CHECK(renderer.editorDebugDepthTest());renderer.configurePipeline(RenderPipelineDesc::makeEditorForward());
+    CHECK(renderer.editorDebugDepthTest());renderer.configurePipeline(RenderPipelineDesc::makeEditorDeferred());
+    CHECK(renderer.editorDebugDepthTest());renderer.setEditorDebugDepthTest(false);CHECK(!renderer.editorDebugDepthTest());
+}
 TEST_SUITE_END

@@ -1099,7 +1099,8 @@ void EditorOverlayPass::destroyDebugLines(BGFXAdapter& adapter)
     if(BGFXAdapter::isValid(_debugIndexBuffer)) adapter.destroy(_debugIndexBuffer);
     _debugVertexBuffer=BGFX_INVALID_HANDLE; _debugIndexBuffer=BGFX_INVALID_HANDLE;
 }
-uint32_t EditorOverlayPass::submitDebugLines(PassExecContext& ctx, const FrameContext& frame)
+uint32_t EditorOverlayPass::submitSceneDebugLines(PassExecContext& ctx, const FrameContext& frame, uint8_t viewId) { return submitDebugLines(ctx,frame,true,viewId); }
+uint32_t EditorOverlayPass::submitDebugLines(PassExecContext& ctx, const FrameContext& frame, bool sceneDepth, uint8_t sceneView)
 {
     if(_debugLinesDirty) {
         destroyDebugLines(ctx.adapter);
@@ -1118,17 +1119,20 @@ uint32_t EditorOverlayPass::submitDebugLines(PassExecContext& ctx, const FrameCo
         _debugLinesDirty=!_debugLines.empty() && (!BGFXAdapter::isValid(_debugVertexBuffer)||!BGFXAdapter::isValid(_debugIndexBuffer));
     }
     if(_debugLines.empty()||!BGFXAdapter::isValid(_debugVertexBuffer)||!BGFXAdapter::isValid(_debugIndexBuffer)) return 0;
-    ctx.adapter.setViewFrameBuffer(kGridViewId,BGFX_INVALID_HANDLE);
-    ctx.adapter.setViewRect(kGridViewId,ctx.viewportX,ctx.viewportY,ctx.viewportWidth,ctx.viewportHeight);
-    ctx.adapter.setViewTransform(kGridViewId,frame.view,_hasUnjitteredProjection?_unjitteredProjection:frame.projection);
-    ctx.adapter.setViewMode(kGridViewId,bgfx::ViewMode::Sequential);
+    const auto targetView=sceneDepth?sceneView:kGridViewId;
+    if(!sceneDepth) {
+        ctx.adapter.setViewFrameBuffer(targetView,BGFX_INVALID_HANDLE);
+        ctx.adapter.setViewRect(targetView,ctx.viewportX,ctx.viewportY,ctx.viewportWidth,ctx.viewportHeight);
+        ctx.adapter.setViewTransform(targetView,frame.view,_hasUnjitteredProjection?_unjitteredProjection:frame.projection);
+        ctx.adapter.setViewMode(targetView,bgfx::ViewMode::Sequential);
+    }
     ctx.adapter.setTransformIdentity(); ctx.adapter.setVertexBuffer(_debugVertexBuffer);
     ctx.adapter.setIndexBuffer(_debugIndexBuffer,0,static_cast<uint32_t>(_debugLines.size()*2));
     // Post-Present overlays have no scene-depth attachment. The generic
     // alpha-blend helper enables LESS, which would hide these diagnostics.
     ctx.adapter.setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
-        | BGFX_STATE_BLEND_ALPHA | BGFX_STATE_PT_LINES);
-    ayt::shader::DrawCallContext draw; draw.viewId=kGridViewId; draw.state=0; _axisProgram.submit(draw);
+        | BGFX_STATE_BLEND_ALPHA | BGFX_STATE_PT_LINES | (sceneDepth?BGFX_STATE_DEPTH_TEST_LEQUAL:0));
+    ayt::shader::DrawCallContext draw; draw.viewId=targetView; draw.state=0; _axisProgram.submit(draw);
     return 1;
 }
 void EditorOverlayPass::destroyResources(BGFXAdapter& adapter)

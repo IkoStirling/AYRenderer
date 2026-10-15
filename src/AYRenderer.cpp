@@ -526,6 +526,7 @@ struct Renderer::Impl {
     EditorTransformGizmoState      editorTransformGizmo{};
     EditorGrid2DState              editorGrid2D{};
     std::vector<EditorDebugLine>    editorDebugLines;
+    bool editorDebugDepthTest = false;
     EditorSelectionOutline2DState  editorSelectionOutline2D{};
 
     // Display-referred anti-aliasing is enabled by default. The state lives on
@@ -543,13 +544,14 @@ struct Renderer::Impl {
 
     void applyEditorOverlayKnobs()
     {
+        if(auto* pass=pipeline.findPass<detail::TransparentPass>()) pass->setDebugLines(editorDebugDepthTest?editorDebugLines:std::vector<EditorDebugLine>{});
         if (detail::EditorOverlayPass* editorOverlay =
                 pipeline.findPass<detail::EditorOverlayPass>()) {
             editorOverlay->setOrientationAxisEnabled(
                 viewportOrientationAxisEnabled);
             editorOverlay->setTransformGizmoState(editorTransformGizmo);
             editorOverlay->setGrid2DState(editorGrid2D);
-            editorOverlay->setDebugLines(editorDebugLines);
+            editorOverlay->setDebugLines(editorDebugDepthTest?std::vector<EditorDebugLine>{}:editorDebugLines);
             editorOverlay->setSelectionOutline2DState(editorSelectionOutline2D);
         }
     }
@@ -3592,6 +3594,8 @@ void Renderer::setEditorGrid2DState(const EditorGrid2DState& state)
     _impl->applyEditorOverlayKnobs();
 }
 
+void Renderer::setEditorDebugDepthTest(bool enabled) { if(!_impl) return; _impl->editorDebugDepthTest=enabled; _impl->applyEditorOverlayKnobs(); }
+bool Renderer::editorDebugDepthTest() const noexcept { return _impl && _impl->editorDebugDepthTest; }
 bool Renderer::setEditorDebugLines(const std::vector<EditorDebugLine>& lines)
 {
     if (!_impl || lines.size() > kMaxEditorDebugLines) return false;
