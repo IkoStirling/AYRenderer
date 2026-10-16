@@ -2,12 +2,13 @@
 
 ## 2026-10-16 聚光灯数组 / 发光点演出
 
-Windows Debug：renderer-full非GPU9组通过（145.21s，含并发构建影响，不作耗时基准）。
+Windows Debug：合入主线诊断显示后，renderer-full非GPU9组通过（124.72s）。
 D3D11/D3D12的AYRenderer_PhoskiaGpu各27用例9862断言通过，无跳过。
 新增实际LightingPass双光相加、VolumetricPass消光只应用一次与双光散射、scissor不泄漏；
 透视Spot按独立相机基向量和CPU积分逐像素核对，覆盖AYMath通用逆矩阵修复。
 截图回归覆盖异步TGA晚到后转换PNG；67项生产shader全部编译并在两设备路径无compiler加载。
-日志：out/lightshow-renderer-final.log、out/lightshow-d3d11-final.log、out/lightshow-d3d12-final.log。
+日志：out/lightshow-renderer-integrated.log、out/lightshow-integrated-d3d11.log、out/lightshow-integrated-d3d12.log。
+两后端耗时61.12s/93.27s，清单981用例/10完整分区，无遗漏或重复。
 实际画面与Release性能记录见[演出系统](../../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
 
 ## 2026-10-06 Deferred Decal v1 / 三项新增能力集成收尾
