@@ -5,6 +5,7 @@
 #include <AYShader/IR.h>
 #include <AYTest.h>
 #include <limits>
+#include <cmath>
 
 using namespace ayt::render;
 namespace {
@@ -13,6 +14,15 @@ PerformanceLight light(uint32_t id) {
 }
 }
 TEST_SUITE(PerformanceLightingTests)
+TEST_CASE(finite_aperture_expands_conservative_bounds_and_is_validated) {
+    auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,1};
+    p.apertureRadius=.2f;ayt::math::FVector3 center,extent;performanceLightBounds(p,center,extent);
+    CHECK(std::abs(center.z-5)<1e-5f);CHECK(std::abs(extent.z-5)<1e-5f);
+    CHECK(std::abs(extent.x-(.2f+10*std::tan(std::acos(.8f))))<1e-4f);
+    PerformanceLighting packet;CHECK(packet.assign({&p,1},{}));CHECK(packet.lights[0].apertureRadius==.2f);
+    p.apertureRadius=-.1f;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].apertureRadius==.2f);
+    p.apertureRadius=std::numeric_limits<float>::quiet_NaN();CHECK(!packet.assign({&p,1},{}));
+}
 TEST_CASE(budgets_are_independent_and_priority_is_stable_with_shadow_mapping) {
     std::vector<PerformanceLight> lights;for(uint32_t i=0;i<32;++i){auto p=light(i);p.light.castShadow=true;lights.push_back(p);}
     lights[8].priority=2;lights[10].priority=2;PerformanceLighting packet;

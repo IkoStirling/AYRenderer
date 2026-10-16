@@ -289,6 +289,51 @@ TEST_CASE(volumetric_shader_matches_extinction_scattering_local_box_and_shadow) 
 #endif
 }
 
+TEST_CASE(performance_beam_geometry_matches_analytic_chords_core_and_penumbra) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    // Encode the known [0,30] ray segment as [0,1] for consistent D3D11/D3D12 readback.
+    const std::string source=std::string(ayt::render::kPerformancePatternSource)+R"(
+material BeamGeometryProbe {
+ uniform vec4 rayOrigin
+ uniform vec4 rayDirection
+ uniform vec4 query
+ uniform vec4 cone
+ vertex {in p:position;return vec4(p,1.0)}
+ fragment {
+  let hit=performanceBeamInterval(rayOrigin.xyz,rayDirection.xyz,vec3(0.0),vec3(0.0,0.0,1.0),cone,20.0,vec2(0.0,30.0))
+  let profile=performanceBeamProfile(query.xyz,vec3(0.0,0.0,1.0),cone,0.05)
+  return vec4(hit.x/30.0,hit.y/30.0,profile,0.0)
+ }
+})";
+    const auto program=f.pool.acquire(source,"beam_geometry_probe_v2");CHECK(program.isValid());
+    struct Case {Pixel origin,direction,query,expected;};
+    const float diagonal=1/std::sqrt(1.01f);
+    const std::array cases{
+        Case{{-2,0,10,0},{1,0,0,0},{.85f,0,10,0},{.9f,3.1f,.5f,0}},
+        Case{{-2,2,10,0},{1,0,0,0},{1.2f,0,10,0},{0,0,0,0}},
+        Case{{.2f,0,-1,0},{0,0,1,0},{.4f,0,10,0},{2,21,1,0}},
+        Case{{0,0,10,0},{0,0,1,0},{.85f,0,10,0},{0,10,.5f,0}},
+        Case{{.2f,0,3,0},{0,0,-1,0},{0,0,-1,0},{0,2,0,0}},
+        Case{{.5f,0,0,0},{.1f*diagonal,0,diagonal,0},{1.1f,0,10,0},{0,0,0,0}},
+        Case{{0,0,10,0},{.1f*diagonal,0,diagonal,0},{0,0,10,0},{0,10/diagonal,1,0}}
+    };
+    for(const auto& test:cases) {
+        const auto pixels=f.renderResource(program,[&](const auto& shader){
+            const auto uniform=[&](const char* name,Pixel value){shader.setUniform(shader.getUniformBinding(name),value.data(),16);};
+            uniform("rayOrigin",test.origin);uniform("rayDirection",test.direction);uniform("query",test.query);
+            uniform("cone",{std::cos(std::atan(.05f)),std::cos(std::atan(.1f)),.1f,.1f});
+        });
+        CHECK(pixels.size()==16);
+        for(const auto& pixel:pixels)for(int channel=0;channel<4;++channel)
+            CHECK(std::abs(pixel[channel]-test.expected[channel]/(channel<2?30.f:1.f))<(channel<2?.00004f:.001f));
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
 TEST_CASE(performance_spot_volume_perspective_rays_match_independent_cpu_integration) {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
@@ -301,7 +346,7 @@ TEST_CASE(performance_spot_volume_perspective_rays_match_independent_cpu_integra
     const auto identityCheck=inverse*(projection*view);float residual=0;
     for(int row=0;row<4;++row)for(int column=0;column<4;++column)residual=std::max(residual,std::abs(identityCheck(row,column)-(row==column?1.f:0.f)));
     CHECK(residual<.002f);
-    const float radius=20*std::tan(std::acos(.9f));
+    const float aperture=.08f,radius=aperture+20*std::tan(std::acos(.9f));
     auto program=f.pool.acquire(ayt::render::kVolumetricPhoskiaSource,ayt::render::kVolumetricCacheKey);
     const auto pixels=f.renderResource(program,[&](const auto& p){
         const auto tex=[&](const char* n,bgfx::TextureHandle h){auto b=p.getTextureBinding(n);p.setTexture(p.getTextureStage(b),b,toShaderTexture(h));};
@@ -310,10 +355,10 @@ TEST_CASE(performance_spot_volume_perspective_rays_match_independent_cpu_integra
         p.setUniform(p.getUniformBinding("fogInverseViewProjection"),inverseUpload,64);p.setUniform(p.getUniformBinding("fogView"),viewUpload,64);
         const auto identity=ayt::math::Float4x4::identity();for(const auto* n:{"fogShadow0","fogShadow1","fogShadow2"})p.setUniform(p.getUniformBinding(n),&identity,64);
         for(const auto* n:{"fogShadowRect0","fogShadowRect1","fogShadowRect2"})u(n,{0,0,1,1});
-        u("fogShadowParams",{0,0,0,0});u("fogCamera",{0,8,-8,0});u("fogMedium",{.1f,.8f,0,30});u("fogOptions",{32,0,0,2});
+        u("fogShadowParams",{0,0,0,0});u("fogCamera",{0,8,-8,0});u("fogMedium",{.1f,.8f,0,30});u("fogOptions",{64,0,0,2});
         u("fogCenter",{0,0,0,0});u("fogExtent",{100,100,100,0});u("fogTint",{1,1,1,0});
-        u("fogLightPosition",{0,7,0,2});u("fogLightDirection",{0,-1,0,20});u("fogLightColor",{500,0,0,0});u("fogSpot",{.97f,.9f,std::tan(std::acos(.9f)),0});
-        u("fogPatternSettings",{0,0,1,0});u("fogPatternRight",{1,0,0,0});u("fogPatternUp",{0,0,1,0});
+        u("fogLightPosition",{0,7,0,2});u("fogLightDirection",{0,-1,0,20});u("fogLightColor",{500,0,0,0});u("fogSpot",{.97f,.9f,std::tan(std::acos(.9f)),aperture});
+        u("fogPatternSettings",{0,0,1,0});u("fogPatternRight",{1,0,0,std::tan(std::acos(.97f))});u("fogPatternUp",{0,0,1,0});
         u("fogLightBoundsCenter",{0,-3,0,0});u("fogLightBoundsExtent",{radius,10,radius,0});
     });
     size_t nonzero=0;CHECK(pixels.size()==16);
@@ -324,13 +369,14 @@ TEST_CASE(performance_spot_volume_perspective_rays_match_independent_cpu_integra
         const float tanHalf=std::tan(55.f*3.141592653589793f/360);
         const auto direction=(forward+right*(((x+.5f)*.5f-1)*tanHalf)+up*((1-(y+.5f)*.5f)*tanHalf)).normalize();
         const double origin[3]={eye.x,eye.y,eye.z},d[3]={direction.x,direction.y,direction.z};
-        const double minimum[3]={-radius,-13,-radius},maximum[3]={radius,7,radius};double begin=0,end=30;
-        for(int axis=0;axis<3;++axis){if(std::abs(d[axis])<1e-10){if(origin[axis]<minimum[axis]||origin[axis]>maximum[axis])end=-1;}else{const double a=(minimum[axis]-origin[axis])/d[axis],b=(maximum[axis]-origin[axis])/d[axis];begin=std::max(begin,std::min(a,b));end=std::min(end,std::max(a,b));}}
+        // Independent dense reference: no cone roots or production AABB clipping.
+        const double begin=0,end=30;
         double result=0;
-        if(end>begin){const double ds=(end-begin)/32,stepT=std::exp(-.1*ds);double transmission=std::exp(-.1*begin);
-            for(int i=0;i<32;++i){const double t=begin+(i+.5)*ds,px=origin[0]+d[0]*t,py=origin[1]+d[1]*t-7,pz=origin[2]+d[2]*t;
+        if(end>begin){constexpr int count=65536;const double ds=(end-begin)/count,stepT=std::exp(-.1*ds);double transmission=1;
+            for(int i=0;i<count;++i){const double t=begin+(i+.5)*ds,px=origin[0]+d[0]*t,py=origin[1]+d[1]*t-7,pz=origin[2]+d[2]*t;
                 const double distance=std::sqrt(px*px+py*py+pz*pz),cutoff=std::clamp(1-distance/20,0.,1.);
-                const double cone=std::clamp((-py/std::max(distance,1e-5)-.9)/(.97-.9),0.,1.);
+                const double core=aperture-py*std::tan(std::acos(.97f)),field=aperture-py*std::tan(std::acos(.9f));
+                const double cone=py<=0?std::clamp((field-std::sqrt(px*px+pz*pz))/std::max(field-core,1e-6),0.,1.):0.;
                 const double attenuation=cutoff*cutoff/std::max(distance*distance,.01)*cone*cone*(3-2*cone);
                 result+=transmission*(1-stepT)*.8*500*attenuation/(4*3.141592653589793);transmission*=stepT;
             }

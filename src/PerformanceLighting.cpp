@@ -19,6 +19,7 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
             || !finite(l.coneCosInner,l.coneCosOuter+.000001f,1)
             || !finite(l.shadowBias,0,1) || !finite(entry.volumetric,0,100)
             || !finite(entry.patternRotation,-100000,100000) || !finite(entry.patternScale,.01f,100)
+            || !finite(entry.apertureRadius,0,1)
             || entry.pattern>LightPattern::Star) return fail("Invalid performance Spot light");
         for(int i=0;i<3;++i) if(!finite(l.position[i],-100000,100000) || !finite(l.color[i],0,10000)
             || !finite(l.spotDirection[i],-100000,100000)) return fail("Invalid light position/color/direction");
@@ -46,10 +47,12 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
 void performanceLightBounds(const PerformanceLight& entry,math::FVector3& center,math::FVector3& halfExtent) {
     const auto& light=entry.light;const auto d=light.spotDirection;
     const auto base=light.position+d*light.range;
-    const float radius=light.range*std::tan(std::acos(light.coneCosOuter));
+    const float radius=entry.apertureRadius+light.range*std::tan(std::acos(light.coneCosOuter));
     for(int i=0;i<3;++i) {
         const float extent=radius*std::sqrt(std::max(0.f,1-d[i]*d[i]));
-        const float low=std::min(light.position[i],base[i]-extent),high=std::max(light.position[i],base[i]+extent);
+        const float apertureExtent=entry.apertureRadius*std::sqrt(std::max(0.f,1-d[i]*d[i]));
+        const float low=std::min(light.position[i]-apertureExtent,base[i]-extent);
+        const float high=std::max(light.position[i]+apertureExtent,base[i]+extent);
         center[i]=(low+high)*.5f;halfExtent[i]=std::max(.0001f,(high-low)*.5f);
     }
 }

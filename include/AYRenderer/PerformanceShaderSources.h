@@ -2,7 +2,62 @@
 #include <string>
 namespace ayt::render {
 inline constexpr const char* kPerformancePatternSource=R"(
+// cone = (cos(core half-angle), cos(field half-angle), tan(field), aperture).
+fn performanceBeamProfile(delta:vec3, axis:vec3, cone:vec4, coreSlope:float):float {
+ let axial=dot(delta,axis)
+ let distance=length(delta)
+ let profile=smoothstep(cone.y,max(cone.x,cone.y+0.000001),axial/max(distance,0.00001))
+ if(cone.w>0.0){
+  let radial=length(delta-axis*axial)
+  let core=cone.w+max(axial,0.0)*coreSlope
+  let field=cone.w+max(axial,0.0)*cone.z
+  profile=(1.0-smoothstep(core,max(field,core+0.000001),radial))*step(0.0,axial)
+ }
+ return profile
+}
+// Intersect an observer ray with the actual forward expanding beam. The AABB
+// is only a broad phase: sampling its empty space creates detached bright slices.
+fn performanceBeamInterval(origin:vec3, ray:vec3, position:vec3, axis:vec3, cone:vec4, reach:float, segment:vec2):vec2 {
+ let o=origin-position
+ let oz=dot(o,axis);let dz=dot(ray,axis)
+ let begin=segment.x;let end=segment.y
+ if(abs(dz)<0.000001){
+  if(oz<0.0 || oz>reach){return vec2(0.0)}
+ } else {
+  let z0=(0.0-oz)/dz;let z1=(reach-oz)/dz
+  begin=max(begin,min(z0,z1));end=min(end,max(z0,z1))
+ }
+ let op=o-axis*oz;let dp=ray-axis*dz
+ let radius=cone.w+oz*cone.z;let slope=dz*cone.z
+ let a=dot(dp,dp)-slope*slope
+ let b=2.0*(dot(op,dp)-radius*slope)
+ let c=dot(op,op)-radius*radius
+ if(abs(a)<0.000001){
+  if(abs(b)<0.000001){if(c>0.0){return vec2(0.0)}}
+  else if(b>0.0){end=min(end,0.0-c/b)}
+  else {begin=max(begin,0.0-c/b)}
+ } else {
+  let discriminant=b*b-4.0*a*c
+  if(discriminant<0.0){if(a>0.0){return vec2(0.0)}}
+  else {
+   // Stable quadratic roots: avoid subtracting almost equal values.
+   let signB=1.0
+   if(b<0.0){signB=-1.0}
+   let q=-0.5*(b+signB*sqrt(max(discriminant,0.0)))
+   let r0=0.0-b/(2.0*a);let r1=r0
+   if(abs(q)>0.0000001){r0=q/a;r1=c/q}
+   let low=min(r0,r1);let high=max(r0,r1)
+   if(a>0.0){begin=max(begin,low);end=min(end,high)}
+   else if(begin<high && end>low){
+    if(begin<low){end=min(end,low)}else{begin=max(begin,high)}
+   }
+  }
+ }
+ if(end<=begin){return vec2(0.0)}
+ return vec2(begin,end)
+}
 fn performancePattern(p:vec2, settings:vec4):float {
+ if(settings.x<0.5){return 1.0}
  let c=cos(settings.y);let s=sin(settings.y)
  let uv=vec2(p.x*c-p.y*s,p.x*s+p.y*c)*settings.z
  let result=1.0
@@ -55,10 +110,10 @@ material PerformanceSurface {
   let outward=delta/max(distance,0.00001)
   let L=outward*-1.0
   let axial=dot(delta,performanceDirection.xyz)
-  let projected=vec2(dot(delta,performanceRight.xyz),dot(delta,performanceUp.xyz))/max(axial*performanceCone.z,0.00001)
+  let projected=vec2(dot(delta,performanceRight.xyz),dot(delta,performanceUp.xyz))/max(performanceCone.w+axial*performanceCone.z,0.00001)
   let pattern=performancePattern(projected,performancePatternSettings)
   let falloff=clamp(1.0-distance/performancePosition.w,0.0,1.0)
-  let attenuation=falloff*falloff/max(distance*distance,0.01)*smoothstep(performanceCone.y,performanceCone.x,dot(outward,performanceDirection.xyz))*pattern
+  let attenuation=falloff*falloff/max(distance*distance,max(0.01,performanceCone.w*performanceCone.w))*performanceBeamProfile(delta,performanceDirection.xyz,performanceCone,performanceRight.w)*pattern
   let visibility=1.0
   if(performanceShadowSettings.x>0.5){
    let clip=performanceShadow*vec4(position.xyz,1.0)

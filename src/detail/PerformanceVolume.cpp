@@ -63,10 +63,10 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         const auto direction=light.spotDirection;
         vector("fogLightDirection",direction.x,direction.y,direction.z,light.range);
         vector("fogLightColor",light.color.x*light.intensity*entry.volumetric,light.color.y*light.intensity*entry.volumetric,light.color.z*light.intensity*entry.volumetric,0);
-        vector("fogSpot",light.coneCosInner,light.coneCosOuter,std::tan(std::acos(light.coneCosOuter)),0);
+        vector("fogSpot",light.coneCosInner,light.coneCosOuter,std::tan(std::acos(light.coneCosOuter)),entry.apertureRadius);
         const auto axis=std::abs(direction.y)>.99f?math::FVector3(0,0,1):math::FVector3(0,1,0);
         const auto right=axis.cross(direction).normalize(),up=direction.cross(right).normalize();
-        vector("fogPatternRight",right.x,right.y,right.z,0);vector("fogPatternUp",up.x,up.y,up.z,0);
+        vector("fogPatternRight",right.x,right.y,right.z,std::tan(std::acos(light.coneCosInner)));vector("fogPatternUp",up.x,up.y,up.z,0);
         vector("fogPatternSettings",float(entry.pattern),entry.patternRotation,entry.patternScale,0);
         math::FVector3 center,extent;performanceLightBounds(entry,center,extent);
         vector("fogLightBoundsCenter",center.x,center.y,center.z,0);vector("fogLightBoundsExtent",extent.x,extent.y,extent.z,0);

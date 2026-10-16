@@ -4,7 +4,10 @@
 
 主Deferred的setPerformanceLights复制最多256个Spot，表面/体积/阴影独立预算，
 锥体AABB/scissor、GGX与五种程序化投影。体积光消光一次，再累计各灯散射。
+有限出光口与核心/外场两半角控制发散；AABB粗裁剪后解析裁剪到真实前向光束弦段，
+避免用稀疏包围盒采样产生悬空亮片。表面与体积共用同一角度/出光口轮廓。
 默认预算64/16/4，上限256/64/8，不代表帧率保证。
+apertureRadius默认零兼容点源，节目新默认使用有限半径；阴影仍是点源投影近似。
 EmissivePointCloud提供最多65536个逐点HDR色发光点、亚像素覆盖及共享材质批次。
 Host入口/生命周期/限制见[演出系统](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
 

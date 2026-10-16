@@ -1,7 +1,7 @@
 #pragma once
 #include "AYRenderer/PerformanceShaderSources.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v3_performance_pattern";
+inline constexpr char kVolumetricCacheKey[]="volumetric_v4_beam_interval";
 inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
@@ -62,13 +62,28 @@ material Volumetric {
    let b=(fogLightBoundsCenter.xyz+fogLightBoundsExtent.xyz-origin)/safeDirection
    begin=max(begin,max(max(min(a.x,b.x),min(a.y,b.y)),min(a.z,b.z)))
    end=min(end,min(min(max(a.x,b.x),max(a.y,b.y)),max(a.z,b.z)))
+   if(fogLightPosition.w>1.5){
+    let segment=performanceBeamInterval(origin,direction,fogLightPosition.xyz,fogLightDirection.xyz,fogSpot,fogLightDirection.w,vec2(begin,end))
+    begin=segment.x;end=segment.y
+   }
   }
-  let ds=max(end-begin,0.0)/fogOptions.x
+  // Scatter-only pixels outside the actual beam contribute exactly zero.
+  // Do not execute a 48/64-step loop over an empty AABB/cone intersection.
+  if(fogOptions.w>1.5 && end<=begin){return vec4(0.0)}
+  let sampleCount=fogOptions.x
+  if(fogOptions.w>1.5 && fogLightPosition.w>1.5 && fogPatternSettings.x<0.5){
+   let midPoint=origin+direction*((begin+end)*0.5)-fogLightPosition.xyz
+   let radius=fogSpot.w+max(0.0,dot(midPoint,fogLightDirection.xyz))*fogSpot.z
+   // At least 16 samples across a normal chord; use the user's higher budget
+   // for long/grazing chords. Patterned beams retain the full sample budget.
+   sampleCount=min(fogOptions.x,max(16.0,ceil((end-begin)/max(0.02,radius*0.125))))
+  }
+  let ds=max(end-begin,0.0)/sampleCount
   let stepT=exp(-fogMedium.x*ds)
   let transmission=exp(-fogMedium.x*max(begin-mediumBegin,0.0))
   let radiance=vec3(0.0)
   if(fogOptions.w<0.5 || fogOptions.w>1.5) {
-  for(i in range(int(fogOptions.x),64)) {
+  for(i in range(int(sampleCount),64)) {
    let fogSample=origin+direction*(begin+(float(i)+0.5)*ds)
    let toLight=fogLightPosition.xyz-fogSample
    let lightDistance=length(toLight)
@@ -77,12 +92,12 @@ material Volumetric {
    if(fogLightPosition.w>0.5) {
     L=toLight/max(lightDistance,0.00001)
     let cutoff=clamp(1.0-lightDistance/max(fogLightDirection.w,0.00001),0.0,1.0)
-    attenuation=cutoff*cutoff/max(lightDistance*lightDistance,0.01)
+    attenuation=cutoff*cutoff/max(lightDistance*lightDistance,max(0.01,fogSpot.w*fogSpot.w))
     if(fogLightPosition.w>1.5) {
-     attenuation=attenuation*smoothstep(fogSpot.y,max(fogSpot.x,fogSpot.y+0.0001),dot(L*-1.0,fogLightDirection.xyz))
      let delta=fogSample-fogLightPosition.xyz
+     attenuation=attenuation*performanceBeamProfile(delta,fogLightDirection.xyz,fogSpot,fogPatternRight.w)
      let axial=dot(delta,fogLightDirection.xyz)
-     let projected=vec2(dot(delta,fogPatternRight.xyz),dot(delta,fogPatternUp.xyz))/max(axial*fogSpot.z,0.00001)
+     let projected=vec2(dot(delta,fogPatternRight.xyz),dot(delta,fogPatternUp.xyz))/max(fogSpot.w+axial*fogSpot.z,0.00001)
      attenuation=attenuation*performancePattern(projected,fogPatternSettings)
     }
    }
@@ -105,7 +120,8 @@ material Volumetric {
    let g=fogMedium.z
    // Incoming propagation is -L and outgoing propagation is -direction.
    let mu=dot(L,direction)
-   let phase=(1.0-g*g)/(12.5663706*pow(max(1.0+g*g-2.0*g*mu,0.001),1.5))
+   let phaseBase=max(1.0+g*g-2.0*g*mu,0.001)
+   let phase=(1.0-g*g)/(12.5663706*phaseBase*sqrt(phaseBase))
    radiance=radiance+transmission*(1.0-stepT)*fogMedium.y*fogTint.rgb*fogLightColor.rgb*attenuation*visibility*phase
    transmission=transmission*stepT
   }

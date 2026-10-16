@@ -12,6 +12,11 @@ struct PerformanceLight {
     LightPattern pattern = LightPattern::Open;
     float patternRotation = 0, patternScale = 1;
     int32_t priority = 0;
+    /// Finite exit-aperture radius in world units, [0,1]. Zero retains the
+    /// point-source angular profile. Inner/outer angles delimit core/penumbra;
+    /// their radii grow as apertureRadius + axialDistance * tan(halfAngle).
+    /// Shadow projection remains a point-source approximation.
+    float apertureRadius = 0;
 };
 struct PerformanceLightBudget {
     uint16_t surfaceLights = 64;
