@@ -264,13 +264,14 @@ TEST_CASE(volumetric_shader_matches_extinction_scattering_local_box_and_shadow) 
     auto program=f.pool.acquire(ayt::render::kVolumetricPhoskiaSource,ayt::render::kVolumetricCacheKey);
     for(int mode=0;mode<8;++mode) {
         const float density=mode==0?0.f:.1f;
-        const float distance=mode==2?.25f:mode==3?0.f:1.f;
+        // Local medium fades over its outer quarter; its integral is 0.875.
+        const float distance=mode==2?.25f*.875f:mode==3?0.f:1.f;
         const float t=std::exp(-density*distance);
         const float phaseRatio=mode==5?(.75f/std::pow(2.25f,1.5f)):1.f;
         const float expected=mode==6?2*t:mode==7?.8f*(1-t):2*t+(mode==4?0.f:.8f*(1-t)*phaseRatio);
         auto pixels=f.renderResource(program,[&](const auto& p){
             auto tex=[&](const char* n,bgfx::TextureHandle h){auto b=p.getTextureBinding(n);CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(h));};
-            tex("sceneColor",scene);tex("worldPosition",world);tex("geometryCoverage",sky);tex("shadowAtlas",mode==4?dark:lit);
+            tex("sceneColor",scene);tex("worldPosition",world);tex("geometryCoverage",sky);tex("shadowAtlas",mode==4?dark:lit);tex("patternGobo",lit);
             auto identity=ayt::math::Float4x4::identity();
             for(const char* n:{"fogInverseViewProjection","fogView","fogShadow0","fogShadow1","fogShadow2"})p.setUniform(p.getUniformBinding(n),&identity,64);
             auto u=[&](const char* n,Pixel v){auto b=p.getUniformBinding(n);CHECK(b!=ayt::shader::InvalidBinding);p.setUniform(b,v.data(),16);};
@@ -471,23 +472,29 @@ TEST_CASE(performance_surface_gpu_matches_brdf_pattern_shadow_and_unlit_contract
     const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
     PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
     const auto albedo=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),world=f.input({0,0,0,1});
-    const auto edge=f.input({.5f,0,0,1});
+    const auto edge=f.input({.5f,0,0,1}),gobo=f.input({.5f,.5f,.5f,1});
     const auto unlit=f.input({0,0,0,3}),coverage=f.input({0,0,0,1}),dark=f.input({0,0,0,1});
+    std::array<Pixel,16> shadowPixels{};
+    for(size_t i=0;i<shadowPixels.size();++i)shadowPixels[i]={i%4>=2?1.f:0.f,0,0,1};
+    const auto softShadow=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,
+        BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,
+        bgfx::copy(shadowPixels.data(),sizeof(shadowPixels)));
+    CHECK(bgfx::isValid(softShadow));if(!bgfx::isValid(softShadow))return;f.textures.push_back(softShadow);
     auto program=f.pool.acquire(ayt::render::kPerformanceSurfaceSource,"performance_surface_gpu_v2_pattern_optics");
     CHECK(program.isValid());if(!program.isValid())return;
-    for(int mode=0;mode<6;++mode) {
+    for(int mode=0;mode<8;++mode) {
         const auto pixels=f.renderResource(program,[&](const auto& p){
             const auto tex=[&](const char* name,bgfx::TextureHandle h){const auto b=p.getTextureBinding(name);CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(h));};
             const auto u=[&](const char* name,Pixel v){const auto b=p.getUniformBinding(name);CHECK(b!=ayt::shader::InvalidBinding);p.setUniform(b,v.data(),16);};
-            tex("surfaceAlbedo",albedo);tex("surfaceNormal",normal);tex("surfacePosition",mode==4?unlit:mode==5?edge:world);tex("surfaceCoverage",coverage);tex("shadowAtlas",dark);
+            tex("surfaceAlbedo",albedo);tex("surfaceNormal",normal);tex("surfacePosition",mode==4?unlit:mode==5?edge:world);tex("surfaceCoverage",coverage);tex("shadowAtlas",mode==7?softShadow:dark);tex("patternGobo",gobo);
             u("performancePosition",{0,0,-2,10});u("performanceDirection",{0,0,1,0});u("performanceColor",{10,0,0,0});
             u("performanceCone",{.95f,.8f,.75f,0});u("performanceRight",{1,0,0,0});u("performanceUp",{0,1,0,0});
-            u("performancePatternSettings",{mode==1?1.f:mode==2?3.f:0.f,0,1,0});u("performanceEye",{0,0,-1,0});
+            u("performancePatternSettings",{mode==1?1.f:mode==2?3.f:mode==6?5.f:0.f,0,1,0});u("performanceEye",{0,0,-1,0});
             u("performancePatternOptics",{0,mode==5?.1f:1.f,0,0});
             const auto identity=ayt::math::Float4x4::identity();p.setUniform(p.getUniformBinding("performanceShadow"),&identity,64);
-            u("performanceShadowRect",{0,0,1,1});u("performanceShadowSettings",{mode==3?1.f:0.f,0,0,0});
+            u("performanceShadowRect",{0,0,1,1});u("performanceShadowSettings",{mode==3||mode==7?1.f:0.f,0,mode==7?1.f:0.f,mode==7?.25f:0.f});
         });
-        const float red=mode>=2?0.f:float(.97/3.141592653589793*1.6)*(mode==1?.5f:1.f);
+        const float red=mode>=2&&mode!=6&&mode!=7?0.f:float(.97/3.141592653589793*1.6)*(mode==1||mode==6||mode==7?.5f:1.f);
         checkPixels(pixels,{red,0,0,0});
     }
 #else

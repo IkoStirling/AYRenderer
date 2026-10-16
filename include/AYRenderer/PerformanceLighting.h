@@ -4,7 +4,7 @@
 #include <string>
 
 namespace ayt::render {
-enum class LightPattern : uint8_t { Open, Stripes, Grid, Ring, Star };
+enum class LightPattern : uint8_t { Open, Stripes, Grid, Ring, Star, Texture };
 struct PerformanceLight {
     uint32_t id = 0;
     Light light;
@@ -14,6 +14,12 @@ struct PerformanceLight {
     /// Pattern edge blur [0,1] and circular iris opening (0,1]. Iris clips
     /// the projected pattern inside the outer beam without changing its cone.
     float patternFocus = 0, iris = 1;
+    /// Renderer-owned, live texture for LightPattern::Texture. The host keeps
+    /// it alive until rendering finishes; the setter rejects missing handles.
+    TextureHandle goboTexture;
+    /// Optional 2x2 shadow PCF radius in atlas texels, [0,4]. Zero keeps
+    /// the original single-sample hard shadow; this is not area-light penumbra.
+    float shadowSoftness = 0;
     int32_t priority = 0;
     /// Finite exit-aperture radius in world units, [0,1]. Zero retains the
     /// point-source angular profile. Inner/outer angles delimit core/penumbra;

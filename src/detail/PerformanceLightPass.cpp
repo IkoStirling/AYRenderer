@@ -13,7 +13,7 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         || !ctx.adapter.isInitialized() || ctx.adapter.isNoopBackend())return 0;
     BlackboardGBufferView gb;
     if(!ctx.resourceBlackboard->resolveGBuffer(gb) || !_geometry.ensure(ctx.adapter))return 0;
-    if(!_program.isValid())_program=ctx.pool.acquire(kPerformanceSurfaceSource,"performance_surface_v3_pattern_optics");
+    if(!_program.isValid())_program=ctx.pool.acquire(kPerformanceSurfaceSource,"performance_surface_v5_gobo_soft_shadow");
     if(!_program.isValid())return 0;
     bool valid=true;
     const auto texture=[&](const char* name,bgfx::TextureHandle handle){
@@ -33,6 +33,12 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         const auto rect=performanceLightRect(entry,vp,ctx.viewportWidth,ctx.viewportHeight);
         if(!rect.visible){++packet.stats.culledLights;continue;}
         if(draws>=packet.budget.surfaceLights){++packet.stats.surfaceBudgetSkipped;continue;}
+        auto gobo=gb.albedo;
+        if(entry.pattern==LightPattern::Texture){
+            const auto found=ctx.textures.find(entry.goboTexture.id);
+            if(found==ctx.textures.end()||!BGFXAdapter::isValid(found->second.handle))continue;
+            gobo=found->second.handle;
+        }
         // ShaderResource pending bindings are consumed by each submit.
         texture("surfaceAlbedo",gb.albedo);texture("surfaceNormal",gb.normal);
         texture("surfacePosition",gb.worldPosition);texture("surfaceCoverage",gb.material);
@@ -47,6 +53,7 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         vector("performanceRight",right.x,right.y,right.z,std::tan(std::acos(l.coneCosInner)));vector("performanceUp",up.x,up.y,up.z,0);
         vector("performancePatternSettings",float(entry.pattern),entry.patternRotation,entry.patternScale,0);
         vector("performancePatternOptics",entry.patternFocus,entry.iris,0,0);
+        texture("patternGobo",gobo);
         float matrix[16];toBgfxColumnMajor(math::Float4x4::identity(),matrix);
         float shadowRect[4]={0,0,1,1};float bias=ctx.frame.shadowBias;bool shadowed=false;
         auto shadowTexture=gb.material;const int slot=packet.shadowSlots[i];
@@ -61,7 +68,8 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
             }
         }
         uniform("performanceShadow",matrix,64);uniform("performanceShadowRect",shadowRect,16);
-        vector("performanceShadowSettings",shadowed?1.f:0.f,bias,0,0);texture("shadowAtlas",shadowTexture);
+        const float texel=shadowed?1.f/float(ctx.shadowPass->shadowSampleMapSize()):0.f;
+        vector("performanceShadowSettings",shadowed?1.f:0.f,bias,entry.shadowSoftness,texel);texture("shadowAtlas",shadowTexture);
         if(!valid)break;
         _geometry.bind(ctx.adapter);
         ctx.adapter.setDrawScissor(rect.x,rect.y,rect.width,rect.height);

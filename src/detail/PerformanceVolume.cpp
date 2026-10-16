@@ -57,6 +57,12 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
             rect=performanceLightRect(entry,vp,ctx.viewportWidth,ctx.viewportHeight);if(!rect.visible)continue;
             if(packet.stats.volumeDraws>=packet.budget.volumeLights){++packet.stats.volumeBudgetSkipped;continue;}
         }
+        auto gobo=gb.material;
+        if(entry.pattern==LightPattern::Texture){
+            const auto found=ctx.textures.find(entry.goboTexture.id);
+            if(found==ctx.textures.end()||!BGFXAdapter::isValid(found->second.handle))continue;
+            gobo=found->second.handle;
+        }
         uploadFrame();
         vector("fogOptions",float(settings.steps),float(settings.debugView),settings.local?1.f:0.f,extinction?1.f:2.f);
         vector("fogLightPosition",light.position.x,light.position.y,light.position.z,float(light.type));
@@ -68,7 +74,9 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         const auto right=axis.cross(direction).normalize(),up=direction.cross(right).normalize();
         vector("fogPatternRight",right.x,right.y,right.z,std::tan(std::acos(light.coneCosInner)));vector("fogPatternUp",up.x,up.y,up.z,0);
         vector("fogPatternSettings",float(entry.pattern),entry.patternRotation,entry.patternScale,0);
-        vector("fogPatternOptics",entry.patternFocus,entry.iris,0,0);
+        const float shadowTexel=ctx.shadowPass?1.f/float(ctx.shadowPass->shadowSampleMapSize()):0.f;
+        vector("fogPatternOptics",entry.patternFocus,entry.iris,entry.shadowSoftness,shadowTexel);
+        texture("patternGobo",gobo);
         math::FVector3 center,extent;performanceLightBounds(entry,center,extent);
         vector("fogLightBoundsCenter",center.x,center.y,center.z,0);vector("fogLightBoundsExtent",extent.x,extent.y,extent.z,0);
         float matrix[16];toBgfxColumnMajor(math::Float4x4::identity(),matrix);float sr[4]={0,0,1,1};

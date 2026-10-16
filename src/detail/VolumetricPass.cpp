@@ -73,6 +73,7 @@ uint32_t VolumetricPass::execute(PassExecContext& ctx) {
  u("fogShadowRect0",rects[0],16);u("fogShadowRect1",rects[1],16);u("fogShadowRect2",rects[2],16);
  v("fogShadowParams",splits[0],splits[1],bias,float(count));
  tex("sceneColor",input);tex("worldPosition",gb.worldPosition);tex("geometryCoverage",gb.material);tex("shadowAtlas",shadow);
+ tex("patternGobo",gb.material);
  if(!bindings)return 0;
  configureFullscreenPassView(adapter,kViewId,target,0,0,ctx.viewportWidth,ctx.viewportHeight);
  _geometry.bind(adapter);adapter.setStateDepthTestAlways();shader::DrawCallContext submit;submit.viewId=kViewId;submit.state=0;_program.submit(submit);

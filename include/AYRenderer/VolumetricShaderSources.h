@@ -1,13 +1,14 @@
 #pragma once
 #include "AYRenderer/PerformanceShaderSources.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v5_pattern_optics";
+inline constexpr char kVolumetricCacheKey[]="volumetric_v9_local_feather_budget";
 inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
  texture2d worldPosition
  texture2d geometryCoverage
  texture2d shadowAtlas
+ texture2d patternGobo
  uniform mat4 fogInverseViewProjection
  uniform mat4 fogView
  uniform mat4 fogShadow0
@@ -72,6 +73,9 @@ material Volumetric {
   // Do not execute a 48/64-step loop over an empty AABB/cone intersection.
   if(fogOptions.w>1.5 && end<=begin){return vec4(0.0)}
   let sampleCount=fogOptions.x
+  // A four-point quadrature is sufficient for the smooth box extinction;
+  // only scattering needs the user's full per-beam step budget.
+  if(fogOptions.z>0.5 && fogOptions.w>0.5 && fogOptions.w<1.5){sampleCount=4.0}
   if(fogOptions.w>1.5 && fogLightPosition.w>1.5 && fogPatternSettings.x<0.5){
    let midPoint=origin+direction*((begin+end)*0.5)-fogLightPosition.xyz
    let radius=fogSpot.w+max(0.0,dot(midPoint,fogLightDirection.xyz))*fogSpot.z
@@ -80,12 +84,26 @@ material Volumetric {
    sampleCount=min(fogOptions.x,max(16.0,ceil((end-begin)/max(0.02,radius*max(0.01,fogPatternOptics.y)*0.125))))
   }
   let ds=max(end-begin,0.0)/sampleCount
-  let stepT=exp(-fogMedium.x*ds)
   let transmission=exp(-fogMedium.x*max(begin-mediumBegin,0.0))
+  if(fogOptions.z>0.5 && begin>mediumBegin){
+   transmission=1.0
+   for(k in range(4)){
+    let pre=origin+direction*(mediumBegin+(float(k)+0.5)*(begin-mediumBegin)*0.25)
+    let local=abs(pre-fogCenter.xyz)/fogExtent.xyz
+    let weight=1.0-smoothstep(0.75,1.0,max(max(local.x,local.y),local.z))
+    transmission=transmission*exp(-fogMedium.x*(begin-mediumBegin)*0.25*weight)
+   }
+  }
   let radiance=vec3(0.0)
-  if(fogOptions.w<0.5 || fogOptions.w>1.5) {
+  if(fogOptions.w<0.5 || fogOptions.w>1.5 || fogOptions.z>0.5) {
   for(i in range(int(sampleCount),64)) {
    let fogSample=origin+direction*(begin+(float(i)+0.5)*ds)
+   let localWeight=1.0
+   if(fogOptions.z>0.5){
+    let local=abs(fogSample-fogCenter.xyz)/fogExtent.xyz
+    localWeight=1.0-smoothstep(0.75,1.0,max(max(local.x,local.y),local.z))
+   }
+   let stepT=exp(-fogMedium.x*ds*localWeight)
    let toLight=fogLightPosition.xyz-fogSample
    let lightDistance=length(toLight)
    let L=fogLightDirection.xyz*-1.0
@@ -99,7 +117,21 @@ material Volumetric {
      attenuation=attenuation*performanceBeamProfile(delta,fogLightDirection.xyz,fogSpot,fogPatternRight.w)
      let axial=dot(delta,fogLightDirection.xyz)
      let projected=vec2(dot(delta,fogPatternRight.xyz),dot(delta,fogPatternUp.xyz))/max(fogSpot.w+axial*fogSpot.z,0.00001)
-     attenuation=attenuation*performancePattern(projected,fogPatternSettings,fogPatternOptics)
+     let textureMask=1.0
+     if(fogPatternSettings.x>4.5){
+      let goboUv=performanceGoboUv(projected,fogPatternSettings)
+      let inside=step(0.0,goboUv.x)*step(goboUv.x,1.0)*step(0.0,goboUv.y)*step(goboUv.y,1.0)
+      let texel=sampleLod(patternGobo,goboUv,0.0)
+      if(fogPatternOptics.x>0.01){
+       let blur=fogPatternOptics.x*0.025
+       texel=(texel+sampleLod(patternGobo,goboUv+vec2(blur,0.0),0.0)
+             +sampleLod(patternGobo,goboUv-vec2(blur,0.0),0.0)
+             +sampleLod(patternGobo,goboUv+vec2(0.0,blur),0.0)
+             +sampleLod(patternGobo,goboUv-vec2(0.0,blur),0.0))*0.2
+      }
+      textureMask=dot(texel.rgb,vec3(0.2126,0.7152,0.0722))*texel.a*inside
+     }
+     attenuation=attenuation*performancePattern(projected,fogPatternSettings,fogPatternOptics,textureMask)
     }
    }
    let visibility=1.0
@@ -114,8 +146,23 @@ material Volumetric {
     let ref=q.z*0.5+0.5
     if(clip.w>0.0 && localUv.x>=0.0 && localUv.x<=1.0 && localUv.y>=0.0 && localUv.y<=1.0 && ref>=0.0 && ref<=1.0) {
      let shadowUv=mix(rect.xy,rect.zw,localUv)
-     let depth=sampleLod(shadowAtlas,shadowUv,0.0).r
-     visibility=max(1.0-step(depth+fogShadowParams.z,ref),step(0.999,depth))
+     if(fogPatternOptics.z<0.001){
+      let depth=sampleLod(shadowAtlas,shadowUv,0.0).r
+      visibility=max(1.0-step(depth+fogShadowParams.z,ref),step(0.999,depth))
+     } else {
+      let radius=fogPatternOptics.z*fogPatternOptics.w
+      let edge=vec2(fogPatternOptics.w*0.5)
+      let soft=0.0
+      for(j in range(4)) {
+       let ox=-1.0;let oy=-1.0
+       if(j==1 || j==3){ox=1.0}
+       if(j>=2){oy=1.0}
+       let tap=clamp(shadowUv+vec2(ox,oy)*radius,rect.xy+edge,rect.zw-edge)
+       let depth=sampleLod(shadowAtlas,tap,0.0).r
+       soft=soft+max(1.0-step(depth+fogShadowParams.z,ref),step(0.999,depth))
+      }
+      visibility=soft*0.25
+     }
     }
    }
    let g=fogMedium.z

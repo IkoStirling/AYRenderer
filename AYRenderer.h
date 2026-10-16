@@ -254,6 +254,8 @@ public:
     /// Owned Spot-light packet for the main Deferred view. Replaces direct
     /// scene lighting while active; ambient/IBL is retained. Empty clears it.
     /// Copy/validate before publication, max256; false preserves old state.
+    /// Texture-pattern lights require a live Renderer-owned goboTexture; keep
+    /// it alive through render. shadowSoftness optionally filters atlas edges.
     /// Owner thread only; priority then input order determines budget admission.
     /// Shadows, surface and volume costs are separately bounded. Forward views ignore it.
     bool setPerformanceLights(std::span<const PerformanceLight> lights,

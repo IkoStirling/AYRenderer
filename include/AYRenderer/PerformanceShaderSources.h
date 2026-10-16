@@ -56,17 +56,22 @@ fn performanceBeamInterval(origin:vec3, ray:vec3, position:vec3, axis:vec3, cone
  if(end<=begin){return vec2(0.0)}
  return vec2(begin,end)
 }
-fn performancePattern(p:vec2, settings:vec4, optics:vec4):float {
+fn performanceGoboUv(p:vec2, settings:vec4):vec2 {
+ let c=cos(settings.y);let s=sin(settings.y)
+ return vec2(p.x*c-p.y*s,p.x*s+p.y*c)*settings.z*0.5+vec2(0.5)
+}
+fn performancePattern(p:vec2, settings:vec4, optics:vec4, textureMask:float):float {
  let iris=1.0
  if(optics.y<0.999){iris=1.0-smoothstep(optics.y-0.02,optics.y+0.02,length(p))}
  if(settings.x<0.5){return iris}
+ if(settings.x>4.5){return textureMask*iris}
  let c=cos(settings.y);let s=sin(settings.y)
  let uv=vec2(p.x*c-p.y*s,p.x*s+p.y*c)*settings.z
  let result=1.0
  if(settings.x>0.5 && settings.x<1.5){result=smoothstep(-0.15-optics.x*0.5,0.15+optics.x*0.5,sin(uv.x*25.132741))}
  if(settings.x>1.5 && settings.x<2.5){result=smoothstep(0.0-optics.x*0.5,0.25+optics.x*0.5,sin(uv.x*18.0)*sin(uv.y*18.0))}
  if(settings.x>2.5 && settings.x<3.5){result=1.0-smoothstep(0.07-optics.x*0.2,0.12+optics.x*0.2,abs(length(uv)-0.55))}
- if(settings.x>3.5){
+ if(settings.x>3.5 && settings.x<4.5){
   let ray=0.0
   for(j in range(5)) {
    let a=float(j)*1.25663706
@@ -86,6 +91,7 @@ material PerformanceSurface {
  texture2d surfacePosition
  texture2d surfaceCoverage
  texture2d shadowAtlas
+ texture2d patternGobo
  uniform vec4 performancePosition
  uniform vec4 performanceDirection
  uniform vec4 performanceColor
@@ -114,7 +120,21 @@ material PerformanceSurface {
   let L=outward*-1.0
   let axial=dot(delta,performanceDirection.xyz)
   let projected=vec2(dot(delta,performanceRight.xyz),dot(delta,performanceUp.xyz))/max(performanceCone.w+axial*performanceCone.z,0.00001)
-  let pattern=performancePattern(projected,performancePatternSettings,performancePatternOptics)
+  let textureMask=1.0
+  if(performancePatternSettings.x>4.5){
+   let goboUv=performanceGoboUv(projected,performancePatternSettings)
+   let inside=step(0.0,goboUv.x)*step(goboUv.x,1.0)*step(0.0,goboUv.y)*step(goboUv.y,1.0)
+   let texel=sampleLod(patternGobo,goboUv,0.0)
+   if(performancePatternOptics.x>0.01){
+    let blur=performancePatternOptics.x*0.025
+    texel=(texel+sampleLod(patternGobo,goboUv+vec2(blur,0.0),0.0)
+          +sampleLod(patternGobo,goboUv-vec2(blur,0.0),0.0)
+          +sampleLod(patternGobo,goboUv+vec2(0.0,blur),0.0)
+          +sampleLod(patternGobo,goboUv-vec2(0.0,blur),0.0))*0.2
+   }
+   textureMask=dot(texel.rgb,vec3(0.2126,0.7152,0.0722))*texel.a*inside
+  }
+  let pattern=performancePattern(projected,performancePatternSettings,performancePatternOptics,textureMask)
   let falloff=clamp(1.0-distance/performancePosition.w,0.0,1.0)
   let attenuation=falloff*falloff/max(distance*distance,max(0.01,performanceCone.w*performanceCone.w))*performanceBeamProfile(delta,performanceDirection.xyz,performanceCone,performanceRight.w)*pattern
   let visibility=1.0
@@ -124,8 +144,24 @@ material PerformanceSurface {
    let localUv=vec2(q.x*0.5+0.5,0.5-q.y*0.5)
    let ref=q.z*0.5+0.5
    if(clip.w>0.0 && localUv.x>=0.0 && localUv.x<=1.0 && localUv.y>=0.0 && localUv.y<=1.0 && ref>=0.0 && ref<=1.0){
-    let depth=sampleLod(shadowAtlas,mix(performanceShadowRect.xy,performanceShadowRect.zw,localUv),0.0).r
-    visibility=max(1.0-step(depth+performanceShadowSettings.y,ref),step(0.999,depth))
+    let shadowUv=mix(performanceShadowRect.xy,performanceShadowRect.zw,localUv)
+    if(performanceShadowSettings.z<0.001){
+     let depth=sampleLod(shadowAtlas,shadowUv,0.0).r
+     visibility=max(1.0-step(depth+performanceShadowSettings.y,ref),step(0.999,depth))
+    } else {
+     let radius=performanceShadowSettings.z*performanceShadowSettings.w
+     let edge=vec2(performanceShadowSettings.w*0.5)
+     let soft=0.0
+     for(j in range(4)) {
+      let ox=-1.0;let oy=-1.0
+      if(j==1 || j==3){ox=1.0}
+      if(j>=2){oy=1.0}
+      let tap=clamp(shadowUv+vec2(ox,oy)*radius,performanceShadowRect.xy+edge,performanceShadowRect.zw-edge)
+      let depth=sampleLod(shadowAtlas,tap,0.0).r
+      soft=soft+max(1.0-step(depth+performanceShadowSettings.y,ref),step(0.999,depth))
+     }
+     visibility=soft*0.25
+    }
    }
   }
   let toEye=performanceEye.xyz-position.xyz

@@ -2777,7 +2777,20 @@ void Renderer::setSceneLights(const ayt::render::SceneLights* lights)
 
 bool Renderer::setPerformanceLights(std::span<const PerformanceLight> lights, PerformanceLightBudget budget, std::string* error)
 {
-    return _impl && _impl->performance.assign(lights,budget,error);
+    if(!_impl)return false;
+    PerformanceLighting next;
+    if(!next.assign(lights,budget,error))return false;
+    for(const auto& light:next.lights)if(light.pattern==LightPattern::Texture){
+        const auto found=_impl->resources.textures().find(light.goboTexture.id);
+        if(found==_impl->resources.textures().end()
+            || !detail::BGFXAdapter::isValid(found->second.handle)){
+            if(error)*error="Texture Gobo must be a live Renderer-owned texture";
+            return false;
+        }
+    }
+    _impl->performance=std::move(next);
+    if(error)error->clear();
+    return true;
 }
 PerformanceLightStats Renderer::performanceLightStats() const noexcept
 {

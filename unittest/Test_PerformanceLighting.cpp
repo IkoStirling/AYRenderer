@@ -31,6 +31,24 @@ TEST_CASE(pattern_focus_and_iris_are_bounded_and_preserve_packet_on_failure) {
     p.iris=1;p.patternFocus=std::numeric_limits<float>::quiet_NaN();
     CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].patternFocus==.4f);
 }
+TEST_CASE(texture_gobo_requires_a_handle_and_preserves_previous_packet) {
+    PerformanceLighting packet;auto p=light(1);
+    CHECK(packet.assign({&p,1},{}));
+    p.pattern=LightPattern::Texture;
+    CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].pattern==LightPattern::Open);
+    p.goboTexture={42};
+    CHECK(packet.assign({&p,1},{}));CHECK(packet.lights[0].goboTexture.id==42);
+    Renderer renderer;std::string error;
+    auto open=light(9);CHECK(renderer.setPerformanceLights({&open,1},{},&error));
+    CHECK(!renderer.setPerformanceLights({&p,1},{},&error));
+    CHECK(!error.empty());CHECK(renderer.performanceLightStats().sourceLights==1);
+}
+TEST_CASE(shadow_softness_is_bounded_and_transactional) {
+    PerformanceLighting packet;auto p=light(1);p.light.castShadow=true;
+    p.shadowSoftness=2;CHECK(packet.assign({&p,1},{}));CHECK(packet.lights[0].shadowSoftness==2);
+    p.shadowSoftness=5;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].shadowSoftness==2);
+    p.shadowSoftness=std::numeric_limits<float>::quiet_NaN();CHECK(!packet.assign({&p,1},{}));
+}
 TEST_CASE(budgets_are_independent_and_priority_is_stable_with_shadow_mapping) {
     std::vector<PerformanceLight> lights;for(uint32_t i=0;i<32;++i){auto p=light(i);p.light.castShadow=true;lights.push_back(p);}
     lights[8].priority=2;lights[10].priority=2;PerformanceLighting packet;
