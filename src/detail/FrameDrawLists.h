@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYRenderer/RenderScene.h"
+#include "AYRenderer.h"
 #include "detail/FrameContext.h"
 #include "detail/GpuResources.h"
 
@@ -46,6 +46,8 @@ struct FrameDrawLists {
     std::vector<const DrawItem*> shadowBoundsItems;
     std::vector<const DrawItem*> selectionOutlines;
     FrameDrawListStats stats{};
+    std::vector<RenderDebugDraw> debugDraws;
+    size_t debugDropped=0;
 
     void clear();
 };

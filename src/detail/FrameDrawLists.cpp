@@ -89,7 +89,7 @@ void FrameDrawLists::clear()
     shadowCasters.clear();
     shadowBoundsItems.clear();
     selectionOutlines.clear();
-    stats = {};
+    stats = {};debugDraws.clear();debugDropped=0;
 }
 
 void buildFrameDrawLists(
@@ -112,6 +112,21 @@ void buildFrameDrawLists(
     output.stats.sourceItems = static_cast<uint32_t>(count);
 
     for (const DrawItem& item : scene.items()) {
+        RenderDebugDraw* diagnostic=nullptr;
+        if(frame.collectDebugDraws && item.sourceEntityId) {
+            if(output.debugDraws.size()<1024) {
+                output.debugDraws.emplace_back();diagnostic=&output.debugDraws.back();
+                diagnostic->entityId=item.sourceEntityId;diagnostic->world=item.sourceWorld;diagnostic->mesh=item.mesh.id;
+                const auto found=meshes.find(item.mesh.id);
+                if(found!=meshes.end()) {
+                    const auto& mesh=found->second;
+                    diagnostic->deformed=item.boneMatrices || item.jointCount || mesh.hasSkinWeights || mesh.hasMorphTargets;
+                    diagnostic->boundsValid=mesh.localBoundsValid;
+                    if(mesh.localBoundsValid) for(int i=0;i<8;++i) diagnostic->corners[i]=item.world.transformPoint({
+                        i&1?mesh.localBoundsMax.x:mesh.localBoundsMin.x,i&2?mesh.localBoundsMax.y:mesh.localBoundsMin.y,i&4?mesh.localBoundsMax.z:mesh.localBoundsMin.z});
+                }
+            } else ++output.debugDropped;
+        }
         if (isOverlay2DItem(item)) {
             if (!item.outlineHull) {
                 output.overlay2D.push_back(&item);
@@ -125,11 +140,13 @@ void buildFrameDrawLists(
             continue;
         }
         if (!item.mesh.isValid() || !item.material.isValid()) {
+            if(diagnostic) diagnostic->visibility=DebugDrawVisibility::InvalidHandles;
             ++output.stats.invalidHandles;
             continue;
         }
         const auto materialIt = materials.find(item.material.id);
         if (materialIt == materials.end()) {
+            if(diagnostic) diagnostic->visibility=DebugDrawVisibility::MissingMaterial;
             ++output.stats.missingMaterials;
             continue;
         }
@@ -162,9 +179,11 @@ void buildFrameDrawLists(
             const auto meshIt = meshes.find(item.mesh.id);
             const bool rejected = meshIt != meshes.end()
                 && outsideFrustum(item, meshIt->second, frame, tested);
+            if(diagnostic && !tested) diagnostic->visibility=DebugDrawVisibility::CullingBypassed;
             if (tested) ++output.stats.frustumTested;
             else ++output.stats.frustumBypassed;
             if (rejected) {
+                if(diagnostic) diagnostic->visibility=DebugDrawVisibility::FrustumCulled;
                 ++output.stats.frustumCulled;
                 continue;
             }
