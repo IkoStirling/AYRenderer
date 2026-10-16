@@ -56,25 +56,27 @@ fn performanceBeamInterval(origin:vec3, ray:vec3, position:vec3, axis:vec3, cone
  if(end<=begin){return vec2(0.0)}
  return vec2(begin,end)
 }
-fn performancePattern(p:vec2, settings:vec4):float {
- if(settings.x<0.5){return 1.0}
+fn performancePattern(p:vec2, settings:vec4, optics:vec4):float {
+ let iris=1.0
+ if(optics.y<0.999){iris=1.0-smoothstep(optics.y-0.02,optics.y+0.02,length(p))}
+ if(settings.x<0.5){return iris}
  let c=cos(settings.y);let s=sin(settings.y)
  let uv=vec2(p.x*c-p.y*s,p.x*s+p.y*c)*settings.z
  let result=1.0
- if(settings.x>0.5 && settings.x<1.5){result=smoothstep(-0.15,0.15,sin(uv.x*25.132741))}
- if(settings.x>1.5 && settings.x<2.5){result=smoothstep(0.0,0.25,sin(uv.x*18.0)*sin(uv.y*18.0))}
- if(settings.x>2.5 && settings.x<3.5){result=1.0-smoothstep(0.07,0.12,abs(length(uv)-0.55))}
+ if(settings.x>0.5 && settings.x<1.5){result=smoothstep(-0.15-optics.x*0.5,0.15+optics.x*0.5,sin(uv.x*25.132741))}
+ if(settings.x>1.5 && settings.x<2.5){result=smoothstep(0.0-optics.x*0.5,0.25+optics.x*0.5,sin(uv.x*18.0)*sin(uv.y*18.0))}
+ if(settings.x>2.5 && settings.x<3.5){result=1.0-smoothstep(0.07-optics.x*0.2,0.12+optics.x*0.2,abs(length(uv)-0.55))}
  if(settings.x>3.5){
   let ray=0.0
   for(j in range(5)) {
    let a=float(j)*1.25663706
    let along=dot(uv,vec2(cos(a),sin(a)))
    let across=abs(dot(uv,vec2(-sin(a),cos(a))))
-   ray=max(ray,(1.0-smoothstep(0.03,0.08,across))*step(0.0,along))
+   ray=max(ray,(1.0-smoothstep(0.03-optics.x*0.2,0.08+optics.x*0.2,across))*step(0.0,along))
   }
   result=ray
  }
- return result
+ return result*iris
 }
 )";
 inline const std::string kPerformanceSurfaceSource=std::string(kPerformancePatternSource)+R"(
@@ -91,6 +93,7 @@ material PerformanceSurface {
  uniform vec4 performanceRight
  uniform vec4 performanceUp
  uniform vec4 performancePatternSettings
+ uniform vec4 performancePatternOptics
  uniform vec4 performanceEye
  uniform mat4 performanceShadow
  uniform vec4 performanceShadowRect
@@ -111,7 +114,7 @@ material PerformanceSurface {
   let L=outward*-1.0
   let axial=dot(delta,performanceDirection.xyz)
   let projected=vec2(dot(delta,performanceRight.xyz),dot(delta,performanceUp.xyz))/max(performanceCone.w+axial*performanceCone.z,0.00001)
-  let pattern=performancePattern(projected,performancePatternSettings)
+  let pattern=performancePattern(projected,performancePatternSettings,performancePatternOptics)
   let falloff=clamp(1.0-distance/performancePosition.w,0.0,1.0)
   let attenuation=falloff*falloff/max(distance*distance,max(0.01,performanceCone.w*performanceCone.w))*performanceBeamProfile(delta,performanceDirection.xyz,performanceCone,performanceRight.w)*pattern
   let visibility=1.0

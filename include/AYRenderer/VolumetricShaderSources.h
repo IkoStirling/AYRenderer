@@ -1,7 +1,7 @@
 #pragma once
 #include "AYRenderer/PerformanceShaderSources.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v4_beam_interval";
+inline constexpr char kVolumetricCacheKey[]="volumetric_v5_pattern_optics";
 inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
@@ -28,6 +28,7 @@ material Volumetric {
  uniform vec4 fogLightColor
  uniform vec4 fogSpot
  uniform vec4 fogPatternSettings
+ uniform vec4 fogPatternOptics
  uniform vec4 fogPatternRight
  uniform vec4 fogPatternUp
  uniform vec4 fogLightBoundsCenter
@@ -76,7 +77,7 @@ material Volumetric {
    let radius=fogSpot.w+max(0.0,dot(midPoint,fogLightDirection.xyz))*fogSpot.z
    // At least 16 samples across a normal chord; use the user's higher budget
    // for long/grazing chords. Patterned beams retain the full sample budget.
-   sampleCount=min(fogOptions.x,max(16.0,ceil((end-begin)/max(0.02,radius*0.125))))
+   sampleCount=min(fogOptions.x,max(16.0,ceil((end-begin)/max(0.02,radius*max(0.01,fogPatternOptics.y)*0.125))))
   }
   let ds=max(end-begin,0.0)/sampleCount
   let stepT=exp(-fogMedium.x*ds)
@@ -98,7 +99,7 @@ material Volumetric {
      attenuation=attenuation*performanceBeamProfile(delta,fogLightDirection.xyz,fogSpot,fogPatternRight.w)
      let axial=dot(delta,fogLightDirection.xyz)
      let projected=vec2(dot(delta,fogPatternRight.xyz),dot(delta,fogPatternUp.xyz))/max(fogSpot.w+axial*fogSpot.z,0.00001)
-     attenuation=attenuation*performancePattern(projected,fogPatternSettings)
+     attenuation=attenuation*performancePattern(projected,fogPatternSettings,fogPatternOptics)
     }
    }
    let visibility=1.0

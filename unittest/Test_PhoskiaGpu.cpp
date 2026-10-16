@@ -277,7 +277,7 @@ TEST_CASE(volumetric_shader_matches_extinction_scattering_local_box_and_shadow) 
             u("fogCamera",{0,0,0,1});u("fogMedium",{density,.8f,mode==5?.5f:0.f,100});u("fogOptions",{32,0,mode==2||mode==3?1.f:0.f,mode==6?1.f:mode==7?2.f:0.f});
             u("fogCenter",{0,0,mode==3?3.f:0.f,0});u("fogExtent",{10,10,.25f,0});u("fogTint",{1,1,1,0});
             u("fogLightPosition",{0,0,0,0});u("fogLightDirection",{0,0,1,0});u("fogLightColor",{12.5663706f,12.5663706f,12.5663706f,0});u("fogSpot",{0,0,0,0});
-            u("fogPatternSettings",{0,0,1,0});u("fogPatternRight",{1,0,0,0});u("fogPatternUp",{0,1,0,0});
+            u("fogPatternSettings",{0,0,1,0});u("fogPatternOptics",{0,1,0,0});u("fogPatternRight",{1,0,0,0});u("fogPatternUp",{0,1,0,0});
             u("fogLightBoundsCenter",{0,0,0,0});u("fogLightBoundsExtent",{10000,10000,10000,0});
             for(const char* n:{"fogShadowRect0","fogShadowRect1","fogShadowRect2"})u(n,{0,0,1,1});
             u("fogShadowParams",{0,0,0,mode==4?1.f:0.f});
@@ -358,7 +358,7 @@ TEST_CASE(performance_spot_volume_perspective_rays_match_independent_cpu_integra
         u("fogShadowParams",{0,0,0,0});u("fogCamera",{0,8,-8,0});u("fogMedium",{.1f,.8f,0,30});u("fogOptions",{64,0,0,2});
         u("fogCenter",{0,0,0,0});u("fogExtent",{100,100,100,0});u("fogTint",{1,1,1,0});
         u("fogLightPosition",{0,7,0,2});u("fogLightDirection",{0,-1,0,20});u("fogLightColor",{500,0,0,0});u("fogSpot",{.97f,.9f,std::tan(std::acos(.9f)),aperture});
-        u("fogPatternSettings",{0,0,1,0});u("fogPatternRight",{1,0,0,std::tan(std::acos(.97f))});u("fogPatternUp",{0,0,1,0});
+        u("fogPatternSettings",{0,0,1,0});u("fogPatternOptics",{0,1,0,0});u("fogPatternRight",{1,0,0,std::tan(std::acos(.97f))});u("fogPatternUp",{0,0,1,0});
         u("fogLightBoundsCenter",{0,-3,0,0});u("fogLightBoundsExtent",{radius,10,radius,0});
     });
     size_t nonzero=0;CHECK(pixels.size()==16);
@@ -471,17 +471,19 @@ TEST_CASE(performance_surface_gpu_matches_brdf_pattern_shadow_and_unlit_contract
     const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
     PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
     const auto albedo=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),world=f.input({0,0,0,1});
+    const auto edge=f.input({.5f,0,0,1});
     const auto unlit=f.input({0,0,0,3}),coverage=f.input({0,0,0,1}),dark=f.input({0,0,0,1});
-    auto program=f.pool.acquire(ayt::render::kPerformanceSurfaceSource,"performance_surface_gpu_v1");
+    auto program=f.pool.acquire(ayt::render::kPerformanceSurfaceSource,"performance_surface_gpu_v2_pattern_optics");
     CHECK(program.isValid());if(!program.isValid())return;
-    for(int mode=0;mode<5;++mode) {
+    for(int mode=0;mode<6;++mode) {
         const auto pixels=f.renderResource(program,[&](const auto& p){
             const auto tex=[&](const char* name,bgfx::TextureHandle h){const auto b=p.getTextureBinding(name);CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(h));};
             const auto u=[&](const char* name,Pixel v){const auto b=p.getUniformBinding(name);CHECK(b!=ayt::shader::InvalidBinding);p.setUniform(b,v.data(),16);};
-            tex("surfaceAlbedo",albedo);tex("surfaceNormal",normal);tex("surfacePosition",mode==4?unlit:world);tex("surfaceCoverage",coverage);tex("shadowAtlas",dark);
+            tex("surfaceAlbedo",albedo);tex("surfaceNormal",normal);tex("surfacePosition",mode==4?unlit:mode==5?edge:world);tex("surfaceCoverage",coverage);tex("shadowAtlas",dark);
             u("performancePosition",{0,0,-2,10});u("performanceDirection",{0,0,1,0});u("performanceColor",{10,0,0,0});
             u("performanceCone",{.95f,.8f,.75f,0});u("performanceRight",{1,0,0,0});u("performanceUp",{0,1,0,0});
             u("performancePatternSettings",{mode==1?1.f:mode==2?3.f:0.f,0,1,0});u("performanceEye",{0,0,-1,0});
+            u("performancePatternOptics",{0,mode==5?.1f:1.f,0,0});
             const auto identity=ayt::math::Float4x4::identity();p.setUniform(p.getUniformBinding("performanceShadow"),&identity,64);
             u("performanceShadowRect",{0,0,1,1});u("performanceShadowSettings",{mode==3?1.f:0.f,0,0,0});
         });

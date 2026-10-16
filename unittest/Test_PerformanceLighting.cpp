@@ -23,6 +23,14 @@ TEST_CASE(finite_aperture_expands_conservative_bounds_and_is_validated) {
     p.apertureRadius=-.1f;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].apertureRadius==.2f);
     p.apertureRadius=std::numeric_limits<float>::quiet_NaN();CHECK(!packet.assign({&p,1},{}));
 }
+TEST_CASE(pattern_focus_and_iris_are_bounded_and_preserve_packet_on_failure) {
+    auto p=light(1);PerformanceLighting packet;
+    p.patternFocus=.4f;p.iris=.7f;
+    CHECK(packet.assign({&p,1},{}));CHECK(packet.lights[0].patternFocus==.4f);
+    p.iris=0;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].iris==.7f);
+    p.iris=1;p.patternFocus=std::numeric_limits<float>::quiet_NaN();
+    CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].patternFocus==.4f);
+}
 TEST_CASE(budgets_are_independent_and_priority_is_stable_with_shadow_mapping) {
     std::vector<PerformanceLight> lights;for(uint32_t i=0;i<32;++i){auto p=light(i);p.light.castShadow=true;lights.push_back(p);}
     lights[8].priority=2;lights[10].priority=2;PerformanceLighting packet;
@@ -54,6 +62,23 @@ TEST_CASE(point_batches_keep_hdr_color_and_split_uint16_indices_without_per_poin
     CHECK(stats.visible==20000);CHECK(stats.batches==2);CHECK(batches[0].vertices.size()==16383*4);
     CHECK(batches[0].vertices[0].r==16);CHECK(batches[0].indices.back()<65532);
     CHECK(batches[1].vertices.size()==(20000-16383)*4);
+}
+TEST_CASE(point_quality_budget_selects_stable_ids_independent_of_input_order) {
+    std::vector<EmissivePoint> points(100);
+    for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].position={float(i)/100.f,0,.5f};points[i].radius=.01f;}
+    const auto identity=ayt::math::Float4x4::identity();
+    EmissivePointSettings settings;settings.maxPoints=10;
+    std::vector<ParticleDrawData> first,second;EmissivePointStats stats;
+    CHECK(buildEmissivePointBatches(points,identity,identity,100,100,settings,first,stats));
+    CHECK(stats.visible==10);CHECK(stats.budgetSkipped==90);
+    std::vector<float> firstPositions;
+    for(size_t i=0;i<10;++i)firstPositions.push_back(first[0].vertices[i*4].x);
+    std::reverse(points.begin(),points.end());
+    CHECK(buildEmissivePointBatches(points,identity,identity,100,100,settings,second,stats));
+    std::vector<float> secondPositions;
+    for(size_t i=0;i<10;++i)secondPositions.push_back(second[0].vertices[i*4].x);
+    std::sort(firstPositions.begin(),firstPositions.end());std::sort(secondPositions.begin(),secondPositions.end());
+    CHECK(firstPositions==secondPositions);
 }
 TEST_CASE(point_culling_budgets_and_subpixel_coverage_are_explicit) {
     std::vector<EmissivePoint> points(3);points[1].position.x=100;points[2].intensity=0;

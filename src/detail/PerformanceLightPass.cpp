@@ -13,7 +13,7 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         || !ctx.adapter.isInitialized() || ctx.adapter.isNoopBackend())return 0;
     BlackboardGBufferView gb;
     if(!ctx.resourceBlackboard->resolveGBuffer(gb) || !_geometry.ensure(ctx.adapter))return 0;
-    if(!_program.isValid())_program=ctx.pool.acquire(kPerformanceSurfaceSource,"performance_surface_v2_aperture");
+    if(!_program.isValid())_program=ctx.pool.acquire(kPerformanceSurfaceSource,"performance_surface_v3_pattern_optics");
     if(!_program.isValid())return 0;
     bool valid=true;
     const auto texture=[&](const char* name,bgfx::TextureHandle handle){
@@ -46,6 +46,7 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         vector("performanceCone",l.coneCosInner,l.coneCosOuter,std::tan(std::acos(l.coneCosOuter)),entry.apertureRadius);
         vector("performanceRight",right.x,right.y,right.z,std::tan(std::acos(l.coneCosInner)));vector("performanceUp",up.x,up.y,up.z,0);
         vector("performancePatternSettings",float(entry.pattern),entry.patternRotation,entry.patternScale,0);
+        vector("performancePatternOptics",entry.patternFocus,entry.iris,0,0);
         float matrix[16];toBgfxColumnMajor(math::Float4x4::identity(),matrix);
         float shadowRect[4]={0,0,1,1};float bias=ctx.frame.shadowBias;bool shadowed=false;
         auto shadowTexture=gb.material;const int slot=packet.shadowSlots[i];

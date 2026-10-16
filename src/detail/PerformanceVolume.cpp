@@ -68,6 +68,7 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         const auto right=axis.cross(direction).normalize(),up=direction.cross(right).normalize();
         vector("fogPatternRight",right.x,right.y,right.z,std::tan(std::acos(light.coneCosInner)));vector("fogPatternUp",up.x,up.y,up.z,0);
         vector("fogPatternSettings",float(entry.pattern),entry.patternRotation,entry.patternScale,0);
+        vector("fogPatternOptics",entry.patternFocus,entry.iris,0,0);
         math::FVector3 center,extent;performanceLightBounds(entry,center,extent);
         vector("fogLightBoundsCenter",center.x,center.y,center.z,0);vector("fogLightBoundsExtent",extent.x,extent.y,extent.z,0);
         float matrix[16];toBgfxColumnMajor(math::Float4x4::identity(),matrix);float sr[4]={0,0,1,1};

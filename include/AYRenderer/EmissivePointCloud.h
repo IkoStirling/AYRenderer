@@ -13,6 +13,8 @@ struct EmissivePoint {
 struct EmissivePointSettings {
     float minimumPixelRadius=.75f;
     bool preserveEnergy=true;
+    /// Maximum visible points. When exceeded, stable IDs choose a spatially
+    /// unbiased deterministic subset so input order does not shape the show.
     uint32_t maxPoints=65536;
 };
 struct EmissivePointStats { uint32_t source=0,visible=0,culled=0,budgetSkipped=0,batches=0; };

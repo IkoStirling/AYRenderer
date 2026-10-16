@@ -11,6 +11,9 @@ struct PerformanceLight {
     float volumetric = 1;
     LightPattern pattern = LightPattern::Open;
     float patternRotation = 0, patternScale = 1;
+    /// Pattern edge blur [0,1] and circular iris opening (0,1]. Iris clips
+    /// the projected pattern inside the outer beam without changing its cone.
+    float patternFocus = 0, iris = 1;
     int32_t priority = 0;
     /// Finite exit-aperture radius in world units, [0,1]. Zero retains the
     /// point-source angular profile. Inner/outer angles delimit core/penumbra;

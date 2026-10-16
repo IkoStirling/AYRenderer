@@ -25,19 +25,40 @@ bool buildEmissivePointBatches(std::span<const EmissivePoint> points,const math:
     const auto vp=projection*view;const float scale=std::abs(projection(1,1))*height*.5f;
     if(scale<.00001f)return fail("Degenerate point cloud projection");
     EmissivePointStats next;next.source=static_cast<uint32_t>(points.size());
-    // Reuse batch/vector capacity between frames. Validation has completed.
-    const size_t needed=(std::min<size_t>(points.size(),settings.maxPoints)+16382)/16383;
-    batches.resize(needed);for(auto& b:batches){b.vertices.clear();b.indices.clear();b.world3D=true;}
-    for(const auto& p:points) {
+    struct VisiblePoint { std::size_t index; float radius,energy; std::uint32_t rank; };
+    std::vector<VisiblePoint> visible;visible.reserve(points.size());
+    for(std::size_t index=0;index<points.size();++index) {
+        const auto& p=points[index];
         const auto clip=vp*math::FVector4(p.position.x,p.position.y,p.position.z,1);
         if(clip.w<=.00001f||p.intensity==0){++next.culled;continue;}
         const float pixelRadius=p.radius*scale/clip.w;
         const float radius=std::max(p.radius,settings.minimumPixelRadius*clip.w/scale);
         const float marginX=radius*std::abs(projection(0,0)),marginY=radius*std::abs(projection(1,1));
         if(clip.x< -clip.w-marginX||clip.x>clip.w+marginX||clip.y< -clip.w-marginY||clip.y>clip.w+marginY){++next.culled;continue;}
-        if(next.visible>=settings.maxPoints){++next.budgetSkipped;continue;}
-        auto& batch=batches[next.visible/16383];
         const float energy=settings.preserveEnergy?std::min(1.f,pixelRadius*pixelRadius/std::max(.000001f,settings.minimumPixelRadius*settings.minimumPixelRadius)):1.f;
+        // Stable ID rank avoids a camera-dependent first-N wedge and frame
+        // flicker when a quality budget samples a dense formation.
+        std::uint32_t rank=p.id;
+        rank^=rank>>16;rank*=0x7feb352du;rank^=rank>>15;rank*=0x846ca68bu;rank^=rank>>16;
+        visible.push_back({index,radius,energy,rank});
+    }
+    if(visible.size()>settings.maxPoints) {
+        const auto less=[](const VisiblePoint& a,const VisiblePoint& b){
+            return a.rank<b.rank||(a.rank==b.rank&&a.index<b.index);
+        };
+        if(settings.maxPoints)
+            std::nth_element(visible.begin(),visible.begin()+settings.maxPoints,visible.end(),less);
+        next.budgetSkipped=static_cast<uint32_t>(visible.size()-settings.maxPoints);
+        visible.resize(settings.maxPoints);
+        std::sort(visible.begin(),visible.end(),[](const auto& a,const auto& b){return a.index<b.index;});
+    }
+    const size_t needed=(visible.size()+16382)/16383;
+    batches.resize(needed);for(auto& b:batches){b.vertices.clear();b.indices.clear();b.world3D=true;}
+    for(const auto& selected:visible) {
+        const auto& p=points[selected.index];
+        auto& batch=batches[next.visible/16383];
+        const float radius=selected.radius;
+        const float energy=selected.energy;
         const auto radiance=p.color*(p.intensity*energy);const uint16_t base=static_cast<uint16_t>(batch.vertices.size());
         for(int corner=0;corner<4;++corner) {
             const float x=(corner==1||corner==2)?1.f:-1.f,y=corner>=2?1.f:-1.f;

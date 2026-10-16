@@ -48,7 +48,7 @@ uint32_t VolumetricPass::execute(PassExecContext& ctx) {
  v("fogLightDirection",d.x,d.y,d.z,light.range);
  v("fogLightColor",light.color.x*light.intensity,light.color.y*light.intensity,light.color.z*light.intensity,0);
  v("fogSpot",light.coneCosInner,light.coneCosOuter,0,0);
- v("fogPatternSettings",0,0,1,0);v("fogPatternRight",1,0,0,0);v("fogPatternUp",0,0,1,0);
+ v("fogPatternSettings",0,0,1,0);v("fogPatternOptics",0,1,0,0);v("fogPatternRight",1,0,0,0);v("fogPatternUp",0,0,1,0);
  v("fogLightBoundsCenter",0,0,0,0);v("fogLightBoundsExtent",10000,10000,10000,0);
  auto shadow=gb.material;int count=0;float splits[2]={0,0};float bias=ctx.frame.shadowBias;
  const auto identity=math::Float4x4::identity();float matrices[3][16];float rects[3][4]={{0,0,1,1},{0,0,1,1},{0,0,1,1}};

@@ -19,6 +19,7 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
             || !finite(l.coneCosInner,l.coneCosOuter+.000001f,1)
             || !finite(l.shadowBias,0,1) || !finite(entry.volumetric,0,100)
             || !finite(entry.patternRotation,-100000,100000) || !finite(entry.patternScale,.01f,100)
+            || !finite(entry.patternFocus,0,1) || !finite(entry.iris,.01f,1)
             || !finite(entry.apertureRadius,0,1)
             || entry.pattern>LightPattern::Star) return fail("Invalid performance Spot light");
         for(int i=0;i<3;++i) if(!finite(l.position[i],-100000,100000) || !finite(l.color[i],0,10000)
