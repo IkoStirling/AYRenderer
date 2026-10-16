@@ -1,5 +1,15 @@
 # AYRenderer 测试维护
 
+## 2026-10-16 聚光灯数组 / 发光点演出
+
+Windows Debug：renderer-full非GPU9组通过（145.21s，含并发构建影响，不作耗时基准）。
+D3D11/D3D12的AYRenderer_PhoskiaGpu各27用例9862断言通过，无跳过。
+新增实际LightingPass双光相加、VolumetricPass消光只应用一次与双光散射、scissor不泄漏；
+透视Spot按独立相机基向量和CPU积分逐像素核对，覆盖AYMath通用逆矩阵修复。
+截图回归覆盖异步TGA晚到后转换PNG；67项生产shader全部编译并在两设备路径无compiler加载。
+日志：out/lightshow-renderer-final.log、out/lightshow-d3d11-final.log、out/lightshow-d3d12-final.log。
+实际画面与Release性能记录见[演出系统](../../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
+
 ## 2026-10-06 Deferred Decal v1 / 三项新增能力集成收尾
 
 VS2026 Insider Debug，同 out/build/render-phoskia-20261004，production66变体构建部署。

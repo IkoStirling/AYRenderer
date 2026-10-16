@@ -58,10 +58,10 @@ std::string screenshotPngPath(const std::string& basePath)
     return basePath + ".png";
 }
 
-void finalizeScreenshotSidecar(const std::string& basePath)
+bool finalizeScreenshotSidecar(const std::string& basePath)
 {
     if (basePath.empty()) {
-        return;
+        return false;
     }
 
     const std::string tgaPath = screenshotTgaPath(basePath);
@@ -69,8 +69,7 @@ void finalizeScreenshotSidecar(const std::string& basePath)
 
     const DecodedImage image = decodeImageFile(tgaPath);
     if (image.rgba8.empty()) {
-        std::fprintf(stderr, "[Renderer] screenshot missing or unreadable: %s\n", tgaPath.c_str());
-        return;
+        return false;
     }
 
     std::fprintf(stderr, "[Renderer] screenshot saved: %s (%ux%u)\n",
@@ -79,8 +78,10 @@ void finalizeScreenshotSidecar(const std::string& basePath)
     if (writePngFromRgba8(pngPath, image.width, image.height, image.rgba8.data())) {
         std::fprintf(stderr, "[Renderer] screenshot saved: %s (%ux%u)\n",
                      pngPath.c_str(), image.width, image.height);
+        return true;
     } else {
         std::fprintf(stderr, "[Renderer] screenshot PNG sidecar failed: %s\n", pngPath.c_str());
+        return false;
     }
 }
 

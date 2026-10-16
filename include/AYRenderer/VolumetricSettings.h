@@ -4,7 +4,8 @@
 #include <cmath>
 #include <cstdint>
 namespace ayt::render {
-/// Advanced host controls. One selected light, optional axis-aligned local medium.
+/// Advanced host controls and optional axis-aligned local medium. Legacy mode
+/// selects one SceneLight; an active performance packet uses its separate budget.
 struct VolumetricSettings {
     bool enabled = false;
     float density = 0.025f; // extinction, inverse world units
@@ -12,7 +13,7 @@ struct VolumetricSettings {
     float anisotropy = 0.2f;
     float maxDistance = 100.0f;
     uint8_t steps = 32;
-    uint8_t lightIndex = 0;
+    uint8_t lightIndex = 0; // Legacy single-light selection; performance packets ignore it.
     uint8_t debugView = 0; // 0 composite, 1 transmittance, 2 radiance
     bool local = false;
     math::FVector3 center{0,0,0};

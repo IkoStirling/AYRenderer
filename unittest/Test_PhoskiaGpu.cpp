@@ -10,13 +10,17 @@
 #include "detail/ShaderPoolSetup.h"
 #include "AYShader/detail/ComputeResourceAccess.h"
 #include <AYIO/File.h>
+#include <AYMath/MathUtils.h>
 #include "detail/BGFXAdapter.h"
 #include "detail/FullscreenPassGeometry.h"
 #include "detail/GpuResources.h"
 #include "AYRenderer/SsrShaderSources.h"
 #include "AYRenderer/VolumetricShaderSources.h"
+#include "AYRenderer/PerformanceShaderSources.h"
 #include "AYRenderer/DeferredDecalShaderSources.h"
 #include "detail/DeferredDecalPass.h"
+#include "detail/PerformanceLightPass.h"
+#include "detail/VolumetricPass.h"
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/PassExecContext.h"
@@ -104,8 +108,8 @@ struct PhoskiaGpuFixture {
         return texture;
     }
 
-    std::vector<Pixel> readImage(bgfx::TextureHandle image) {
-        bgfx::blit(2,readback,0,0,image);
+    std::vector<Pixel> readImage(bgfx::TextureHandle image,uint8_t blitView=2) {
+        bgfx::blit(blitView,readback,0,0,image);
         std::vector<Pixel> pixels(size*size);
         const auto ready=bgfx::readTexture(readback,pixels.data());
         for(int frame=0;frame<120 && adapter.gpuFrameCounter()<ready;++frame) adapter.endFrame();
@@ -114,31 +118,31 @@ struct PhoskiaGpuFixture {
     }
 
     std::vector<Pixel> render(const std::string& declarations, const std::string& body,
-        const std::function<void(const ayt::shader::ShaderResource&)>& bind = {}) {
+        const std::function<void(const ayt::shader::ShaderResource&)>& bind = {},uint8_t viewId=0) {
         const auto source = "material Probe { " + declarations +
             " vertex { in position : position; return vec4(position, 1.0) } fragment { " + body + " } }";
-        return renderSource(source, bind);
+        return renderSource(source, bind,viewId);
     }
 
     std::vector<Pixel> renderSource(const std::string& source,
-        const std::function<void(const ayt::shader::ShaderResource&)>& bind = {}) {
+        const std::function<void(const ayt::shader::ShaderResource&)>& bind = {},uint8_t viewId=0) {
         auto program = pool.acquire(source);
-        return renderResource(program, bind);
+        return renderResource(program, bind,viewId);
     }
 
     std::vector<Pixel> renderResource(const ayt::shader::ShaderResource& program,
-        const std::function<void(const ayt::shader::ShaderResource&)>& bind = {}) {
+        const std::function<void(const ayt::shader::ShaderResource&)>& bind = {},uint8_t viewId=0) {
         CHECK(program.isValid());
         if (!program.isValid()) {
             for (const auto& error : pool.lastCompileErrors()) std::cerr << error << '\n';
             return {};
         }
-        configureFullscreenPassView(adapter, 0, target, 0, 0, size, size);
+        configureFullscreenPassView(adapter, viewId, target, 0, 0, size, size);
         geometry.bind(adapter);
         if (bind) bind(program);
         adapter.setStateDepthTestAlways();
-        program.submit({0, 0});
-        bgfx::blit(1, readback, 0, 0, targetTexture);
+        program.submit({viewId, 0});
+        bgfx::blit(viewId+1, readback, 0, 0, targetTexture);
         std::vector<Pixel> pixels(size * size);
         const auto ready = bgfx::readTexture(readback, pixels.data());
         for (int frame = 0; frame < 120 && adapter.gpuFrameCounter() < ready; ++frame) adapter.endFrame();
@@ -258,25 +262,185 @@ TEST_CASE(volumetric_shader_matches_extinction_scattering_local_box_and_shadow) 
     PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
     auto scene=f.input({2,2,2,1}),world=f.input({0,0,2,1}),sky=f.input({0,0,0,0}),lit=f.input({1,1,1,1}),dark=f.input({0,0,0,1});
     auto program=f.pool.acquire(ayt::render::kVolumetricPhoskiaSource,ayt::render::kVolumetricCacheKey);
-    for(int mode=0;mode<6;++mode) {
+    for(int mode=0;mode<8;++mode) {
         const float density=mode==0?0.f:.1f;
         const float distance=mode==2?.25f:mode==3?0.f:1.f;
         const float t=std::exp(-density*distance);
         const float phaseRatio=mode==5?(.75f/std::pow(2.25f,1.5f)):1.f;
-        const float expected=2*t+(mode==4?0.f:.8f*(1-t)*phaseRatio);
+        const float expected=mode==6?2*t:mode==7?.8f*(1-t):2*t+(mode==4?0.f:.8f*(1-t)*phaseRatio);
         auto pixels=f.renderResource(program,[&](const auto& p){
             auto tex=[&](const char* n,bgfx::TextureHandle h){auto b=p.getTextureBinding(n);CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(h));};
             tex("sceneColor",scene);tex("worldPosition",world);tex("geometryCoverage",sky);tex("shadowAtlas",mode==4?dark:lit);
             auto identity=ayt::math::Float4x4::identity();
             for(const char* n:{"fogInverseViewProjection","fogView","fogShadow0","fogShadow1","fogShadow2"})p.setUniform(p.getUniformBinding(n),&identity,64);
             auto u=[&](const char* n,Pixel v){auto b=p.getUniformBinding(n);CHECK(b!=ayt::shader::InvalidBinding);p.setUniform(b,v.data(),16);};
-            u("fogCamera",{0,0,0,1});u("fogMedium",{density,.8f,mode==5?.5f:0.f,100});u("fogOptions",{32,0,mode==2||mode==3?1.f:0.f,0});
+            u("fogCamera",{0,0,0,1});u("fogMedium",{density,.8f,mode==5?.5f:0.f,100});u("fogOptions",{32,0,mode==2||mode==3?1.f:0.f,mode==6?1.f:mode==7?2.f:0.f});
             u("fogCenter",{0,0,mode==3?3.f:0.f,0});u("fogExtent",{10,10,.25f,0});u("fogTint",{1,1,1,0});
             u("fogLightPosition",{0,0,0,0});u("fogLightDirection",{0,0,1,0});u("fogLightColor",{12.5663706f,12.5663706f,12.5663706f,0});u("fogSpot",{0,0,0,0});
+            u("fogPatternSettings",{0,0,1,0});u("fogPatternRight",{1,0,0,0});u("fogPatternUp",{0,1,0,0});
+            u("fogLightBoundsCenter",{0,0,0,0});u("fogLightBoundsExtent",{10000,10000,10000,0});
             for(const char* n:{"fogShadowRect0","fogShadowRect1","fogShadowRect2"})u(n,{0,0,1,1});
             u("fogShadowParams",{0,0,0,mode==4?1.f:0.f});
         });
-        checkPixels(pixels,{expected,expected,expected,1});
+        checkPixels(pixels,{expected,expected,expected,mode==7?0.f:1.f});
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(performance_spot_volume_perspective_rays_match_independent_cpu_integration) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    const auto black=f.input({0,0,0,0}),lit=f.input({1,1,1,1});
+    const ayt::math::FVector3 eye(0,8,-8);
+    const auto view=ayt::math::lh::lookAt(eye,{0,3,0},{0,1,0});
+    const auto projection=ayt::math::lh::perspective(55.f*3.141592653589793f/180,1,.1f,100);
+    const auto inverse=(projection*view).inverse();float inverseUpload[16],viewUpload[16];toBgfxColumnMajor(inverse,inverseUpload);toBgfxColumnMajor(view,viewUpload);
+    const auto identityCheck=inverse*(projection*view);float residual=0;
+    for(int row=0;row<4;++row)for(int column=0;column<4;++column)residual=std::max(residual,std::abs(identityCheck(row,column)-(row==column?1.f:0.f)));
+    CHECK(residual<.002f);
+    const float radius=20*std::tan(std::acos(.9f));
+    auto program=f.pool.acquire(ayt::render::kVolumetricPhoskiaSource,ayt::render::kVolumetricCacheKey);
+    const auto pixels=f.renderResource(program,[&](const auto& p){
+        const auto tex=[&](const char* n,bgfx::TextureHandle h){auto b=p.getTextureBinding(n);p.setTexture(p.getTextureStage(b),b,toShaderTexture(h));};
+        const auto u=[&](const char* n,Pixel v){p.setUniform(p.getUniformBinding(n),v.data(),16);};
+        tex("sceneColor",black);tex("worldPosition",black);tex("geometryCoverage",black);tex("shadowAtlas",lit);
+        p.setUniform(p.getUniformBinding("fogInverseViewProjection"),inverseUpload,64);p.setUniform(p.getUniformBinding("fogView"),viewUpload,64);
+        const auto identity=ayt::math::Float4x4::identity();for(const auto* n:{"fogShadow0","fogShadow1","fogShadow2"})p.setUniform(p.getUniformBinding(n),&identity,64);
+        for(const auto* n:{"fogShadowRect0","fogShadowRect1","fogShadowRect2"})u(n,{0,0,1,1});
+        u("fogShadowParams",{0,0,0,0});u("fogCamera",{0,8,-8,0});u("fogMedium",{.1f,.8f,0,30});u("fogOptions",{32,0,0,2});
+        u("fogCenter",{0,0,0,0});u("fogExtent",{100,100,100,0});u("fogTint",{1,1,1,0});
+        u("fogLightPosition",{0,7,0,2});u("fogLightDirection",{0,-1,0,20});u("fogLightColor",{500,0,0,0});u("fogSpot",{.97f,.9f,std::tan(std::acos(.9f)),0});
+        u("fogPatternSettings",{0,0,1,0});u("fogPatternRight",{1,0,0,0});u("fogPatternUp",{0,0,1,0});
+        u("fogLightBoundsCenter",{0,-3,0,0});u("fogLightBoundsExtent",{radius,10,radius,0});
+    });
+    size_t nonzero=0;CHECK(pixels.size()==16);
+    for(int y=0;y<4;++y)for(int x=0;x<4;++x) {
+        const auto forward=(ayt::math::FVector3(0,3,0)-eye).normalize();
+        const auto right=ayt::math::FVector3(0,1,0).cross(forward).normalize();
+        const auto up=forward.cross(right);
+        const float tanHalf=std::tan(55.f*3.141592653589793f/360);
+        const auto direction=(forward+right*(((x+.5f)*.5f-1)*tanHalf)+up*((1-(y+.5f)*.5f)*tanHalf)).normalize();
+        const double origin[3]={eye.x,eye.y,eye.z},d[3]={direction.x,direction.y,direction.z};
+        const double minimum[3]={-radius,-13,-radius},maximum[3]={radius,7,radius};double begin=0,end=30;
+        for(int axis=0;axis<3;++axis){if(std::abs(d[axis])<1e-10){if(origin[axis]<minimum[axis]||origin[axis]>maximum[axis])end=-1;}else{const double a=(minimum[axis]-origin[axis])/d[axis],b=(maximum[axis]-origin[axis])/d[axis];begin=std::max(begin,std::min(a,b));end=std::min(end,std::max(a,b));}}
+        double result=0;
+        if(end>begin){const double ds=(end-begin)/32,stepT=std::exp(-.1*ds);double transmission=std::exp(-.1*begin);
+            for(int i=0;i<32;++i){const double t=begin+(i+.5)*ds,px=origin[0]+d[0]*t,py=origin[1]+d[1]*t-7,pz=origin[2]+d[2]*t;
+                const double distance=std::sqrt(px*px+py*py+pz*pz),cutoff=std::clamp(1-distance/20,0.,1.);
+                const double cone=std::clamp((-py/std::max(distance,1e-5)-.9)/(.97-.9),0.,1.);
+                const double attenuation=cutoff*cutoff/std::max(distance*distance,.01)*cone*cone*(3-2*cone);
+                result+=transmission*(1-stepT)*.8*500*attenuation/(4*3.141592653589793);transmission*=stepT;
+            }
+        }
+        if(result>1e-5)++nonzero;
+        if(pixels.size()==16){const auto actual=pixels[y*4+x][0];if(std::abs(actual-result)>=.0002)std::fprintf(stderr,"Spot ray %d,%d expected=%g actual=%g\n",x,y,result,actual);CHECK(std::abs(actual-result)<.0002);}
+    }
+    CHECK(nonzero>0);CHECK(nonzero<16);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(performance_pass_rebinds_inputs_for_each_light_and_accumulates_both_colors) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    checkPixels(f.render("","return vec4(0.0)"),{0,0,0,0});
+    const auto albedo=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),world=f.input({0,0,0,1}),coverage=f.input({0,0,0,1});
+    RenderResourceBlackboard blackboard;blackboard.beginFrame();blackboard.publishGBuffer(f.target,albedo,normal,world,coverage,coverage,4,4,1,true);
+    ayt::render::PerformanceLight red,blue;red.id=1;red.light=ayt::render::Light::spot({0,0,-2},{0,0,1},10,10,.95f,.8f,{1,0,0});
+    blue=red;blue.id=2;blue.light.color={0,0,1};const std::array lights{red,blue};
+    ayt::render::PerformanceLighting packet;CHECK(packet.assign(lights,{}));
+    ayt::render::RenderScene scene;std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;
+    std::unordered_map<uint64_t,GpuMaterial> materials;FrameContext frame;frame.cameraPosition={0,0,-1};
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.performanceLights=&packet;ctx.resourceBlackboard=&blackboard;
+    configureFullscreenPassView(f.adapter,8,f.target,0,0,4,4);
+    PerformanceLightPass pass;CHECK(pass.execute(ctx)==2);
+    const float expected=float(.97/3.141592653589793*1.6);checkPixels(f.readImage(f.targetTexture,9),{expected,0,expected,0});
+    pass.destroy(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(performance_volume_real_pass_extinguishes_once_and_adds_two_light_colors) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    checkPixels(f.render("","return vec4(2.0,2.0,2.0,1.0)"),{2,2,2,1});
+    const auto albedo=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),world=f.input({0,0,0,1}),sky=f.input({0,0,0,0});
+    RenderResourceBlackboard blackboard;blackboard.beginFrame();blackboard.publishGBuffer(f.target,albedo,normal,world,sky,sky,4,4,1,true);
+    blackboard.publishProduced(BlackboardResourceId::LightingColor,BlackboardResourceLifetime::External,f.target,f.targetTexture,4,4,1);
+    FrameGraph graph(f.adapter);PostProcessGraphPlanInput input;input.width=input.height=4;input.finalLdr=true;input.sceneColor=f.target;input.gbuffer=f.target;input.volumetric=true;
+    CHECK(buildPostProcessGraphPlan(graph,input).compileSucceeded);
+    ayt::render::PerformanceLight red,blue;red.id=1;red.light=ayt::render::Light::spot({0,0,-20},{0,0,1},100,10000,.99f,.98f,{1,0,0});
+    blue=red;blue.id=2;blue.light.color={0,0,1};const std::array lights{red,blue};ayt::render::PerformanceLighting packet;CHECK(packet.assign(lights,{}));
+    ayt::render::RenderScene scene;std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;
+    std::unordered_map<uint64_t,GpuMaterial> materials;FrameContext frame;frame.volumetric.enabled=true;frame.volumetric.density=.1f;frame.volumetric.scattering=.8f;frame.volumetric.anisotropy=0;frame.volumetric.steps=32;
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.sceneFbo=f.target;ctx.performanceLights=&packet;ctx.resourceBlackboard=&blackboard;ctx.frameGraph=&graph;
+    VolumetricPass pass;CHECK(pass.execute(ctx)==3);CHECK(packet.stats.volumeDraws==2);
+    const auto output=f.adapter.getFboAttachment(graph.resolve(FgResourceId::VolumetricColor),0);
+    const auto pixels=f.render("texture2d result","return sample(result,vec2(0.5,0.5))",[&](const auto& p){auto b=p.getTextureBinding("result");p.setTexture(p.getTextureStage(b),b,toShaderTexture(output));},34);
+    double radiance=0,transmission=1;const double stepT=std::exp(-.1/32);
+    for(int i=0;i<32;++i){const double z=(i+.5)/32.,distance=std::sqrt(.25*.25*2+(20+z)*(20+z));const double cutoff=1-distance/100;
+        radiance+=transmission*(1-stepT)*.8*10000*cutoff*cutoff/(distance*distance)/(4*3.141592653589793);transmission*=stepT;}
+    const double base=2*std::exp(-.1);
+    CHECK(pixels.size()==16);for(const auto& p:pixels){CHECK(std::abs(p[0]-(base+radiance))<.003);CHECK(std::abs(p[1]-base)<.003);CHECK(std::abs(p[2]-(base+radiance))<.003);CHECK(p[3]==1);}
+    pass.destroyResources(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(performance_pass_does_not_leak_scissor_into_a_later_fullscreen_view) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    const auto albedo=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),world=f.input({0,0,0,1}),coverage=f.input({0,0,0,1});
+    RenderResourceBlackboard blackboard;blackboard.beginFrame();
+    blackboard.publishGBuffer(f.target,albedo,normal,world,coverage,coverage,4,4,1,true);
+    ayt::render::PerformanceLight light;light.light=ayt::render::Light::spot({0,0,-2},{0,0,1},10,10,.95f,.8f,{1,0,0});
+    ayt::render::PerformanceLighting packet;CHECK(packet.assign({&light,1},{}));
+    ayt::render::RenderScene scene;std::unordered_map<uint64_t,GpuMesh> meshes;
+    std::unordered_map<uint64_t,GpuTexture> textures;std::unordered_map<uint64_t,GpuMaterial> materials;FrameContext frame;
+    frame.cameraPosition={0,0,-1};
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,1,1,frame};
+    ctx.performanceLights=&packet;ctx.resourceBlackboard=&blackboard;
+    configureFullscreenPassView(f.adapter,8,f.target,0,0,4,4);
+    PerformanceLightPass pass;CHECK(pass.execute(ctx)==1);
+    // Same encoder frame: the one-pixel light draw runs before a four-pixel
+    // fullscreen view. State preserved by ShaderResource::submit must not clip it.
+    checkPixels(f.render("","return vec4(0.2,0.4,0.6,1.0)",{},8),{.2f,.4f,.6f,1});
+    pass.destroy(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(performance_surface_gpu_matches_brdf_pattern_shadow_and_unlit_contract) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    const auto albedo=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),world=f.input({0,0,0,1});
+    const auto unlit=f.input({0,0,0,3}),coverage=f.input({0,0,0,1}),dark=f.input({0,0,0,1});
+    auto program=f.pool.acquire(ayt::render::kPerformanceSurfaceSource,"performance_surface_gpu_v1");
+    CHECK(program.isValid());if(!program.isValid())return;
+    for(int mode=0;mode<5;++mode) {
+        const auto pixels=f.renderResource(program,[&](const auto& p){
+            const auto tex=[&](const char* name,bgfx::TextureHandle h){const auto b=p.getTextureBinding(name);CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(h));};
+            const auto u=[&](const char* name,Pixel v){const auto b=p.getUniformBinding(name);CHECK(b!=ayt::shader::InvalidBinding);p.setUniform(b,v.data(),16);};
+            tex("surfaceAlbedo",albedo);tex("surfaceNormal",normal);tex("surfacePosition",mode==4?unlit:world);tex("surfaceCoverage",coverage);tex("shadowAtlas",dark);
+            u("performancePosition",{0,0,-2,10});u("performanceDirection",{0,0,1,0});u("performanceColor",{10,0,0,0});
+            u("performanceCone",{.95f,.8f,.75f,0});u("performanceRight",{1,0,0,0});u("performanceUp",{0,1,0,0});
+            u("performancePatternSettings",{mode==1?1.f:mode==2?3.f:0.f,0,1,0});u("performanceEye",{0,0,-1,0});
+            const auto identity=ayt::math::Float4x4::identity();p.setUniform(p.getUniformBinding("performanceShadow"),&identity,64);
+            u("performanceShadowRect",{0,0,1,1});u("performanceShadowSettings",{mode==3?1.f:0.f,0,0,0});
+        });
+        const float red=mode>=2?0.f:float(.97/3.141592653589793*1.6)*(mode==1?.5f:1.f);
+        checkPixels(pixels,{red,0,0,0});
     }
 #else
     SKIP_TEST("Windows device fixture required");

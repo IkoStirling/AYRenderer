@@ -1,7 +1,8 @@
 #pragma once
+#include "AYRenderer/PerformanceShaderSources.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v2_forward_phase";
-inline constexpr char kVolumetricPhoskiaSource[]=R"PHOSKIA(
+inline constexpr char kVolumetricCacheKey[]="volumetric_v3_performance_pattern";
+inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
  texture2d worldPosition
@@ -26,6 +27,11 @@ material Volumetric {
  uniform vec4 fogLightDirection
  uniform vec4 fogLightColor
  uniform vec4 fogSpot
+ uniform vec4 fogPatternSettings
+ uniform vec4 fogPatternRight
+ uniform vec4 fogPatternUp
+ uniform vec4 fogLightBoundsCenter
+ uniform vec4 fogLightBoundsExtent
  vertex { in pos:position; out vUv:texcoord=pos.xy*vec2(0.5)+vec2(0.5); return vec4(pos.xy,0.0,1.0) }
  fragment {
   in vUv:texcoord
@@ -49,10 +55,19 @@ material Volumetric {
    begin=max(0.0,max(max(min(a.x,b.x),min(a.y,b.y)),min(a.z,b.z)))
    end=min(distance,min(min(max(a.x,b.x),max(a.y,b.y)),max(a.z,b.z)))
   }
+  let mediumBegin=begin
+  if(fogOptions.w>1.5){
+   let safeDirection=mix(vec3(0.00001),direction,step(vec3(0.00001),abs(direction)))
+   let a=(fogLightBoundsCenter.xyz-fogLightBoundsExtent.xyz-origin)/safeDirection
+   let b=(fogLightBoundsCenter.xyz+fogLightBoundsExtent.xyz-origin)/safeDirection
+   begin=max(begin,max(max(min(a.x,b.x),min(a.y,b.y)),min(a.z,b.z)))
+   end=min(end,min(min(max(a.x,b.x),max(a.y,b.y)),max(a.z,b.z)))
+  }
   let ds=max(end-begin,0.0)/fogOptions.x
   let stepT=exp(-fogMedium.x*ds)
-  let transmission=1.0
+  let transmission=exp(-fogMedium.x*max(begin-mediumBegin,0.0))
   let radiance=vec3(0.0)
+  if(fogOptions.w<0.5 || fogOptions.w>1.5) {
   for(i in range(int(fogOptions.x),64)) {
    let fogSample=origin+direction*(begin+(float(i)+0.5)*ds)
    let toLight=fogLightPosition.xyz-fogSample
@@ -63,7 +78,13 @@ material Volumetric {
     L=toLight/max(lightDistance,0.00001)
     let cutoff=clamp(1.0-lightDistance/max(fogLightDirection.w,0.00001),0.0,1.0)
     attenuation=cutoff*cutoff/max(lightDistance*lightDistance,0.01)
-    if(fogLightPosition.w>1.5) {attenuation=attenuation*smoothstep(fogSpot.y,max(fogSpot.x,fogSpot.y+0.0001),dot(L*-1.0,fogLightDirection.xyz))}
+    if(fogLightPosition.w>1.5) {
+     attenuation=attenuation*smoothstep(fogSpot.y,max(fogSpot.x,fogSpot.y+0.0001),dot(L*-1.0,fogLightDirection.xyz))
+     let delta=fogSample-fogLightPosition.xyz
+     let axial=dot(delta,fogLightDirection.xyz)
+     let projected=vec2(dot(delta,fogPatternRight.xyz),dot(delta,fogPatternUp.xyz))/max(axial*fogSpot.z,0.00001)
+     attenuation=attenuation*performancePattern(projected,fogPatternSettings)
+    }
    }
    let visibility=1.0
    if(fogShadowParams.w>0.5) {
@@ -88,11 +109,14 @@ material Volumetric {
    radiance=radiance+transmission*(1.0-stepT)*fogMedium.y*fogTint.rgb*fogLightColor.rgb*attenuation*visibility*phase
    transmission=transmission*stepT
   }
+  } else {transmission=exp(-fogMedium.x*max(end-begin,0.0))}
   let result=vec4(raw.rgb*transmission+radiance,raw.a)
+  if(fogOptions.w>1.5){result=vec4(radiance,0.0)}
   if(fogOptions.y>1.5) {result=vec4(radiance,raw.a)}
   else if(fogOptions.y>0.5) {result=vec4(vec3(transmission),raw.a)}
   return result
  }
 }
 )PHOSKIA";
+inline const char* const kVolumetricPhoskiaSource=kVolumetricPhoskiaOwned.c_str();
 }

@@ -1,5 +1,13 @@
 # AYRenderer
 
+## 聚光灯数组与 HDR 发光点（2026-10-16）
+
+主Deferred的setPerformanceLights复制最多256个Spot，表面/体积/阴影独立预算，
+锥体AABB/scissor、GGX与五种程序化投影。体积光消光一次，再累计各灯散射。
+默认预算64/16/4，上限256/64/8，不代表帧率保证。
+EmissivePointCloud提供最多65536个逐点HDR色发光点、亚像素覆盖及共享材质批次。
+Host入口/生命周期/限制见[演出系统](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
+
 ## 相机视口与输出（2026-10-14）
 
 RendererSubSystem::setCameraViewports 配置最多16个独立 Forward 视图，按 viewportId

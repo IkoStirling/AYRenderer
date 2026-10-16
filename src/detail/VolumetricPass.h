@@ -10,6 +10,7 @@ public:
  uint32_t execute(PassExecContext& ctx) override;
  void destroyResources(BGFXAdapter& adapter);
 private:
+ uint32_t executePerformance(PassExecContext& ctx);
  FullscreenPassGeometry _geometry;
  shader::ShaderResource _program;
 };

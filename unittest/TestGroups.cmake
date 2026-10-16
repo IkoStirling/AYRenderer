@@ -2,6 +2,7 @@
 set(AYRENDERER_TEST_GROUPS Contracts SceneMaterial Geometry LightingShadow PostProcess FrameGraph UI Shader Audit Gpu)
 
 set(AYRENDERER_TEST_Contracts_SOURCES
+    Test_PerformanceLighting.cpp
     Test_Ssr.cpp
     Test_Volumetric.cpp
     Test_DeferredDecal.cpp

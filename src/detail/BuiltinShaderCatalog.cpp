@@ -9,6 +9,7 @@
 #include "AYRenderer/ShadowShaderSources.h"
 #include "AYRenderer/SSAOShaderSources.h"
 #include "AYRenderer/SsrShaderSources.h"
+#include "AYRenderer/PerformanceShaderSources.h"
 #include "AYRenderer/VolumetricShaderSources.h"
 #include "AYRenderer/DeferredDecalShaderSources.h"
 #include "AYRenderer/ParticleDraw.h"
@@ -46,6 +47,7 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
         std::pair{"tile_semantic_shadow",kTilemapSemanticShadowPhoskiaSource}})
         jobs.push_back(embeddedShader(name,source));
     jobs.push_back(embeddedShader("pbr_instances",rigidInstancedSource(kPbrPhoskiaSource)));
+    jobs.push_back(embeddedShader("performance_surface",kPerformanceSurfaceSource));
     jobs.push_back(embeddedShader("shadow_instances",rigidInstancedSource(kShadowCasterPhoskiaSource,true)));
     jobs.push_back(rawShader("shadow_sc",kShadowCasterVertexSc,kShadowCasterFragmentSc,kShadowCasterVaryingSc));
     jobs.push_back(rawShader("shadow_mask",kShadowMaskCasterVertexSc,kShadowMaskCasterFragmentSc,kShadowMaskCasterVaryingSc));

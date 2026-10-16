@@ -413,6 +413,7 @@ struct Renderer::Impl {
     uint32_t                      lastSceneItems  = 0;
     std::string                   pendingScreenshotBase;
     std::string                   finalizeScreenshotBase;
+    uint16_t                      screenshotFinalizeAttempts = 0;
 
     ayt::math::Float4x4           mainView        = ayt::math::Float4x4::identity();
     ayt::math::Float4x4           mainProjection  = ayt::math::Float4x4::identity();
@@ -622,6 +623,7 @@ struct Renderer::Impl {
     // this in host app code (e.g. AppState::lights populate by
     // editor / game logic; renderer just consumes).
     const ayt::render::SceneLights* sceneLights = nullptr;
+    PerformanceLighting performance;
 
     // P0 (2026-07-20) — wall-clock origin for FrameContext.timeSeconds.
     // std::chrono::steady_clock is monotonic (immune to wall-clock
@@ -1274,6 +1276,12 @@ void Renderer::shutdown()
     _impl->resources.shutdown();
     _impl->shaderPool.shutdown();
     _impl->adapter.shutdown();
+    // Shutdown joins the submission thread, so a last-frame screenshot may
+    // only become readable now. Image conversion uses no live GPU resources.
+    if (!_impl->finalizeScreenshotBase.empty()) {
+        detail::finalizeScreenshotSidecar(_impl->finalizeScreenshotBase);
+        _impl->finalizeScreenshotBase.clear();
+    }
     _impl->shaderPoolReady = false;
 }
 
@@ -1329,6 +1337,11 @@ void Renderer::render(const RenderScene& scene)
 
     _impl->lastSceneItems = static_cast<uint32_t>(scene.items().size());
     _impl->lastDrawCalls  = 0;
+
+    const bool performanceEnabled = lightingEnabled() && !_impl->performance.lights.empty();
+    const SceneLights* effectiveLights = performanceEnabled ? &_impl->performance.shadowSources : _impl->sceneLights;
+    _impl->performance.stats.surfaceDraws = _impl->performance.stats.volumeDraws = 0;
+    _impl->performance.stats.culledLights = _impl->performance.stats.surfaceBudgetSkipped = _impl->performance.stats.volumeBudgetSkipped = 0;
 
     detail::TAAPass* taaPassPtr = nullptr;
     bool taaPrepared = false;
@@ -1727,7 +1740,7 @@ void Renderer::render(const RenderScene& scene)
     // pre-C single key-light caster (pre-C byte-equivalent).
     if (detail::ShadowPass* shadow =
             _impl->pipeline.findPass<detail::ShadowPass>()) {
-        shadow->setSceneLightsRef(_impl->sceneLights);
+        shadow->setSceneLightsRef(effectiveLights);
     }
 
     // Scene projection may carry TAA jitter, but the post-Present editor
@@ -1939,7 +1952,7 @@ void Renderer::render(const RenderScene& scene)
         // nullptr = B5 single-light path stays active (no behavior
         // change). count == 0 falls through to B5 fallback at
         // LightingPass::execute() side too.
-        _impl->sceneLights,
+        effectiveLights,
         // §Skybox0 (2026-07-23) — host-supplied Skybox DataSource
         // mount. Borrowed pointer from Renderer::setSkySource.
         // nullptr = no sky mounted (Forward path / SkySource not
@@ -1962,7 +1975,7 @@ void Renderer::render(const RenderScene& scene)
         // pre-C single-key-light fallback + LightingPass
         // perLightShadowCount=0 upload ⇒ byte-equivalent pre-C
         // key-only shadow multiply on lights[0].
-        _impl->sceneLights,
+        effectiveLights,
         // Bloom producer latches; physical textures resolve through FG.
         bloomExtractPassPtr,
         bloomBlurPassPtr,
@@ -1983,6 +1996,7 @@ void Renderer::render(const RenderScene& scene)
     ctx.rigidInstancing = _impl->rigidInstancingEnabled;
     ctx.instancingStats = &instancingStats;
     ctx.decals = &_impl->decals;
+    ctx.performanceLights = performanceEnabled ? &_impl->performance : nullptr;
 
     static uint32_t s_compositeLog = 0;
     if (s_compositeLog < 3) {
@@ -2377,8 +2391,12 @@ void Renderer::endFrame()
 
     _impl->cameraFrameOpen = false;
     if (!_impl->pendingScreenshotBase.empty()) {
+        // The callback is asynchronous. Remove the previous generated TGA so
+        // a repeated basename cannot publish a PNG from an earlier capture.
+        std::remove(detail::screenshotTgaPath(_impl->pendingScreenshotBase).c_str());
         _impl->adapter.requestScreenshot(_impl->pendingScreenshotBase);
         _impl->finalizeScreenshotBase = _impl->pendingScreenshotBase;
+        _impl->screenshotFinalizeAttempts = 0;
         _impl->pendingScreenshotBase.clear();
     }
 
@@ -2391,8 +2409,12 @@ void Renderer::endFrame()
     _impl->compositeSceneViewId = -1;
 
     if (!_impl->finalizeScreenshotBase.empty()) {
-        detail::finalizeScreenshotSidecar(_impl->finalizeScreenshotBase);
-        _impl->finalizeScreenshotBase.clear();
+        if (detail::finalizeScreenshotSidecar(_impl->finalizeScreenshotBase))
+            _impl->finalizeScreenshotBase.clear();
+        else if (++_impl->screenshotFinalizeAttempts >= 120) {
+            std::fprintf(stderr,"[Renderer] screenshot callback timed out: %s\n",_impl->finalizeScreenshotBase.c_str());
+            _impl->finalizeScreenshotBase.clear();
+        }
     }
 }
 
@@ -2728,6 +2750,15 @@ void Renderer::setSceneLights(const ayt::render::SceneLights* lights)
         return;
     }
     _impl->sceneLights = lights;
+}
+
+bool Renderer::setPerformanceLights(std::span<const PerformanceLight> lights, PerformanceLightBudget budget, std::string* error)
+{
+    return _impl && _impl->performance.assign(lights,budget,error);
+}
+PerformanceLightStats Renderer::performanceLightStats() const noexcept
+{
+    return _impl ? _impl->performance.stats : PerformanceLightStats{};
 }
 
 // §Skybox0 (2026-07-23) — public setter for the host-supplied

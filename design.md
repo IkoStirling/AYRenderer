@@ -1,5 +1,15 @@
 # AYRenderer Design
 
+## 2026-10-16 — 聚光灯数组与批量发光点
+
+PerformanceLighting复制并校验最多256个Spot，独立表面/体积/阴影预算；旧八灯结构保持兼容，
+活动包用黑色阴影源保留atlas生产，Lighting阶段按灯scissor叠加GGX，不重复环境光。
+统一程序化投影函数用于表面与体积。体积先消光一次，再累计各灯散射，并按锥体保守AABB
+裁剪屏幕区域/积分区间，保留入口到起点的透射率；无时域历史、froxel或clustered列表。
+EmissivePointCloud复用浮点粒子顶点/共享材质，逐点HDR、视锥筛选和屏幕覆盖能量校正。
+生命周期、限制和测试入口见[项目契约](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
+新增表面光进入生产清单（共67变体）；原单光体积入口在无活动包时继续生效。
+
 ## 2026-10-14 — 独立相机 Forward 视图
 
 公开 CameraViews recipe 与 renderer-owned CameraOutputHandle；每 batch最多16视图，

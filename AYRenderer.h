@@ -7,6 +7,7 @@
 #include "AYRenderer/VolumetricSettings.h"
 #include "AYRenderer/DeferredDecal.h"
 #include "AYRenderer/CameraViews.h"
+#include "AYRenderer/PerformanceLighting.h"
 
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathUtils.h"
@@ -230,6 +231,15 @@ public:
     // multi-light upload (LightingPass falls back to the B5 single
     // light via FrameContext — see setDirectionalLight above).
     void setSceneLights(const SceneLights* lights);
+
+    /// Owned Spot-light packet for the main Deferred view. Replaces direct
+    /// scene lighting while active; ambient/IBL is retained. Empty clears it.
+    /// Copy/validate before publication, max256; false preserves old state.
+    /// Owner thread only; priority then input order determines budget admission.
+    /// Shadows, surface and volume costs are separately bounded. Forward views ignore it.
+    bool setPerformanceLights(std::span<const PerformanceLight> lights,
+                              PerformanceLightBudget budget = {}, std::string* error = nullptr);
+    PerformanceLightStats performanceLightStats() const noexcept;
 
     // §Skybox0 (2026-07-23) — host-facing Skybox DataSource.
     // Drives the Deferred SkyboxPass's equirect-panorama blit.

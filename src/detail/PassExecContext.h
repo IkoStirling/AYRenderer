@@ -37,6 +37,7 @@
 
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/DeferredDecal.h"
+#include "AYRenderer/PerformanceLighting.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
@@ -386,6 +387,7 @@ struct PassExecContext {
     bool rigidInstancing = false;
     InstancingStats* instancingStats = nullptr;
     const std::vector<DeferredDecal>* decals = nullptr; // borrowed immutable per-dispatch host copy
+    PerformanceLighting* performanceLights = nullptr; // Renderer-owned packet; only counters mutate during dispatch
 
 };
 

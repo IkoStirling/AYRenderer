@@ -65,6 +65,9 @@ public:
     // (returns early when !_initialized).
     void setViewScissor(uint8_t viewId, uint16_t x, uint16_t y,
                         uint16_t w, uint16_t h);
+    /// Draw-local fragment bounds, independent for each submit.
+    void setDrawScissor(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+    void resetDrawScissor();
     void setViewClear(uint8_t viewId, const ClearDesc& clear);
     void setViewClearNone(uint8_t viewId);
     // View/proj must be true AYMath row-major Float4x4; converted to

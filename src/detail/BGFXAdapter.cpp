@@ -891,6 +891,15 @@ void BGFXAdapter::setState(uint64_t state)
     bgfx::setState(state);
 }
 
+void BGFXAdapter::setDrawScissor(uint16_t x,uint16_t y,uint16_t w,uint16_t h)
+{
+    if (_initialized && !isNoopBackend()) bgfx::setScissor(x,y,w,h);
+}
+void BGFXAdapter::resetDrawScissor()
+{
+    if (_initialized && !isNoopBackend()) bgfx::setScissor(UINT16_MAX);
+}
+
 void BGFXAdapter::setTransformIdentity()
 {
     bgfx::setTransform(nullptr);

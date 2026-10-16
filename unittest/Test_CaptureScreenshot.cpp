@@ -2,6 +2,10 @@
 
 #include "AYRenderer.h"
 #include "AYTest.h"
+#include "AYTestFixtures.h"
+#include "AYIO/File.h"
+#include "detail/ScreenshotSidecar.h"
+#include "detail/TextureImageLoader.h"
 
 #include <sys/stat.h>
 
@@ -47,6 +51,19 @@ bool shadercAvailable()
 } // namespace
 
 TEST_SUITE(RendererCaptureScreenshotTests)
+
+TEST_CASE(asynchronous_sidecar_waits_for_callback_file_then_publishes_png)
+{
+    ayt::test::ScratchDirectory scratch("screenshot-sidecar");
+    const auto base=(scratch.path()/"capture").string();
+    CHECK(!ayt::render::detail::finalizeScreenshotSidecar(base));
+    const uint8_t tga[22]={0,0,2,0,0,0,0,0,0,0,0,0,1,0,1,0,32,40,10,20,30,255};
+    CHECK(ayt::io::File::atomicWrite(base+".tga",tga,sizeof(tga)));
+    CHECK(ayt::render::detail::finalizeScreenshotSidecar(base));
+    const auto image=ayt::render::detail::decodeImageFile(base+".png");
+    CHECK(image.width==1);CHECK(image.height==1);CHECK(image.rgba8.size()==4);
+    if(image.rgba8.size()==4){CHECK(image.rgba8[0]==30);CHECK(image.rgba8[1]==20);CHECK(image.rgba8[2]==10);}
+}
 
 TEST_CASE(capture_screenshot_rejects_invalid_requests)
 {
