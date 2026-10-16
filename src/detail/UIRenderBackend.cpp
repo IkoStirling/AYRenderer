@@ -1956,6 +1956,8 @@ void UIRenderBackend::beginCanvas(const ayt::math::FRectangle& viewport)
 
 void UIRenderBackend::endCanvas() {}
 
+ayt::ui::IRenderBackend::DebugClip UIRenderBackend::debugClip() const { return {activeClipBounds(),getActivePathClipDepthForDebug(),_frame!=nullptr}; }
+
 ayt::math::FRectangle UIRenderBackend::activeClipBounds() const
 {
     if (_frame == nullptr || _frame->clipStack.empty()) {

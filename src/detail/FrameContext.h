@@ -124,6 +124,7 @@ struct FrameContext {
 
     // Stable CPU visibility, independent of the jittered raster projection.
     // Direct pass/unit contexts opt in explicitly; Renderer enables it.
+    bool collectDebugDraws = false;
     bool frustumCulling = false;
     ayt::math::Float4x4 cullingViewProjection = ayt::math::Float4x4::identity();
     float cullingMarginX = 0.0f;

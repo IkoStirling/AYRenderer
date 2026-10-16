@@ -321,4 +321,17 @@ TEST_CASE(culled_object_reentry_does_not_reuse_nonconsecutive_motion_history)
     CHECK(history.find(1, 1, 0, 3) == nullptr);
 }
 
+TEST_CASE(debug_observations_report_actual_culling_without_removing_shadow_casters) {
+    std::unordered_map<uint64_t,GpuMesh> meshes;meshes[1].localBoundsValid=true;
+    std::unordered_map<uint64_t,GpuMaterial> materials;materials[1].blendMode=BlendMode::Opaque;
+    RenderScene scene;auto draw=item(1,1,.5f);draw.sourceEntityId=42;draw.sourceWorld=123;scene.add(draw);
+    draw.sourceEntityId=43;draw.world(0,3)=100;scene.add(draw);
+    FrameContext frame;frame.frustumCulling=true;frame.collectDebugDraws=true;FrameDrawLists lists;
+    buildFrameDrawLists(scene,meshes,materials,frame,lists);
+    CHECK(lists.debugDraws.size()==2);CHECK(lists.debugDraws[0].visibility==DebugDrawVisibility::Visible);
+    CHECK(lists.debugDraws[1].visibility==DebugDrawVisibility::FrustumCulled);CHECK(lists.debugDraws[1].world==123);
+    CHECK(lists.debugDraws[1].boundsValid);CHECK(lists.debugDraws[1].corners[0].x==99.5f);
+    CHECK(lists.shadowCasters.size()==2);CHECK(lists.opaque3D.size()==1);
+    frame.collectDebugDraws=false;buildFrameDrawLists(scene,meshes,materials,frame,lists);CHECK(lists.debugDraws.empty());
+}
 TEST_SUITE_END

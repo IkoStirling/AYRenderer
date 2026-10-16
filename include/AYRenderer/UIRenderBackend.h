@@ -234,6 +234,7 @@ public:
     void flushBatches() override;
 
     void pushClip(const ayt::math::FRectangle& bounds) override;
+    DebugClip debugClip() const override;
     void popClip() override;
 
     // CPU-authored vector paths are tessellated into triangle meshes and

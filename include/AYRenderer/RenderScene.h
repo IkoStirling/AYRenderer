@@ -101,6 +101,9 @@ struct DrawItem {
     bool allowFrustumCulling = true;
     /// 3D visibility membership; 2D payloads use their existing packed layer.
     uint32_t cameraLayerMask = 1u;
+    /// Optional presentation provenance for editor diagnostics; never a rendering authority.
+    uint32_t sourceEntityId=0;
+    uintptr_t sourceWorld=0;
 };
 
 // Camera used by the camera-overlay 2D composition domain. It is independent

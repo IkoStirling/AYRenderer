@@ -403,6 +403,8 @@ struct Renderer::Impl {
     };
     std::unordered_map<uint32_t, std::unique_ptr<RuntimeView>> runtimeViews;
     bool                         frustumCullingEnabled = true;
+    bool debugCapture=false;
+    RenderDebugSnapshot debugSnapshot;
     bool                         rigidInstancingEnabled = true;
 
     detail::RenderResourceManager resources;
@@ -1392,6 +1394,7 @@ void Renderer::render(const RenderScene& scene)
         ? taaPassPtr->jitteredProjection()
         : _impl->mainProjection;
     frame.cameraPosition   = _impl->mainCameraPosition;
+    frame.collectDebugDraws=_impl->debugCapture;
     frame.frustumCulling = _impl->frustumCullingEnabled;
     frame.cullingViewProjection = _impl->mainProjection * _impl->mainView;
     frame.cullingHomogeneousDepth = _impl->adapter.capsHomogeneousDepth();
@@ -2065,6 +2068,23 @@ void Renderer::render(const RenderScene& scene)
     resourceStats.persistentHistoryResources =
         blackboardStats.persistentHistoryResources;
     _impl->debugOverlay.setArchitectureStats(graphStats, resourceStats);
+    if(_impl->debugCapture) {
+        auto& snapshot=_impl->debugSnapshot;++snapshot.frame;
+        snapshot.draws=_impl->frameDrawLists.debugDraws;snapshot.dropped=_impl->frameDrawLists.debugDropped;
+        snapshot.lights=_impl->sceneLights?*_impl->sceneLights:SceneLights{};
+        snapshot.lights.count=std::min(snapshot.lights.count,kMaxSceneLights);
+        if(!_impl->sceneLights) snapshot.lights.add(Light::directional(_impl->directionalLightDir,_impl->directionalLightColor));
+        snapshot.homogeneousDepth=_impl->adapter.capsHomogeneousDepth();snapshot.shadowsEnabled=shadowsEnabled();
+        snapshot.shadowViewProjections.clear();
+        if(auto* shadow=_impl->pipeline.findPass<detail::ShadowPass>();shadow && shadow->hasSampleableShadow()) {
+            const auto* values=shadow->atlasLightViewProjsColumnMajor();
+            for(uint32_t slot=0;slot<std::min(shadow->shadowProjectionCount(),8u);++slot) {
+                auto matrix=ayt::math::Float4x4::identity();
+                for(int row=0;row<4;++row)for(int col=0;col<4;++col) matrix(row,col)=values[slot*16+col*4+row];
+                snapshot.shadowViewProjections.push_back(matrix);
+            }
+        }
+    }
     const auto& visibility = _impl->frameDrawLists.stats;
     _impl->debugOverlay.setVisibilityStats(visibility.frustumTested,
         visibility.frustumCulled, visibility.frustumBypassed);
@@ -2223,6 +2243,9 @@ bool Renderer::renderViews(std::span<const CameraRenderView> views) {
     }
     return true;
 }
+
+void Renderer::setDebugCaptureEnabled(bool enabled) { if(_impl) { _impl->debugCapture=enabled;if(!enabled) _impl->debugSnapshot={}; } }
+RenderDebugSnapshot Renderer::debugSnapshot() const { return _impl?_impl->debugSnapshot:RenderDebugSnapshot{}; }
 
 void Renderer::setFrustumCullingEnabled(bool enabled)
 {

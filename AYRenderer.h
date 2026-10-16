@@ -33,6 +33,22 @@ class RenderTargetPool;
 struct CameraViewsTestAccess;
 }
 
+
+enum class DebugDrawVisibility : uint8_t { Visible, FrustumCulled, CullingBypassed, InvalidHandles, MissingMaterial };
+struct RenderDebugDraw {
+    uint32_t entityId=0; uintptr_t world=0; uint64_t mesh=0;
+    DebugDrawVisibility visibility=DebugDrawVisibility::Visible;
+    bool boundsValid=false,deformed=false;
+    ayt::math::FVector3 corners[8]{};
+};
+struct RenderDebugSnapshot {
+    uint64_t frame=0; size_t dropped=0;
+    std::vector<RenderDebugDraw> draws;
+    SceneLights lights;
+    std::vector<ayt::math::Float4x4> shadowViewProjections;
+    bool homogeneousDepth=false,shadowsEnabled=false;
+};
+
 // High-level renderer: frame loop, resource handles, draw submission.
 // GPU backend details live in src/detail/ only.
 class Renderer {
@@ -74,6 +90,9 @@ public:
     void destroyCameraOutput(CameraOutputHandle output);
     /// Static camera-frustum culling defaults on; shadows remain independent.
     /// Disable for comparisons or hosts with unbounded custom vertex deformation.
+    /// Bounded owned last-main-render diagnostics. Disabled by default; owner thread only.
+    void setDebugCaptureEnabled(bool enabled);
+    RenderDebugSnapshot debugSnapshot() const;
     void setFrustumCullingEnabled(bool enabled);
     bool frustumCullingEnabled() const noexcept;
     /// Merge contiguous compatible rigid opaque GBuffer/shadow submissions.

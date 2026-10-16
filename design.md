@@ -1620,3 +1620,15 @@ rebuilds. The built-in editor uses editor pipelines; generic game pipelines
 omit the post-Present x-ray pass. Camera-specific sprite-overlay routing is
 not part of this API. Tests: AYRenderer_EditorOverlay and the opt-in real D3D11
 AYRenderer_PhysicsDebugGpu pixel fixture (colors, clear, forward/deferred occlusion).
+
+## Debug content extension (2026-10-15)
+
+Opt-in setDebugCaptureEnabled/debugSnapshot copies the last main render: up to1024 draw classifications, mesh bounds, borrowed SceneLights values and produced shadow projection matrices. DrawItem appends optional Entity/World provenance. Visibility comes from the real frame-list classification; shadow casters remain independent. Deformed bounds are labeled bind-pose. This ordinary mesh entry exposes no LOD index; unrelated Avatar LOD policies are not inferred. Turning capture off clears observations; preview/multiview rendering does not overwrite the main snapshot.
+
+Module-local regression sources were updated. Runtime tests and interactive editor acceptance are deferred by the current task request; previous validation reports cover the earlier baseline. These changes remain uncommitted until focused runtime checks are requested and pass.
+
+## Extended diagnostic observations (2026-10-15)
+
+UIRenderBackend::debugClip exposes the actual effective logical rectangular clip and stencil/path depth during an active frame through the optional UI backend observation seam. It returns invalid outside a frame; it does not infer path outlines. Screen diagnostics render through UI while world diagnostics retain the existing renderer debug line path.
+
+Regression sources are included. Runtime tests and interactive editor acceptance are deferred for this content task; untested changes remain uncommitted.
