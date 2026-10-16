@@ -34,6 +34,7 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
         std::pair{"volumetric",kVolumetricPhoskiaSource},
         std::pair{"deferred_decal",kDeferredDecalPhoskiaSource},
         std::pair{"particle_unlit",kParticlePhoskiaSource},
+        std::pair{"emissive_point_instanced",kEmissivePointInstancedPhoskiaSource},
         std::pair{"bloom_extract",kBloomExtractPhoskiaSource},
         std::pair{"bloom_down",kBloomPyramidDownsamplePhoskiaSource},
         std::pair{"bloom_up",kBloomPyramidUpsamplePhoskiaSource},

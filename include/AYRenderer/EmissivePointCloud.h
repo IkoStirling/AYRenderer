@@ -16,12 +16,24 @@ struct EmissivePointSettings {
     /// Maximum visible points. When exceeded, stable IDs choose a spatially
     /// unbiased deterministic subset so input order does not shape the show.
     uint32_t maxPoints=65536;
+    /// Prefer one hardware instance per visible point when supported; the
+    /// existing CPU quad path remains the fallback and comparison mode.
+    bool preferInstancing=true;
 };
-struct EmissivePointStats { uint32_t source=0,visible=0,culled=0,budgetSkipped=0,batches=0; };
-/// CPU-owned HDR billboard batches, shared shader/material, per-point color.
+struct EmissivePointStats {
+    uint32_t source=0,visible=0,culled=0,budgetSkipped=0,batches=0;
+    bool instanced=false;
+};
+/// CPU quad preparation for deterministic tests and non-instanced backends.
 /// No births/lifetimes/RNG and no SceneLights per point. Input must be finite;
 /// failure leaves output intact. Does not promise a particular frame rate.
 bool buildEmissivePointBatches(std::span<const EmissivePoint> points,
+    const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
+    EmissivePointSettings settings,std::vector<ParticleDrawData>& batches,EmissivePointStats& stats,
+    std::string* error=nullptr);
+/// Deterministic packed-instance preparation used by the GPU path and tests.
+/// Keeps the same culling, stable-ID budget and subpixel energy as CPU quads.
+bool buildEmissivePointInstanceBatches(std::span<const EmissivePoint> points,
     const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
     EmissivePointSettings settings,std::vector<ParticleDrawData>& batches,EmissivePointStats& stats,
     std::string* error=nullptr);
@@ -43,5 +55,6 @@ private:
     MeshHandle _quad;
     TextureHandle _texture;
     MaterialHandle _material;
+    MaterialHandle _instancedMaterial;
 };
 } // namespace ayt::render

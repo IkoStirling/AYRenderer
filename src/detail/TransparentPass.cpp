@@ -322,7 +322,21 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
 
     // §P2 L5 (2026-08-24) — `worldOverride` arg dropped (was unused).
     adapter.setTransform(item.world);
-    if (item.particleBatch) {
+    const bool pointInstances = item.particleBatch
+        && item.particleBatch->instanceStride != 0;
+    if (pointInstances) {
+        const auto& batch = *item.particleBatch;
+        const auto byteCount = batch.instanceData.size() * sizeof(float);
+        if (byteCount == 0 || byteCount % batch.instanceStride != 0
+            || !adapter.bindInstances(batch.instanceData.data(),
+                static_cast<uint32_t>(byteCount / batch.instanceStride),
+                batch.instanceStride)) {
+            result.skip = true;
+            return result;
+        }
+        adapter.setVertexBuffer(mesh.vertexBuffer);
+        (void)bindDrawIndexBuffer(adapter, mesh, drawRange, false);
+    } else if (item.particleBatch) {
         if (!adapter.bindParticleBatch(*item.particleBatch)) { result.skip = true; return result; }
     } else adapter.setVertexBuffer(mesh.vertexBuffer);
     const bool wireframe = item.particleBatch ? false : bindDrawIndexBuffer(

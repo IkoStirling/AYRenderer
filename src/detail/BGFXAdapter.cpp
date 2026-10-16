@@ -23,7 +23,7 @@ uint32_t BGFXAdapter::availableInstances(uint32_t requested, uint16_t stride) co
 
 bool BGFXAdapter::bindInstances(const void* data, uint32_t count, uint16_t stride)
 {
-    if (!data || count < 2 || availableInstances(count, stride) < count) return false;
+    if (!data || !count || availableInstances(count, stride) < count) return false;
     bgfx::InstanceDataBuffer buffer{};
     bgfx::allocInstanceDataBuffer(&buffer, count, stride);
     if (!buffer.data || buffer.num < count) return false;

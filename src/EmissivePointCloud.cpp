@@ -1,12 +1,24 @@
 #include <AYRenderer/EmissivePointCloud.h>
 #include <AYRenderer.h>
+#include <bgfx/bgfx.h>
 #include <algorithm>
 #include <cmath>
+#include <iterator>
+#include <utility>
 
 namespace ayt::render {
-bool buildEmissivePointBatches(std::span<const EmissivePoint> points,const math::Float4x4& view,
+namespace {
+struct VisiblePoint { std::size_t index; float radius,energy; std::uint32_t rank; };
+struct PointSelection {
+    std::vector<VisiblePoint> visible;
+    math::FVector3 right,up;
+    EmissivePointStats stats;
+};
+constexpr std::size_t kPointsPerBatch=16383;
+
+bool selectVisiblePoints(std::span<const EmissivePoint> points,const math::Float4x4& view,
     const math::Float4x4& projection,uint16_t width,uint16_t height,EmissivePointSettings settings,
-    std::vector<ParticleDrawData>& batches,EmissivePointStats& stats,std::string* error) {
+    PointSelection& output,std::string* error) {
     const auto fail=[&](const char* text){if(error)*error=text;return false;};
     if(points.size()>65536||!width||!height||settings.maxPoints>65536
         ||!std::isfinite(settings.minimumPixelRadius)||settings.minimumPixelRadius<0||settings.minimumPixelRadius>16)
@@ -20,12 +32,11 @@ bool buildEmissivePointBatches(std::span<const EmissivePoint> points,const math:
     }
     const auto inverse=view.inverse();
     for(int i=0;i<16;++i)if(!std::isfinite(inverse.ptr()[i]))return fail("Singular point cloud camera");
-    const math::FVector3 right(inverse(0,0),inverse(1,0),inverse(2,0));
-    const math::FVector3 up(inverse(0,1),inverse(1,1),inverse(2,1));
+    output.right={inverse(0,0),inverse(1,0),inverse(2,0)};
+    output.up={inverse(0,1),inverse(1,1),inverse(2,1)};
     const auto vp=projection*view;const float scale=std::abs(projection(1,1))*height*.5f;
     if(scale<.00001f)return fail("Degenerate point cloud projection");
     EmissivePointStats next;next.source=static_cast<uint32_t>(points.size());
-    struct VisiblePoint { std::size_t index; float radius,energy; std::uint32_t rank; };
     std::vector<VisiblePoint> visible;visible.reserve(points.size());
     for(std::size_t index=0;index<points.size();++index) {
         const auto& p=points[index];
@@ -52,11 +63,29 @@ bool buildEmissivePointBatches(std::span<const EmissivePoint> points,const math:
         visible.resize(settings.maxPoints);
         std::sort(visible.begin(),visible.end(),[](const auto& a,const auto& b){return a.index<b.index;});
     }
-    const size_t needed=(visible.size()+16382)/16383;
-    batches.resize(needed);for(auto& b:batches){b.vertices.clear();b.indices.clear();b.world3D=true;}
+    output.visible=std::move(visible);output.stats=next;
+    if(error)error->clear();return true;
+}
+} // namespace
+
+bool buildEmissivePointBatches(std::span<const EmissivePoint> points,const math::Float4x4& view,
+    const math::Float4x4& projection,uint16_t width,uint16_t height,EmissivePointSettings settings,
+    std::vector<ParticleDrawData>& batches,EmissivePointStats& stats,std::string* error) {
+    PointSelection selection;
+    if(!selectVisiblePoints(points,view,projection,width,height,settings,selection,error))return false;
+    const auto& visible=selection.visible;
+    const auto& right=selection.right;const auto& up=selection.up;
+    auto next=selection.stats;
+    const size_t needed=(visible.size()+kPointsPerBatch-1)/kPointsPerBatch;
+    batches.resize(needed);
+    for(std::size_t i=0;i<needed;++i){
+        auto& b=batches[i];const auto count=std::min(kPointsPerBatch,visible.size()-i*kPointsPerBatch);
+        b.vertices.clear();b.vertices.reserve(count*4);b.indices.clear();b.indices.reserve(count*6);
+        b.instanceData.clear();b.instanceStride=0;b.world3D=true;
+    }
     for(const auto& selected:visible) {
         const auto& p=points[selected.index];
-        auto& batch=batches[next.visible/16383];
+        auto& batch=batches[next.visible/kPointsPerBatch];
         const float radius=selected.radius;
         const float energy=selected.energy;
         const auto radiance=p.color*(p.intensity*energy);const uint16_t base=static_cast<uint16_t>(batch.vertices.size());
@@ -68,15 +97,52 @@ bool buildEmissivePointBatches(std::span<const EmissivePoint> points,const math:
         for(const uint16_t offset:{0,1,2,0,2,3})batch.indices.push_back(base+offset);
         ++next.visible;
     }
-    next.batches=(next.visible+16382)/16383;batches.resize(next.batches);stats=next;
+    next.batches=static_cast<uint32_t>(needed);stats=next;
     if(error)error->clear();return true;
+}
+bool buildEmissivePointInstanceBatches(std::span<const EmissivePoint> points,
+    const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
+    EmissivePointSettings settings,std::vector<ParticleDrawData>& batches,
+    EmissivePointStats& stats,std::string* error) {
+    PointSelection selection;
+    if(!selectVisiblePoints(points,view,projection,width,height,settings,selection,error))return false;
+    auto next=selection.stats;
+    const size_t needed=(selection.visible.size()+kPointsPerBatch-1)/kPointsPerBatch;
+    batches.resize(needed);
+    for(std::size_t i=0;i<needed;++i) {
+        auto& batch=batches[i];
+        const auto count=std::min(kPointsPerBatch,selection.visible.size()-i*kPointsPerBatch);
+        batch.vertices.clear();batch.indices.clear();batch.instanceData.clear();
+        batch.instanceData.reserve(count*16);
+        batch.instanceStride=16*sizeof(float);batch.world3D=true;
+    }
+    for(const auto& selected:selection.visible) {
+        const auto& point=points[selected.index];
+        auto& batch=batches[next.visible/kPointsPerBatch];
+        const auto radiance=point.color*(point.intensity*selected.energy);
+        const float instance[16]={
+            point.position.x,point.position.y,point.position.z,selected.radius,
+            selection.right.x,selection.right.y,selection.right.z,0,
+            selection.up.x,selection.up.y,selection.up.z,0,
+            radiance.x,radiance.y,radiance.z,1
+        };
+        batch.instanceData.insert(batch.instanceData.end(),std::begin(instance),std::end(instance));
+        ++next.visible;
+    }
+    next.batches=static_cast<uint32_t>(needed);next.instanced=next.visible!=0;
+    stats=next;if(error)error->clear();return true;
 }
 bool EmissivePointCloud::append(Renderer& renderer,RenderScene& scene,std::span<const EmissivePoint> points,
     const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
     EmissivePointSettings settings,std::string* error) {
-    if(!buildEmissivePointBatches(points,view,projection,width,height,settings,_batches,_stats,error))return false;
+    const auto* caps=bgfx::getCaps();
+    const bool instancing=settings.preferInstancing&&caps&&(caps->supported&BGFX_CAPS_INSTANCING);
+    const bool built=instancing
+        ?buildEmissivePointInstanceBatches(points,view,projection,width,height,settings,_batches,_stats,error)
+        :buildEmissivePointBatches(points,view,projection,width,height,settings,_batches,_stats,error);
+    if(!built)return false;
     if(_batches.empty())return true;
-    if(_renderer!=&renderer){_renderer=&renderer;_quad={};_texture={};_material={};}
+    if(_renderer!=&renderer){_renderer=&renderer;_quad={};_texture={};_material={};_instancedMaterial={};}
     if(!_texture.isValid()) {
     uint8_t pixels[32*32*4];
     for(int y=0;y<32;++y)for(int x=0;x<32;++x) {
@@ -86,16 +152,20 @@ bool EmissivePointCloud::append(Renderer& renderer,RenderScene& scene,std::span<
     }
     _texture=renderer.createTextureFromRgba8(32,32,pixels,"emissive_point_disc_v1");
     }
-    if(!_material.isValid()) {
-        _material=renderer.createMaterialFromPhoskia(kParticlePhoskiaSource,"emissive_point_material_v1");
-        renderer.setMaterialTexture(_material,"albedoMap",_texture);
-        renderer.setMaterialBlendMode(_material,BlendMode::Additive);renderer.setMaterialSurfaceProperties(_material,2,0,true);
-        renderer.setMaterialModel(_material,MaterialModel::Unlit);
+    auto& material=instancing?_instancedMaterial:_material;
+    if(!material.isValid()) {
+        material=renderer.createMaterialFromPhoskia(
+            instancing?kEmissivePointInstancedPhoskiaSource:kParticlePhoskiaSource,
+            instancing?"emissive_point_instanced_material_v1":"emissive_point_material_v1");
+        renderer.setMaterialTexture(material,"albedoMap",_texture);
+        renderer.setMaterialBlendMode(material,BlendMode::Additive);
+        renderer.setMaterialSurfaceProperties(material,2,0,true);
+        renderer.setMaterialModel(material,MaterialModel::Unlit);
     }
     if(!_quad.isValid())_quad=renderer.createUnitQuad();
-    if(!_texture.isValid()||!_material.isValid()||!_quad.isValid()){if(error)*error="Point cloud GPU assets unavailable";return false;}
+    if(!_texture.isValid()||!material.isValid()||!_quad.isValid()){if(error)*error="Point cloud GPU assets unavailable";return false;}
     for(auto& batch:_batches) {
-        DrawItem item;item.mesh=_quad;item.material=_material;item.shadowFlags=ShadowFlags::None;
+        DrawItem item;item.mesh=_quad;item.material=material;item.shadowFlags=ShadowFlags::None;
         item.particleBatch=&batch;item.allowFrustumCulling=false;scene.add(item);
     }
     return true;

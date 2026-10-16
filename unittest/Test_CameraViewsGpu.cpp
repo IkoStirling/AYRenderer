@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include <AYRenderer.h>
+#include <AYRenderer/EmissivePointCloud.h>
 #include <AYRenderer/UIRenderBackend.h>
 #include <AYTest.h>
 #include "detail/BGFXAdapter.h"
@@ -97,6 +98,62 @@ TEST_CASE(independent_camera_layers_outputs_and_resize_are_verified_by_gpu_readb
     ui.shutdown();
     renderer.destroyMesh(mesh); renderer.destroyMaterial(red); renderer.destroyMaterial(green);
     renderer.shutdown(); DestroyWindow(window);
+#else
+    SKIP_TEST("Windows D3D11 device required");
+#endif
+}
+TEST_SUITE_END
+
+TEST_SUITE(EmissivePointsGpu)
+TEST_CASE(single_instanced_point_matches_cpu_quad_in_a_real_view) {
+#ifdef _WIN32
+    if (!std::getenv("AY_POINT_GPU_TEST")) SKIP_TEST("Requires an isolated Windows D3D11 device");
+    HWND window=CreateWindowExW(0,L"STATIC",L"Emissive point GPU regression",WS_OVERLAPPED,
+        0,0,64,64,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window!=nullptr);if(!window)return;
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;desc.windowHandle=window;desc.backend=ayt::render::Backend::Direct3D11;
+    desc.width=64;desc.height=64;desc.vsync=false;desc.msaa=0;
+    CHECK(renderer.initialize(desc));
+    if(!renderer.isInitialized()){DestroyWindow(window);return;}
+    CHECK((bgfx::getCaps()->supported&BGFX_CAPS_INSTANCING)!=0);
+    auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(renderer);
+    auto output=renderer.createCameraOutput(64,64);CHECK(output.id!=0);
+    auto readback=bgfx::createTexture2D(64,64,false,1,bgfx::TextureFormat::RGBA8,
+        BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
+    CHECK(bgfx::isValid(readback));
+    const ayt::math::FVector3 eye{0,0,-3};
+    const auto view=ayt::math::lh::lookAt(eye,{0,0,0},{0,1,0});
+    const auto projection=ayt::math::lh::perspective(ayt::math::radians(50.f),1,.1f,100);
+    ayt::render::EmissivePoint point;point.id=7;point.color={1,0,0};point.intensity=4;
+    point.radius=.4f;
+    ayt::render::EmissivePointCloud cloud;
+    auto sample=[&](bool preferInstances) {
+        ayt::render::RenderScene scene;std::string error;
+        ayt::render::EmissivePointSettings settings;settings.preferInstancing=preferInstances;
+        CHECK(cloud.append(renderer,scene,std::span<const ayt::render::EmissivePoint>(&point,1),
+            view,projection,64,64,settings,&error));
+        CHECK(error.empty());CHECK(cloud.stats().instanced==preferInstances);
+        ayt::render::CameraRenderView camera;camera.scene=&scene;camera.position=eye;
+        camera.view=view;camera.projection=projection;camera.width=camera.height=64;camera.output=output;
+        const std::array<ayt::render::CameraRenderView,1> views{camera};
+        for(int frame=0;frame<3;++frame){renderer.beginFrame();CHECK(renderer.renderViews(views));renderer.endFrame();}
+        const auto fbo=bgfx::FrameBufferHandle{ayt::render::detail::CameraViewsTestAccess::framebuffer(renderer,output)};
+        const auto color=adapter->getFboAttachment(fbo,0);
+        bgfx::blit(112,readback,0,0,color);
+        std::array<uint8_t,64*64*4> pixels{};
+        const auto ready=bgfx::readTexture(readback,pixels.data());
+        for(int frame=0;frame<120&&adapter->gpuFrameCounter()<ready;++frame)renderer.endFrame();
+        CHECK(adapter->gpuFrameCounter()>=ready);
+        const size_t center=(32*64+32)*4;
+        return std::array<uint8_t,4>{pixels[center],pixels[center+1],pixels[center+2],pixels[center+3]};
+    };
+    const auto instanced=sample(true),cpu=sample(false);
+    CHECK(instanced[0]>20);CHECK(cpu[0]>20);
+    CHECK(instanced[0]>instanced[1]);CHECK(cpu[0]>cpu[1]);
+    CHECK(std::abs(int(instanced[0])-int(cpu[0]))<35);
+    renderer.destroyCameraOutput(output);bgfx::destroy(readback);
+    renderer.shutdown();DestroyWindow(window);
 #else
     SKIP_TEST("Windows D3D11 device required");
 #endif

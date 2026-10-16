@@ -1,6 +1,6 @@
 # AYRenderer
 
-## 聚光灯数组与 HDR 发光点（2026-10-16）
+## 聚光灯数组与 HDR 发光点（2026-10-17）
 
 主Deferred的setPerformanceLights复制最多256个Spot，表面/体积/阴影独立预算，
 锥体AABB/scissor、GGX与五种程序化投影。体积光消光一次，再累计各灯散射。
@@ -10,7 +10,10 @@
 apertureRadius默认零兼容点源，节目新默认使用有限半径；阴影仍是点源投影近似。
 patternFocus[0,1]柔化程序化图案边缘，iris(0,1]裁剪投影口径；二者在表面和体积一致。
 EmissivePointCloud提供最多65536个逐点HDR色发光点、亚像素覆盖及共享材质批次。
-maxPoints限制可见点数，超额时按稳定ID选取，与输入顺序无关；目前仍逐帧CPU展开四顶点。
+maxPoints限制可见点数，超额时按稳定ID选取，与输入顺序无关。支持硬件时默认
+逐点GPU实例化，共享单位四边形；不支持实例化时回退逐帧CPU四顶点，
+也可用preferInstancing=false显式对照。两路径使用同一裁剪、半径和能量校正。
+GPU瞬态实例缓冲不足时该批按既有渲染契约跳过；仍无GPU端裁剪或间接绘制。
 Host入口/生命周期/限制见[演出系统](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
 
 ## 相机视口与输出（2026-10-14）

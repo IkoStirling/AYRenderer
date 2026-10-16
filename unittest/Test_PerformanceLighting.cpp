@@ -90,6 +90,37 @@ TEST_CASE(point_culling_budgets_and_subpixel_coverage_are_explicit) {
     CHECK(buildEmissivePointBatches(points,identity,identity,100,100,{.75f,true,0},batches,stats));CHECK(stats.visible==0);CHECK(stats.budgetSkipped==1);
     points[0].radius=-1;stats.visible=9;CHECK(!buildEmissivePointBatches(points,identity,identity,100,100,{},batches,stats));CHECK(stats.visible==9);
 }
+TEST_CASE(point_instances_preserve_cpu_selection_hdr_and_bounded_batches) {
+    std::vector<EmissivePoint> points(20000);
+    for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].position={0,0,.5f};}
+    points[0].color={2,0,0};points[0].intensity=8;
+    const auto identity=ayt::math::Float4x4::identity();
+    std::vector<ParticleDrawData> cpu,instances;EmissivePointStats cpuStats,instanceStats;
+    CHECK(buildEmissivePointBatches(points,identity,identity,100,100,{},cpu,cpuStats));
+    CHECK(buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},instances,instanceStats));
+    CHECK(instanceStats.visible==cpuStats.visible);CHECK(instanceStats.batches==2);
+    CHECK(instanceStats.instanced);CHECK(instances[0].instanceStride==64);
+    CHECK(instances[0].instanceData.size()==16383*16);
+    CHECK(instances[1].instanceData.size()==(20000-16383)*16);
+    CHECK(instances[0].vertices.empty());CHECK(instances[0].indices.empty());
+    CHECK(instances[0].instanceData[0]==points[0].position.x);
+    CHECK(instances[0].instanceData[3]==points[0].radius);
+    CHECK(instances[0].instanceData[12]==cpu[0].vertices[0].r);
+    EmissivePointSettings budget;budget.maxPoints=17;
+    CHECK(buildEmissivePointInstanceBatches(points,identity,identity,100,100,budget,instances,instanceStats));
+    CHECK(instanceStats.visible==17);CHECK(instanceStats.budgetSkipped==20000-17);
+    CHECK(instances[0].instanceData.size()==17*16);
+    points[0].radius=-1;instanceStats.visible=9;
+    CHECK(!buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},instances,instanceStats));
+    CHECK(instanceStats.visible==9);
+}
+TEST_CASE(instanced_point_shader_uses_production_frontend) {
+    ayt::shader::phoskia::Compiler compiler;ayt::shader::phoskia::ir::IRProgram program;
+    std::vector<std::string> errors;
+    const bool success=compiler.generateIr(kEmissivePointInstancedPhoskiaSource,{},program,errors);
+    for(const auto& error:errors)std::fprintf(stderr,"%s\n",error.c_str());
+    CHECK(success);
+}
 TEST_CASE(surface_shader_uses_production_frontend_and_bounded_procedural_patterns) {
     ayt::shader::phoskia::Compiler compiler;ayt::shader::phoskia::ir::IRProgram program;std::vector<std::string> errors;
     const bool success=compiler.generateIr(kPerformanceSurfaceSource,{},program,errors);
