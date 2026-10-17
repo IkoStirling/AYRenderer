@@ -36,6 +36,7 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
     uniform("fogInverseViewProjection",inv,64);uniform("fogView",view,64);
     vector("fogCamera",ctx.frame.cameraPosition.x,ctx.frame.cameraPosition.y,ctx.frame.cameraPosition.z,std::abs(ctx.frame.projection.row[3].w)>.5f?1.f:0.f);
     vector("fogMedium",settings.density,settings.scattering,settings.anisotropy,settings.maxDistance);
+    vector("fogNoise",settings.noiseStrength,settings.noiseScale,settings.noiseTime,0);
     vector("fogCenter",settings.center.x,settings.center.y,settings.center.z,bgfx::getCaps()->homogeneousDepth?-1.f:0.f);
     vector("fogExtent",settings.halfExtent.x,settings.halfExtent.y,settings.halfExtent.z,0);
     vector("fogTint",settings.tint.x,settings.tint.y,settings.tint.z,0);

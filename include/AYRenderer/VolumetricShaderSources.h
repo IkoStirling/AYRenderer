@@ -1,7 +1,7 @@
 #pragma once
 #include "AYRenderer/PerformanceShaderSources.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v9_local_feather_budget";
+inline constexpr char kVolumetricCacheKey[]="volumetric_v10_animated_density";
 inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
@@ -24,6 +24,7 @@ material Volumetric {
  uniform vec4 fogCenter
  uniform vec4 fogExtent
  uniform vec4 fogTint
+ uniform vec4 fogNoise
  uniform vec4 fogLightPosition
  uniform vec4 fogLightDirection
  uniform vec4 fogLightColor
@@ -85,12 +86,19 @@ material Volumetric {
   }
   let ds=max(end-begin,0.0)/sampleCount
   let transmission=exp(-fogMedium.x*max(begin-mediumBegin,0.0))
-  if(fogOptions.z>0.5 && begin>mediumBegin){
+  if((fogOptions.z>0.5 || fogNoise.x>0.001) && begin>mediumBegin){
    transmission=1.0
    for(k in range(4)){
     let pre=origin+direction*(mediumBegin+(float(k)+0.5)*(begin-mediumBegin)*0.25)
-    let local=abs(pre-fogCenter.xyz)/fogExtent.xyz
-    let weight=1.0-smoothstep(0.75,1.0,max(max(local.x,local.y),local.z))
+    let weight=1.0
+    if(fogOptions.z>0.5){
+     let local=abs(pre-fogCenter.xyz)/fogExtent.xyz
+     weight=1.0-smoothstep(0.75,1.0,max(max(local.x,local.y),local.z))
+    }
+    if(fogNoise.x>0.001){
+     let p=pre*fogNoise.y+vec3(fogNoise.z*0.17,fogNoise.z*0.11,fogNoise.z*0.14)
+     weight=weight*clamp(1.0+fogNoise.x*(0.5*sin(p.x+p.z*0.73)+0.35*sin(p.y*1.7-p.z*1.1)+0.15*sin(p.x*1.3+p.y*0.6)),0.15,1.85)
+    }
     transmission=transmission*exp(-fogMedium.x*(begin-mediumBegin)*0.25*weight)
    }
   }
@@ -102,6 +110,10 @@ material Volumetric {
    if(fogOptions.z>0.5){
     let local=abs(fogSample-fogCenter.xyz)/fogExtent.xyz
     localWeight=1.0-smoothstep(0.75,1.0,max(max(local.x,local.y),local.z))
+   }
+   if(fogNoise.x>0.001){
+    let p=fogSample*fogNoise.y+vec3(fogNoise.z*0.17,fogNoise.z*0.11,fogNoise.z*0.14)
+    localWeight=localWeight*clamp(1.0+fogNoise.x*(0.5*sin(p.x+p.z*0.73)+0.35*sin(p.y*1.7-p.z*1.1)+0.15*sin(p.x*1.3+p.y*0.6)),0.15,1.85)
    }
    let stepT=exp(-fogMedium.x*ds*localWeight)
    let toLight=fogLightPosition.xyz-fogSample
@@ -173,7 +185,18 @@ material Volumetric {
    radiance=radiance+transmission*(1.0-stepT)*fogMedium.y*fogTint.rgb*fogLightColor.rgb*attenuation*visibility*phase
    transmission=transmission*stepT
   }
-  } else {transmission=exp(-fogMedium.x*max(end-begin,0.0))}
+  } else {
+   transmission=exp(-fogMedium.x*max(end-begin,0.0))
+   if(fogNoise.x>0.001){
+    transmission=1.0
+    for(k in range(4)){
+     let pre=origin+direction*(begin+(float(k)+0.5)*(end-begin)*0.25)
+     let p=pre*fogNoise.y+vec3(fogNoise.z*0.17,fogNoise.z*0.11,fogNoise.z*0.14)
+     let weight=clamp(1.0+fogNoise.x*(0.5*sin(p.x+p.z*0.73)+0.35*sin(p.y*1.7-p.z*1.1)+0.15*sin(p.x*1.3+p.y*0.6)),0.15,1.85)
+     transmission=transmission*exp(-fogMedium.x*max(end-begin,0.0)*0.25*weight)
+    }
+   }
+  }
   let result=vec4(raw.rgb*transmission+radiance,raw.a)
   if(fogOptions.w>1.5){result=vec4(radiance,0.0)}
   if(fogOptions.y>1.5) {result=vec4(radiance,raw.a)}

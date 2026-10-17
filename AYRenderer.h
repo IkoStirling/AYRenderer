@@ -470,6 +470,8 @@ public:
     void setSsrSettings(const SsrSettings& settings);
     SsrSettings ssrSettings() const noexcept;
     /// Deferred-only medium, owner-thread setter; copied finite settings, default off.
+    /// Optional noiseStrength/Scale/Time vary density consistently for extinction
+    /// and scattering; the host supplies time each frame when animation is wanted.
     void setVolumetricSettings(const VolumetricSettings& settings);
     VolumetricSettings volumetricSettings() const noexcept;
     /// Owner-thread, copies up to16 positive-scale projectors in stable order.

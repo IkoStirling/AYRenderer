@@ -14,6 +14,8 @@ patternFocus[0,1]柔化程序化图案边缘及贴图采样，iris(0,1]裁剪投
 shadowSoftness[0,4]以阴影图像素指定可选2x2滤波半径；零保持旧硬阴影，
 此项只柔化遮挡边缘，不模拟面积光几何半影。
 局部雾盒靠边缘四分之一半轴距离平滑降低密度，避免光束在空气中被硬截断。
+VolumetricSettings可选noiseStrength/noiseScale/noiseTime让介质密度缓慢起伏；默认强度零
+保留原静态介质。全局与局部消光、每束散射共用相同的变化密度。
 EmissivePointCloud提供最多65536个逐点HDR色发光点、亚像素覆盖及共享材质批次。
 maxPoints限制可见点数，超额时按稳定ID选取，与输入顺序无关。支持硬件时默认
 逐点GPU实例化，共享单位四边形；不支持实例化时回退逐帧CPU四顶点，
@@ -51,7 +53,7 @@ Deferred HDR：Lighting → SSR → DepthHaze → Volumetric → Transparent →
 8..64 次确定性中点积分，Beer–Lambert 消光 + HG 单次散射；一个按原场景索引选择的
 方向光／点光／Spot，方向光 CSM/Spot 读取本帧阴影；点光全向阴影仍不支持。
 全局或局部轴对齐盒介质，颜色为散射 albedo tint；天空参与积分，零密度无目标/绘制。
-首版全分辨率，无 froxel、噪声介质、多灯累计、多重散射或独立历史；
+首版全分辨率，无 froxel、纹理化流体模拟、多重散射或独立历史；
 透明自身尚未在介质中积分（在雾后合成），不冒充完整体积透明材质。
 
 ## 新画面能力：SSR v1（2026-10-06）

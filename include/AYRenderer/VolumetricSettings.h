@@ -19,6 +19,11 @@ struct VolumetricSettings {
     math::FVector3 center{0,0,0};
     math::FVector3 halfExtent{10,10,10};
     math::FVector3 tint{1,1,1};
+    /// Optional animated density variation. Zero keeps the original uniform
+    /// medium; positive strength modulates extinction and in-scattering.
+    float noiseStrength = 0;
+    float noiseScale = 0.2f; // cycles per world unit, [0.01,2]
+    float noiseTime = 0; // seconds, supplied by the host's show clock
 };
 inline VolumetricSettings sanitizeVolumetricSettings(VolumetricSettings s) noexcept {
     auto finite=[](float x,float fallback,float lo,float hi){return std::isfinite(x)?std::clamp(x,lo,hi):fallback;};
@@ -26,6 +31,9 @@ inline VolumetricSettings sanitizeVolumetricSettings(VolumetricSettings s) noexc
     s.anisotropy=finite(s.anisotropy,.2f,-.9f,.9f); s.maxDistance=finite(s.maxDistance,100,.1f,500);
     s.steps=std::clamp<uint8_t>(s.steps,8,64); s.lightIndex=std::min<uint8_t>(s.lightIndex,7); s.debugView=std::min<uint8_t>(s.debugView,2);
     for(int i=0;i<3;++i) {s.center[i]=finite(s.center[i],0,-100000,100000);s.halfExtent[i]=finite(s.halfExtent[i],10,.01f,10000);s.tint[i]=finite(s.tint[i],1,0,1);}
+    s.noiseStrength=finite(s.noiseStrength,0,0,1);
+    s.noiseScale=finite(s.noiseScale,.2f,.01f,2);
+    s.noiseTime=finite(s.noiseTime,0,-100000,100000);
     return s;
 }
 }
