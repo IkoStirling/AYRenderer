@@ -1,5 +1,15 @@
 # AYRenderer 测试维护
 
+## 2026-10-18 聚合Point与光通变焦
+
+Contracts149/149、964断言；Shader12/12、208断言通过，68生产变体重新烘焙并通过
+无编译器加载测试。D3D11 GPU44项中41通过、3项既有独占设备夹具跳过，17366断言通过；
+D3D12 Phoskia31/31、11027断言通过。新增CPU覆盖RGB/中心、乱序、预算/相同亮度、
+65536点上限及非法值原子失败；GPU覆盖实际聚合器输出到表面Pass和表面/体积光通强度。
+Renderer清单997项/10分区无遗漏或重复。性能及后续限制见项目灯光系统文档§7，
+本轮未做人工图片验收。日志：out/lighting-stage8-contracts-final.log、
+out/lighting-stage8-shaders.log、out/lighting-stage8-gpu-d3d11.log、out/lighting-stage8-gpu-d3d12.log。
+
 ## 2026-10-16 聚光灯数组 / 发光点演出
 
 Windows Debug：合入主线诊断显示后，renderer-full非GPU9组通过（124.72s）。

@@ -5,6 +5,8 @@
 #include <cmath>
 #include <iterator>
 #include <utility>
+#include <unordered_map>
+#include <numeric>
 
 namespace ayt::render {
 namespace {
@@ -67,6 +69,83 @@ bool selectVisiblePoints(std::span<const EmissivePoint> points,const math::Float
     if(error)error->clear();return true;
 }
 } // namespace
+
+bool buildEmissivePointLights(std::span<const EmissivePoint> points,
+    EmissivePointLightingSettings settings,std::vector<PerformanceLight>& output,
+    EmissivePointLightingStats& stats,std::string* error) {
+    const auto fail=[&](const char* message){if(error)*error=message;return false;};
+    const auto finite=[](float v,float lo,float hi){return std::isfinite(v)&&v>=lo&&v<=hi;};
+    if(points.size()>65536||settings.maxLights>64||!finite(settings.cellSize,.01f,10000)
+        ||!finite(settings.range,.01f,1000)||!finite(settings.intensityScale,0,100))
+        return fail("Invalid point lighting settings/budget");
+    bool canonical=true;
+    for(size_t i=0;i<points.size();++i){
+        const auto& p=points[i];
+        if(i&&points[i-1].id>=p.id)canonical=false;
+        for(int j=0;j<3;++j)if(!finite(p.position[j],-100000,100000)||!finite(p.color[j],0,10000))
+            return fail("Invalid point lighting position/color");
+        if(!finite(p.intensity,0,100000)||(!std::isfinite(p.radius)||p.radius<=0||p.radius>100))return fail("Invalid point lighting intensity/radius");
+    }
+    // Compiled shows already use increasing stable IDs. Arbitrary caller order
+    // is canonicalized only when necessary, retaining identical double sums.
+    std::vector<size_t> order;
+    if(!canonical){
+        order.resize(points.size());std::iota(order.begin(),order.end(),size_t(0));
+        std::sort(order.begin(),order.end(),[&](size_t a,size_t b){return points[a].id<points[b].id;});
+        for(size_t i=1;i<order.size();++i)if(points[order[i-1]].id==points[order[i]].id)return fail("Duplicate point lighting ID");
+    }
+    struct Key {
+        int x,y,z;
+        bool operator==(const Key&) const=default;
+        bool operator<(const Key& b) const {if(x!=b.x)return x<b.x;if(y!=b.y)return y<b.y;return z<b.z;}
+    };
+    struct Hash {size_t operator()(const Key& k) const noexcept {
+        return size_t(uint32_t(k.x))*73856093u^size_t(uint32_t(k.y))*19349663u^size_t(uint32_t(k.z))*83492791u;
+    }};
+    struct Cell {Key key;double rgb[3]{},center[3]{},energy=0;math::FVector3 position;float reach=0;};
+    std::vector<Cell> cells;cells.reserve(std::min<size_t>(points.size(),64));
+    std::unordered_map<Key,size_t,Hash> grid;grid.reserve(std::min<size_t>(points.size(),1024));
+    std::vector<size_t> membership(points.size(),size_t(-1));
+    EmissivePointLightingStats next;next.source=uint32_t(points.size());
+    for(size_t n=0;n<points.size();++n){
+        const size_t i=canonical?n:order[n];const auto& p=points[i];
+        const double weight=(.2126*p.color.x+.7152*p.color.y+.0722*p.color.z)*p.intensity*settings.intensityScale;
+        if(weight<=0)continue;
+        const Key key{int(std::floor(p.position.x/settings.cellSize)),int(std::floor(p.position.y/settings.cellSize)),int(std::floor(p.position.z/settings.cellSize))};
+        const auto [it,inserted]=grid.try_emplace(key,cells.size());
+        if(inserted)cells.push_back(Cell{key});
+        membership[i]=it->second;auto& cell=cells[it->second];cell.energy+=weight;++next.contributing;
+        for(int j=0;j<3;++j){cell.rgb[j]+=double(p.color[j])*p.intensity*settings.intensityScale;cell.center[j]+=p.position[j]*weight;}
+    }
+    for(auto& cell:cells){
+        cell.position={float(cell.center[0]/cell.energy),float(cell.center[1]/cell.energy),float(cell.center[2]/cell.energy)};
+        cell.reach=settings.range;
+    }
+    for(size_t i=0;i<points.size();++i)if(membership[i]!=size_t(-1)){
+        auto& cell=cells[membership[i]];cell.reach=std::max(cell.reach,settings.range+(points[i].position-cell.position).length());
+    }
+    struct Candidate {PerformanceLight light;double energy;Key key;};
+    const auto best=[](const Candidate& a,const Candidate& b){return a.energy>b.energy||(a.energy==b.energy&&a.key<b.key);};
+    std::vector<Candidate> selected;selected.reserve(settings.maxLights);
+    for(auto& cell:cells){
+        bool clamped=false;for(auto& c:cell.rgb){clamped|=c>1e9;c=std::min(c,1e9);}next.clampedCells+=clamped?1:0;
+        const float intensity=float(std::clamp(std::max({cell.rgb[0],cell.rgb[1],cell.rgb[2]}),1e-30,100000.0));
+        PerformanceLight light;light.volumetric=0;
+        light.light=Light::point(cell.position,std::min(cell.reach,10000.f),intensity,
+            {float(cell.rgb[0]/intensity),float(cell.rgb[1]/intensity),float(cell.rgb[2]/intensity)});
+        Candidate candidate{light,cell.energy,cell.key};
+        if(selected.size()<settings.maxLights){selected.push_back(candidate);std::push_heap(selected.begin(),selected.end(),best);}
+        else if(!selected.empty()&&best(candidate,selected.front())){
+            std::pop_heap(selected.begin(),selected.end(),best);selected.back()=candidate;std::push_heap(selected.begin(),selected.end(),best);
+        }
+    }
+    next.occupiedCells=uint32_t(cells.size());next.budgetSkipped=next.occupiedCells-uint32_t(selected.size());
+    std::sort(selected.begin(),selected.end(),[](const auto& a,const auto& b){return a.key<b.key;});
+    std::vector<PerformanceLight> lights;lights.reserve(selected.size());
+    for(auto& cell:selected){cell.light.id=uint32_t(lights.size());lights.push_back(cell.light);}
+    next.selectedLights=uint32_t(lights.size());output=std::move(lights);stats=next;
+    if(error)error->clear();return true;
+}
 
 bool buildEmissivePointBatches(std::span<const EmissivePoint> points,const math::Float4x4& view,
     const math::Float4x4& projection,uint16_t width,uint16_t height,EmissivePointSettings settings,

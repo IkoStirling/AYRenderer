@@ -7,6 +7,7 @@ namespace ayt::render {
 enum class LightPattern : uint8_t { Open, Stripes, Grid, Ring, Star, Texture };
 struct PerformanceLight {
     uint32_t id = 0;
+    /// Point entries require volumetric=0, Open pattern and castShadow=false.
     Light light;
     float volumetric = 1;
     LightPattern pattern = LightPattern::Open;
@@ -26,6 +27,10 @@ struct PerformanceLight {
     /// their radii grow as apertureRadius + axialDistance * tan(halfAngle).
     /// Shadow projection remains a point-source approximation.
     float apertureRadius = 0;
+    /// Normalize the far-field angular flux during zoom relative to a 2deg core /
+    /// 3deg field Spot at the same intensity. Iris/Gobo still absorb energy.
+    /// Finite aperture near-field and shadows remain geometric approximations.
+    bool constantFlux = false;
 };
 struct PerformanceLightBudget {
     uint16_t surfaceLights = 64;
@@ -37,7 +42,7 @@ struct PerformanceLightStats {
     uint32_t culledLights=0, surfaceBudgetSkipped=0, volumeBudgetSkipped=0;
 };
 /// Renderer-owned validated immutable-for-dispatch light packet. Local Spot
-/// lights only; max256, sorted by descending priority then original order.
+/// and surface-only Point lights; max256, sorted by descending priority then original order.
 /// Shadow projections remain a separately bounded 0..8 atlas resource.
 struct PerformanceLighting {
     std::vector<PerformanceLight> lights;
@@ -50,6 +55,8 @@ struct PerformanceLighting {
                 std::string* error = nullptr);
 };
 struct LightScreenRect { uint16_t x=0,y=0,width=0,height=0; bool visible=false; };
+/// Radiant intensity multiplier shared by surface and volume; Point returns1.
+float performanceLightFluxScale(const PerformanceLight& light) noexcept;
 void performanceLightBounds(const PerformanceLight& light,math::FVector3& center,math::FVector3& halfExtent);
 /// Conservative projected range bounds. Near-plane intersections use the full
 /// viewport; scissor never clips an in-range surface or scattering sample.

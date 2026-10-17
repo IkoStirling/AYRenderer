@@ -120,6 +120,8 @@ material PerformanceSurface {
   let L=outward*-1.0
   let axial=dot(delta,performanceDirection.xyz)
   let projected=vec2(dot(delta,performanceRight.xyz),dot(delta,performanceUp.xyz))/max(performanceCone.w+axial*performanceCone.z,0.00001)
+  let beam=1.0;let pattern=1.0
+  if(performanceDirection.w<0.5){
   let textureMask=1.0
   if(performancePatternSettings.x>4.5){
    let goboUv=performanceGoboUv(projected,performancePatternSettings)
@@ -134,9 +136,11 @@ material PerformanceSurface {
    }
    textureMask=dot(texel.rgb,vec3(0.2126,0.7152,0.0722))*texel.a*inside
   }
-  let pattern=performancePattern(projected,performancePatternSettings,performancePatternOptics,textureMask)
+  pattern=performancePattern(projected,performancePatternSettings,performancePatternOptics,textureMask)
+  beam=performanceBeamProfile(delta,performanceDirection.xyz,performanceCone,performanceRight.w)
+  }
   let falloff=clamp(1.0-distance/performancePosition.w,0.0,1.0)
-  let attenuation=falloff*falloff/max(distance*distance,max(0.01,performanceCone.w*performanceCone.w))*performanceBeamProfile(delta,performanceDirection.xyz,performanceCone,performanceRight.w)*pattern
+  let attenuation=falloff*falloff/max(distance*distance,max(0.01,performanceCone.w*performanceCone.w))*beam*pattern
   let visibility=1.0
   if(performanceShadowSettings.x>0.5){
    let clip=performanceShadow*vec4(position.xyz,1.0)

@@ -10,6 +10,7 @@
 #include "detail/ShaderPoolSetup.h"
 #include "AYShader/detail/ComputeResourceAccess.h"
 #include <AYIO/File.h>
+#include <AYRenderer/EmissivePointCloud.h>
 #include <AYMath/MathUtils.h>
 #include "detail/BGFXAdapter.h"
 #include "detail/FullscreenPassGeometry.h"
@@ -413,6 +414,53 @@ TEST_CASE(performance_pass_rebinds_inputs_for_each_light_and_accumulates_both_co
 #endif
 }
 
+TEST_CASE(performance_flux_zoom_scales_actual_surface_submission) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    checkPixels(f.render("","return vec4(0.0)"),{0,0,0,0});
+    const auto albedo=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),world=f.input({0,0,0,1}),coverage=f.input({0,0,0,1});
+    RenderResourceBlackboard blackboard;blackboard.beginFrame();blackboard.publishGBuffer(f.target,albedo,normal,world,coverage,coverage,4,4,1,true);
+    ayt::render::PerformanceLight red,blue;red.id=1;red.constantFlux=true;red.light=ayt::render::Light::spot({0,0,-2},{0,0,1},10,1000,.95f,.8f,{1,0,0});
+    blue=red;blue.id=2;blue.light.color={0,0,1};const std::array lights{red,blue};
+    ayt::render::PerformanceLighting packet;CHECK(packet.assign(lights,{}));
+    ayt::render::RenderScene scene;std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;
+    std::unordered_map<uint64_t,GpuMaterial> materials;FrameContext frame;frame.cameraPosition={0,0,-1};
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.performanceLights=&packet;ctx.resourceBlackboard=&blackboard;
+    configureFullscreenPassView(f.adapter,8,f.target,0,0,4,4);
+    PerformanceLightPass pass;CHECK(pass.execute(ctx)==2);
+    const double scale=(2.0-std::cos(2.0*3.141592653589793/180)-std::cos(3.0*3.141592653589793/180))/(2.0-double(.95f)-double(.8f));
+    const float expected=float(.97/3.141592653589793*160*scale);checkPixels(f.readImage(f.targetTexture,9),{expected,0,expected,0});
+    pass.destroy(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(performance_point_pass_lights_surfaces_outside_spot_axis) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    checkPixels(f.render("","return vec4(0.0)"),{0,0,0,0});
+    const auto albedo=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),world=f.input({0,0,0,1}),coverage=f.input({0,0,0,1});
+    RenderResourceBlackboard blackboard;blackboard.beginFrame();blackboard.publishGBuffer(f.target,albedo,normal,world,coverage,coverage,4,4,1,true);
+    const std::array<ayt::render::EmissivePoint,2> points{{{9,{0,0,-2},{1,0,0},10,.1f},{42,{0,0,-2},{0,0,1},10,.1f}}};
+    ayt::render::EmissivePointLightingSettings settings;settings.intensityScale=1;settings.range=10;
+    ayt::render::EmissivePointLightingStats stats;std::vector<ayt::render::PerformanceLight> lights;
+    CHECK(ayt::render::buildEmissivePointLights(points,settings,lights,stats));CHECK(stats.contributing==2);CHECK(stats.selectedLights==1);
+    ayt::render::PerformanceLighting packet;CHECK(packet.assign(lights,{}));
+    ayt::render::RenderScene scene;std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;
+    std::unordered_map<uint64_t,GpuMaterial> materials;FrameContext frame;frame.cameraPosition={0,0,-1};
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.performanceLights=&packet;ctx.resourceBlackboard=&blackboard;
+    configureFullscreenPassView(f.adapter,8,f.target,0,0,4,4);
+    PerformanceLightPass pass;CHECK(pass.execute(ctx)==1);
+    const float expected=float(.97/3.141592653589793*1.6);checkPixels(f.readImage(f.targetTexture,9),{expected,0,expected,0});
+    pass.destroy(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
 TEST_CASE(performance_volume_real_pass_extinguishes_once_and_adds_two_light_colors) {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
@@ -434,6 +482,36 @@ TEST_CASE(performance_volume_real_pass_extinguishes_once_and_adds_two_light_colo
     double radiance=0,transmission=1;const double stepT=std::exp(-.1/32);
     for(int i=0;i<32;++i){const double z=(i+.5)/32.,distance=std::sqrt(.25*.25*2+(20+z)*(20+z));const double cutoff=1-distance/100;
         radiance+=transmission*(1-stepT)*.8*10000*cutoff*cutoff/(distance*distance)/(4*3.141592653589793);transmission*=stepT;}
+    const double base=2*std::exp(-.1);
+    CHECK(pixels.size()==16);for(const auto& p:pixels){CHECK(std::abs(p[0]-(base+radiance))<.003);CHECK(std::abs(p[1]-base)<.003);CHECK(std::abs(p[2]-(base+radiance))<.003);CHECK(p[3]==1);}
+    pass.destroyResources(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(performance_flux_zoom_scales_actual_volume_submission) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    checkPixels(f.render("","return vec4(2.0,2.0,2.0,1.0)"),{2,2,2,1});
+    const auto albedo=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),world=f.input({0,0,0,1}),sky=f.input({0,0,0,0});
+    RenderResourceBlackboard blackboard;blackboard.beginFrame();blackboard.publishGBuffer(f.target,albedo,normal,world,sky,sky,4,4,1,true);
+    blackboard.publishProduced(BlackboardResourceId::LightingColor,BlackboardResourceLifetime::External,f.target,f.targetTexture,4,4,1);
+    FrameGraph graph(f.adapter);PostProcessGraphPlanInput input;input.width=input.height=4;input.finalLdr=true;input.sceneColor=f.target;input.gbuffer=f.target;input.volumetric=true;
+    CHECK(buildPostProcessGraphPlan(graph,input).compileSucceeded);
+    ayt::render::PerformanceLight red,blue;red.id=1;red.constantFlux=true;red.light=ayt::render::Light::spot({0,0,-20},{0,0,1},100,10000,.99f,.98f,{1,0,0});
+    blue=red;blue.id=2;blue.light.color={0,0,1};const std::array lights{red,blue};ayt::render::PerformanceLighting packet;CHECK(packet.assign(lights,{}));
+    ayt::render::RenderScene scene;std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;
+    std::unordered_map<uint64_t,GpuMaterial> materials;FrameContext frame;frame.volumetric.enabled=true;frame.volumetric.density=.1f;frame.volumetric.scattering=.8f;frame.volumetric.anisotropy=0;frame.volumetric.steps=32;
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.sceneFbo=f.target;ctx.performanceLights=&packet;ctx.resourceBlackboard=&blackboard;ctx.frameGraph=&graph;
+    VolumetricPass pass;CHECK(pass.execute(ctx)==3);CHECK(packet.stats.volumeDraws==2);
+    const auto output=f.adapter.getFboAttachment(graph.resolve(FgResourceId::VolumetricColor),0);
+    const auto pixels=f.render("texture2d result","return sample(result,vec2(0.5,0.5))",[&](const auto& p){auto b=p.getTextureBinding("result");p.setTexture(p.getTextureStage(b),b,toShaderTexture(output));},34);
+    double radiance=0,transmission=1;const double stepT=std::exp(-.1/32);
+    for(int i=0;i<32;++i){const double z=(i+.5)/32.,distance=std::sqrt(.25*.25*2+(20+z)*(20+z));const double cutoff=1-distance/100;
+        radiance+=transmission*(1-stepT)*.8*10000*cutoff*cutoff/(distance*distance)/(4*3.141592653589793);transmission*=stepT;}
+    radiance*=(2.0-std::cos(2.0*3.141592653589793/180)-std::cos(3.0*3.141592653589793/180))/(2.0-double(.99f)-double(.98f));
     const double base=2*std::exp(-.1);
     CHECK(pixels.size()==16);for(const auto& p:pixels){CHECK(std::abs(p[0]-(base+radiance))<.003);CHECK(std::abs(p[1]-base)<.003);CHECK(std::abs(p[2]-(base+radiance))<.003);CHECK(p[3]==1);}
     pass.destroyResources(f.adapter);

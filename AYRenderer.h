@@ -251,7 +251,7 @@ public:
     // light via FrameContext — see setDirectionalLight above).
     void setSceneLights(const SceneLights* lights);
 
-    /// Owned Spot-light packet for the main Deferred view. Replaces direct
+    /// Owned Spot/surface-only Point packet for the main Deferred view. Replaces direct
     /// scene lighting while active; ambient/IBL is retained. Empty clears it.
     /// Copy/validate before publication, max256; false preserves old state.
     /// Texture-pattern lights require a live Renderer-owned goboTexture; keep

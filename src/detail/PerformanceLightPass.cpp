@@ -13,7 +13,7 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         || !ctx.adapter.isInitialized() || ctx.adapter.isNoopBackend())return 0;
     BlackboardGBufferView gb;
     if(!ctx.resourceBlackboard->resolveGBuffer(gb) || !_geometry.ensure(ctx.adapter))return 0;
-    if(!_program.isValid())_program=ctx.pool.acquire(kPerformanceSurfaceSource,"performance_surface_v5_gobo_soft_shadow");
+    if(!_program.isValid())_program=ctx.pool.acquire(kPerformanceSurfaceSource,"performance_surface_v6_point");
     if(!_program.isValid())return 0;
     bool valid=true;
     const auto texture=[&](const char* name,bgfx::TextureHandle handle){
@@ -47,8 +47,9 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         const auto axis=std::abs(d.y)>.99f?math::FVector3(0,0,1):math::FVector3(0,1,0);
         const auto right=axis.cross(d).normalize();const auto up=d.cross(right).normalize();
         vector("performancePosition",l.position.x,l.position.y,l.position.z,l.range);
-        vector("performanceDirection",d.x,d.y,d.z,0);
-        vector("performanceColor",l.color.x*l.intensity,l.color.y*l.intensity,l.color.z*l.intensity,0);
+        vector("performanceDirection",d.x,d.y,d.z,l.type==LightType::Point?1.f:0.f);
+        const float intensity=l.intensity*performanceLightFluxScale(entry);
+        vector("performanceColor",l.color.x*intensity,l.color.y*intensity,l.color.z*intensity,0);
         vector("performanceCone",l.coneCosInner,l.coneCosOuter,std::tan(std::acos(l.coneCosOuter)),entry.apertureRadius);
         vector("performanceRight",right.x,right.y,right.z,std::tan(std::acos(l.coneCosInner)));vector("performanceUp",up.x,up.y,up.z,0);
         vector("performancePatternSettings",float(entry.pattern),entry.patternRotation,entry.patternScale,0);

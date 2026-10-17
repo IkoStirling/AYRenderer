@@ -490,3 +490,22 @@ Module-local regression sources were updated. Runtime tests and interactive edit
 UIRenderBackend::debugClip exposes the actual effective logical rectangular clip and stencil/path depth during an active frame through the optional UI backend observation seam. It returns invalid outside a frame; it does not infer path outlines. Screen diagnostics render through UI while world diagnostics retain the existing renderer debug line path.
 
 Regression sources are included. Runtime tests and interactive editor acceptance are deferred for this content task; untested changes remain uncommitted.
+
+## 2026-10-18 聚合点阵表面光与变焦光通
+
+`buildEmissivePointLights`（EmissivePointCloud.h）把最多65536个有限HDR点按世界网格合并，
+稳定ID决定累加顺序，线性RGB功率相加，亮度加权求中心，范围为配置range加本单元最大偏移
+并限于10000。cellSize[.01,10000]、range[.01,1000]、intensityScale[0,100]；
+最多64个候选灯使用有界堆，亮单元优先、相同亮度按单元坐标排序；输入排序与视锥预算不改变结果。
+已按稳定ID排序的点阵以哈希网格平均O(N)聚合；任意顺序输入先按ID排序，O(N log N)。
+点到单元映射与稀疏累加器为O(N)，候选灯临时存储O(maxLights)，没有逐点SceneLight。
+超过1e9的单元RGB分量夹取，clampedCells显式报告；非法数据/重复ID不替换输出及统计。
+
+setPerformanceLights现在接收Spot和仅表面Point，仍共享256项/表面预算；Point要求
+volumetric=0、Open、无阴影且constantFlux关闭，使用球形范围AABB/scissor和同一GGX通道，
+不扩大旧八灯ABI，不产生体积光。EmissivePointCloud本身仍只提交可见发光；聚合需宿主显式接入。
+这不是逐点GI，不能表达遮挡或网格跨界的连续变化；预算排名变化也可跳变。
+
+PerformanceLight.constantFlux默认关闭，开启时performanceLightFluxScale按
+(2-cos(2°)-cos(3°))/(2-coneCosInner-coneCosOuter)缩放表面和体积强度。
+这是smoothstep角度轮廓的解析归一化；Gobo/iris仍损失光通，有限口径近场不是物理光学。

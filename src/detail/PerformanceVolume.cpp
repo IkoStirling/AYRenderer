@@ -69,7 +69,8 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         vector("fogLightPosition",light.position.x,light.position.y,light.position.z,float(light.type));
         const auto direction=light.spotDirection;
         vector("fogLightDirection",direction.x,direction.y,direction.z,light.range);
-        vector("fogLightColor",light.color.x*light.intensity*entry.volumetric,light.color.y*light.intensity*entry.volumetric,light.color.z*light.intensity*entry.volumetric,0);
+        const float intensity=light.intensity*entry.volumetric*performanceLightFluxScale(entry);
+        vector("fogLightColor",light.color.x*intensity,light.color.y*intensity,light.color.z*intensity,0);
         vector("fogSpot",light.coneCosInner,light.coneCosOuter,std::tan(std::acos(light.coneCosOuter)),entry.apertureRadius);
         const auto axis=std::abs(direction.y)>.99f?math::FVector3(0,0,1):math::FVector3(0,1,0);
         const auto right=axis.cross(direction).normalize(),up=direction.cross(right).normalize();

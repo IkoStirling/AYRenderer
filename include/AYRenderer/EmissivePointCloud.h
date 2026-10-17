@@ -1,5 +1,6 @@
 #pragma once
 #include <AYRenderer/RenderScene.h>
+#include <AYRenderer/PerformanceLighting.h>
 #include <span>
 #include <string>
 namespace ayt::render {
@@ -10,6 +11,24 @@ struct EmissivePoint {
     math::FVector3 color{1,1,1};
     float intensity=4,radius=.05f;
 };
+/// Optional surface-light approximation, independent of visible-point sampling.
+/// World-anchored cells sum linear RGB energy at a luminance-weighted center.
+struct EmissivePointLightingSettings {
+    uint16_t maxLights=16; // [0,64]; zero disables aggregation.
+    float cellSize=8, range=20, intensityScale=.01f;
+};
+struct EmissivePointLightingStats {
+    uint32_t source=0, contributing=0, occupiedCells=0, selectedLights=0, budgetSkipped=0, clampedCells=0;
+};
+/// Build at most64 unshadowed, non-volumetric Point lights from <=65536 points.
+/// Brightest cells win, ties use lexicographic cell coordinates; stable IDs fix
+/// accumulation order. No camera/visibility budget affects illumination. Cell
+/// transitions and budget changes can pop; this is not per-point GI/occlusion.
+/// Invalid values/duplicate IDs leave output and stats intact. RGB above1e9
+/// per cell clamps with an explicit counter. Output IDs are local [0,N).
+bool buildEmissivePointLights(std::span<const EmissivePoint> points,
+    EmissivePointLightingSettings settings,std::vector<PerformanceLight>& output,
+    EmissivePointLightingStats& stats,std::string* error=nullptr);
 struct EmissivePointSettings {
     float minimumPixelRadius=.75f;
     bool preserveEnergy=true;

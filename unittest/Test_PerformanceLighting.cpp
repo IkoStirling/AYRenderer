@@ -14,6 +14,64 @@ PerformanceLight light(uint32_t id) {
 }
 }
 TEST_SUITE(PerformanceLightingTests)
+TEST_CASE(constant_flux_zoom_preserves_angular_integral_and_defaults_off) {
+    auto p=light(1);CHECK(performanceLightFluxScale(p)==1);p.constantFlux=true;
+    const double reference=2.0-std::cos(2.0*3.141592653589793/180)-std::cos(3.0*3.141592653589793/180);
+    for(float outer:{.02f,.052359878f,.3f,1.2f}){
+        p.light.coneCosInner=std::cos(outer*.6666667f);p.light.coneCosOuter=std::cos(outer);
+        const double integral=2.0-double(p.light.coneCosInner)-p.light.coneCosOuter;
+        CHECK(std::abs(performanceLightFluxScale(p)*integral-reference)<1e-9);
+    }
+    p.light=Light::point({0,0,0},5,1,{1,1,1});CHECK(performanceLightFluxScale(p)==1);
+}
+TEST_CASE(point_aggregation_preserves_rgb_energy_centroid_and_input_order) {
+    std::vector<EmissivePoint> points{{9,{1,1,1},{1,0,0},4,.1f},{2,{3,1,1},{0,0,1},8,.1f},
+        {7,{-1,1,1},{0,1,0},2,.1f},{8,{40,0,0},{1,1,1},0,.1f}};
+    EmissivePointLightingSettings settings;settings.intensityScale=1;
+    std::vector<PerformanceLight> lights,reverse;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));
+    CHECK(stats.source==4);CHECK(stats.contributing==3);CHECK(stats.occupiedCells==2);CHECK(lights.size()==2);
+    const auto& mix=lights[1].light;CHECK(mix.type==LightType::Point);
+    CHECK(std::abs(mix.color.x*mix.intensity-4)<1e-5f);CHECK(std::abs(mix.color.z*mix.intensity-8)<1e-5f);
+    const double x=(1*.2126*4+3*.0722*8)/(.2126*4+.0722*8);
+    CHECK(std::abs(mix.position.x-x)<1e-5);CHECK(mix.range>settings.range);
+    std::reverse(points.begin(),points.end());CHECK(buildEmissivePointLights(points,settings,reverse,stats));
+    CHECK(reverse[1].light.position.x==mix.position.x);CHECK(reverse[1].light.color.z==mix.color.z);
+    PerformanceLighting packet;CHECK(packet.assign(lights,{}));CHECK(packet.stats.shadowLights==0);
+    ayt::math::FVector3 center,extent;performanceLightBounds(packet.lights[1],center,extent);
+    CHECK(center.x==mix.position.x);CHECK(extent.x==mix.range);CHECK(extent.z==mix.range);
+}
+TEST_CASE(point_aggregation_selects_brightest_cells_and_rejects_bad_values_transactionally) {
+    std::vector<EmissivePoint> points{{1,{1,0,0},{1,0,0},1,.1f},{2,{21,0,0},{1,0,0},10,.1f}};
+    EmissivePointLightingSettings settings;settings.maxLights=1;settings.intensityScale=1;
+    std::vector<PerformanceLight> lights;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));
+    CHECK(lights.size()==1);CHECK(lights[0].light.position.x==21);CHECK(stats.budgetSkipped==1);
+    points[0].id=2;CHECK(!buildEmissivePointLights(points,settings,lights,stats));CHECK(lights[0].light.position.x==21);
+    points[0].id=1;points[0].intensity=std::numeric_limits<float>::infinity();
+    CHECK(!buildEmissivePointLights(points,settings,lights,stats));CHECK(stats.budgetSkipped==1);
+    points[0].intensity=1;settings.cellSize=0;CHECK(!buildEmissivePointLights(points,settings,lights,stats));
+    settings.cellSize=8;settings.maxLights=65;CHECK(!buildEmissivePointLights(points,settings,lights,stats));
+    settings.maxLights=0;CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(lights.empty());
+    settings.maxLights=16;points[0].color={10000,10000,10000};points[0].intensity=100000;settings.intensityScale=100;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(stats.clampedCells==1);
+    PerformanceLighting packet;CHECK(packet.assign(lights,{}));
+    auto point=lights[0];point.light.castShadow=true;CHECK(!packet.assign({&point,1},{}));
+    point.light.castShadow=false;point.volumetric=1;CHECK(!packet.assign({&point,1},{}));
+}
+
+TEST_CASE(point_aggregation_caps_sparse_maximum_input_and_ties_by_cell_coordinate) {
+    std::vector<EmissivePoint> points(65536);
+    for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].position={float(i),0,0};points[i].intensity=1;}
+    EmissivePointLightingSettings settings;settings.cellSize=1;settings.maxLights=64;
+    std::vector<PerformanceLight> lights,shuffled;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(lights.size()==64);
+    CHECK(stats.occupiedCells==65536);CHECK(stats.budgetSkipped==65472);
+    CHECK(lights.front().light.position.x==0);CHECK(lights.back().light.position.x==63);
+    std::reverse(points.begin(),points.end());CHECK(buildEmissivePointLights(points,settings,shuffled,stats));
+    CHECK(shuffled.front().light.position.x==0);CHECK(shuffled.back().light.position.x==63);
+    points.push_back(points[0]);CHECK(!buildEmissivePointLights(points,settings,shuffled,stats));CHECK(shuffled.size()==64);
+}
 TEST_CASE(finite_aperture_expands_conservative_bounds_and_is_validated) {
     auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,1};
     p.apertureRadius=.2f;ayt::math::FVector3 center,extent;performanceLightBounds(p,center,extent);

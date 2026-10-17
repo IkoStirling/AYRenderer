@@ -14,13 +14,14 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
     for(const auto& entry:source) {
         const auto& l=entry.light;
         const auto finite=[](float v,float a,float b){return std::isfinite(v)&&v>=a&&v<=b;};
-        if(!ids.insert(entry.id).second || l.type!=LightType::Spot || !finite(l.range,.01f,10000)
-            || !finite(l.intensity,0,100000) || !finite(l.coneCosOuter,.001f,.999999f)
-            || !finite(l.coneCosInner,l.coneCosOuter+.000001f,1)
+        if(!ids.insert(entry.id).second || (l.type!=LightType::Spot&&l.type!=LightType::Point) || !finite(l.range,.01f,10000)
+            || !finite(l.intensity,0,100000) || (l.type==LightType::Spot&&(!finite(l.coneCosOuter,.001f,.999999f)
+            || !finite(l.coneCosInner,l.coneCosOuter+.000001f,1)))
             || !finite(l.shadowBias,0,1) || !finite(entry.volumetric,0,100)
             || !finite(entry.patternRotation,-100000,100000) || !finite(entry.patternScale,.01f,100)
             || !finite(entry.patternFocus,0,1) || !finite(entry.iris,.01f,1)
             || !finite(entry.apertureRadius,0,1) || !finite(entry.shadowSoftness,0,4)
+            || (l.type==LightType::Point&&(l.castShadow||entry.volumetric!=0||entry.pattern!=LightPattern::Open||entry.constantFlux))
             || entry.pattern>LightPattern::Texture
             || (entry.pattern==LightPattern::Texture&&!entry.goboTexture.isValid()))
             return fail("Invalid performance Spot light");
@@ -28,8 +29,11 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
             || !finite(l.spotDirection[i],-100000,100000)) return fail("Invalid light position/color/direction");
         auto copy=entry;
         const float length=l.spotDirection.length();
-        if(length<.00001f) return fail("Zero Spot direction");
-        copy.light.spotDirection=copy.light.spotDirection/length;
+        if(l.type==LightType::Point){copy.light.spotDirection={0,-1,0};copy.light.coneCosInner=.95f;copy.light.coneCosOuter=.8f;}
+        else {
+            if(length<.00001f) return fail("Zero Spot direction");
+            copy.light.spotDirection=copy.light.spotDirection/length;
+        }
         next.lights.push_back(copy);
     }
     std::stable_sort(next.lights.begin(),next.lights.end(),[](const auto& a,const auto& b){return a.priority>b.priority;});
@@ -47,8 +51,17 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
     if(next.shadowSources.count==0)next.shadowSources.add(Light::directional({0,-1,0},{0,0,0}));
     *this=std::move(next);if(error)error->clear();return true;
 }
+float performanceLightFluxScale(const PerformanceLight& light) noexcept {
+    if(!light.constantFlux||light.light.type!=LightType::Spot)return 1;
+    // Integral of smoothstep across cosine space is exactly half its interval.
+    // The common 2*pi factor cancels. Double avoids narrow-cone cancellation.
+    constexpr double reference=2.0-0.9993908270190958-0.9986295347545738;
+    const double solidAngle=2.0-double(light.light.coneCosInner)-double(light.light.coneCosOuter);
+    return float(reference/std::max(solidAngle,1e-9));
+}
 void performanceLightBounds(const PerformanceLight& entry,math::FVector3& center,math::FVector3& halfExtent) {
     const auto& light=entry.light;const auto d=light.spotDirection;
+    if(light.type==LightType::Point){center=light.position;halfExtent={light.range,light.range,light.range};return;}
     const auto base=light.position+d*light.range;
     const float radius=entry.apertureRadius+light.range*std::tan(std::acos(light.coneCosOuter));
     for(int i=0;i<3;++i) {
