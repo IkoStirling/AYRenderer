@@ -73,6 +73,21 @@ ColorStylizationSettings colorStylizationPreset(ColorStylizationPreset preset) n
             result.display.grainStrength=.08f;result.display.vignetteStrength=.3f;
         }
         break;
+    case ColorStylizationPreset::Afterimage:
+    case ColorStylizationPreset::StopMotion:
+    case ColorStylizationPreset::TileRefresh:
+    case ColorStylizationPreset::TimeEcho:
+        result.enabled=true;result.pixelationEnabled=false;result.posterizationEnabled=false;
+        result.temporal.enabled=true;
+        if(preset==ColorStylizationPreset::StopMotion) {
+            result.temporal.mode=TemporalFeedbackMode::FrameHold;result.temporal.holdFrames=5;
+        } else if(preset==ColorStylizationPreset::TileRefresh) {
+            result.temporal.mode=TemporalFeedbackMode::TileHold;result.temporal.holdFrames=8;
+        } else if(preset==ColorStylizationPreset::TimeEcho) {
+            result.temporal.historyWeight=.9f;result.temporal.historyOffsetX=2;
+            result.temporal.historyOffsetY=.5f;
+        }
+        break;
     default: break;
     }
     return result;
@@ -109,6 +124,7 @@ ColorStylizationSettings sanitizeColorStylization(ColorStylizationSettings value
     value.outlineStrength=finiteClamp(value.outlineStrength,0,1,1);
     value.outlineColor=color(value.outlineColor);
     value.display=sanitizeAnalogDisplay(value.display);
+    value.temporal=sanitizeTemporalFeedback(value.temporal);
     return value;
 }
 

@@ -826,8 +826,8 @@ void TAAPass::finishFrame(MotionVectorPass* motion,
     if (!_producedThisFrame) {
         invalidateHistory(ResourceInvalidationReason::ProducerFailure);
         if (blackboard != nullptr) {
-            blackboard->invalidateTemporal(
-                ResourceInvalidationReason::ProducerFailure);
+            for(auto id:{BlackboardResourceId::MotionVectors,BlackboardResourceId::TaaHistoryRead,
+                BlackboardResourceId::TaaHistoryWrite})blackboard->invalidate(id,ResourceInvalidationReason::ProducerFailure);
         }
         if (motion != nullptr) {
             motion->invalidateHistory();

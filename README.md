@@ -1,5 +1,18 @@
 # AYRenderer
 
+## 时间风格与动态内容（2026-10-19）
+
+新增Afterimage、StopMotion、TileRefresh和TimeEcho起点，左右箭头遍历十六个look。
+TemporalFeedback独立处理残影混合、整帧停格和有界分块刷新，可与色板、印刷和显示效果组合。
+保持周期按成功主视图提交计数，1..120帧；分块4..128物理像素，每块每周期更新一次。
+两个RGBA8历史按视口尺寸独占；切镜、尺寸/原点变化、失败输入后从当前帧重启；禁用释放。
+`resetStylizationHistory()`只重置艺术历史；镜头跳转使用`notifyCameraCut()`处理全部历史。
+历史偏移超出视口时使用当前像素，不在窗口其他区域采样；没有运动补偿或持久内容缓存。
+
+`--motion-gallery --hidden --output <directory>`输出两管线的原画和四种时间效果，每段32张、
+固定1/30秒推进、每3帧取样的3.2秒序列。一次F9截图即可，PNG在GPU回调完成后的endFrame生成，
+shutdown做最终收尾；请求队列上限32。
+
 ## 主视口背景与着色路径一致性（2026-10-19 修正）
 
 `beginFrame(clear)` / `beginCompositeFrame(clear,...)` 的 clear RGBA 现在传递给主场景。
@@ -16,7 +29,7 @@ Forward 自定义光照算法和 Deferred 统一 PBR 并不等价；画廊统一
 ## 风格化创作工具箱（2026-10-19）
 
 `setColorStylizationSettings` 复制并清洗完整look，状态跨重建/resize保留；默认关闭。
-主视图顺序为 AA → StylizedOutline → ColorGrading → ColorStylization → AnalogDisplay → Present → Editor/UI。
+主视图顺序为 AA → StylizedOutline → ColorGrading → ColorStylization → TemporalFeedback → AnalogDisplay → Present → Editor/UI。
 轮廓与颜色有独立gate和输出，关闭时不声明节点/目标，不做identity draw。
 独立renderViews/preview不运行该链；所有颜色处理包含已合成的主视口背景，窗口外部与UI不参与。
 
@@ -28,7 +41,7 @@ Forward 自定义光照算法和 Deferred 统一 PBR 并不等价；画廊统一
 | Outline | 亮度边缘、相对view-depth轮廓、Deferred法线折痕；Forward DepthNormal使用depth，缺少几何输入时旁路 |
 
 颜色内部顺序：像素中心 → Bayer/颜色映射 → 印刷。轮廓在这之前合成，因而可接受分级、色板与印刷。
-所有阶段保留输入alpha；geometry coverage不裁切整幅颜色效果。轮廓只读取可用不透明深度/法线，
+颜色、轮廓及显示阶段保留采样alpha，时间反馈对RGBA一同混合；其他阶段保留输入alpha；geometry coverage不裁切整幅颜色效果。轮廓只读取可用不透明深度/法线，
 透明表面、内部隐藏线和超出视口的内容不能由这个屏幕空间效果恢复。
 PixelRetro/LowColor/DitherRetro之外增加Pocket、Sunset、Noir、Comic、Engraving、Blueprint。
 Blueprint使用共有的depth模式；法线折痕需要显式选择，避免预设暗中引入Forward/Deferred差异。
@@ -42,16 +55,16 @@ std::string error;
 ayt::render::saveColorStylizationLook("sunset.rsl", look, &error);
 ```
 
-包含 `AYRenderer/ColorStylizationLook.h` 使用版本1 `.rsl`配置：64 KiB上限，完整字段、严格类型/
+包含 `AYRenderer/ColorStylizationLook.h` 使用版本3 `.rsl`配置（兼容完整1/2，旧组默认关闭）：64 KiB上限，完整字段、严格类型/
 范围/版本检查，失败不替换输出；保存使用AYIO原子替换。没有路径引用或GPU对象，不自动接入
 ResourceManager/Cook/Pak。Editor Render面板可编辑参数与hex色板、保存/加载项目内look、重置；
 用户偏好schema8保留完整控制，作品文件可独立共享，不改变Scene序列化。
 
 Windows `AYRenderer_ColorStylizationDemo` 含彩色展台、Noir城市、动作角色和机械工坊，无外部素材。
 0..9切换look，F切换管线，Space冻结，G切换分级，F9截图。
-`--gallery --hidden --output <directory>` 导出两管线各十二张；`--d3d12`切换后端；
-`--write-presets`写出十二个`.rsl`，`--look <file.rsl>`加载自定义配置。
-离线catalog包括实际两个阶段的shader。验证入口见[测试说明](docs/testing.md)。
+`--gallery --hidden --output <directory>` 导出两管线各十六张；`--d3d12`切换后端；
+`--write-presets`写出十六个`.rsl`，`--look <file.rsl>`加载自定义配置。
+离线catalog包括实际四个阶段的shader。验证入口见[测试说明](docs/testing.md)。
 
 ## 相机视口与输出（2026-10-14）
 
@@ -62,7 +75,7 @@ createCameraOutput/cameraOutputTexture/destroyCameraOutput 管理可采样颜色
 独立视图不使用主视图的 Deferred、TAA/Motion/曝光历史或编辑器选中视图；WorldLit2D
 在显式 Forward batch 中拒绝。详见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
 CPU/Noop 用例 CameraViews；独立 D3D11 读回用例 CameraViewsGpu。
-离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为142。
+离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为141。
 
 ## Deferred Decal v1（2026-10-06）
 

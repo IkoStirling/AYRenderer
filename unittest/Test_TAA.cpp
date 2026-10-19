@@ -79,7 +79,7 @@ TEST_CASE(taa_append_only_abi_resource_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::TAA) == 19u);
     CHECK(static_cast<uint8_t>(FgResourceId::TaaColor) == 12u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 34u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 36u);
     CHECK(ayt::render::detail::TAAPass::kTaaViewId == 5u);
     CHECK(std::is_final_v<ayt::render::detail::TAAPass>);
 }
@@ -103,7 +103,7 @@ TEST_CASE(taa_is_deferred_only_and_sits_between_postprocess_and_spatial_aa)
         CHECK(fxaa == taa + 1u);
         CHECK(smaa == fxaa + 1u);
         CHECK(grading == smaa + 2u);
-        CHECK(present == grading + 3u);
+        CHECK(present == grading + 4u);
     }
 }
 
@@ -433,6 +433,24 @@ TEST_CASE(taa_phoskia_source_compiles_for_d3d11_and_d3d12)
     CHECK(program.success);
     CHECK(!program.vsBin.empty());
     CHECK(!program.fsBin.empty());
+}
+
+TEST_CASE(local_taa_failure_preserves_exposure_and_stylized_feedback_history)
+{
+    using namespace ayt::render::detail;
+    RenderResourceBlackboard bb;
+    for(auto id:{BlackboardResourceId::TaaHistoryRead,BlackboardResourceId::AutoExposureRead,
+        BlackboardResourceId::FeedbackHistoryRead,BlackboardResourceId::FeedbackHistoryWrite})
+        bb.publish(id,BlackboardResourceLifetime::PersistentHistory,{51},{52},8,8,1,true);
+    TAAPass pass;pass.finishFrame(nullptr,&bb);
+    CHECK_FALSE(bb.find(BlackboardResourceId::TaaHistoryRead)->contentValid);
+    CHECK(bb.find(BlackboardResourceId::AutoExposureRead)->contentValid);
+    CHECK(bb.find(BlackboardResourceId::FeedbackHistoryRead)->contentValid);
+    CHECK(bb.find(BlackboardResourceId::FeedbackHistoryWrite)->contentValid);
+    bb.invalidateTemporal(ResourceInvalidationReason::CameraCut);
+    CHECK_FALSE(bb.find(BlackboardResourceId::AutoExposureRead)->contentValid);
+    CHECK_FALSE(bb.find(BlackboardResourceId::FeedbackHistoryRead)->contentValid);
+    CHECK_FALSE(bb.find(BlackboardResourceId::FeedbackHistoryWrite)->contentValid);
 }
 
 TEST_SUITE_END

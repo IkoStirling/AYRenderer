@@ -6,6 +6,10 @@
 #include <bx/file.h>
 
 #include <cstdio>
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 
 namespace ayt::render::detail
 {
@@ -58,29 +62,59 @@ std::string screenshotPngPath(const std::string& basePath)
     return basePath + ".png";
 }
 
-void finalizeScreenshotSidecar(const std::string& basePath)
+bool finalizeScreenshotSidecar(const std::string& captureBase,const std::string& outputBase)
 {
-    if (basePath.empty()) {
-        return;
-    }
+    if(captureBase.empty() || outputBase.empty())return false;
 
-    const std::string tgaPath = screenshotTgaPath(basePath);
-    const std::string pngPath = screenshotPngPath(basePath);
+    const std::string tgaPath = screenshotTgaPath(captureBase);
+    const std::string pngPath = screenshotPngPath(outputBase);
+
+    // bgfx's default callback writes an uncompressed 32-bit TGA. Require the
+    // complete pixel payload before decoding; its file can exist while still writing.
+    std::ifstream input(tgaPath,std::ios::binary|std::ios::ate);
+    if(!input)return false;
+    const auto bytes=input.tellg();input.seekg(0);
+    uint8_t header[18]{};input.read(reinterpret_cast<char*>(header),18);
+    if(!input || header[2]!=2 || header[1]!=0 || (header[16]!=24 && header[16]!=32))return false;
+    const uint32_t width=header[12]|(uint32_t(header[13])<<8),height=header[14]|(uint32_t(header[15])<<8);
+    const uint64_t expected=18u+header[0]+uint64_t(width)*height*(header[16]/8);
+    if(!width || !height || bytes<0 || uint64_t(bytes)<expected)return false;
+    input.close();
 
     const DecodedImage image = decodeImageFile(tgaPath);
     if (image.rgba8.empty()) {
-        std::fprintf(stderr, "[Renderer] screenshot missing or unreadable: %s\n", tgaPath.c_str());
-        return;
+        return false;
     }
-
-    std::fprintf(stderr, "[Renderer] screenshot saved: %s (%ux%u)\n",
-                 tgaPath.c_str(), image.width, image.height);
 
     if (writePngFromRgba8(pngPath, image.width, image.height, image.rgba8.data())) {
         std::fprintf(stderr, "[Renderer] screenshot saved: %s (%ux%u)\n",
                      pngPath.c_str(), image.width, image.height);
-    } else {
-        std::fprintf(stderr, "[Renderer] screenshot PNG sidecar failed: %s\n", pngPath.c_str());
+        if(captureBase!=outputBase) {
+            std::error_code error;
+            std::filesystem::copy_file(tgaPath,screenshotTgaPath(outputBase),std::filesystem::copy_options::overwrite_existing,error);
+            if(error)std::fprintf(stderr,"[Renderer] screenshot TGA sidecar copy failed: %s\n",error.message().c_str());
+            std::filesystem::remove(tgaPath,error);
+        }
+        return true;
+    }
+    return false;
+}
+
+std::string ScreenshotCaptureQueue::enqueue(const std::string& outputBase) {
+    if(full() || outputBase.empty())return {};
+    static std::atomic<uint64_t> serial{uint64_t(std::chrono::steady_clock::now().time_since_epoch().count())};
+    auto capture=outputBase+".aycapture-"+std::to_string(serial.fetch_add(1,std::memory_order_relaxed));
+    _pending.push_back({capture,outputBase,_frame});return capture;
+}
+void ScreenshotCaptureQueue::advance(bool finalAttempt) {
+    ++_frame;
+    while(!_pending.empty()) {
+        const auto& request=_pending.front();
+        if(finalizeScreenshotSidecar(request.capture,request.output)) {_pending.pop_front();continue;}
+        if(!finalAttempt && _frame-request.submitted<120)return;
+        std::fprintf(stderr,"[Renderer] screenshot callback incomplete or PNG unwritable: %s\n",request.output.c_str());
+        std::error_code error;std::filesystem::remove(screenshotTgaPath(request.capture),error);
+        _pending.pop_front();
     }
 }
 

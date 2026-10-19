@@ -444,11 +444,16 @@ public:
     ColorGradingPreset colorGradingPreset() const noexcept;
 
     /// Main Forward/Deferred looks: independent outline after AA, then grading,
-    /// color mapping and print. UI remains outside these image transformations.
+    /// color mapping/print, temporal feedback and display simulation. UI remains outside.
     /// Owner-thread copied settings are sanitized and survive pipeline rebuilds.
     /// Disabled/identity settings omit the graph target and draw. Explicit renderViews
-    /// do not run this post chain. Alpha is preserved; Bayer uses virtual pixel cells.
+    /// do not run this post chain. Color/outline preserve sampled alpha; feedback blends
+    /// RGBA over time. Bayer uses virtual pixel cells. Active feedback owns two RGBA8
+    /// history targets and releases them when disabled; resize/cuts reset their content.
     void setColorStylizationSettings(const ColorStylizationSettings& settings);
+    /// Drop only stylized feedback history (not TAA/exposure), e.g. for an art
+    /// direction transition. Camera cuts should use notifyCameraCut for all histories.
+    void resetStylizationHistory();
     /// Returns the copied, sanitized settings, including when the stage is bypassed.
     ColorStylizationSettings colorStylizationSettings() const noexcept;
 
@@ -569,8 +574,11 @@ public:
     void resetDebugOverlayStats();
     const RenderFrameStats& getFrameStats() const noexcept;
 
-    // Queue a backbuffer capture for this frame. Call after render(), before endFrame().
-    // Writes {base}.tga via bgfx, then {base}.png on the main thread after the frame.
+    /// Queue a backbuffer capture for this frame. Call after render(), before endFrame().
+    /// The last request before endFrame wins. Returns false for an invalid backend/empty path
+    /// or a full (32 in-flight captures) queue. Accepted does not imply disk success.
+    /// Writes {base}.tga and {base}.png after the asynchronous GPU callback completes;
+    /// subsequent endFrame calls drain results, and shutdown performs a final drain.
     bool captureScreenshot(const std::string& filePath);
 
     // RD-07: path-cache introspection for unit tests / diagnostics.

@@ -22,6 +22,7 @@
 #include "detail/ColorStylizationPass.h"
 #include "detail/StylizedOutlinePass.h"
 #include "detail/AnalogDisplayPass.h"
+#include "detail/TemporalFeedbackPass.h"
 #include "detail/RenderViewOrder.h"
 #include "detail/DeferredDecalVisibility.h"
 #include "detail/PostProcessGraphPlan.h"
@@ -507,6 +508,163 @@ TEST_CASE(analog_display_real_pass_physical_mask_and_channel_offsets) {
         if(mismatch)std::cerr<<"Display variant="<<variant<<" mismatches="<<mismatch<<'\n';
         CHECK(mismatch==0);
     }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(temporal_feedback_real_pass_sequences_and_history_lifecycle) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    configureRenderViewOrder(f.adapter);
+    using BytePixel=std::array<uint8_t,4>;using Image=std::array<BytePixel,64>;
+    TemporalFeedbackPass pass;FrameGraph graph(f.adapter);RenderResourceBlackboard bb;
+    struct Cleanup{TemporalFeedbackPass& p;BGFXAdapter& a;~Cleanup(){p.destroyResources(a);}} cleanup{pass,f.adapter};
+    auto readback=bgfx::createTexture2D(8,8,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
+    f.textures.push_back(readback);CHECK(bgfx::isValid(readback));
+    FrameContext frame;ayt::render::RenderScene scene;
+    std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;
+    std::unordered_map<uint64_t,GpuMaterial> materials;
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,8,8,frame,0};
+    ctx.frameGraph=&graph;ctx.resourceBlackboard=&bb;
+    const auto run=[&](const Image& data,bool invalidRead=false,bool produced=true) {
+        auto texture=bgfx::createTexture2D(8,8,false,1,bgfx::TextureFormat::RGBA8,
+            BGFX_TEXTURE_RT|BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(data.data(),sizeof(data)));
+        f.textures.push_back(texture);auto source=bgfx::createFrameBuffer(1,&texture,false);
+        struct SourceCleanup{bgfx::FrameBufferHandle h;~SourceCleanup(){if(bgfx::isValid(h))bgfx::destroy(h);}} sourceCleanup{source};
+        CHECK(bgfx::isValid(source));bb.beginFrame();
+        const bool ready=pass.prepareFrame(f.adapter,f.pool,frame,ctx.viewportX,ctx.viewportY,8,8,&bb);CHECK(ready);
+        if(!ready)return Image{};
+        graph.beginFrame(8,8);graph.importExternal(FgResourceId::FinalLdrColor,source);
+        graph.importExternal(FgResourceId::FeedbackHistory,pass.readFbo());
+        graph.importExternal(FgResourceId::TemporalColor,pass.writeFbo());
+        graph.addPass({"Feedback",{FgResourceId::FinalLdrColor,FgResourceId::FeedbackHistory},{FgResourceId::TemporalColor},true});
+        graph.addPass({"Present",{FgResourceId::TemporalColor},{},true,true});
+        graph.setResolvedSemantic(FgSemantic::PresentSource,FgResourceId::FinalLdrColor);
+        CHECK(graph.compile());
+        if(invalidRead)bb.invalidate(BlackboardResourceId::FeedbackHistoryRead,ResourceInvalidationReason::CameraCut);
+        if(produced)graph.markProduced(FgResourceId::FinalLdrColor);
+        const auto draws=pass.execute(ctx);CHECK(draws==(produced?1u:0u));pass.finishFrame(&bb);
+        if(draws!=1)return Image{};
+        const auto output=graph.resolveSemantic(FgSemantic::PresentSource);CHECK(output.idx==pass.readFbo().idx);
+        CHECK(bb.findProduced(BlackboardResourceId::FeedbackHistoryWrite)!=nullptr);
+        bgfx::blit(55,readback,0,0,f.adapter.getFboAttachment(output,0));Image actual{};
+        const auto readyFrame=bgfx::readTexture(readback,actual.data());
+        for(int i=0;i<120 && f.adapter.gpuFrameCounter()<readyFrame;++i)f.adapter.endFrame();
+        CHECK(f.adapter.gpuFrameCounter()>=readyFrame);return actual;
+    };
+    const auto compare=[&](const Image& actual,const Image& expected,int mode,int step) {
+        int mismatch=0;for(size_t i=0;i<64;++i)for(size_t c=0;c<4;++c)
+            if(std::abs(int(actual[i][c])-int(expected[i][c]))>1)++mismatch;
+        if(mismatch)std::cerr<<"Feedback mode="<<mode<<" step="<<step<<" mismatches="<<mismatch<<'\n';
+        CHECK(mismatch==0);
+    };
+    const auto phase=[](int x,int y,int seed,int period) {
+        int u=(x+seed%251)%251,v=(y+seed/251)%251;
+        int rank=(u*67+v*131)%251;rank=(rank*rank*3+u*v*11+u*29+v*73)%251;
+        return int(std::floor((rank+.5f)/251*period));
+    };
+    ayt::render::ColorStylizationSettings look;look.enabled=true;look.temporal.enabled=true;
+    look.temporal.historyWeight=.5f;look.temporal.tileSize=4;look.temporal.noiseSeed=7;
+    Image expected{};
+    for(int mode=0;mode<3;++mode) {
+        look.temporal.mode=static_cast<ayt::render::TemporalFeedbackMode>(mode);
+        look.temporal.holdFrames=mode==2?4:3;pass.setSettings(look);pass.invalidateHistory();
+        expected={};
+        for(int step=0;step<8;++step) {
+            const BytePixel current={uint8_t(25+20*step),uint8_t(55+10*step),uint8_t(200-15*step),uint8_t(60+20*step)};
+            Image data;data.fill(current);
+            for(int y=0;y<8;++y)for(int x=0;x<8;++x)for(int c=0;c<4;++c) {
+                auto& value=expected[y*8+x][c];
+                if(step==0)value=current[c];
+                else if(mode==0)value=uint8_t(std::lround((float(value)+current[c])*.5f));
+                else if(mode==1 && step%3==0)value=current[c];
+                else if(mode==2 && step%4==phase(x/4,y/4,7,4))value=current[c];
+            }
+            compare(run(data),expected,mode,step);CHECK(pass.historyValid());CHECK(pass.completedFrames()==uint64_t(step+1));
+        }
+    }
+    Image fresh;fresh.fill({180,120,60,200});
+    compare(run(fresh,true),fresh,3,0);CHECK(pass.completedFrames()==1);
+    frame.cameraPosition.x+=10;fresh.fill({80,40,120,100});compare(run(fresh),fresh,3,1);CHECK(pass.completedFrames()==1);
+    ctx.viewportX=13;ctx.viewportY=9;fresh.fill({40,80,140,160});compare(run(fresh),fresh,3,2);CHECK(pass.completedFrames()==1);
+    (void)run(fresh,false,false);CHECK_FALSE(pass.historyValid());
+    compare(run(fresh),fresh,3,3);CHECK(pass.completedFrames()==1);
+    look.temporal.mode=ayt::render::TemporalFeedbackMode::Afterimage;look.temporal.historyOffsetX=1;pass.setSettings(look);pass.invalidateHistory();
+    Image first;first.fill({0,0,0,100});for(int y=0;y<8;++y)first[y*8+4]={200,0,0,100};
+    compare(run(first),first,4,0);
+    Image second;second.fill({0,0,0,200});Image shifted=second;
+    for(int y=0;y<8;++y)for(int x=0;x<7;++x){shifted[y*8+x][3]=150;if(x==3)shifted[y*8+x][0]=100;}
+    compare(run(second),shifted,4,1);
+    const auto generation=pass.generation();
+    CHECK(pass.prepareFrame(f.adapter,f.pool,frame,13,9,7,5,&bb));CHECK(pass.generation()>generation);CHECK_FALSE(pass.historyValid());
+    pass.finishFrame(&bb);look.enabled=false;pass.setSettings(look);pass.releaseHistory(f.adapter,&bb);
+    CHECK_FALSE(bgfx::isValid(pass.readFbo()));CHECK_FALSE(bgfx::isValid(pass.writeFbo()));CHECK_FALSE(pass.historyValid());
+    pass.destroyResources(f.adapter);pass.destroyResources(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(temporal_feedback_main_pipelines_hold_reset_and_scope_to_viewport) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    HWND window=CreateWindowExW(0,L"STATIC",L"Main temporal integration",WS_OVERLAPPED,
+        0,0,160,120,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window);if(!window)return;
+    struct WindowCleanup{HWND h;~WindowCleanup(){DestroyWindow(h);}} windowCleanup{window};
+    using namespace ayt::render;
+    Renderer renderer;InitDesc init;init.windowHandle=window;init.width=160;init.height=120;init.msaa=0;init.vsync=false;
+    init.backend=std::string(backend)=="d3d12"?Backend::Direct3D12:Backend::Direct3D11;
+    CHECK(renderer.initialize(init));if(!renderer.isInitialized())return;
+    renderer.setPostProcessGamma(1);renderer.setPostProcessExposure(1);renderer.setPostProcessTonemapMode(Renderer::TonemapMode::None);
+    renderer.setMainCamera(ayt::math::Float4x4::identity(),ayt::math::Float4x4::identity(),{0,0,-2});
+    const char* requested=std::getenv("AY_TEMPORAL_CAPTURE_DIRECTORY");
+    const auto root=requested?std::filesystem::path(requested)/backend:std::filesystem::temp_directory_path()/
+        (std::string("ay-temporal-")+backend+"-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    const float colors[6][3]={{.2f,.4f,.6f},{.7f,.2f,.1f},{.1f,.6f,.3f},{.3f,.1f,.7f},{.6f,.5f,.1f},{.1f,.5f,.8f}};
+    const int inputColor[7]={0,1,1,2,3,4,5},heldColor[7]={0,0,1,2,3,4,4};
+    RenderScene scene;
+    for(bool deferred:{false,true}) {
+        renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());
+        renderer.setShadowsEnabled(false);renderer.setFxaaEnabled(false);renderer.setSmaaEnabled(false);renderer.setTaaEnabled(false);
+        ColorStylizationSettings look;look.enabled=true;look.pixelationEnabled=false;look.posterizationEnabled=false;
+        look.temporal.enabled=true;look.temporal.mode=TemporalFeedbackMode::FrameHold;look.temporal.holdFrames=120;
+        renderer.setColorStylizationSettings(look);
+        for(int phase=0;phase<7;++phase) {
+            const bool composite=phase>=4;const int ox=phase>=5?19:composite?13:0,oy=phase>=5?13:composite?9:0;
+            const int width=composite?128:160,height=composite?96:120;
+            renderer.setViewportRect(uint16_t(ox),uint16_t(oy),uint16_t(width),uint16_t(height));
+            if(phase==2)renderer.resetStylizationHistory();if(phase==3)renderer.notifyCameraCut();
+            ClearDesc clear;clear.r=colors[inputColor[phase]][0];clear.g=colors[inputColor[phase]][1];clear.b=colors[inputColor[phase]][2];
+            const auto path=root/((deferred?std::string("deferred-"):std::string("forward-"))+std::to_string(phase)+".png");
+            for(int step=0;step<12;++step) {
+                // Reapplying disabled AA controls must not erase another effect's history.
+                renderer.setFxaaEnabled(false);renderer.setSmaaEnabled(false);renderer.setTaaEnabled(false);
+                if(composite)renderer.beginCompositeFrame(clear,160,120);else renderer.beginFrame(clear);
+                renderer.render(scene);
+                if(step==5)CHECK(renderer.captureScreenshot(path.string()));renderer.endFrame();
+                // Per-pass diagnostics publish in endFrame; reading them earlier observes the previous frame.
+                CHECK(renderer.getFrameStats().graph.compileSucceeded);
+                uint32_t draws=0;for(const auto& pass:renderer.getFrameStats().passes)if(pass.name=="TemporalFeedback")draws+=pass.drawCalls;
+                if(draws!=1)std::cerr<<"Feedback draw missing path="<<deferred<<" phase="<<phase<<" step="<<step<<'\n';
+                CHECK(draws==1);
+            }
+            const auto image=decodeImageFile(path.string());CHECK(image.width==160&&image.height==120);
+            if(image.rgba8.size()!=160*120*4){CHECK(false);continue;}
+            int errors=0;for(int y=0;y<120;++y)for(int x=0;x<160;++x)for(int c=0;c<4;++c) {
+                const bool inside=x>=ox&&y>=oy&&x<ox+width&&y<oy+height;
+                const int index=inside?heldColor[phase]:inputColor[phase];
+                const int expected=c==3?255:int(uint8_t(colors[index][c]*255));
+                if(std::abs(int(image.rgba8[(y*160+x)*4+c])-expected)>1)++errors;
+            }
+            if(errors)std::cerr<<"Main feedback path="<<deferred<<" phase="<<phase<<" errors="<<errors<<'\n';
+            CHECK(errors==0);
+        }
+    }
+    renderer.shutdown();
 #else
     SKIP_TEST("Windows device fixture required");
 #endif

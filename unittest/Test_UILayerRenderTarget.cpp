@@ -36,7 +36,7 @@ TEST_CASE(UIRenderBackend_LayerHandlesComplexPaintReuseAndDeviceReset)
     CHECK_TRUE(ui.supportsRenderTargets());
     CHECK(UIRenderBackend::kFirstLayerViewId == 32);
     CHECK(UIRenderBackend::kLastLayerViewId == 242);
-    CHECK(UIRenderBackend::kMaxOffscreenPaintsPerFrame == 142);
+    CHECK(UIRenderBackend::kMaxOffscreenPaintsPerFrame == 141);
     CHECK(UIRenderBackend::kFirstLayerViewId < UIRenderBackend::kLastLayerViewId);
     CHECK(UIRenderBackend::kLastLayerViewId < UIRenderBackend::kViewId);
 

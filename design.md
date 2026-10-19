@@ -1,5 +1,22 @@
 # AYRenderer Design
 
+## 2026-10-19 — 独立艺术历史与截图完成队列
+
+TemporalFeedback slot28/view53，FG TemporalColor34/FeedbackHistory35，Count36。
+GPU固定顺序为color50 → feedback53 → display52 → Present16；总view remap66，UI单Pass预算141。
+history FBO由Pass拥有，FrameGraph仅借用导入。prepare检查当前viewport/camera和程序binding，
+execute仅在本帧PresentSource成功生产时读取；submit后交换ping/pong并推进成功帧序号。
+无有效history时previous绑定current且historyAvailable=0，不读未初始化内存；失败不发布旧输出。
+Blackboard读/写条目携带generation和尺寸，外部失效可在prepare/execute之间生效。
+FrameHold按序号模N刷新；TileHold通过共享有界程序噪声分配0..N-1相位，每块每周期恰好更新一次。
+全局切镜仍统一失效；AA局部设置/TAAPass失败只清Motion/TAA条目，避免跨效果重置。
+颜色/轮廓/反馈/显示的设置与销毁通过visitStylePasses统一枚举，避免生命周期hook漏加。
+Look v3追加temporal，完整v1/v2迁移填默认关闭；文件不持久化GPU历史或帧序号。
+
+ScreenshotCaptureQueue为每次请求生成独立callback路径，避免读到同名旧TGA；完整header/像素
+payload后才转换，FIFO保护同目标覆盖次序。最多32项、120次endFrame重试，无阻塞等待；
+adapter.shutdown完成回调后最终排空。保留公开PNG/TGA文件名，删除成功的私有callback文件。
+
 ## 2026-10-19 — Deferred 投影盒保守可见性
 
 `DeferredDecalVisibility` 在主渲染的 FrameGraph 导入之前，按原 descriptor 顺序记录最多16个
@@ -31,7 +48,7 @@ GPU view64..111分配三Pass连续区间，原主管线/编辑器/粒子view保�
 RendererSubSystem在每视图自己的相机/aspect下提取OwnedCpu packet后恢复主视口；
 主镜头3D mask在presentation副本过滤，原Scene完整保留。该路径明确为Forward，
 完整Deferred多视图仍需独立的Pass/FrameGraph/blackboard/历史与view命名空间设计。
-UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，最大单Pass预算142；
+UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，最大单Pass预算141；
 constexpr容量与公开上限静态交叉检查，防止布局变更后重用同帧GPU view。
 范围、使用方式与实际验收见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
 

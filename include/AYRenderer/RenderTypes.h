@@ -465,6 +465,7 @@ enum class RenderPassSlot : uint8_t {
     /// Optional image/depth/normal contours after AA and before grading.
     StylizedOutline = 26,
     AnalogDisplay = 27,
+    TemporalFeedback = 28,
 };
 
 enum class ColorGradingPreset : uint8_t {

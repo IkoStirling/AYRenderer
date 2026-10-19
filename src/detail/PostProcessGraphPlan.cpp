@@ -129,6 +129,7 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     graph.setExecutionEligibility(RenderPassSlot::ColorStylization, input.colorStylization);
     graph.setExecutionEligibility(RenderPassSlot::StylizedOutline, input.stylizedOutline);
     graph.setExecutionEligibility(RenderPassSlot::AnalogDisplay, input.analogDisplay);
+    graph.setExecutionEligibility(RenderPassSlot::TemporalFeedback, input.temporalFeedback);
 
     if (input.ssao || input.taa || input.ssr || input.volumetric || input.decals || input.stylizationNormals) {
         // These are multiple logical views of one pass-owned MRT. FrameGraph
@@ -421,6 +422,14 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
             {result.presentationSource},{FgResourceId::StylizedColor},true,false,
             executionSlot(RenderPassSlot::ColorStylization)});
         result.presentationSource = FgResourceId::StylizedColor;
+    }
+
+    if(input.temporalFeedback) {
+        graph.importExternal(FgResourceId::FeedbackHistory,input.feedbackReadHistory);
+        graph.importExternal(FgResourceId::TemporalColor,input.feedbackWriteTarget);
+        graph.addPass({contractName(RenderPassSlot::TemporalFeedback),{result.presentationSource,FgResourceId::FeedbackHistory},
+            {FgResourceId::TemporalColor},true,true,executionSlot(RenderPassSlot::TemporalFeedback)});
+        result.presentationSource=FgResourceId::TemporalColor;
     }
 
     if(input.analogDisplay) {

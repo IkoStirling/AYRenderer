@@ -1,5 +1,6 @@
 #pragma once
 #include "AYRenderer/AnalogDisplaySettings.h"
+#include "AYRenderer/TemporalFeedbackSettings.h"
 
 #include <algorithm>
 #include <array>
@@ -48,6 +49,7 @@ struct ColorStylizationSettings {
     float outlineStrength = 1;
     StylizationColor outlineColor{.015f,.02f,.04f};
     AnalogDisplaySettings display;
+    TemporalFeedbackSettings temporal;
 };
 
 enum class ColorStylizationPreset : uint8_t {
@@ -63,6 +65,10 @@ enum class ColorStylizationPreset : uint8_t {
     Blueprint = 9,
     Arcade = 10,
     Broadcast = 11,
+    Afterimage = 12,
+    StopMotion = 13,
+    TileRefresh = 14,
+    TimeEcho = 15,
 };
 
 /// Construct a reusable runtime/editor look. Neutral and unknown values bypass.

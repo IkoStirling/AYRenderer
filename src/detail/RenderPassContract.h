@@ -53,6 +53,8 @@ enum class RenderPassResourceId : uint8_t {
     StylizedColor,
     OutlinedColor,
     DisplayColor,
+    TemporalColor,
+    FeedbackHistory,
     Count,
 };
 

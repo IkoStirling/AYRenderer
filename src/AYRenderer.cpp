@@ -9,6 +9,7 @@
 #include "detail/ColorStylizationPass.h"
 #include "detail/StylizedOutlinePass.h"
 #include "detail/AnalogDisplayPass.h"
+#include "detail/TemporalFeedbackPass.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
 #include "detail/BloomPipeline.h"
@@ -113,6 +114,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::StylizedOutline,
         RenderPassSlot::ColorGrading,
         RenderPassSlot::ColorStylization,
+        RenderPassSlot::TemporalFeedback,
         RenderPassSlot::AnalogDisplay,
         RenderPassSlot::Present,
         RenderPassSlot::UI,
@@ -130,6 +132,15 @@ RenderPipelineDesc RenderPipelineDesc::makeForwardWithShadows()
 
 namespace {
 
+template<class Visitor>
+void visitStylePasses(detail::RenderPipeline& pipeline,Visitor&& visitor)
+{
+    if(auto* p=pipeline.findPass<detail::ColorStylizationPass>())visitor(*p);
+    if(auto* p=pipeline.findPass<detail::StylizedOutlinePass>())visitor(*p);
+    if(auto* p=pipeline.findPass<detail::TemporalFeedbackPass>())visitor(*p);
+    if(auto* p=pipeline.findPass<detail::AnalogDisplayPass>())visitor(*p);
+}
+
 void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
 {
     auto ppIt = std::find(desc.passes.begin(), desc.passes.end(),
@@ -143,6 +154,8 @@ void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
         if (fxaaIt != desc.passes.end() && fxaaIt > insertAfter) {
             insertAfter = fxaaIt;
         }
+        const auto feedbackIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::TemporalFeedback);
+        if(feedbackIt!=desc.passes.end() && feedbackIt>insertAfter)insertAfter=feedbackIt;
         const auto displayIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::AnalogDisplay);
         if(displayIt!=desc.passes.end() && displayIt>insertAfter)insertAfter=displayIt;
         const auto outlineIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::StylizedOutline);
@@ -243,6 +256,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::StylizedOutline,
         RenderPassSlot::ColorGrading,
         RenderPassSlot::ColorStylization,
+        RenderPassSlot::TemporalFeedback,
         RenderPassSlot::AnalogDisplay,
         RenderPassSlot::Present,
         RenderPassSlot::UI,
@@ -291,6 +305,8 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::StylizedOutlinePass>();
     case RenderPassSlot::AnalogDisplay:
         return std::make_unique<detail::AnalogDisplayPass>();
+    case RenderPassSlot::TemporalFeedback:
+        return std::make_unique<detail::TemporalFeedbackPass>();
     case RenderPassSlot::ColorGrading:
         return std::make_unique<detail::ColorGradingPass>();
     case RenderPassSlot::Present:
@@ -439,7 +455,7 @@ struct Renderer::Impl {
     uint32_t                      lastDrawCalls   = 0;
     uint32_t                      lastSceneItems  = 0;
     std::string                   pendingScreenshotBase;
-    std::string                   finalizeScreenshotBase;
+    detail::ScreenshotCaptureQueue screenshotCaptures;
 
     ayt::math::Float4x4           mainView        = ayt::math::Float4x4::identity();
     ayt::math::Float4x4           mainProjection  = ayt::math::Float4x4::identity();
@@ -574,13 +590,9 @@ struct Renderer::Impl {
 
     void applyColorStylizationKnobs()
     {
-        if (auto* pass = pipeline.findPass<detail::ColorStylizationPass>()) {
-            pass->setSettings(colorStylization);
-        }
-        if (auto* pass = pipeline.findPass<detail::StylizedOutlinePass>()) {
-            pass->setSettings(colorStylization);
-        }
-        if(auto* pass=pipeline.findPass<detail::AnalogDisplayPass>())pass->setSettings(colorStylization);
+        visitStylePasses(pipeline,[&](auto& pass){pass.setSettings(colorStylization);});
+        if(auto* feedback=pipeline.findPass<detail::TemporalFeedbackPass>();feedback && !feedback->active())
+            feedback->releaseHistory(adapter,&resourceBlackboard);
     }
 
     void applyEditorOverlayKnobs()
@@ -601,6 +613,7 @@ struct Renderer::Impl {
         detail::ResourceInvalidationReason reason)
     {
         resourceBlackboard.invalidateTemporal(reason);
+        if(auto* feedback=pipeline.findPass<detail::TemporalFeedbackPass>())feedback->invalidateHistory(reason);
         if (detail::TAAPass* taa = pipeline.findPass<detail::TAAPass>()) {
             taa->invalidateHistory(reason);
         }
@@ -612,6 +625,14 @@ struct Renderer::Impl {
                 pipeline.findPass<detail::AutoExposurePass>()) {
             exposure->invalidateHistory(reason);
         }
+    }
+
+    void invalidateAaHistory(detail::ResourceInvalidationReason reason)
+    {
+        for(auto id:{detail::BlackboardResourceId::MotionVectors,detail::BlackboardResourceId::TaaHistoryRead,
+            detail::BlackboardResourceId::TaaHistoryWrite})resourceBlackboard.invalidate(id,reason);
+        if(auto* taa=pipeline.findPass<detail::TAAPass>())taa->invalidateHistory(reason);
+        if(auto* motion=pipeline.findPass<detail::MotionVectorPass>())motion->invalidateHistory();
     }
 
     void applyAntiAliasingKnobs()
@@ -626,7 +647,7 @@ struct Renderer::Impl {
             taa->setEnabled(taaEnabled);
             taa->setDebugView(taaDebugView);
             if (!taaEnabled) {
-                invalidateTemporalResources(
+                invalidateAaHistory(
                     detail::ResourceInvalidationReason::FeatureDisabled);
             }
         }
@@ -957,17 +978,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
-    if(auto* display=pipeline.findPass<detail::AnalogDisplayPass>()) {
-        if(adapter.isInitialized())display->destroyResources(adapter);
-    }
-    if (auto* outline=pipeline.findPass<detail::StylizedOutlinePass>()) {
-        if(adapter.isInitialized())outline->destroyResources(adapter);
-    }
-    if (auto* style = pipeline.findPass<detail::ColorStylizationPass>()) {
-        if (adapter.isInitialized()) {
-            style->destroyResources(adapter);
-        }
-    }
+    if(adapter.isInitialized())visitStylePasses(pipeline,[&](auto& pass){pass.destroyResources(adapter);});
 
     if (detail::PresentPass* presentPass =
             pipeline.findPass<detail::PresentPass>()) {
@@ -1276,17 +1287,7 @@ void Renderer::shutdown()
         }
     }
 
-    if(auto* display=_impl->pipeline.findPass<detail::AnalogDisplayPass>()) {
-        if(_impl->adapter.isInitialized())display->destroyResources(_impl->adapter);
-    }
-    if (auto* outline=_impl->pipeline.findPass<detail::StylizedOutlinePass>()) {
-        if(_impl->adapter.isInitialized())outline->destroyResources(_impl->adapter);
-    }
-    if (auto* style = _impl->pipeline.findPass<detail::ColorStylizationPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            style->destroyResources(_impl->adapter);
-        }
-    }
+    if(_impl->adapter.isInitialized())visitStylePasses(_impl->pipeline,[&](auto& pass){pass.destroyResources(_impl->adapter);});
 
     if (detail::PresentPass* presentPass =
             _impl->pipeline.findPass<detail::PresentPass>()) {
@@ -1340,6 +1341,8 @@ void Renderer::shutdown()
     _impl->resources.shutdown();
     _impl->shaderPool.shutdown();
     _impl->adapter.shutdown();
+    _impl->screenshotCaptures.advance(true);
+    _impl->pendingScreenshotBase.clear();
     _impl->shaderPoolReady = false;
 }
 
@@ -1992,6 +1995,21 @@ void Renderer::render(const RenderScene& scene)
     graphInput.colorGrading = colorGradingStageEnabled;
     graphInput.colorStylization = finalLdrStageEnabled && colorStylizationPassPtr
         && colorStylizationPassPtr->isEnabled() && colorStylizationPassPtr->active();
+    auto* feedbackPass=_impl->pipeline.findPass<detail::TemporalFeedbackPass>();
+    if(feedbackPass && feedbackPass->isEnabled() && feedbackPass->active()) {
+        if(finalLdrStageEnabled) {
+            graphInput.temporalFeedback=feedbackPass->prepareFrame(_impl->adapter,_impl->shaderPool,frame,
+                _impl->viewportX,_impl->viewportY,_impl->viewportW,_impl->viewportH,&_impl->resourceBlackboard);
+            if(graphInput.temporalFeedback) {
+                graphInput.feedbackReadHistory=feedbackPass->readFbo();
+                graphInput.feedbackWriteTarget=feedbackPass->writeFbo();
+            }
+        } else {
+            feedbackPass->invalidateHistory(detail::ResourceInvalidationReason::ProducerFailure);
+            _impl->resourceBlackboard.invalidate(detail::BlackboardResourceId::FeedbackHistoryRead,detail::ResourceInvalidationReason::ProducerFailure);
+            _impl->resourceBlackboard.invalidate(detail::BlackboardResourceId::FeedbackHistoryWrite,detail::ResourceInvalidationReason::ProducerFailure);
+        }
+    }
     const auto* displayPass=_impl->pipeline.findPass<detail::AnalogDisplayPass>();
     graphInput.analogDisplay=finalLdrStageEnabled && displayPass && displayPass->isEnabled() && displayPass->active();
     auto* outlinePassPtr=_impl->pipeline.findPass<detail::StylizedOutlinePass>();
@@ -2143,6 +2161,7 @@ void Renderer::render(const RenderScene& scene)
     // cleanly when the adapter is uninitialized or Noop.
     detail::configureRenderViewOrder(_impl->adapter);
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
+    if(feedbackPass)feedbackPass->finishFrame(&_impl->resourceBlackboard);
     // Commit temporal state as a pair. A skipped/failed resolve must not
     // leave color at t-2 while motion advances to t-1; a failed motion pass
     // must likewise never reuse its old object snapshots on the next frame.
@@ -2513,8 +2532,8 @@ void Renderer::endFrame()
 
     _impl->cameraFrameOpen = false;
     if (!_impl->pendingScreenshotBase.empty()) {
-        _impl->adapter.requestScreenshot(_impl->pendingScreenshotBase);
-        _impl->finalizeScreenshotBase = _impl->pendingScreenshotBase;
+        const auto capture=_impl->screenshotCaptures.enqueue(_impl->pendingScreenshotBase);
+        if(!capture.empty())_impl->adapter.requestScreenshot(capture);
         _impl->pendingScreenshotBase.clear();
     }
 
@@ -2526,10 +2545,7 @@ void Renderer::endFrame()
     _impl->debugOverlay.onFrameSubmitted();
     _impl->compositeSceneViewId = -1;
 
-    if (!_impl->finalizeScreenshotBase.empty()) {
-        detail::finalizeScreenshotSidecar(_impl->finalizeScreenshotBase);
-        _impl->finalizeScreenshotBase.clear();
-    }
+    _impl->screenshotCaptures.advance();
 }
 
 MeshHandle Renderer::createMesh(const void* vertices,
@@ -3280,7 +3296,7 @@ void Renderer::setPostProcessTonemapMode(TonemapMode mode)
 
 void Renderer::setFxaaEnabled(bool enabled)
 {
-    if (!_impl) {
+    if (!_impl || _impl->fxaaEnabled == enabled) {
         return;
     }
     _impl->fxaaEnabled = enabled;
@@ -3298,7 +3314,7 @@ bool Renderer::fxaaEnabled() const noexcept
 
 void Renderer::setSmaaEnabled(bool enabled)
 {
-    if (!_impl) {
+    if (!_impl || _impl->smaaEnabled == enabled) {
         return;
     }
     _impl->smaaEnabled = enabled;
@@ -3324,7 +3340,7 @@ void Renderer::setTaaEnabled(bool enabled)
         _impl->fxaaEnabled = false;
         _impl->smaaEnabled = false;
     }
-    _impl->invalidateTemporalResources(
+    _impl->invalidateAaHistory(
         enabled ? detail::ResourceInvalidationReason::Manual
                 : detail::ResourceInvalidationReason::FeatureDisabled);
     _impl->applyAntiAliasingKnobs();
@@ -3823,6 +3839,7 @@ bool Renderer::captureScreenshot(const std::string& filePath)
     if (_impl->initDesc.backend == Backend::Noop || _impl->initDesc.windowHandle == nullptr) {
         return false;
     }
+    if(_impl->screenshotCaptures.full())return false;
     _impl->pendingScreenshotBase = detail::screenshotBasePath(filePath);
     return true;
 }
@@ -3938,6 +3955,14 @@ void Renderer::setColorStylizationSettings(const ColorStylizationSettings& setti
     if (!_impl) return;
     _impl->colorStylization = sanitizeColorStylization(settings);
     _impl->applyColorStylizationKnobs();
+}
+void Renderer::resetStylizationHistory()
+{
+    if(!_impl)return;
+    if(auto* pass=_impl->pipeline.findPass<detail::TemporalFeedbackPass>())
+        pass->invalidateHistory(detail::ResourceInvalidationReason::Manual);
+    _impl->resourceBlackboard.invalidate(detail::BlackboardResourceId::FeedbackHistoryRead,detail::ResourceInvalidationReason::Manual);
+    _impl->resourceBlackboard.invalidate(detail::BlackboardResourceId::FeedbackHistoryWrite,detail::ResourceInvalidationReason::Manual);
 }
 ColorStylizationSettings Renderer::colorStylizationSettings() const noexcept
 {

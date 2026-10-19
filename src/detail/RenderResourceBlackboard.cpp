@@ -155,6 +155,8 @@ void RenderResourceBlackboard::invalidateTemporal(
     invalidate(BlackboardResourceId::AutoExposureRead, reason);
     invalidate(BlackboardResourceId::AutoExposureWrite, reason);
     invalidate(BlackboardResourceId::AutoExposure, reason);
+    invalidate(BlackboardResourceId::FeedbackHistoryRead, reason);
+    invalidate(BlackboardResourceId::FeedbackHistoryWrite, reason);
 }
 
 void RenderResourceBlackboard::invalidateFrameOutputs(
@@ -323,6 +325,8 @@ const char* blackboardResourceName(BlackboardResourceId id) noexcept
     case BlackboardResourceId::AutoExposure: return "AutoExposure";
     case BlackboardResourceId::SsrColor: return "SsrColor";
     case BlackboardResourceId::VolumetricColor: return "VolumetricColor";
+    case BlackboardResourceId::FeedbackHistoryRead: return "FeedbackHistoryRead";
+    case BlackboardResourceId::FeedbackHistoryWrite: return "FeedbackHistoryWrite";
     case BlackboardResourceId::Count: break;
     }
     return "Unknown";

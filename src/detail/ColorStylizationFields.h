@@ -28,8 +28,18 @@ void visitAnalogDisplayFields(Settings& s,Visitor&& v) {
     v("vignetteStrength",s.vignetteStrength);v("grainStrength",s.grainStrength);v("noiseSeed",s.noiseSeed);
 }
 template<class Settings,class Visitor>
-void visitColorStylizationFields(Settings& s,Visitor&& v) {
+void visitColorStylizationFieldsV2(Settings& s,Visitor&& v) {
     visitColorStylizationFieldsV1(s,v);v("display",s.display);
+}
+template<class Settings,class Visitor>
+void visitTemporalFeedbackFields(Settings& s,Visitor&& v) {
+    v("enabled",s.enabled);v("mode",s.mode);v("historyWeight",s.historyWeight);
+    v("holdFrames",s.holdFrames);v("tileSize",s.tileSize);
+    v("historyOffsetX",s.historyOffsetX);v("historyOffsetY",s.historyOffsetY);v("noiseSeed",s.noiseSeed);
+}
+template<class Settings,class Visitor>
+void visitColorStylizationFields(Settings& s,Visitor&& v) {
+    visitColorStylizationFieldsV2(s,v);v("temporal",s.temporal);
 }
 
 } // namespace ayt::render::detail
