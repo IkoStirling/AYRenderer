@@ -118,7 +118,9 @@ enum class FgResourceId : uint8_t {
     BaseGBuffer = 29,
     VolumetricIntegration = 30, // optional reduced-resolution radiance/transmission
     FroxelField = 31, // optional packed coefficient RGB / extinction sigma atlas
-    Count        = 32,
+    FroxelHistoryRead = 32, // pass-owned persistent coefficient atlas
+    FroxelHistoryWrite = 33,
+    Count        = 34,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。

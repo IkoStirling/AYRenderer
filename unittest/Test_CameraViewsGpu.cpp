@@ -493,6 +493,27 @@ TEST_CASE(real_main_view_grid_preserves_optics_and_local_medium_with_bounded_all
 }
 TEST_SUITE_END
 
+TEST_SUITE(FroxelHistoryGpu)
+TEST_CASE(main_volume_history_is_independent_stable_and_dark_on_flash_off) {
+#ifdef _WIN32
+ const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Isolated real-device acceptance required");
+ FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+ using namespace ayt::render;
+ PerformanceLight lamp;lamp.id=1;lamp.light=Light::spot({-.5f,0,-2},{0,0,1},10,4,.95f,.8f,{1,0,0});lamp.apertureRadius=.1f;
+ VolumetricSettings fog;fog.enabled=true;fog.froxel=true;fog.froxelTileSize=4;fog.froxelSlices=32;fog.maxDistance=10;fog.density=.1f;fog.scattering=1;fog.anisotropy=0;fog.debugView=2;
+ const auto original=f.sampleLight(lamp,true,1,&fog);CHECK(!f.renderer.getFrameStats().volumetric.historyUsed);
+ fog.froxelHistory=true;const auto stable=f.sampleLight(lamp,true,1,&fog);CHECK(f.renderer.getFrameStats().volumetric.historyUsed);
+ unsigned difference=0;for(size_t i=0;i<original.size();++i)difference+=unsigned(std::abs(int(original[i])-int(stable[i])));CHECK(difference<64);
+ f.renderer.resetVolumetricHistory();fog.froxelSlices=64;const auto resized=f.sampleLight(lamp,true,1,&fog);CHECK(f.renderer.getFrameStats().volumetric.depthSlices==64);CHECK(f.renderer.getFrameStats().volumetric.historyUsed);CHECK(emitterRedEnergy(resized)>1000);
+ lamp.light.intensity=0;const auto dark=f.sampleLight(lamp,true,1,&fog);CHECK(emitterRedEnergy(dark)==0);
+ fog.froxelHistory=false;f.sampleLight(lamp,true,1,&fog);CHECK(!f.renderer.getFrameStats().volumetric.historyUsed);
+ std::fprintf(stderr,"[Froxel history] identity difference=%u flash-off=%.0f\n",difference,emitterRedEnergy(dark));
+#else
+ SKIP_TEST("Windows device fixture required");
+#endif
+}
+TEST_SUITE_END
+
 TEST_SUITE(FixtureHousingBatchGpu)
 TEST_CASE(grouped_housings_instance_without_changing_opaque_pixels) {
 #ifdef _WIN32

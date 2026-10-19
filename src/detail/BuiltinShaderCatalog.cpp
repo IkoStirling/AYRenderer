@@ -2,6 +2,7 @@
 #include "detail/PerformanceTransparentSource.h"
 #include "detail/VolumeReconstructionSource.h"
 #include "detail/FroxelShaderSources.h"
+#include "detail/FroxelHistorySource.h"
 #include "detail/LightingPass.h"
 #include "detail/RigidInstancing.h"
 #include "detail/WorldLit2DMaterialSource.h"
@@ -36,7 +37,8 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
         std::pair{"ssr",kSsrPhoskiaSource},
         std::pair{"volumetric",kVolumetricPhoskiaSource},
         std::pair{"volume_reconstruction",kVolumeReconstructionSource},
-        std::pair{"froxel_density",kFroxelDensitySource},
+        std::pair{"froxel_history",kFroxelHistorySource},
+            std::pair{"froxel_density",kFroxelDensitySource},
         std::pair{"froxel_integration",kFroxelIntegrationSource},
         std::pair{"deferred_decal",kDeferredDecalPhoskiaSource},
         std::pair{"particle_unlit",kParticlePhoskiaSource},

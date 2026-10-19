@@ -32,7 +32,7 @@ createCameraOutput/cameraOutputTexture/destroyCameraOutput 管理可采样颜色
 独立视图不使用主视图的 Deferred、TAA/Motion/曝光历史或编辑器选中视图；WorldLit2D
 在显式 Forward batch 中拒绝。详见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
 CPU/Noop 用例 CameraViews；独立 D3D11 读回用例 CameraViewsGpu。
-离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为143。
+离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为142。
 
 ## Deferred Decal v1（2026-10-06）
 
@@ -53,7 +53,7 @@ Deferred HDR：Lighting → SSR → DepthHaze → Volumetric → Transparent →
 8..64 次确定性中点积分，Beer–Lambert 消光 + HG 单次散射；一个按原场景索引选择的
 方向光／点光／Spot，方向光 CSM/Spot 读取本帧阴影；点光全向阴影仍不支持。
 全局或局部轴对齐盒介质，颜色为散射 albedo tint；天空参与积分，零密度无目标/绘制。
-当前支持可选低分辨率积分和froxel（见后文），无流体模拟、多重散射或独立历史；
+当前支持可选低分辨率积分、froxel与独立系数历史（见后文），无流体模拟或多重散射；
 透明自身尚未在介质中积分（在雾后合成），不冒充完整体积透明材质。
 
 ## 新画面能力：SSR v1（2026-10-06）
@@ -684,3 +684,16 @@ XY分辨率同时受纹理轴限与cell预算约束。RGBA32F八列atlas保存RG
 场景颜色/alpha仍全分辨率，深度感知重建及当前介质消光沿用既有路径；无历史或多重散射。
 新增FroxelField资源ID31，原ID不变；view241注入、33积分、242重建，UI单Pass容量143。
 RenderFrameStats.volumetric报告实际积分宽高、切片、cell数及启用状态；关闭帧清零。
+
+
+## 2026-10-20 独立体积系数历史
+
+froxelHistory默认关闭，weight=.85[0,.95]；仅网格路径启用。两份RGBA32F最近采样历史由Pass持有、
+FrameGraph按32/33导入（额外32bytes/cell），view240位于241注入和33积分之间；UI容量142。
+前帧系数按世界位置重投影，并由当前5点邻域夹紧；零通道/亮度或消光突变拒绝历史，当前alpha不滤波。
+尺寸、网格/物理参数、镜头大切换、提交帧间断或noiseTime跳变失效；显式resetVolumetricHistory处理跳播/换场。
+失败退回当前场，关闭释放缓存；成功完成全分辨率输出后才交换历史，不依赖TAA/曝光结果。
+historyUsed是帧级重投影资格，不是逐格接受数；最近采样、无子格抖动/方差估计，仍可能漏掉细光束。
+
+FrameGraph::resolve对external借用也要求本帧declared：效果关闭未重导入时返回invalid，
+避免Owner已释放旧FBO后仍查询其附件；本阶段历史关停真实GPU用例覆盖此路径。

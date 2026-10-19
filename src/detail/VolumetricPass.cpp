@@ -11,7 +11,7 @@
 #include <cmath>
 namespace ayt::render::detail {
 uint32_t VolumetricPass::execute(PassExecContext& ctx) {
- _stats={};auto& adapter=ctx.adapter;const auto s=sanitizeVolumetricSettings(ctx.frame.volumetric);
+ _stats={};_historySubmitted=false;auto& adapter=ctx.adapter;const auto s=sanitizeVolumetricSettings(ctx.frame.volumetric);
  if(!s.enabled||s.density<=0||!adapter.isInitialized()||adapter.isNoopBackend()||!ctx.frameGraph||!ctx.resourceBlackboard||!ctx.viewportWidth||!ctx.viewportHeight)return 0;
  if(ctx.performanceLights)return executePerformance(ctx);
  BlackboardGBufferView gb;
@@ -123,5 +123,5 @@ uint32_t VolumetricPass::finishIntegration(PassExecContext& ctx,bgfx::FrameBuffe
  ctx.frameGraph->markProduced(FgResourceId::VolumetricColor);ctx.resourceBlackboard->publishProduced(BlackboardResourceId::VolumetricColor,BlackboardResourceLifetime::Transient,target,output,ctx.viewportWidth,ctx.viewportHeight,0);
  return 1;
 }
-void VolumetricPass::destroyResources(BGFXAdapter& adapter){_program.reset();_reconstruction.reset();_froxelDensity.reset();_froxelIntegration.reset();_stats={};_geometry.destroy(adapter);}
+void VolumetricPass::destroyResources(BGFXAdapter& adapter){destroyHistory(adapter);_froxelHistory.reset();_program.reset();_reconstruction.reset();_froxelDensity.reset();_froxelIntegration.reset();_stats={};_geometry.destroy(adapter);}
 }

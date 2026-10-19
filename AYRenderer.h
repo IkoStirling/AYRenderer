@@ -491,6 +491,9 @@ public:
     /// tile/slice/cell caps and device fallback are reported by frame statistics.
     void setVolumetricSettings(const VolumetricSettings& settings);
     VolumetricSettings volumetricSettings() const noexcept;
+    /// Owner-thread: discard only volume history after seek/scene replacement.
+    /// Safe before initialization; automatic cuts/resize/gaps also invalidate it.
+    void resetVolumetricHistory();
     /// Owner-thread, copies up to16 positive-scale projectors in stable order.
     /// Texture resources must remain alive through rendering. No ECS serialization yet.
     void setDeferredDecals(const std::vector<DeferredDecal>& decals);

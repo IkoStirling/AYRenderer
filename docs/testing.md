@@ -596,3 +596,13 @@ D3D11/D3D12各解析系数网格1项155断言、主Deferred1项46断言通过。
 45帧组合Studio预览实际160x64x32=327680cells、4表面/4体积/8透明draw，非法tile3退出2。
 SDK129能力/53模块/91检索/551符号，0错误0警告；未查看图片。
 原FixtureEmittersGpu 9项/395断言在D3D11与D3D12均通过。
+
+
+2026-10-20 独立体积历史最终验收：Contracts168/2119、PostProcess252/1363、SceneMaterial79/10042、
+UI114/377、FrameGraph41/159、Shader12/213（73生产变体和无编译器加载）通过。
+D3D11/D3D12各历史kernel1/619、主视图1/29（恒定像素差0、熄灯0、切片resize/显式重置/关闭）通过；
+历史关闭的原网格解析1/155和主视图光学/局部动画雾1/46在两后端亦通过。
+真实关闭路径发现FrameGraph仍返回未重导入的旧external句柄，已修复并加入CPU/GPU回归。
+45帧Studio玻璃/图案/PCSS/镜头组合预览实际160x64x32、327680cells、historyUsed=true，退出0。
+SDK129能力/53模块/92检索/552符号，0错误0警告；Renderer1034用例/10分区无遗漏重复。
+.lshow仍schema7，无图片查看。后续雾密度编排、点阵与Editor及频闪积分仍需继续。

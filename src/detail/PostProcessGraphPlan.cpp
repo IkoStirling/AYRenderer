@@ -1,5 +1,6 @@
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/RenderPassContract.h"
+#include "detail/BGFXAdapter.h"
 
 #include <cassert>
 #include <utility>
@@ -199,6 +200,7 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     if (input.volumetric) {
         graph.addResource(FgResourceId::VolumetricColor, graphTextureDesc(RenderPassSlot::Volumetric, RenderPassResourceId::VolumetricColor));
         std::vector<FgResourceId> writes{FgResourceId::VolumetricColor};
+        std::vector<FgResourceId> reads{result.hdrSceneSource,FgResourceId::GBufferWorldPosition,FgResourceId::GBufferSurface};
         if (input.volumetricGrid.valid()) {
             auto low = graphTextureDesc(RenderPassSlot::Volumetric, RenderPassResourceId::VolumetricColor);
             low.pointSampled = true;low.absoluteWidth=input.volumetricGrid.width;low.absoluteHeight=input.volumetricGrid.height;
@@ -206,6 +208,11 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
             auto field=low;field.format=bgfx::TextureFormat::RGBA32F;
             field.absoluteWidth=input.volumetricGrid.atlasWidth;field.absoluteHeight=input.volumetricGrid.atlasHeight;
             graph.addResource(FgResourceId::FroxelField,field);writes.push_back(FgResourceId::FroxelField);
+            if(BGFXAdapter::isValid(input.volumetricHistoryRead)&&BGFXAdapter::isValid(input.volumetricHistoryWrite)){
+                graph.importExternal(FgResourceId::FroxelHistoryRead,input.volumetricHistoryRead);
+                graph.importExternal(FgResourceId::FroxelHistoryWrite,input.volumetricHistoryWrite);
+                reads.push_back(FgResourceId::FroxelHistoryRead);writes.push_back(FgResourceId::FroxelHistoryWrite);
+            }
         } else if (input.volumetricDownsample >= 2) {
             auto low = graphTextureDesc(RenderPassSlot::Volumetric, RenderPassResourceId::VolumetricColor);
             low.scale = input.volumetricDownsample >= 4 ? FgTextureScale::Quarter : FgTextureScale::Half;
@@ -213,7 +220,7 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
             graph.addResource(FgResourceId::VolumetricIntegration, low);
             writes.push_back(FgResourceId::VolumetricIntegration);
         }
-        graph.addPass({"Volumetric", {result.hdrSceneSource, FgResourceId::GBufferWorldPosition, FgResourceId::GBufferSurface},
+        graph.addPass({"Volumetric", std::move(reads),
                        std::move(writes), true, false, executionSlot(RenderPassSlot::Volumetric)});
         result.hdrSceneSource = FgResourceId::VolumetricColor;
     }

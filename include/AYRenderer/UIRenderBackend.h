@@ -74,7 +74,7 @@ public:
     /// Maximum single-view offscreen paints after fixed scene and camera-view reservations.
     /// The allocator skips reserved ranges; four-view scene previews may leave small gaps.
     /// Fixed scene views include reduced-volume injection/reconstruction (241/242); remaining paint capacity.
-    static constexpr uint16_t kMaxOffscreenPaintsPerFrame = 143;
+    static constexpr uint16_t kMaxOffscreenPaintsPerFrame = 142;
 
     UIRenderBackend();
     ~UIRenderBackend() override;

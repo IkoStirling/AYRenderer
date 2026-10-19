@@ -3,6 +3,8 @@
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/RenderPassContract.h"
+#include "detail/VolumetricHistoryState.h"
+#include "detail/VolumetricPass.h"
 #include <limits>
 using namespace ayt::render;
 using namespace ayt::render::detail;
@@ -27,6 +29,20 @@ TEST_CASE(froxel_layout_caps_memory_and_atlas_axes_without_overflow) {
  auto result=buildPostProcessGraphPlan(graph,in);CHECK(result.compileSucceeded);const auto original=graph.stats().physicalTargets;
  s.froxel=true;in.volumetricGrid=makeVolumetricGridLayout(s,65,33,16384);result=buildPostProcessGraphPlan(graph,in);CHECK(result.compileSucceeded);CHECK(graph.stats().physicalTargets==original+2);
  in.volumetric=false;result=buildPostProcessGraphPlan(graph,in);CHECK(result.compileSucceeded);CHECK(!BGFXAdapter::isValid(graph.resolve(FgResourceId::FroxelField)));CHECK(static_cast<uint8_t>(FgResourceId::FroxelField)==31);
+}
+TEST_CASE(independent_history_rejects_cuts_settings_gaps_seek_and_invalid_resources) {
+ Renderer r;r.resetVolumetricHistory();VolumetricSettings s;s.froxelHistoryWeight=100;r.setVolumetricSettings(s);CHECK(r.volumetricSettings().froxelHistoryWeight==.95f);
+ s.froxelHistoryWeight=std::numeric_limits<float>::quiet_NaN();CHECK(sanitizeVolumetricSettings(s).froxelHistoryWeight==.85f);
+ VolumetricHistoryState h;FrameContext a;a.volumetric.froxel=true;a.volumetric.froxelHistory=true;a.volumetric.noiseTime=1;
+ const auto grid=makeVolumetricGridLayout(a.volumetric,64,64,16384);CHECK(!h.reusable(a,grid,2));h.commit(a,grid,1);CHECK(h.reusable(a,grid,2));CHECK(!h.reusable(a,grid,3));
+ auto b=a;b.cameraPosition.x+=.1f;CHECK(h.reusable(b,grid,2));b.cameraPosition.x+=5;CHECK(!h.reusable(b,grid,2));
+ b=a;b.projection.row[0].x+=.1f;CHECK(!h.reusable(b,grid,2));b=a;b.view.row[0].y+=.5f;CHECK(!h.reusable(b,grid,2));
+ b=a;b.volumetric.noiseTime=.9f;CHECK(!h.reusable(b,grid,2));b.volumetric.noiseTime=1.3f;CHECK(!h.reusable(b,grid,2));b.volumetric.noiseTime=1.01f;CHECK(h.reusable(b,grid,2));
+ b=a;b.volumetric.density*=2;CHECK(!h.reusable(b,grid,2));auto resized=grid;resized.width+=1;CHECK(!h.reusable(a,resized,2));h.invalidate();CHECK(!h.reusable(a,grid,2));
+ BGFXAdapter adapter;VolumetricPass pass;pass.prepareHistory(adapter,a.volumetric,grid);CHECK(!BGFXAdapter::isValid(pass.historyRead()));CHECK(!BGFXAdapter::isValid(pass.historyWrite()));pass.destroyResources(adapter);
+ FrameGraph graph(adapter);PostProcessGraphPlanInput in;in.width=64;in.height=64;in.sceneColor={7};in.gbuffer={8};in.volumetric=true;in.volumetricGrid=grid;in.volumetricHistoryRead={9};in.volumetricHistoryWrite={10};
+ const auto result=buildPostProcessGraphPlan(graph,in);CHECK(result.compileSucceeded);CHECK(graph.resolve(FgResourceId::FroxelHistoryRead).idx==9);CHECK(graph.resolve(FgResourceId::FroxelHistoryWrite).idx==10);CHECK(static_cast<uint8_t>(FgResourceId::FroxelHistoryRead)==32);CHECK(static_cast<uint8_t>(FgResourceId::FroxelHistoryWrite)==33);
+ in.volumetricHistoryRead=in.volumetricHistoryWrite=BGFX_INVALID_HANDLE;CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);CHECK(!BGFXAdapter::isValid(graph.resolve(FgResourceId::FroxelHistoryRead)));CHECK(!BGFXAdapter::isValid(graph.resolve(FgResourceId::FroxelHistoryWrite)));
 }
 TEST_CASE(settings_graph_and_disabled_resources) {
  Renderer r;CHECK(!r.volumetricSettings().enabled);

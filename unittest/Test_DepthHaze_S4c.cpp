@@ -170,7 +170,7 @@ TEST_CASE(deferred_pipeline_matches_data_dependencies) {
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 64u);
+    CHECK(order.size() == 65u);
     const auto rank = [&order](bgfx::ViewId view) {
         return std::find(order.begin(), order.end(), view);
     };
@@ -183,7 +183,7 @@ TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
 
     const bgfx::ViewId dependencyChain[] = {
         7, 3, 14,       // GBuffer, motion vectors, SSAO
-        8, 32, 13, 241, 33, 242, 9,  // Lighting, SSR, opaque haze, transparent composition
+        8, 32, 13, 241, 240, 33, 242, 9,  // Lighting, SSR, opaque haze, transparent composition
         244, 253, 246, // Selection masks, camera-overlay 2D
         10, 11, 26, 27, 28, 29, 30, 12, // Bloom pyramid and resolve
         31, 15,        // Exposure before tone mapping

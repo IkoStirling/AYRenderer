@@ -41,6 +41,8 @@ struct PostProcessGraphPlanInput {
     bool volumetric = false;
     uint8_t volumetricDownsample = 1;
     VolumetricGridLayout volumetricGrid;
+    bgfx::FrameBufferHandle volumetricHistoryRead=BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle volumetricHistoryWrite=BGFX_INVALID_HANDLE;
     bool decals = false;
     bgfx::FrameBufferHandle baseGBuffer = BGFX_INVALID_HANDLE;
 };

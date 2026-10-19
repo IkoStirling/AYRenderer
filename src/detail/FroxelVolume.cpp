@@ -32,8 +32,10 @@ bool VolumetricPass::beginFroxelInjection(PassExecContext& ctx,bgfx::FrameBuffer
 uint32_t VolumetricPass::finishFroxelIntegration(PassExecContext& ctx,bgfx::FrameBufferHandle field,bgfx::TextureHandle input,const VolumetricGridLayout& grid){
  auto& adapter=ctx.adapter;BlackboardGBufferView gb;if(!ctx.resourceBlackboard->resolveGBuffer(gb))return 0;
  const auto target=ctx.frameGraph->resolve(FgResourceId::VolumetricIntegration);
- const auto fieldTexture=adapter.getFboAttachment(field,0),output=adapter.getFboAttachment(target,0);
+ auto fieldTexture=adapter.getFboAttachment(field,0);const auto output=adapter.getFboAttachment(target,0);
  if(!BGFXAdapter::isValid(fieldTexture)||!BGFXAdapter::isValid(output)||fieldTexture.idx==output.idx)return 0;
+ ctx.frameGraph->markProduced(FgResourceId::FroxelField);
+ fieldTexture=resolveHistory(ctx,fieldTexture,grid);
  if(!_froxelIntegration.isValid())_froxelIntegration=ctx.pool.acquire(kFroxelIntegrationSource,kFroxelIntegrationKey);
  if(!_froxelIntegration.isValid()||!bindGridFrame(ctx,_froxelIntegration,grid,false))return 0;
  bool valid=true;const auto tex=[&](const char* n,bgfx::TextureHandle t){const auto b=_froxelIntegration.getTextureBinding(n);valid&=b!=shader::InvalidBinding;if(b!=shader::InvalidBinding)_froxelIntegration.setTexture(_froxelIntegration.getTextureStage(b),b,toShaderTexture(t));};
@@ -42,6 +44,8 @@ uint32_t VolumetricPass::finishFroxelIntegration(PassExecContext& ctx,bgfx::Fram
  ctx.frameGraph->markProduced(FgResourceId::VolumetricIntegration);
  const auto reconstructed=finishIntegration(ctx,target,input);
  if(reconstructed){_stats.froxel=true;_stats.integrationWidth=grid.width;_stats.integrationHeight=grid.height;_stats.depthSlices=grid.slices;_stats.froxelCells=grid.cells;}
- return 1+reconstructed;
+ if(reconstructed&&_historySubmitted){_historyState.commit(ctx.frame,grid,adapter.gpuFrameCounter());_readIndex=uint8_t(1-_readIndex);}
+ else if(!reconstructed)_historyState.invalidate();
+ return 1+reconstructed+(_historySubmitted?1:0);
 }
 }

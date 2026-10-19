@@ -492,7 +492,9 @@ bgfx::FrameBufferHandle FrameGraph::resolve(FgResourceId id) const
     // FinalColorSource without any enabled effect Pass reading it,
     // so `live` can still be false. Never create/destroy externals.
     if (r.isExternal) {
-        return r.physical;
+        // Borrowed targets must be re-imported each frame. A disabled owner
+        // may already have destroyed the preceding frame's physical handle.
+        return r.declared ? r.physical : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
     if (!r.live) {
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};

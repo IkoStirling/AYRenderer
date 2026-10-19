@@ -22,6 +22,7 @@
 #include "detail/DeferredDecalPass.h"
 #include "detail/PerformanceLightPass.h"
 #include "detail/VolumetricPass.h"
+#include "detail/FroxelHistorySource.h"
 #include "detail/SsrPass.h"
 #include "detail/LightingPass.h"
 #include "detail/RenderViewOrder.h"
@@ -769,6 +770,37 @@ TEST_CASE(reduced_volume_preserves_full_scene_edges_and_extinguishes_only_once) 
   }
  }
  pass.destroyResources(f.adapter);
+#else
+ SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(froxel_history_reprojects_coefficients_and_rejects_flash_color_density_and_offscreen) {
+#ifdef _WIN32
+ const auto* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Isolated real-device acceptance required");
+ PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+ std::string source=kFroxelHistorySource;const std::string at="let at=vec2(vUv.x,1.0-vUv.y)";const auto offset=source.find(at);CHECK(offset!=std::string::npos);source.replace(offset,at.size(),"let at=vec2(0.375)");
+ const auto program=f.pool.acquire(source);CHECK(program.isValid());
+ for(int mode=0;mode<8;++mode){
+  std::array<Pixel,16> current{},old{};current.fill({2,0,0,.2f});current[5]={1,0,0,.2f};old.fill({1.4f,0,0,.2f});
+  Pixel expected={mode==0||mode==7?1.2f:1.f,0,0,.2f};
+  if(mode==2){current.fill({0,0,0,.2f});expected={0,0,0,.2f};}
+  if(mode==3){current.fill({0,1,0,.2f});expected={0,1,0,.2f};}
+  if(mode==4){for(auto& p:current)p[3]=.4f;expected[3]=.4f;}
+  if(mode==5)old.fill({20,0,0,.2f});
+  if(mode==7){old.fill({20,0,0,.2f});old[6]={1.4f,0,0,.2f};}
+  const auto texture=[&](const auto& data){const auto value=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(data.data(),sizeof(data)));f.textures.push_back(value);return value;};
+  const auto currentTexture=texture(current),oldTexture=texture(old);
+  const auto pixels=f.renderResource(program,[&](const auto& p){
+   const auto u=[&](const char* name,const void* data,uint32_t bytes){const auto b=p.getUniformBinding(name);CHECK(b!=ayt::shader::InvalidBinding);p.setUniform(b,data,bytes);};
+   const auto v=[&](const char* name,Pixel data){u(name,data.data(),16);};
+   float inverse[16];toBgfxColumnMajor(ayt::math::Float4x4::identity(),inverse);u("historyInverseViewProjection",inverse,64);
+   auto previous=ayt::math::Float4x4::identity();if(mode==6)previous.row[0].w=10;if(mode==7)previous.row[0].w=.5f;toBgfxColumnMajor(previous,inverse);u("historyPreviousViewProjection",inverse,64);
+   v("historyCamera",{0,0,0,1});v("historyPreviousCamera",{0,0,0,0});v("historyPreviousDirection",{0,0,1,0});v("historyPacking",{1,1,1,1});v("historyOptions",{.5f,mode==1?0.f:1.f,0,0});v("historyGrid",{.25f,.25f,0,0});
+   const auto tex=[&](const char* name,bgfx::TextureHandle value){const auto b=p.getTextureBinding(name);CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(value));};tex("currentField",currentTexture);tex("previousField",oldTexture);
+  });
+  std::fprintf(stderr,"[Froxel history kernel] mode=%d\n",mode);checkPixels(pixels,expected);
+ }
 #else
  SKIP_TEST("Windows device fixture required");
 #endif

@@ -565,6 +565,7 @@ struct Renderer::Impl {
         detail::ResourceInvalidationReason reason)
     {
         resourceBlackboard.invalidateTemporal(reason);
+        if(auto* fog=pipeline.findPass<detail::VolumetricPass>())fog->invalidateHistory();
         if (detail::TAAPass* taa = pipeline.findPass<detail::TAAPass>()) {
             taa->invalidateHistory(reason);
         }
@@ -1892,12 +1893,18 @@ void Renderer::render(const RenderScene& scene)
             graphInput.gbuffer = decalPass->output(_impl->decals.size());
         }
     }
-    const auto* fogPass = _impl->pipeline.findPass<detail::VolumetricPass>();
+    auto* fogPass = _impl->pipeline.findPass<detail::VolumetricPass>();
     graphInput.volumetric = backendReady && frame.volumetric.enabled && frame.volumetric.density > 0
         && fogPass && fogPass->isEnabled() && gbufferPassPtr && gbufferPassPtr->isEnabled()
         && lightingPassPtr && lightingPassPtr->isEnabled();
     graphInput.volumetricDownsample = frame.volumetric.downsample;
     graphInput.volumetricGrid = detail::runtimeVolumetricGridLayout(frame.volumetric,fgW,fgH);
+    if(fogPass){
+        const auto layout=graphInput.volumetric?graphInput.volumetricGrid:detail::VolumetricGridLayout{};
+        fogPass->prepareHistory(_impl->adapter,frame.volumetric,layout);
+        graphInput.volumetricHistoryRead=fogPass->historyRead();
+        graphInput.volumetricHistoryWrite=fogPass->historyWrite();
+    }
     if (graphInput.volumetric && !detail::BGFXAdapter::isValid(graphInput.gbuffer))
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
     graphInput.bloomExtract = bloomStages.extract;
@@ -3361,6 +3368,9 @@ ColorGradingPreset Renderer::colorGradingPreset() const noexcept
 void Renderer::setVolumetricSettings(const VolumetricSettings& settings) {
     // Independent of decal authoring.
     if (_impl) _impl->volumetric = sanitizeVolumetricSettings(settings);
+}
+void Renderer::resetVolumetricHistory() {
+    if(_impl)if(auto* pass=_impl->pipeline.findPass<detail::VolumetricPass>())pass->invalidateHistory();
 }
 VolumetricSettings Renderer::volumetricSettings() const noexcept {
     return _impl ? _impl->volumetric : VolumetricSettings{};

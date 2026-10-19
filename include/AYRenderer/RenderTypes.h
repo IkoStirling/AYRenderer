@@ -137,6 +137,8 @@ struct RenderResourceFrameStats {
 /// was produced; cell counts describe allocation, not GPU visibility/readback.
 struct VolumetricFrameStats {
     bool froxel=false;
+    /// Frame-level reprojection eligibility; individual cells may reject history.
+    bool historyUsed=false;
     uint16_t integrationWidth=0,integrationHeight=0;
     uint8_t depthSlices=0;
     uint32_t froxelCells=0;

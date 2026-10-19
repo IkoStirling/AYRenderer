@@ -1863,3 +1863,16 @@ XY分辨率同时受纹理轴限与cell预算约束。RGBA32F八列atlas保存RG
 场景颜色/alpha仍全分辨率，深度感知重建及当前介质消光沿用既有路径；无历史或多重散射。
 新增FroxelField资源ID31，原ID不变；view241注入、33积分、242重建，UI单Pass容量143。
 RenderFrameStats.volumetric报告实际积分宽高、切片、cell数及启用状态；关闭帧清零。
+
+
+## 2026-10-20 独立体积系数历史
+
+froxelHistory默认关闭，weight=.85[0,.95]；仅网格路径启用。两份RGBA32F最近采样历史由Pass持有、
+FrameGraph按32/33导入（额外32bytes/cell），view240位于241注入和33积分之间；UI容量142。
+前帧系数按世界位置重投影，并由当前5点邻域夹紧；零通道/亮度或消光突变拒绝历史，当前alpha不滤波。
+尺寸、网格/物理参数、镜头大切换、提交帧间断或noiseTime跳变失效；显式resetVolumetricHistory处理跳播/换场。
+失败退回当前场，关闭释放缓存；成功完成全分辨率输出后才交换历史，不依赖TAA/曝光结果。
+historyUsed是帧级重投影资格，不是逐格接受数；最近采样、无子格抖动/方差估计，仍可能漏掉细光束。
+
+FrameGraph::resolve对external借用也要求本帧declared：效果关闭未重导入时返回invalid，
+避免Owner已释放旧FBO后仍查询其附件；本阶段历史关停真实GPU用例覆盖此路径。
