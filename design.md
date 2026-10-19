@@ -1783,3 +1783,22 @@ areaShadowBias[0,.1]为独立世界单位偏移（默认.003），旧light.shado
 该PCSS是平行平面/平均遮挡深度近似，稀疏采样、atlas分辨率、近裁剪及半径预算会限制质量，
 并非多光源面积蒙卡阴影。不会增添新的shadow atlas槽或改变旧八灯Shader ABI。
 算法参考：https://download.nvidia.com/developer/SDK/Individual_Samples/MEDIA/docPix/docs/PCSS.pdf
+
+
+## 2026-10-19 扩展灯透明 PBR 与独立 SSR
+
+主视图 Deferred 透明阶段按原有后到前顺序提交 base，再追加扩展灯直接光。
+复用不透明光学核及阴影绑定，包含光度/IES/Gobo/iris/焦面/棱镜/PCSS；仅标准 PBR ABI，
+自定义 Unlit/粒子不强行改写。临时材质副本用独立 aypt_ 属性名，避免 bgfx 全局 uniform
+默认值污染共享 PBR；源材质不变。RGB One/One、alpha Zero/One，直接光按源 alpha 加权，
+非预乘 Additive 保持既有全量语义，深度只读；后层光仍被前层 alpha 遮挡。
+PerformanceLightBudget.transparentDraws 默认128、范围0..1024，transparentLightsPerObject
+默认8、范围0..32。来源还受surfaceLights约束，保留sortKey显式分层，同层按近到远分配额度，再按后到前合成；
+刚性网格用保守AABB求交，无可靠包围盒/变形失败开放。统计区分提交、预算跳过和不支持材质。
+0额度不建透明光程序；预算只是受控近似，不保证透明叠层的完整物理传播/折射/彩色透射阴影。
+
+SSR现在可在没有IBL环境立方贴图、环境强度0的舞台工作；延迟建立黑立方和64x64 split-sum
+积分LUT，关闭SSR不建立资源。已有IBL时复用其资源，命中替换原IBL镜面；反射的本帧屏幕辐射
+已含照明，不再乘环境强度。输入包含不透明扩展灯直接光；保持既有8..64步与失败/未命中回退。
+SSR位于体积和透明之前，仅反射可见不透明接收面，不反射透明层、后加发光灯口、离屏对象，
+不提供折射、递归反射或全局间接光。生命周期销毁fallback纹理，资源失败不发布结果。

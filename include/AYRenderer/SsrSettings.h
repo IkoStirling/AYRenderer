@@ -3,7 +3,9 @@
 #include <cmath>
 #include <cstdint>
 namespace ayt::render {
-// Host-level deferred reflection controls; disabled means no target or draws.
+/// Host-level deferred screen-space reflection controls; disabled allocates no target/draws.
+/// Works without an environment cube. With IBL, valid hits replace its specular term.
+/// Opaque on-screen receivers only; no transparent/off-screen or recursive reflections.
 struct SsrSettings {
     bool enabled = false;
     float strength = 1.0f;

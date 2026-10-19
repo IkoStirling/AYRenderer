@@ -1,4 +1,5 @@
 #include "detail/BuiltinShaderCatalog.h"
+#include "detail/PerformanceTransparentSource.h"
 #include "detail/LightingPass.h"
 #include "detail/RigidInstancing.h"
 #include "detail/WorldLit2DMaterialSource.h"
@@ -49,6 +50,7 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
         jobs.push_back(embeddedShader(name,source));
     jobs.push_back(embeddedShader("pbr_instances",rigidInstancedSource(kPbrPhoskiaSource)));
     jobs.push_back(embeddedShader("performance_surface",kPerformanceSurfaceSource));
+    jobs.push_back(embeddedShader("performance_transparent",performanceTransparentSource()));
     jobs.push_back(embeddedShader("shadow_instances",rigidInstancedSource(kShadowCasterPhoskiaSource,true)));
     jobs.push_back(rawShader("shadow_sc",kShadowCasterVertexSc,kShadowCasterFragmentSc,kShadowCasterVaryingSc));
     jobs.push_back(rawShader("shadow_mask",kShadowMaskCasterVertexSc,kShadowMaskCasterFragmentSc,kShadowMaskCasterVaryingSc));

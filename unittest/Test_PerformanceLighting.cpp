@@ -8,6 +8,7 @@
 #include <AYShader/IR.h>
 #include <AYTest.h>
 #include "detail/SpotShadowProjection.h"
+#include "detail/PerformanceTransparentSource.h"
 #include <limits>
 #include <cmath>
 
@@ -392,5 +393,22 @@ TEST_CASE(spot_depth_reconstruction_and_parallel_plane_penumbra) {
     auto p=light(1);p.light.castShadow=true;p.apertureRadius=.2f;PerformanceLighting packet;CHECK(packet.assign({&p,1},{}));const auto legacy=packet.shadowSources.lights[0].coneCosOuter;
     p.areaShadow=true;CHECK(packet.assign({&p,1},{}));CHECK(packet.shadowSources.lights[0].coneCosOuter<legacy);
     p.areaShadowBias=-1;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].areaShadow);
+}
+TEST_SUITE_END
+
+TEST_SUITE(TransparentPerformanceTests)
+TEST_CASE(transparent_shader_reuses_full_optics_and_stock_pbr_abi) {
+    const auto& source=ayt::render::detail::performanceTransparentSource();CHECK(!source.empty());
+    ayt::shader::phoskia::Compiler compiler;ayt::shader::phoskia::ir::IRProgram program;std::vector<std::string> errors;
+    const bool success=compiler.generateIr(source,{},program,errors);for(const auto& e:errors)std::fprintf(stderr,"%s\n",e.c_str());CHECK(success);
+    CHECK(source.find("performanceShadowArea")!=std::string::npos);CHECK(source.find("texture2d iesAtlas")!=std::string::npos);
+    CHECK(source.find("property aypt_opacitySource")!=std::string::npos);CHECK(source.find("skinningMatrix")!=std::string::npos);
+}
+TEST_CASE(transparent_replay_limits_are_transactional) {
+    auto p=light(1);PerformanceLighting packet;PerformanceLightBudget limits;CHECK(packet.assign({&p,1},limits));
+    CHECK(packet.budget.transparentDraws==128);CHECK(packet.budget.transparentLightsPerObject==8);
+    limits.transparentDraws=1025;CHECK(!packet.assign({&p,1},limits));CHECK(packet.budget.transparentDraws==128);
+    limits.transparentDraws=128;limits.transparentLightsPerObject=33;CHECK(!packet.assign({&p,1},limits));
+    limits.transparentDraws=0;limits.transparentLightsPerObject=0;CHECK(packet.assign({&p,1},limits));
 }
 TEST_SUITE_END

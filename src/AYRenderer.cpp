@@ -1343,6 +1343,7 @@ void Renderer::render(const RenderScene& scene)
 
     const bool performanceEnabled = lightingEnabled() && !_impl->performance.lights.empty();
     const SceneLights* effectiveLights = performanceEnabled ? &_impl->performance.shadowSources : _impl->sceneLights;
+    _impl->performance.stats.transparentDraws = _impl->performance.stats.transparentBudgetSkipped = _impl->performance.stats.transparentUnsupportedMaterials = 0;
     _impl->performance.stats.surfaceDraws = _impl->performance.stats.volumeDraws = 0;
     _impl->performance.stats.culledLights = _impl->performance.stats.surfaceBudgetSkipped = _impl->performance.stats.volumeBudgetSkipped = 0;
 

@@ -8,7 +8,7 @@
 namespace ayt::render {
 bool PerformanceLighting::assign(std::span<const PerformanceLight> source, PerformanceLightBudget limits, std::string* error) {
     const auto fail=[&](const char* message){if(error)*error=message;return false;};
-    if(source.size()>256 || limits.surfaceLights>256 || limits.volumeLights>64 || limits.shadowLights>8)
+    if(source.size()>256 || limits.surfaceLights>256 || limits.volumeLights>64 || limits.shadowLights>8 || limits.transparentDraws>1024 || limits.transparentLightsPerObject>32)
         return fail("Performance lighting budget exceeded");
     PerformanceLighting next; next.budget=limits;
     std::unordered_set<uint32_t> ids;

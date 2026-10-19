@@ -22,6 +22,8 @@
 #include "detail/DeferredDecalPass.h"
 #include "detail/PerformanceLightPass.h"
 #include "detail/VolumetricPass.h"
+#include "detail/SsrPass.h"
+#include "detail/LightingPass.h"
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/PassExecContext.h"
@@ -664,6 +666,42 @@ TEST_CASE(ssr_trace_hits_a_different_surface_and_replaces_ibl_energy) {
         }
     }
     }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(ssr_real_pass_reflects_lit_receivers_without_environment_or_ambient) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    std::array<Pixel,16> positions{},normals{};
+    for(int y=0;y<4;++y)for(int x=0;x<4;++x){
+        const float px=(x+.5f)*.5f-1,py=1-(y+.5f)*.5f,z=x==0?2.f:2.55f;
+        positions[y*4+x]={px,py,z,1};
+        if(x==0){const float l=std::sqrt(px*px+py*py+z*z),nx=px/l-.8f,ny=py/l,nz=z/l-.6f,nl=std::sqrt(nx*nx+ny*ny+nz*nz);normals[y*4+x]={nx/nl*.5f+.5f,ny/nl*.5f+.5f,nz/nl*.5f+.5f,.05f};}
+        else normals[y*4+x]={0,.5f,.5f,.05f};
+    }
+    auto grid=[&](const auto& data){auto t=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(data.data(),sizeof(data)));f.textures.push_back(t);return t;};
+    const auto world=grid(positions),normal=grid(normals),surface=f.input({0,0,0,1}),albedo=f.input({1,1,1,1});
+    FrameGraph graph(f.adapter);PostProcessGraphPlanInput in;in.width=in.height=4;in.finalLdr=true;in.sceneColor=f.target;in.gbuffer=f.target;in.ssr=true;CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);
+    RenderResourceBlackboard bb;ayt::render::RenderScene scene;std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;std::unordered_map<uint64_t,GpuMaterial> materials;
+    FrameContext frame;frame.ssr.enabled=true;frame.ssr.maxDistance=3;frame.ssr.thickness=.02f;frame.cameraPosition={0,0,0};
+    LightingPass lighting;SsrPass pass;PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.sceneFbo=f.target;ctx.resourceBlackboard=&bb;ctx.frameGraph=&graph;ctx.lightingPass=&lighting;
+    CHECK(!lighting.iblActiveThisFrame());
+    double previous=0;
+    for(float radiance:{1.f,2.f}){
+        f.render("","return vec4("+std::to_string(radiance)+",0.0,0.0,1.0)");
+        bb.beginFrame();bb.publishGBuffer(f.target,albedo,normal,world,surface,surface,4,4,1,true);bb.publishProduced(BlackboardResourceId::LightingColor,BlackboardResourceLifetime::External,f.target,f.targetTexture,4,4,1);
+        CHECK(pass.execute(ctx)==1);CHECK(bb.producedThisFrame(BlackboardResourceId::SsrColor));
+        const auto output=f.adapter.getFboAttachment(graph.resolve(FgResourceId::SsrColor),0);
+        const auto pixels=f.render("texture2d ssrResult","return sample(ssrResult,vec2(0.125,0.375))",[&](const auto& p){const auto b=p.getTextureBinding("ssrResult");p.setTexture(p.getTextureStage(b),b,toShaderTexture(output));},34);
+        CHECK(pixels.size()==16);if(pixels.empty())break;
+        std::fprintf(stderr,"[SSR no IBL] input=%.1f reflected=%.4f\n",radiance,pixels[0][0]);
+        CHECK(pixels[0][0]>radiance*1.05f);CHECK(pixels[0][0]<radiance*2);CHECK(pixels[0][1]==0);CHECK(pixels[0][3]==1);
+        if(previous>0)CHECK(std::abs(pixels[0][0]-previous*2)<.005);previous=pixels[0][0];
+    }
+    frame.ssr.enabled=false;CHECK(pass.execute(ctx)==0);pass.destroyResources(f.adapter);
 #else
     SKIP_TEST("Windows device fixture required");
 #endif

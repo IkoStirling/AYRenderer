@@ -1,4 +1,6 @@
 #include "detail/TransparentPass.h"
+#include "detail/PerformanceLightBindings.h"
+#include "detail/PerformanceTransparentSource.h"
 #include "detail/BuiltinShaderCatalog.h"
 #include "detail/RasterConvention.h"
 #include "detail/GpuResources.h"
@@ -17,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <string>
 #include <utility>
@@ -128,7 +131,20 @@ uint64_t selectionCompositeState() noexcept
 }
 
 namespace {
-
+bool performancePbrMaterial(const GpuMaterial& material){
+    return material.materialModel==MaterialModel::StandardLit
+        &&material.shader.getUniformBinding("baseColor")!=shader::InvalidBinding
+        &&material.shader.getUniformBinding("roughness")!=shader::InvalidBinding
+        &&material.shader.getTextureBinding("baseColorTexture")!=shader::InvalidBinding;
+}
+bool objectOverlapsLight(const DrawItem& item,const GpuMesh& mesh,const math::FVector3& center,const math::FVector3& extent){
+    if(mesh.hasSkinWeights||mesh.hasMorphTargets||!mesh.localBoundsValid)return true;
+    math::FVector3 low{INFINITY,INFINITY,INFINITY},high{-INFINITY,-INFINITY,-INFINITY};
+    for(int corner=0;corner<8;++corner){const auto p=item.world*math::FVector4(corner&1?mesh.localBoundsMax.x:mesh.localBoundsMin.x,corner&2?mesh.localBoundsMax.y:mesh.localBoundsMin.y,corner&4?mesh.localBoundsMax.z:mesh.localBoundsMin.z,1);
+        for(int axis=0;axis<3;++axis){if(!std::isfinite(p[axis]))return true;low[axis]=std::min(low[axis],p[axis]);high[axis]=std::max(high[axis],p[axis]);}}
+    for(int axis=0;axis<3;++axis)if(high[axis]<center[axis]-extent[axis]||low[axis]>center[axis]+extent[axis])return false;
+    return true;
+}
 constexpr const char* kSelectionOutlinePhoskiaSource = R"(
 material EditorSelectionOutline {
     texture2d selectionMask
@@ -268,7 +284,7 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
     uint8_t viewId,
     const PackedSceneLighting& lights,
     const PackedShadowAtlas& shadows,
-    SubmitMode mode)
+    SubmitMode mode,GpuMaterial* materialOverride)
 {
     SubmitResult result;
     const auto& meshes   = ctx.meshes;
@@ -302,10 +318,21 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
         return result;
     }
 
-    GpuMaterial& material = matIt->second;
+    GpuMaterial& material = materialOverride?*materialOverride:matIt->second;
     if (!material.shader.isValid()) {
         result.skip = true;
         return result;
+    }
+
+    if(materialOverride){
+        // One replay program is shared by many materials. Establish stock PBR
+        // defaults before the source material's explicit slots are applied.
+        const float zero[4]={0,0,0,0},one[4]={1,0,0,0},rough[4]={.5f,0,0,0};
+        trySetUniformVec4(material.shader,performanceTransparentUniform("metallic").c_str(),zero);trySetUniformVec4(material.shader,performanceTransparentUniform("roughness").c_str(),rough);
+        trySetUniformVec4(material.shader,performanceTransparentUniform("ao").c_str(),one);trySetUniformVec4(material.shader,performanceTransparentUniform("emissive").c_str(),zero);
+        trySetUniformVec4(material.shader,performanceTransparentUniform("opacity").c_str(),one);trySetUniformVec4(material.shader,performanceTransparentUniform("opacitySource").c_str(),zero);
+        trySetUniformVec4(material.shader,performanceTransparentUniform("normalYSign").c_str(),one);
+        const float sided[4]={material.doubleSided?1.f:0.f,0,0,0};trySetUniformVec4(material.shader,performanceTransparentUniform("doubleSided").c_str(),sided);
     }
 
     if (mode == SubmitMode::TransparentSurface
@@ -628,6 +655,7 @@ bool TransparentPass::ensureSelectionResources(
 
 void TransparentPass::destroyResources(BGFXAdapter& adapter) noexcept
 {
+    _performanceProgram.reset();_visiblePerformanceLights.clear();_performanceQuotas.clear();
     _debugDraw.destroyResources(adapter);
     destroySelectionTarget(adapter);
     _selectionCompositeGeometry.destroy(adapter);
@@ -767,6 +795,34 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     const PackedShadowAtlas litFallbackShadows =
         packShadowAtlas(nullptr, false);
 
+    _visiblePerformanceLights.clear();_performanceQuotas.clear();
+    auto* performance=ctx.performanceLights;
+    if(deferredLitComposite&&performance&&!performance->lights.empty()&&performance->budget.transparentDraws&&performance->budget.transparentLightsPerObject&&performance->budget.surfaceLights){
+        bool hasPbr=false;
+        for(const auto& entry:sortedItems){if(entry.item->particleBatch)continue;const auto mat=ctx.materials.find(entry.item->material.id);if(mat==ctx.materials.end())continue;
+            if(performancePbrMaterial(mat->second))hasPbr=true;
+            else if(mat->second.materialModel==MaterialModel::StandardLit)++performance->stats.transparentUnsupportedMaterials;
+        }
+        if(hasPbr){
+            if(!_performanceProgram.isValid())_performanceProgram=ctx.pool.acquire(performanceTransparentSource(),"performance_transparent_v2_isolated_material");
+            if(!_performanceProgram.isValid()){static bool reported=false;if(!reported){reported=true;for(const auto& message:ctx.pool.lastCompileErrors())std::fprintf(stderr,"[TransparentCompile] %s\n",message.c_str());}}
+            if(_performanceProgram.isValid()){
+                const auto vp=frame.projection*frame.view;
+                for(size_t index=0;index<performance->lights.size()&&_visiblePerformanceLights.size()<performance->budget.surfaceLights;++index){
+                    const auto& light=performance->lights[index];if(!performanceLightRect(light,vp,viewportWidth,viewportHeight).visible)continue;
+                    math::FVector3 center,extent;performanceLightBounds(light,center,extent);_visiblePerformanceLights.push_back({index,center,extent});
+                }
+                uint32_t remaining=performance->budget.transparentDraws;
+                for(auto it=sortedItems.rbegin();it!=sortedItems.rend();++it){const auto* item=it->item;if(item->particleBatch)continue;
+                    const auto mat=ctx.materials.find(item->material.id),dummy=ctx.materials.end();
+                    const auto mesh=ctx.meshes.find(item->mesh.id);if(mat==dummy||mesh==ctx.meshes.end()||!performancePbrMaterial(mat->second))continue;
+                    uint16_t candidates=0;for(const auto& light:_visiblePerformanceLights)if(objectOverlapsLight(*item,mesh->second,light.center,light.extent))++candidates;
+                    const uint16_t allowed=uint16_t(std::min<uint32_t>({candidates,remaining,performance->budget.transparentLightsPerObject}));
+                    if(allowed)_performanceQuotas[item]=allowed;remaining-=allowed;performance->stats.transparentBudgetSkipped+=candidates-allowed;
+                }
+            }
+        }
+    }
     for (const SortedTransparentItem& entry : sortedItems) {
         const DrawItem* pItem = entry.item;
         if (pItem->particleBatch && pItem->particleBatch->world3D
@@ -792,6 +848,24 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
             SubmitMode::TransparentSurface);
         if (res.accepted) {
             ++drawCount;
+            const auto quota=_performanceQuotas.find(pItem);
+            if(quota!=_performanceQuotas.end()&&performance&&_performanceProgram.isValid()){
+                const auto mesh=ctx.meshes.find(pItem->mesh.id);
+                if(mesh!=ctx.meshes.end()){
+                    GpuMaterial replay=material;replay.shader=_performanceProgram;replay.blendMode=BlendMode::Additive;
+                    replay.mat4Binding=replay.boneBlockBinding=shader::InvalidBinding;
+                    replay.colorBinding=replay.shader.getUniformBinding(performanceTransparentUniform("baseColor"));
+                    for(auto& slot:replay.uniformSlots)slot.name=performanceTransparentUniform(slot.name);
+                    uint16_t emitted=0;
+                    for(const auto& light:_visiblePerformanceLights){if(emitted>=quota->second)break;if(!objectOverlapsLight(*pItem,mesh->second,light.center,light.extent))continue;
+                        if(!bindPerformanceSurfaceLight(ctx,_performanceProgram,light.index,receivesShadow(pItem->shadowFlags)))continue;
+                        const float blend[4]={material.blendMode==BlendMode::Additive&&!material.premultipliedAlpha?1.f:0.f,0,0,0};
+                        _performanceProgram.setUniform(_performanceProgram.getUniformBinding("performanceBlend"),blend,sizeof(blend));
+                        const auto extra=submitItem(adapter,ctx,frame,*pItem,viewId,packedLights,packedShadows,SubmitMode::TransparentSurface,&replay);
+                        if(extra.accepted){++drawCount;++emitted;++performance->stats.transparentDraws;}
+                    }
+                }
+            }
         }
     }
 

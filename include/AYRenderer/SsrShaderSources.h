@@ -1,6 +1,6 @@
 #pragma once
 namespace ayt::render {
-inline constexpr char kSsrCacheKey[] = "ssr_v3_explicit_scene_matrices";
+inline constexpr char kSsrCacheKey[] = "ssr_v4_independent_screen_radiance";
 inline constexpr char kSsrPhoskiaSource[] = R"PHOSKIA(
 material ScreenSpaceReflection {
     texture2d sceneColor
@@ -112,9 +112,11 @@ material ScreenSpaceReflection {
         let weight = confidence * traceParams.x
         // Replace precisely the existing split-sum IBL specular on valid hits;
         // preserve direct light, diffuse, emissive, AO and miss fallback.
+        // Screen radiance already includes illumination; ambient strength only
+        // scales the environment term being replaced, never the reflected hit.
         if (materialParams.z > 1.5) { result = vec4(hitColor * confidence, raw.a) }
         else if (materialParams.z > 0.5) { result = vec4(vec3(confidence), raw.a) }
-        else { result = vec4(max(raw.rgb + (hitColor - oldSpecular) * brdfWeight * iblParams.x * ambientAo * weight, vec3(0.0)), raw.a) }
+        else { result = vec4(max(raw.rgb + (hitColor - oldSpecular * iblParams.x) * brdfWeight * ambientAo * weight, vec3(0.0)), raw.a) }
         } else if (materialParams.z > 0.5) { result = vec4(0.0, 0.0, 0.0, raw.a) }
         return result
     }

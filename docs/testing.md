@@ -557,3 +557,11 @@ source changed; shared PBR/particle variants remain68.
 production shaders12/208 (68 variants); each D3D backend7/306. GPU partial-shadow pixels:
 contact0, legacy hard0, large pupil350, small pupil90; volume hard/soft difference48 and bounded by
 unshadowed energy. Studio new/legacy smokes passed. SDK127/53/88/545 and inventory1016/10 passed.
+
+
+2026-10-19 transparent/SSR stage: Contracts163/1386, PostProcess252/1357, Sequence107/3902,
+Shader12/209 (69 production variants, no-compiler prewarm). Each D3D11/12 FixtureEmittersGpu9/395;
+transparent alpha increments177/89, rear60, stack208 vs207 expected, Gobo/IES and disabled identity.
+Each backend real no-IBL SSR1/27, scene1/2 -> reflected1.5010/3.0020; both legacy SSR cases passed.
+Studio glass/reflections smoke and invalid-budget rejection passed. SDK127/53/88/545 clean;
+Renderer inventory1021/10 clean. SSR remains on-screen opaque only; no refraction or indirect bounce yet.

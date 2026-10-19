@@ -62,10 +62,15 @@ struct PerformanceLightBudget {
     uint16_t surfaceLights = 64;
     uint8_t volumeLights = 16;
     uint8_t shadowLights = 4;
+    /// Transparent PBR replay budget, shared by the main view. Sources still
+    /// obey surfaceLights; nearest sorted objects receive quotas first.
+    uint16_t transparentDraws = 128; // [0,1024]
+    uint8_t transparentLightsPerObject = 8; // [0,32]
 };
 struct PerformanceLightStats {
     uint32_t sourceLights=0, surfaceDraws=0, volumeDraws=0, shadowLights=0;
     uint32_t culledLights=0, surfaceBudgetSkipped=0, volumeBudgetSkipped=0;
+    uint32_t transparentDraws=0,transparentBudgetSkipped=0,transparentUnsupportedMaterials=0;
 };
 /// Renderer-owned validated immutable-for-dispatch light packet. Local Spot
 /// and surface-only Point lights; max256, sorted by descending priority then original order.

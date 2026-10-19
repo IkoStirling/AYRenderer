@@ -12,5 +12,7 @@ public:
 private:
     FullscreenPassGeometry _geometry;
     shader::ShaderResource _program;
+    bgfx::TextureHandle _blackCube = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle _fallbackBrdf = BGFX_INVALID_HANDLE;
 };
 }

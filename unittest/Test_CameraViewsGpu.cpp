@@ -174,6 +174,9 @@ struct FixtureEmitterGpuFixture {
     bgfx::TextureHandle readback=BGFX_INVALID_HANDLE;
     ayt::render::FixtureEmitters emitters;
     ayt::render::FixtureHousings housings;
+    ayt::render::MeshHandle pane;
+    ayt::render::MaterialHandle glass;
+    ayt::render::PerformanceLightStats lastTransparentStats;
     ayt::render::SceneLights dark;
     ayt::render::MeshHandle cube;
     ayt::render::MaterialHandle black;
@@ -220,6 +223,26 @@ struct FixtureEmitterGpuFixture {
         const auto color=bgfx::TextureHandle{ayt::render::detail::CameraViewsTestAccess::finalColor(renderer)};CHECK(bgfx::isValid(color));std::array<uint8_t,64*64*4> pixels{};
         if(bgfx::isValid(color)){bgfx::blit(112,readback,0,0,color);const auto ready=bgfx::readTexture(readback,pixels.data());auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(renderer);for(int i=0;i<120&&adapter->gpuFrameCounter()<ready;++i)renderer.endFrame();CHECK(adapter->gpuFrameCounter()>=ready);}
         CHECK(renderer.setPerformanceLights({}));return pixels;
+    }
+    std::array<uint8_t,64*64*4> sampleTransparent(float alpha,float intensity,uint16_t drawBudget=128,float paneZ=0,bool rear=false,bool blocker=false,ayt::render::LightPattern pattern=ayt::render::LightPattern::Open,std::shared_ptr<const ayt::render::IesProfile> ies={}){
+        using namespace ayt::render;renderer.setPostProcessBloomStrength(0);renderer.setPostProcessGamma(1);renderer.setPostProcessExposure(1);renderer.setVolumetricSettings({});
+        if(!pane.isValid()){
+            struct V{float x,y,z,nx,ny,nz,u,v,tx,ty,tz,tw;};
+            const V vertices[]={{-.8f,-.8f,0,0,0,-1,0,0,1,0,0,1},{-.8f,.8f,0,0,0,-1,0,1,1,0,0,1},{.8f,.8f,0,0,0,-1,1,1,1,0,0,1},{.8f,-.8f,0,0,0,-1,1,0,1,0,0,1}};
+            const uint16_t indices[]={0,1,2,0,2,3};auto layout=VertexLayoutDesc::position3Normal3TexCoord2();CHECK(layout.add({VertexAttribute::Tangent,4,VertexComponentType::Float,false}));
+            pane=renderer.createMesh(vertices,4,layout,indices,6);glass=renderer.createMaterialFromPhoskia(kPbrPhoskiaSource,"transparent_performance_probe");CHECK(pane.isValid());CHECK(glass.isValid());
+            renderer.setMaterialBlendMode(glass,BlendMode::Alpha);renderer.setMaterialColor(glass,"baseColor",1,1,1,1);renderer.setMaterialFloat(glass,"roughness",1);renderer.setMaterialFloat(glass,"metallic",0);
+        }
+        renderer.setMaterialFloat(glass,"opacity",alpha);
+        PerformanceLight light;light.id=7;light.light=Light::spot({0,0,-2},{0,0,1},10,intensity,.95f,.8f,{1,0,0});light.volumetric=0;light.intensityUnit=LightIntensityUnit::Candela;light.pattern=pattern;
+        TextureHandle atlas;if(ies){atlas=createIesTexture(renderer,*ies);CHECK(atlas.isValid());light.iesProfile=ies;light.iesTexture=atlas;}
+        PerformanceLightBudget budget;budget.transparentDraws=drawBudget;CHECK(renderer.setPerformanceLights({&light,1},budget));
+        RenderScene scene;scene.add(pane,glass,ayt::math::translate(0.f,0.f,paneZ));if(rear)scene.add(pane,glass,ayt::math::translate(0.f,0.f,paneZ+1));
+        if(blocker){renderer.setMaterialColor(black,"baseColor",0,0,0,1);scene.add(cube,black,ayt::math::translate(0.f,0.f,-.5f)*ayt::math::scale(1.f,1.f,.1f));}
+        for(int i=0;i<3;++i){renderer.beginFrame({0,0,0,1});renderer.render(scene);renderer.endFrame();}
+        lastTransparentStats=renderer.performanceLightStats();const auto color=bgfx::TextureHandle{ayt::render::detail::CameraViewsTestAccess::finalColor(renderer)};CHECK(bgfx::isValid(color));std::array<uint8_t,64*64*4> pixels{};
+        if(bgfx::isValid(color)){bgfx::blit(112,readback,0,0,color);const auto ready=bgfx::readTexture(readback,pixels.data());auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(renderer);for(int i=0;i<120&&adapter->gpuFrameCounter()<ready;++i)renderer.endFrame();CHECK(adapter->gpuFrameCounter()>=ready);}
+        CHECK(renderer.setPerformanceLights({}));if(atlas.isValid())renderer.destroyTexture(atlas);return pixels;
     }
     std::array<uint8_t,64*64*4> sampleIes(const std::shared_ptr<const ayt::render::IesProfile>& profile,bool volume){
         using namespace ayt::render;
@@ -390,6 +413,39 @@ TEST_CASE(area_shadow_penumbra_grows_away_from_contact_and_softens_volume){
     double difference=0;for(size_t i=0;i<softFog.size();i+=4)difference+=std::abs(int(softFog[i])-int(hardFog[i]));
     std::fprintf(stderr,"[PCSS fog] clear=%.0f hard=%.0f soft=%.0f difference=%.0f\n",emitterRedEnergy(clearFog),emitterRedEnergy(hardFog),emitterRedEnergy(softFog),difference);
     CHECK(difference>10);CHECK(emitterRedEnergy(softFog)<=emitterRedEnergy(clearFog)+100);
+#else
+    SKIP_TEST("Windows real-device acceptance required");
+#endif
+}
+TEST_CASE(transparent_pbr_receives_optical_lights_with_correct_alpha_layers_and_near_quotas){
+#ifdef _WIN32
+    const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Requires isolated real-device transparent lighting acceptance");
+    FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+    const auto center=[](const auto& p){return double(p[(32*64+32)*4]);};
+    const auto dark=f.sampleTransparent(.5f,0),nearPanePixels=f.sampleTransparent(.5f,6);CHECK(f.lastTransparentStats.transparentDraws==1);
+    const double n=center(nearPanePixels)-center(dark);CHECK(n>20);
+    const auto quarterDark=f.sampleTransparent(.25f,0),quarter=f.sampleTransparent(.25f,6);const double q=center(quarter)-center(quarterDark);CHECK(std::abs(n-2*q)<5);
+    const auto rearDark=f.sampleTransparent(.5f,0,128,1),rearPanePixels=f.sampleTransparent(.5f,6,128,1);const double r=center(rearPanePixels)-center(rearDark);
+    const auto stackDark=f.sampleTransparent(.5f,0,128,0,true),stack=f.sampleTransparent(.5f,6,128,0,true);CHECK(f.lastTransparentStats.transparentDraws==2);
+    const double layered=center(stack)-center(stackDark);std::fprintf(stderr,"[Transparent probe] near=%.0f quarter=%.0f rear=%.0f layered=%.0f expected=%.0f\n",n,q,r,layered,n+r*.5);CHECK(std::abs(layered-(n+r*.5))<6);
+    const auto limited=f.sampleTransparent(.5f,6,1,0,true);CHECK(f.lastTransparentStats.transparentDraws==1);CHECK(f.lastTransparentStats.transparentBudgetSkipped==1);CHECK(std::abs(center(limited)-center(stackDark)-n)<5);
+    const auto disabled=f.sampleTransparent(.5f,6,0);CHECK(f.lastTransparentStats.transparentDraws==0);CHECK(disabled==dark);
+    const auto blocked=f.sampleTransparent(.5f,6,128,0,false,true),opaqueOnly=f.sampleTransparent(0,6,128,0,false,true);CHECK(blocked==opaqueOnly);
+#else
+    SKIP_TEST("Windows real-device acceptance required");
+#endif
+}
+TEST_CASE(transparent_pbr_uses_shared_gobo_and_ies_distribution){
+#ifdef _WIN32
+    using namespace ayt::render;
+    const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Requires isolated real-device transparent optics acceptance");
+    FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+    const auto dark=f.sampleTransparent(.5f,0),open=f.sampleTransparent(.5f,6),stripes=f.sampleTransparent(.5f,6,128,0,false,false,LightPattern::Stripes);
+    const auto signal=[&](const auto& p){return emitterRedEnergy(p)-emitterRedEnergy(dark);};CHECK(signal(stripes)>signal(open)*.2);CHECK(signal(stripes)<signal(open)*.8);
+    auto ies=std::make_shared<IesProfile>();CHECK(IesProfile::parse("IESNA:LM-63-2002\nTILT=NONE\n1 -1 1 3 2 1 2 0 0 0\n1 1 1\n0 45 90\n0 180\n100 100 100\n0 0 0\n",*ies));
+    const auto photometric=f.sampleTransparent(.5f,6,128,0,false,false,LightPattern::Open,ies);
+    double left=0,right=0;for(int y=20;y<44;++y)for(int x=18;x<46;++x){const auto i=(y*64+x)*4;const double v=double(photometric[i])-dark[i];if(x<32)left+=v;else right+=v;}
+    std::fprintf(stderr,"[Transparent optics] open=%.0f stripes=%.0f IES=%.0f/%.0f\n",signal(open),signal(stripes),left,right);CHECK(right>left*1.2);CHECK(signal(photometric)<signal(open));
 #else
     SKIP_TEST("Windows real-device acceptance required");
 #endif
