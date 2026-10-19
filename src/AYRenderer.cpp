@@ -2176,6 +2176,11 @@ uint16_t detail::CameraViewsTestAccess::framebuffer(const Renderer& renderer, Ca
     const auto found = renderer._impl->cameraOutputs.find(output.id);
     return found != renderer._impl->cameraOutputs.end() ? found->second.framebuffer.idx : UINT16_MAX;
 }
+uint16_t detail::CameraViewsTestAccess::finalColor(Renderer& renderer) noexcept {
+    if(!renderer._impl||!renderer.isInitialized())return UINT16_MAX;
+    const auto fbo=renderer._impl->frameGraph.resolve(detail::FgResourceId::FinalLdrColor);
+    return renderer._impl->adapter.getFboAttachment(fbo,0).idx;
+}
 detail::BGFXAdapter* detail::CameraViewsTestAccess::adapter(Renderer& renderer) noexcept {
     return renderer.bgfxAdapter();
 }

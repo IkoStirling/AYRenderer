@@ -1688,3 +1688,27 @@ volumetric=0、Open、无阴影且constantFlux关闭，使用球形范围AABB/sc
 PerformanceLight.constantFlux默认关闭，开启时performanceLightFluxScale按
 (2-cos(2°)-cos(3°))/(2-coneCosInner-coneCosOuter)缩放表面和体积强度。
 这是smoothstep角度轮廓的解析归一化；Gobo/iris仍损失光通，有限口径近场不是物理光学。
+
+## 2026-10-19 可见灯具发光口
+
+`FixtureEmitters.h`提供显式的`FixtureEmitters::append`，输入与主视图相同的
+PerformanceLight灯包、view/projection和viewport。`buildFixtureEmitterBatch`是可离线测试的
+准备函数，最多256灯/1024顶点；非法灯包、相机和设置不替换输出/统计。
+仅Spot且apertureRadius>0、intensity>0生成圆形平面，随灯具轴朝向，背面不出光。
+Point和旧版零口径不自动造灯泡。发光口按iris收缩；核心/外场余弦轮廓和constantFlux与灯束一致，
+可选offAxisGlow提供很弱的前半球镜片辉光，不在背面添加屏幕贴片。
+
+近似辐亮度为intensity/出光口面积×radianceScale×角度权重，保留线性HDR颜色；
+不对已分辨发光面再施加平方反比。默认.75px最小足迹按面积修正能量，最大RGB默认10000，
+允许[1,60000]，超限在介质透射和足迹能量修正前夹取并计入clamped，避免高亮饱和吞掉雾衰减。radianceScale[0,100]、
+minimumPixelRadius[0,4]、offAxisGlow[0,1]均为显式呈现参数，尚非标准光度单位标定。
+
+资源复用现有ParticleUnlit生产材质，圆盘纹理64×64，最多一个CPU批次/绘制；
+Additive、深度测试、不写深度，服从不透明场景的完整/部分遮挡，再进入现有Bloom/曝光链。
+因Transparent在体积之后，发光口自行读取Renderer的VolumetricSettings：均匀介质解析透射，
+局部盒/动态密度用最多16次中心视线积分，使用相同噪声时间与边缘淡出。该近似不做逐像素介质积分。
+未生成独立屏幕眩光，不添加第二次散射；现有体积HG方向约定保持不变。
+
+Renderer拥有纹理/材质/quad，借用批次活到下一次append/销毁，保留帧使用OwnedCpu；
+Renderer重启后重建Facade。prepared仅为CPU候选数，GPU裁剪/深度及瞬态缓冲可减少实际像素。
+尚无灯体外壳、Gobo在镜片上的真实像、镜头鬼影、星芒或物理焦面。

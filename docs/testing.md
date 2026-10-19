@@ -1,5 +1,16 @@
 # AYRenderer 测试维护
 
+## 2026-10-19 可见发光口
+
+FixtureEmitterTests新增4项，Contracts总153/153、1025断言通过。FixtureEmittersGpu在
+D3D11/D3D12各2/2、59断言，无跳过；使用主Deferred最终LDR回读验证方向、完整/部分
+遮挡、烟雾与Bloom。正面/侧面/背面/完全遮挡/半遮挡红通道总量为
+28560/630/0/0/14280，不放宽半遮挡阈值。极小口径、源HDR上限后的介质衰减与
+256灯预算另由CPU覆盖。Shader12/12、208断言，68变体离线与无编译器加载通过。
+清单1003项/10分区无遗漏/重复。设备测试需显式AY_EMITTER_GPU_TEST=d3d11或d3d12，
+默认跳过，不冒充硬件验收。当前压力性能和已知近似见项目灯光系统文档§8；未人工查看图片。
+日志out/emitter-gpu-d3d11-verified.log、out/emitter-gpu-d3d12-verified.log、out/emitter-contracts-full.log。
+
 ## 2026-10-18 聚合Point与光通变焦
 
 Contracts149/149、964断言；Shader12/12、208断言通过，68生产变体重新烘焙并通过

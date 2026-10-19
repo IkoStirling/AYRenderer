@@ -1,5 +1,7 @@
 #include <AYRenderer.h>
 #include <AYRenderer/EmissivePointCloud.h>
+#include <AYRenderer/FixtureEmitters.h>
+#include <AYMath/MathUtils.h>
 #include <AYRenderer/PerformanceShaderSources.h>
 #include <AYShader/Phoskia.h>
 #include <AYShader/IR.h>
@@ -13,6 +15,81 @@ PerformanceLight light(uint32_t id) {
     PerformanceLight p;p.id=id;p.light=Light::spot({0,2,0},{0,-1,0},10,20,.95f,.8f,{1,0,0});return p;
 }
 }
+TEST_SUITE(FixtureEmitterTests)
+TEST_CASE(front_side_back_and_physical_aperture_orientation_are_consistent) {
+    auto p=light(7);p.light.position={0,0,0};p.light.spotDirection={0,0,-1};p.light.intensity=1;p.apertureRadius=.3f;
+    const auto projection=ayt::math::lh::perspective(ayt::math::radians(55.f),1,.1f,1000);
+    const auto view=[&](ayt::math::FVector3 eye){return ayt::math::lh::lookAt(eye,{0,0,0},{0,1,0});};
+    FixtureEmitterSettings settings;settings.minimumPixelRadius=0;ParticleDrawData front,side,back,far;FixtureEmitterStats stats;
+    CHECK(buildFixtureEmitterBatch({&p,1},view({0,0,-3}),projection,128,128,settings,{},front,stats));
+    CHECK(stats.prepared==1);CHECK(front.vertices.size()==4);CHECK(front.indices.size()==6);CHECK(front.world3D);
+    CHECK(front.vertices[0].r>1);for(const auto& vertex:front.vertices)CHECK(std::abs(vertex.z)<1e-6f);
+    CHECK(std::abs(front.vertices[0].r-1/(3.141592653589793*.09))<1e-5);
+    CHECK(buildFixtureEmitterBatch({&p,1},view({3,0,-3}),projection,128,128,settings,{},side,stats));
+    CHECK(stats.prepared==1);CHECK(side.vertices[0].r<front.vertices[0].r*.01f);
+    CHECK(buildFixtureEmitterBatch({&p,1},view({0,0,3}),projection,128,128,settings,{},back,stats));
+    CHECK(stats.backFacing==1);CHECK(back.vertices.empty());
+    CHECK(buildFixtureEmitterBatch({&p,1},view({0,0,-6}),projection,128,128,settings,{},far,stats));
+    CHECK(far.vertices[0].r==front.vertices[0].r); // Resolved radiance has no extra distance-squared dimming.
+    settings.offAxisGlow=0;
+    CHECK(buildFixtureEmitterBatch({&p,1},view({3,0,-3}),projection,128,128,settings,{},side,stats));CHECK(side.vertices.empty());
+}
+TEST_CASE(iris_zoom_flux_and_subpixel_footprint_keep_energy_rules) {
+    auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,-1};p.light.intensity=1;p.apertureRadius=.03f;
+    const auto view=ayt::math::lh::lookAt({0,0,-30},{0,0,0},{0,1,0});
+    const auto projection=ayt::math::lh::perspective(ayt::math::radians(55.f),1,.1f,1000);
+    FixtureEmitterSettings settings;settings.minimumPixelRadius=0;ParticleDrawData real,filtered,iris,flux;FixtureEmitterStats stats;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},real,stats));
+    settings.minimumPixelRadius=2;CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},filtered,stats));
+    const auto energy=[](const ParticleDrawData& b){const float width=b.vertices[1].x-b.vertices[0].x;return b.vertices[0].r*width*width;};
+    CHECK(std::abs(energy(real)-energy(filtered))<1e-5f);CHECK(filtered.vertices[0].r<real.vertices[0].r);
+    settings.minimumPixelRadius=0;p.iris=.5f;CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},iris,stats));
+    CHECK(std::abs(energy(iris)/energy(real)-.25f)<1e-5f);
+    p.iris=1;p.constantFlux=true;CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},flux,stats));
+    CHECK(std::abs(flux.vertices[0].r/real.vertices[0].r-performanceLightFluxScale(p))<1e-6f);
+}
+TEST_CASE(global_local_and_animated_medium_extinguish_visible_emitter) {
+    auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,-1};p.light.intensity=1;p.apertureRadius=.3f;
+    const auto view=ayt::math::lh::lookAt({0,0,-3},{0,0,0},{0,1,0});
+    const auto projection=ayt::math::lh::perspective(ayt::math::radians(55.f),1,.1f,1000);
+    ParticleDrawData clear,fogged,local,animated,repeat;FixtureEmitterStats stats;VolumetricSettings fog;fog.enabled=true;fog.density=.2f;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{}, {},clear,stats));
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{},fog,fogged,stats));
+    CHECK(std::abs(fogged.vertices[0].r/clear.vertices[0].r-std::exp(-.6f))<1e-5f);
+    fog.local=true;fog.center={0,0,-1.5f};fog.halfExtent={10,10,.5f};
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{},fog,local,stats));
+    CHECK(std::abs(local.vertices[0].r/clear.vertices[0].r-std::exp(-.175f))<.002f);
+    fog.noiseStrength=.8f;fog.noiseTime=5;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{},fog,animated,stats));
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{},fog,repeat,stats));
+    CHECK(animated.vertices[0].r==repeat.vertices[0].r);CHECK(animated.vertices[0].r<clear.vertices[0].r);
+    fog.center={50,0,0};CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{},fog,repeat,stats));
+    CHECK(repeat.vertices[0].r==clear.vertices[0].r);
+}
+TEST_CASE(validation_is_transactional_and_hdr_is_bounded_at_tiny_apertures) {
+    auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,-1};p.apertureRadius=.1f;
+    const auto view=ayt::math::lh::lookAt({0,0,-3},{0,0,0},{0,1,0});
+    const auto projection=ayt::math::lh::perspective(ayt::math::radians(55.f),1,.1f,1000);
+    ParticleDrawData batch;FixtureEmitterStats stats;CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{}, {},batch,stats));
+    const auto old=batch.vertices[0].r;FixtureEmitterSettings settings;settings.maximumRadiance=std::numeric_limits<float>::infinity();
+    CHECK(!buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},batch,stats));CHECK(batch.vertices[0].r==old);CHECK(stats.prepared==1);
+    CHECK(!buildFixtureEmitterBatch({&p,1},view,projection,0,128,{}, {},batch,stats));
+    auto invalid=view;invalid(0,0)=std::numeric_limits<float>::quiet_NaN();
+    CHECK(!buildFixtureEmitterBatch({&p,1},invalid,projection,128,128,{}, {},batch,stats));CHECK(batch.vertices[0].r==old);
+    settings={};settings.minimumPixelRadius=0;settings.maximumRadiance=100;p.apertureRadius=1e-8f;p.light.intensity=100000;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},batch,stats));CHECK(stats.clamped==1);CHECK(batch.vertices[0].r==100);
+    p.apertureRadius=1e-24f;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},batch,stats));CHECK(std::isfinite(batch.vertices[0].r));
+    VolumetricSettings fog;fog.enabled=true;fog.density=.2f;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,fog,batch,stats));
+    CHECK(std::abs(batch.vertices[0].r-100*std::exp(-.6f))<1e-4f);
+    p.apertureRadius=0;CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{}, {},batch,stats));CHECK(batch.vertices.empty());
+    p.apertureRadius=.1f;std::vector<PerformanceLight> lights(256,p);for(uint32_t i=0;i<256;++i)lights[i].id=i;
+    CHECK(buildFixtureEmitterBatch(lights,view,projection,128,128,{}, {},batch,stats));CHECK(stats.prepared==256);CHECK(batch.vertices.size()==1024);
+    lights.push_back(p);CHECK(!buildFixtureEmitterBatch(lights,view,projection,128,128,{}, {},batch,stats));CHECK(stats.prepared==256);
+}
+TEST_SUITE_END
+
 TEST_SUITE(PerformanceLightingTests)
 TEST_CASE(constant_flux_zoom_preserves_angular_integral_and_defaults_off) {
     auto p=light(1);CHECK(performanceLightFluxScale(p)==1);p.constantFlux=true;
