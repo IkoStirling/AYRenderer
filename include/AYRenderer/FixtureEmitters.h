@@ -3,6 +3,7 @@
 #include <AYRenderer/VolumetricSettings.h>
 namespace ayt::render {
 class Renderer;
+class VolumetricDensityField;
 struct FixtureEmitterSettings {
     /// Unitless presentation calibration: on-axis radiance = intensity / exit
     /// area * radianceScale. Resolved physical/Legacy units come from performanceLightIntensity.
@@ -21,14 +22,14 @@ struct FixtureEmitterStats {
 /// before half-float HDR submission; no inverse-square factor is applied to
 /// resolved surface radiance. Footprint widening preserves integrated energy.
 /// Medium attenuation samples the aperture-center ray (bounded16-step animated
-/// density/box quadrature), not a per-fragment participating lens simulation.
+/// density/box/optional immutable grid quadrature), not a per-fragment participating lens simulation.
 /// View/projection/viewport must match render. Invalid input preserves outputs.
 /// Prepared counts are CPU candidates; GPU clipping/depth/transient budgets
 /// determine actual pixels. No image Gobo, lens ghosts, starburst or housing.
 bool buildFixtureEmitterBatch(std::span<const PerformanceLight> lights,
     const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
     FixtureEmitterSettings settings,const VolumetricSettings& medium,
-    ParticleDrawData& output,FixtureEmitterStats& stats,std::string* error=nullptr);
+    ParticleDrawData& output,FixtureEmitterStats& stats,std::string* error=nullptr,const VolumetricDensityField* density=nullptr);
 /// Owner-thread facade. Renderer owns the cached disc/material/quad resources.
 /// Borrowed batches survive until the next append/destruction; use OwnedCpu for
 /// retained frames. Recreate after Renderer shutdown/reinitialize. Additive HDR

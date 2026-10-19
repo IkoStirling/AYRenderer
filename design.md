@@ -1884,3 +1884,13 @@ FrameGraph::resolve对external借用也要求本帧declared：效果关闭未重
 沿用相同裁剪、稳定ID预算、半径/覆盖能量及16浮点布局；缩放重用和16383边界有CPU回归。
 独立D3D11/D3D12点实例与CPU四边形读回对照通过AY_POINT_GPU_TEST选择后端。
 这项CPU准备优化不等同GPU筛选/compaction或点光聚合稳定性。
+
+
+## 2026-10-20 局部密度场
+
+VolumetricDensityField::create复制各轴1..64的uint8数据，CPU三线性采样；createVolumetricDensityTexture生成
+8列线性RGBA8 atlas。setVolumetricDensityField验证配对与活句柄，active时强制local=true，普通数值设置不丢绑定；
+destroyTexture/shutdown清除绑定并失效独立体积历史，host纹理需活过渲染。场在盒外0，叠加原.75..1柔边和动画噪声。
+ray、froxel密度写入、全分辨率消光与CPU灯口读取同一场；GPU两层Z插值并使用显式LOD0避免动态循环导数展开。
+分离消光/灯口最多16采样，legacy单Pass可共用最多64 ray步，froxel每格中心；高频网格仍可能欠采样，非精确体素积分或流体。
+网格图案是消光倍数，不新增彩色透射、透明雾积分、多重散射或硬件控制。

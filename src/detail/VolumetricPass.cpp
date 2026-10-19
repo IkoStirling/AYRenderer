@@ -1,3 +1,4 @@
+#include "detail/VolumetricDensityBinding.h"
 #include "detail/VolumetricPass.h"
 #include "AYRenderer/VolumetricShaderSources.h"
 #include "detail/VolumeReconstructionSource.h"
@@ -85,6 +86,7 @@ uint32_t VolumetricPass::execute(PassExecContext& ctx) {
  v("fogLens",0,1,0,0);
  v("fogIesSettings",0,0,0,0);tex("iesAtlas",gb.material);
  tex("patternGobo",gb.material);
+ bindings&=bindVolumetricDensity(ctx,_program,gb.material);
  if(!bindings)return 0;
  if(froxel&&!beginFroxelInjection(ctx,target,grid))return 0;
  configureFullscreenPassView(adapter,volumeView,target,0,0,width,height);
@@ -117,6 +119,7 @@ uint32_t VolumetricPass::finishIntegration(PassExecContext& ctx,bgfx::FrameBuffe
  const float width=grid.valid()?float(grid.width):float((uint32_t(ctx.viewportWidth)+s.downsample-1)/s.downsample),height=grid.valid()?float(grid.height):float((uint32_t(ctx.viewportHeight)+s.downsample-1)/s.downsample);
  v("reconstructionGrid",width,height,1.f/width,1.f/height);
  tex("sceneColor",input);tex("worldPosition",gb.worldPosition);tex("geometryCoverage",gb.material);tex("fogIntegral",low);
+ valid&=bindVolumetricDensity(ctx,_reconstruction,gb.material);
  if(!valid)return 0;
  configureFullscreenPassView(adapter,kReconstructViewId,target,0,0,ctx.viewportWidth,ctx.viewportHeight);
  _geometry.bind(adapter);adapter.setStateDepthTestAlways();shader::DrawCallContext submit;submit.viewId=kReconstructViewId;submit.state=0;_reconstruction.submit(submit);

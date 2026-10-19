@@ -1,8 +1,9 @@
 #pragma once
 #include "AYRenderer/PerformanceShaderSources.h"
+#include "AYRenderer/VolumetricDensityShader.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v15_froxel_coefficients";
-inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
+inline constexpr char kVolumetricCacheKey[]="volumetric_v16_density_grid";
+inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+kVolumetricDensityFunctions+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
  texture2d worldPosition
@@ -10,6 +11,8 @@ material Volumetric {
  texture2d shadowAtlas
  texture2d patternGobo
  texture2d iesAtlas
+ texture2d fogDensityAtlas
+ uniform vec4 fogDensityGrid
  uniform mat4 fogInverseViewProjection
  uniform mat4 fogView
  uniform mat4 fogShadow0
@@ -99,38 +102,26 @@ material Volumetric {
    // for long/grazing chords. Patterned beams retain the full sample budget.
    sampleCount=min(fogOptions.x,max(16.0,ceil((end-begin)/max(0.02,radius*max(0.01,fogPatternOptics.y)*0.125))))
   }
+  if(fogDensityGrid.w>0.5 && fogOptions.w>0.5 && fogOptions.w<1.5){sampleCount=16.0}
   if(fogIntegration.y>0.5){sampleCount=1.0}
   let ds=max(end-begin,0.0)/sampleCount
   let transmission=exp(-fogMedium.x*max(begin-mediumBegin,0.0))
-  if((fogOptions.z>0.5 || fogNoise.x>0.001) && begin>mediumBegin){
+  if((fogOptions.z>0.5 || fogNoise.x>0.001 || fogDensityGrid.w>0.5) && begin>mediumBegin && fogIntegration.y<0.5){
    transmission=1.0
-   for(k in range(4)){
-    let pre=origin+direction*(mediumBegin+(float(k)+0.5)*(begin-mediumBegin)*0.25)
-    let weight=1.0
-    if(fogOptions.z>0.5){
-     let local=abs(pre-fogCenter.xyz)/fogExtent.xyz
-     weight=1.0-smoothstep(0.75,1.0,max(max(local.x,local.y),local.z))
-    }
-    if(fogNoise.x>0.001){
-     let p=pre*fogNoise.y+vec3(fogNoise.z*0.17,fogNoise.z*0.11,fogNoise.z*0.14)
-     weight=weight*clamp(1.0+fogNoise.x*(0.5*sin(p.x+p.z*0.73)+0.35*sin(p.y*1.7-p.z*1.1)+0.15*sin(p.x*1.3+p.y*0.6)),0.15,1.85)
-    }
-    transmission=transmission*exp(-fogMedium.x*(begin-mediumBegin)*0.25*weight)
+   let preSamples=4.0
+   if(fogDensityGrid.w>0.5){preSamples=16.0}
+   for(k in range(int(preSamples),16)){
+    let pre=origin+direction*(mediumBegin+(float(k)+0.5)*(begin-mediumBegin)/preSamples)
+    let weight=volumetricMediumWeight(fogDensityAtlas,pre,fogCenter.xyz,fogExtent.xyz,fogOptions,fogNoise,fogDensityGrid)
+    transmission=transmission*exp(-fogMedium.x*(begin-mediumBegin)/preSamples*weight)
    }
   }
   let radiance=vec3(0.0)
-  if(fogOptions.w<0.5 || fogOptions.w>1.5 || fogOptions.z>0.5) {
+  if(fogOptions.w<0.5 || fogOptions.w>1.5 || fogOptions.z>0.5 || fogDensityGrid.w>0.5) {
   for(i in range(int(sampleCount),64)) {
    let fogSample=origin+direction*(begin+(float(i)+0.5)*ds)
    let localWeight=1.0
-   if(fogOptions.z>0.5){
-    let local=abs(fogSample-fogCenter.xyz)/fogExtent.xyz
-    localWeight=1.0-smoothstep(0.75,1.0,max(max(local.x,local.y),local.z))
-   }
-   if(fogNoise.x>0.001){
-    let p=fogSample*fogNoise.y+vec3(fogNoise.z*0.17,fogNoise.z*0.11,fogNoise.z*0.14)
-    localWeight=localWeight*clamp(1.0+fogNoise.x*(0.5*sin(p.x+p.z*0.73)+0.35*sin(p.y*1.7-p.z*1.1)+0.15*sin(p.x*1.3+p.y*0.6)),0.15,1.85)
-   }
+   if(fogIntegration.y<0.5){localWeight=volumetricMediumWeight(fogDensityAtlas,fogSample,fogCenter.xyz,fogExtent.xyz,fogOptions,fogNoise,fogDensityGrid)}
    let stepT=exp(-fogMedium.x*ds*localWeight)
    let toLight=fogLightPosition.xyz-fogSample
    let lightDistance=length(toLight)
@@ -255,13 +246,14 @@ material Volumetric {
   }
   } else {
    transmission=exp(-fogMedium.x*max(end-begin,0.0))
-   if(fogNoise.x>0.001){
+   if(fogNoise.x>0.001||fogDensityGrid.w>0.5){
     transmission=1.0
-    for(k in range(4)){
-     let pre=origin+direction*(begin+(float(k)+0.5)*(end-begin)*0.25)
-     let p=pre*fogNoise.y+vec3(fogNoise.z*0.17,fogNoise.z*0.11,fogNoise.z*0.14)
-     let weight=clamp(1.0+fogNoise.x*(0.5*sin(p.x+p.z*0.73)+0.35*sin(p.y*1.7-p.z*1.1)+0.15*sin(p.x*1.3+p.y*0.6)),0.15,1.85)
-     transmission=transmission*exp(-fogMedium.x*max(end-begin,0.0)*0.25*weight)
+    let extinctionSamples=4.0
+    if(fogDensityGrid.w>0.5){extinctionSamples=16.0}
+    for(k in range(int(extinctionSamples),16)){
+     let pre=origin+direction*(begin+(float(k)+0.5)*(end-begin)/extinctionSamples)
+     let weight=volumetricMediumWeight(fogDensityAtlas,pre,fogCenter.xyz,fogExtent.xyz,fogOptions,fogNoise,fogDensityGrid)
+     transmission=transmission*exp(-fogMedium.x*max(end-begin,0.0)/extinctionSamples*weight)
     }
    }
   }

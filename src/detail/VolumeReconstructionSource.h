@@ -1,12 +1,16 @@
 #pragma once
+#include "AYRenderer/VolumetricDensityShader.h"
+#include <string>
 namespace ayt::render::detail {
-inline constexpr char kVolumeReconstructionKey[]="volume_reconstruction_v2_local_medium_fade";
-inline constexpr char kVolumeReconstructionSource[]=R"(
+inline constexpr char kVolumeReconstructionKey[]="volume_reconstruction_v3_density_grid";
+inline const std::string kVolumeReconstructionOwned=std::string(kVolumetricDensityFunctions)+R"(
 material VolumeReconstruction {
  texture2d sceneColor
  texture2d worldPosition
  texture2d geometryCoverage
  texture2d fogIntegral
+ texture2d fogDensityAtlas
+ uniform vec4 fogDensityGrid
  uniform mat4 fogInverseViewProjection
  uniform mat4 fogView
  uniform vec4 fogCamera
@@ -42,20 +46,14 @@ material VolumeReconstruction {
   // Extinction remains full resolution: scene edges never inherit a neighbor's
   // path length, and no downsampled scene RGB is ever displayed.
   let transmission=exp(-fogMedium.x*max(end-begin,0.0))
-  if(fogOptions.z>0.5||fogNoise.x>0.001){
+  if(fogOptions.z>0.5||fogNoise.x>0.001||fogDensityGrid.w>0.5){
    transmission=1.0
-   for(k in range(4)){
-    let pre=origin+direction*(begin+(float(k)+0.5)*(end-begin)*0.25)
-    let weight=1.0
-    if(fogOptions.z>0.5){
-     let local=abs(pre-fogCenter.xyz)/fogExtent.xyz
-     weight=1.0-smoothstep(0.75,1.0,max(max(local.x,local.y),local.z))
-    }
-    if(fogNoise.x>0.001){
-     let p=pre*fogNoise.y+vec3(fogNoise.z*0.17,fogNoise.z*0.11,fogNoise.z*0.14)
-     weight=weight*clamp(1.0+fogNoise.x*(0.5*sin(p.x+p.z*0.73)+0.35*sin(p.y*1.7-p.z*1.1)+0.15*sin(p.x*1.3+p.y*0.6)),0.15,1.85)
-    }
-    transmission=transmission*exp(-fogMedium.x*max(end-begin,0.0)*0.25*weight)
+   let extinctionSamples=4.0
+   if(fogDensityGrid.w>0.5){extinctionSamples=16.0}
+   for(k in range(int(extinctionSamples),16)){
+    let pre=origin+direction*(begin+(float(k)+0.5)*(end-begin)/extinctionSamples)
+    let weight=volumetricMediumWeight(fogDensityAtlas,pre,fogCenter.xyz,fogExtent.xyz,fogOptions,fogNoise,fogDensityGrid)
+    transmission=transmission*exp(-fogMedium.x*max(end-begin,0.0)/extinctionSamples*weight)
    }
   }
   let base=vec2(floor(uv.x*reconstructionGrid.x-0.5),floor(uv.y*reconstructionGrid.y-0.5))
@@ -89,4 +87,5 @@ material VolumeReconstruction {
  }
 }
 )";
+inline const char* kVolumeReconstructionSource=kVolumeReconstructionOwned.c_str();
 }

@@ -513,6 +513,8 @@ struct Renderer::Impl {
     SsrSettings                    ssr;
     ScreenSpaceIndirectSettings    screenIndirect;
     VolumetricSettings             volumetric;
+    VolumetricDensityBinding densityField;
+    bool requestedVolumetricLocal=false;
     bool                          decalsEnabled = false;
     std::vector<DeferredDecal>     decals;
     float                          ssaoStrength = 0.0f;
@@ -1087,6 +1089,7 @@ void Renderer::shutdown()
     if (!_impl) {
         return;
     }
+    _impl->densityField={};_impl->volumetric.local=_impl->requestedVolumetricLocal;
     for (auto& [id, view] : _impl->runtimeViews) {
         (void)id;
         if (_impl->adapter.isInitialized()) view->transparent.destroyResources(_impl->adapter);
@@ -1454,6 +1457,7 @@ void Renderer::render(const RenderScene& scene)
     frame.ssr = _impl->ssr;
     frame.screenIndirect = _impl->screenIndirect;
     frame.volumetric = _impl->volumetric;
+    frame.densityField = _impl->densityField;
     frame.decalsEnabled = _impl->decalsEnabled;
     frame.hazeStrength     = detail::sanitizeDepthHazeStrength(
         _impl->depthHazeStrength);
@@ -3367,8 +3371,16 @@ ColorGradingPreset Renderer::colorGradingPreset() const noexcept
 // SSR host settings survive pipeline replacement, but never store GPU handles.
 void Renderer::setVolumetricSettings(const VolumetricSettings& settings) {
     // Independent of decal authoring.
-    if (_impl) _impl->volumetric = sanitizeVolumetricSettings(settings);
+    if (_impl){auto value=sanitizeVolumetricSettings(settings);_impl->requestedVolumetricLocal=value.local;if(_impl->densityField.profile)value.local=true;_impl->volumetric=value;}
 }
+bool Renderer::setVolumetricDensityField(VolumetricDensityBinding binding,std::string* error){
+    if(!_impl)return false;
+    if(bool(binding.profile)!=binding.texture.isValid()){if(error)*error="Density grid requires a matching profile and atlas";return false;}
+    if(binding.profile){const auto found=_impl->resources.textures().find(binding.texture.id);if(found==_impl->resources.textures().end()||!detail::BGFXAdapter::isValid(found->second.handle)){if(error)*error="Density atlas must be live and Renderer-owned";return false;}}
+    if(binding.profile!=_impl->densityField.profile||binding.texture.id!=_impl->densityField.texture.id)resetVolumetricHistory();
+    _impl->densityField=std::move(binding);_impl->volumetric.local=_impl->densityField.profile?true:_impl->requestedVolumetricLocal;if(error)error->clear();return true;
+}
+VolumetricDensityBinding Renderer::volumetricDensityField() const noexcept {return _impl?_impl->densityField:VolumetricDensityBinding{};}
 void Renderer::resetVolumetricHistory() {
     if(_impl)if(auto* pass=_impl->pipeline.findPass<detail::VolumetricPass>())pass->invalidateHistory();
 }
@@ -3640,6 +3652,7 @@ void Renderer::destroyTexture(TextureHandle& texture)
         texture = {};
         return;
     }
+    if(_impl->densityField.profile&&_impl->densityField.texture.id==texture.id){_impl->densityField={};_impl->volumetric.local=_impl->requestedVolumetricLocal;resetVolumetricHistory();}
     _impl->resources.destroyTexture(texture);
 }
 

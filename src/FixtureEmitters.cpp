@@ -1,3 +1,4 @@
+#include <AYRenderer/VolumetricDensity.h>
 #include <AYRenderer/FixtureEmitters.h>
 #include <AYRenderer.h>
 #include <algorithm>
@@ -6,8 +7,8 @@
 namespace ayt::render {
 namespace {
 float smooth(float a,float b,float v){const float t=std::clamp((v-a)/(b-a),0.f,1.f);return t*t*(3-2*t);}
-float transmission(const math::FVector3& origin,const math::FVector3& target,VolumetricSettings fog){
-    fog=sanitizeVolumetricSettings(fog);if(!fog.enabled||fog.density<=0)return 1;
+float transmission(const math::FVector3& origin,const math::FVector3& target,VolumetricSettings fog,const VolumetricDensityField* field){
+    fog=sanitizeVolumetricSettings(fog);if(field)fog.local=true;if(!fog.enabled||fog.density<=0)return 1;
     const auto delta=target-origin;const float distance=delta.length();if(distance<1e-6f)return 1;
     const auto direction=delta/distance;float begin=0,end=std::min(distance,fog.maxDistance);
     if(fog.local)for(int i=0;i<3;++i){
@@ -19,7 +20,7 @@ float transmission(const math::FVector3& origin,const math::FVector3& target,Vol
         }
     }
     if(end<=begin)return 1;
-    if(!fog.local&&fog.noiseStrength<=.001f)return std::exp(-fog.density*(end-begin));
+    if(!field&&!fog.local&&fog.noiseStrength<=.001f)return std::exp(-fog.density*(end-begin));
     const float ds=(end-begin)/16;float opticalDepth=0;
     for(int i=0;i<16;++i){
         const auto p=origin+direction*(begin+(i+.5f)*ds);float weight=1;
@@ -28,6 +29,7 @@ float transmission(const math::FVector3& origin,const math::FVector3& target,Vol
             const auto q=p*fog.noiseScale+math::FVector3(fog.noiseTime*.17f,fog.noiseTime*.11f,fog.noiseTime*.14f);
             weight*=std::clamp(1+fog.noiseStrength*(.5f*std::sin(q.x+q.z*.73f)+.35f*std::sin(q.y*1.7f-q.z*1.1f)+.15f*std::sin(q.x*1.3f+q.y*.6f)),.15f,1.85f);
         }
+        if(field)weight*=field->sample({(p.x-fog.center.x)/fog.halfExtent.x,(p.y-fog.center.y)/fog.halfExtent.y,(p.z-fog.center.z)/fog.halfExtent.z});
         opticalDepth+=fog.density*ds*weight;
     }
     return std::exp(-opticalDepth);
@@ -36,7 +38,7 @@ float transmission(const math::FVector3& origin,const math::FVector3& target,Vol
 bool buildFixtureEmitterBatch(std::span<const PerformanceLight> lights,
     const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
     FixtureEmitterSettings settings,const VolumetricSettings& medium,
-    ParticleDrawData& output,FixtureEmitterStats& stats,std::string* error){
+    ParticleDrawData& output,FixtureEmitterStats& stats,std::string* error,const VolumetricDensityField* density){
     const auto fail=[&](const char* message){if(error)*error=message;return false;};
     const auto finite=[](float v,float lo,float hi){return std::isfinite(v)&&v>=lo&&v<=hi;};
     if(!width||!height||!finite(settings.radianceScale,0,100)||!finite(settings.maximumRadiance,1,60000)
@@ -70,7 +72,7 @@ bool buildFixtureEmitterBatch(std::span<const PerformanceLight> lights,
         const float angular=performanceLightAngular(entry,toEye,settings.offAxisGlow);
         const double footprintRatio=double(physicalRadius)/radius;
         const float energy=float(footprintRatio*footprintRatio);
-        const float throughFog=transmission(orthographic?l.position+toEye*distance:eye,l.position,medium);
+        const float throughFog=transmission(orthographic?l.position+toEye*distance:eye,l.position,medium,density);
         // Double keeps small apertures finite before the explicit HDR bound.
         const double scale=double(performanceLightIntensity(entry))*settings.radianceScale
             *angular/(entry.intensityUnit==LightIntensityUnit::Legacy?1.0:std::max(double(facing),1e-6))/(std::numbers::pi*double(entry.apertureRadius)*entry.apertureRadius);
@@ -92,7 +94,7 @@ bool buildFixtureEmitterBatch(std::span<const PerformanceLight> lights,
 bool FixtureEmitters::append(Renderer& renderer,RenderScene& scene,std::span<const PerformanceLight> lights,
     const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
     FixtureEmitterSettings settings,std::string* error){
-    if(!buildFixtureEmitterBatch(lights,view,projection,width,height,settings,renderer.volumetricSettings(),_batch,_stats,error))return false;
+    if(!buildFixtureEmitterBatch(lights,view,projection,width,height,settings,renderer.volumetricSettings(),_batch,_stats,error,renderer.volumetricDensityField().profile.get()))return false;
     if(_batch.vertices.empty())return true;
     if(_renderer!=&renderer){_renderer=&renderer;_quad={};_texture={};_material={};}
     if(!_texture.isValid()){

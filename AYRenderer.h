@@ -7,6 +7,7 @@
 #include "AYRenderer/ScreenSpaceIndirect.h"
 #include "AYRenderer/LensEffects.h"
 #include "AYRenderer/VolumetricSettings.h"
+#include "AYRenderer/VolumetricDensity.h"
 #include "AYRenderer/DeferredDecal.h"
 #include "AYRenderer/CameraViews.h"
 #include "AYRenderer/PerformanceLighting.h"
@@ -494,6 +495,13 @@ public:
     /// Owner-thread: discard only volume history after seek/scene replacement.
     /// Safe before initialization; automatic cuts/resize/gaps also invalidate it.
     void resetVolumetricHistory();
+    /// Owner-thread: pair an immutable density grid with its live Renderer atlas.
+    /// Both empty clears; invalid/unpaired bindings preserve the previous medium.
+    /// Active grids enforce local=true; numeric settings refreshes preserve binding.
+    /// Texture destruction/shutdown clears the pair and history; no ECS serialization.
+    bool setVolumetricDensityField(VolumetricDensityBinding binding,std::string* error=nullptr);
+    /// Value snapshot; profile is shared, atlas remains borrowed from this Renderer.
+    VolumetricDensityBinding volumetricDensityField() const noexcept;
     /// Owner-thread, copies up to16 positive-scale projectors in stable order.
     /// Texture resources must remain alive through rendering. No ECS serialization yet.
     void setDeferredDecals(const std::vector<DeferredDecal>& decals);

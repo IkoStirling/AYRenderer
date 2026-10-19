@@ -16,6 +16,7 @@ struct VolumetricHistoryState {
  }
  bool reusable(const FrameContext& now,const VolumetricGridLayout& layout,uint32_t counter) const noexcept {
   if(!valid||counter!=uint32_t(frame+1)||layout.width!=grid.width||layout.height!=grid.height||layout.slices!=grid.slices||signature(now.volumetric)!=signature(previous.volumetric))return false;
+  if(now.densityField.profile!=previous.densityField.profile||now.densityField.texture.id!=previous.densityField.texture.id)return false;
   const float dt=now.volumetric.noiseTime-previous.volumetric.noiseTime;
   if(dt<0||dt>.25f||(now.cameraPosition-previous.cameraPosition).length()>4.f)return false;
   for(int i=0;i<16;++i)if(std::abs(now.projection.ptr()[i]-previous.projection.ptr()[i])>.05f)return false;

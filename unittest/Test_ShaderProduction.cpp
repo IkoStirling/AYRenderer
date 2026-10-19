@@ -51,6 +51,10 @@ TEST_CASE(complete_catalog_prewarms_normal_paths_without_compiler) {
             const auto& job=jobs.front();
             auto old=job.vertexSc.empty()?pool.acquire(job.sourceText):pool.acquireFromBgfxSc(job.vertexSc,job.fragmentSc,job.varyingSc);
             CHECK(old.isValid()); pool.shutdown(); CHECK(!old.isValid());
+            // bgfx defers uniform/program release. Drain the preceding complete
+            // catalog before loading another, rather than requiring two full
+            // generations to fit the backend's fixed uniform-handle capacity.
+            bgfx::frame(); bgfx::frame(); bgfx::frame();
             CHECK(loadProductionShaderPackages(pool,root,true,errors));
             CHECK(pool.cacheStats().binaryMisses==0); CHECK(pool.cacheStats().sourceMisses==0);
             bgfx::frame(); bgfx::frame(); bgfx::frame();

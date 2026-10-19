@@ -1,3 +1,4 @@
+#include "detail/VolumetricDensityBinding.h"
 #include "detail/VolumetricPass.h"
 #include "detail/FroxelShaderSources.h"
 #include "detail/PassExecContext.h"
@@ -16,7 +17,7 @@ bool bindGridFrame(PassExecContext& ctx,shader::ShaderResource& program,const Vo
  v("fogMedium",s.density,s.scattering,s.anisotropy,s.maxDistance);v("fogCenter",s.center.x,s.center.y,s.center.z,bgfx::getCaps()->homogeneousDepth?-1.f:0.f);
  v("fogExtent",s.halfExtent.x,s.halfExtent.y,s.halfExtent.z,0);v("fogOptions",float(s.steps),float(s.debugView),s.local?1.f:0.f,0);
  v("froxelPacking",float(grid.columns),float(grid.rows),float(grid.slices),0);
- if(density)v("fogNoise",s.noiseStrength,s.noiseScale,s.noiseTime,0);
+ if(density){v("fogNoise",s.noiseStrength,s.noiseScale,s.noiseTime,0);BlackboardGBufferView gb;if(!ctx.resourceBlackboard->resolveGBuffer(gb))return false;valid&=bindVolumetricDensity(ctx,program,gb.material);}
  else {float view[16];toBgfxColumnMajor(ctx.frame.view,view);u("fogView",view,64);}
  return valid;
 }

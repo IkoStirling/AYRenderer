@@ -17,6 +17,7 @@
 #include "detail/GpuResources.h"
 #include "AYRenderer/SsrShaderSources.h"
 #include "AYRenderer/VolumetricShaderSources.h"
+#include "AYRenderer/VolumetricDensity.h"
 #include "AYRenderer/PerformanceShaderSources.h"
 #include "AYRenderer/DeferredDecalShaderSources.h"
 #include "detail/DeferredDecalPass.h"
@@ -775,6 +776,26 @@ TEST_CASE(reduced_volume_preserves_full_scene_edges_and_extinguishes_only_once) 
 #endif
 }
 
+TEST_CASE(density_atlas_gpu_trilinear_matches_cpu_and_crosses_slice_rows_without_bleeding) {
+#ifdef _WIN32
+ const auto* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Isolated real-device acceptance required");
+ PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+ const auto source=std::string(ayt::render::kVolumetricDensityFunctions)+"material DensityProbe { texture2d atlas; uniform vec4 probeLocal; uniform vec4 probeDims; vertex {in pos:position;return vec4(pos,1.0)} fragment {return vec4(vec3(volumetricGridSample(atlas,probeLocal.xyz,probeDims)),1.0)} }";
+ const auto program=f.pool.acquire(source);CHECK(program.isValid());
+ std::vector<uint8_t> cells{0,40,60,100,80,120,140,180};auto profile=ayt::render::VolumetricDensityField::create(2,2,2,cells);
+ for(int layout=0;layout<2;++layout){
+  if(layout==1){cells.resize(9);for(int i=0;i<9;++i)cells[i]=uint8_t(i*16);profile=ayt::render::VolumetricDensityField::create(1,1,9,cells);}
+  const auto bytes=profile->atlas();const auto texture=bgfx::createTexture2D(profile->atlasWidth(),profile->atlasHeight(),false,1,bgfx::TextureFormat::RGBA8,BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(bytes.data(),uint32_t(bytes.size())));f.textures.push_back(texture);
+  const std::array<ayt::math::FVector3,5> probes={ayt::math::FVector3(0,0,0),{.25f,-.5f,.5f},{1,1,1},{1.01f,0,0},{0,0,.875f}};
+  for(const auto& position:probes){const float expected=profile->sample(position);const auto pixels=f.renderResource(program,[&](const auto& p){
+   const Pixel point={position.x,position.y,position.z,0},dims={float(profile->width()),float(profile->height()),float(profile->depth()),1};for(const auto& binding:std::array{std::pair{"probeLocal",point},std::pair{"probeDims",dims}}){const auto b=p.getUniformBinding(binding.first);CHECK(b!=ayt::shader::InvalidBinding);p.setUniform(b,binding.second.data(),16);}const auto b=p.getTextureBinding("atlas");CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(texture));
+  });checkPixels(pixels,{expected,expected,expected,1});}
+ }
+#else
+ SKIP_TEST("Windows device fixture required");
+#endif
+}
+
 TEST_CASE(froxel_history_reprojects_coefficients_and_rejects_flash_color_density_and_offscreen) {
 #ifdef _WIN32
  const auto* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Isolated real-device acceptance required");
@@ -820,7 +841,7 @@ TEST_CASE(froxel_coefficients_follow_beer_and_preserve_atlas_resize_and_two_ligh
  const auto prepare=[&]{
   configureRenderViewOrder(f.adapter);f.render("","return vec4(1.0)",{},3);configureRenderViewOrder(f.adapter);
   bb.beginFrame();bb.publishGBuffer(f.target,white,normal,world,surface,surface,4,4,1,true);bb.publishProduced(BlackboardResourceId::LightingColor,BlackboardResourceLifetime::External,f.target,f.targetTexture,4,4,1);
-  PostProcessGraphPlanInput in;in.width=in.height=4;in.finalLdr=true;in.sceneColor=f.target;in.gbuffer=f.target;in.volumetric=true;in.volumetricGrid=runtimeVolumetricGridLayout(frame.volumetric,4,4);CHECK(in.volumetricGrid.valid());CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);
+  PostProcessGraphPlanInput in;in.width=in.height=4;in.finalLdr=true;in.sceneColor=f.target;in.gbuffer=f.target;in.volumetric=true;in.volumetricGrid=runtimeVolumetricGridLayout(frame.volumetric,4,4);in.volumetricDownsample=frame.volumetric.downsample;if(frame.volumetric.froxel)CHECK(in.volumetricGrid.valid());CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);
  };
  const auto probe=[&](bgfx::TextureHandle texture,float u,float v){configureRenderViewOrder(f.adapter);f.render("texture2d gridProbe","return sample(gridProbe,vec2("+std::to_string(u)+","+std::to_string(v)+"))",[&](const auto& p){const auto b=p.getTextureBinding("gridProbe");CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(texture));},244);
   // Read the completed probe in a separate submission; a remapped view must
@@ -837,6 +858,17 @@ TEST_CASE(froxel_coefficients_follow_beer_and_preserve_atlas_resize_and_two_ligh
  if(!pixels.empty())std::fprintf(stderr,"[Froxel packet] red=%.6f green=%.6f expectedL=%.6f\n",pixels[0][0],pixels[0][1],expected);
  for(const auto& p:pixels){CHECK(std::abs(p[0]-(std::exp(-.1)+expected))<.003);CHECK(std::abs(p[2]-p[0])<.0001f);CHECK(std::abs(p[1]-std::exp(-.1))<.001);CHECK(p[3]==1);}
  atlas=probe(f.adapter.getFboAttachment(graph.resolve(FgResourceId::FroxelField),0),.0625f,.5625f);CHECK(!atlas.empty());if(!atlas.empty()){const double a=std::exp(std::log(3.)*32/64)-1,b=std::exp(std::log(3.)*33/64)-1,d=20+(a+b)*.5,cut=1-d/100,coefficient=.8*10000*cut*cut/(d*d)/(4*3.141592653589793);CHECK(std::abs(atlas[0][0]-coefficient)<.0001);CHECK(std::abs(atlas[0][2]-coefficient)<.0001);CHECK(std::abs(atlas[0][3]-.1f)<.00001f);}
+
+ frame.volumetric.local=true;frame.volumetric.center={0,0,.5f};frame.volumetric.halfExtent={2,2,2};
+ for(const uint8_t value:{uint8_t(128),uint8_t(0)}){
+  frame.densityField.profile=ayt::render::VolumetricDensityField::create(1,1,1,std::span<const uint8_t>(&value,1));frame.densityField.texture={700};
+  const auto bytes=frame.densityField.profile->atlas();const auto texture=bgfx::createTexture2D(8,1,false,1,bgfx::TextureFormat::RGBA8,BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(bytes.data(),uint32_t(bytes.size())));f.textures.push_back(texture);textures[700].handle=texture;
+  for(int mode=0;mode<3;++mode){frame.volumetric.froxel=mode==2;frame.volumetric.downsample=mode==1?2:1;prepare();CHECK(pass.execute(ctx)==uint32_t(mode==0?3:mode==1?4:5));
+   pixels=probe(f.adapter.getFboAttachment(graph.resolve(FgResourceId::VolumetricColor),0),.5f,.5f);const float expectedT=std::exp(-.1f*float(value)/255);
+   std::fprintf(stderr,"[Authored density] value=%u mode=%d green=%.6f expected=%.6f\n",unsigned(value),mode,pixels.empty()?-1.f:pixels[0][1],expectedT);
+   for(const auto& pixel:pixels){CHECK(std::abs(pixel[1]-expectedT)<.001f);CHECK(std::abs(pixel[0]-pixel[2])<.0001f);CHECK(pixel[3]==1);if(value==0)CHECK(std::abs(pixel[0]-1)<.001f);}
+  }
+ }
  pass.destroyResources(f.adapter);
 #else
  SKIP_TEST("Windows device fixture required");

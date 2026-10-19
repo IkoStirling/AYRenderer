@@ -5,6 +5,7 @@
 #include "AYRenderer/ScreenSpaceIndirect.h"
 #include "AYRenderer/LensEffects.h"
 #include "AYRenderer/VolumetricSettings.h"
+#include "AYRenderer/VolumetricDensity.h"
 
 #include <cstdint>
 
@@ -136,6 +137,7 @@ struct FrameContext {
     SsrSettings ssr;
     ScreenSpaceIndirectSettings screenIndirect;
     VolumetricSettings volumetric;
+    VolumetricDensityBinding densityField;
     bool decalsEnabled = false;
 };
 

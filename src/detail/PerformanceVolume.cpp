@@ -1,3 +1,4 @@
+#include "detail/VolumetricDensityBinding.h"
 #include "detail/VolumetricPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/BgfxMatrix.h"
@@ -48,6 +49,7 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
     vector("fogExtent",settings.halfExtent.x,settings.halfExtent.y,settings.halfExtent.z,0);
     vector("fogTint",settings.tint.x,settings.tint.y,settings.tint.z,0);
     texture("sceneColor",input);texture("worldPosition",gb.worldPosition);texture("geometryCoverage",gb.material);
+    valid&=bindVolumetricDensity(ctx,_program,gb.material);
     };
     configureFullscreenPassView(adapter,volumeView,target,0,0,width,height);
     adapter.setViewMode(volumeView,bgfx::ViewMode::Sequential);

@@ -1,8 +1,12 @@
 #pragma once
+#include "AYRenderer/VolumetricDensityShader.h"
+#include <string>
 namespace ayt::render::detail {
-inline constexpr char kFroxelDensityKey[]="froxel_density_v1";
-inline constexpr char kFroxelDensitySource[]=R"(
+inline constexpr char kFroxelDensityKey[]="froxel_density_v2_authored_grid";
+inline const std::string kFroxelDensityOwned=std::string(kVolumetricDensityFunctions)+R"(
 material FroxelDensity {
+ texture2d fogDensityAtlas
+ uniform vec4 fogDensityGrid
  uniform mat4 fogInverseViewProjection
  uniform vec4 fogCamera
  uniform vec4 fogMedium
@@ -29,21 +33,14 @@ material FroxelDensity {
   let result=vec4(0.0)
   if(cellEnd>cellBegin){
    let worldPoint=origin+ray*((cellBegin+cellEnd)*0.5)
-   let weight=1.0
-   if(fogOptions.z>0.5){
-    let local=abs(worldPoint-fogCenter.xyz)/fogExtent.xyz
-    weight=1.0-smoothstep(0.75,1.0,max(max(local.x,local.y),local.z))
-   }
-   if(fogNoise.x>0.001){
-    let p=worldPoint*fogNoise.y+vec3(fogNoise.z*0.17,fogNoise.z*0.11,fogNoise.z*0.14)
-    weight=weight*clamp(1.0+fogNoise.x*(0.5*sin(p.x+p.z*0.73)+0.35*sin(p.y*1.7-p.z*1.1)+0.15*sin(p.x*1.3+p.y*0.6)),0.15,1.85)
-   }
+   let weight=volumetricMediumWeight(fogDensityAtlas,worldPoint,fogCenter.xyz,fogExtent.xyz,fogOptions,fogNoise,fogDensityGrid)
    result=vec4(0.0,0.0,0.0,fogMedium.x*weight)
   }
   return result
  }
 }
 )";
+inline const char* kFroxelDensitySource=kFroxelDensityOwned.c_str();
 inline constexpr char kFroxelIntegrationKey[]="froxel_integration_v1";
 inline constexpr char kFroxelIntegrationSource[]=R"(
 material FroxelIntegration {
