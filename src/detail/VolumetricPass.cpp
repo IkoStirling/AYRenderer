@@ -74,6 +74,7 @@ uint32_t VolumetricPass::execute(PassExecContext& ctx) {
  u("fogShadowRect0",rects[0],16);u("fogShadowRect1",rects[1],16);u("fogShadowRect2",rects[2],16);
  v("fogShadowParams",splits[0],splits[1],bias,float(count));
  tex("sceneColor",input);tex("worldPosition",gb.worldPosition);tex("geometryCoverage",gb.material);tex("shadowAtlas",shadow);
+ v("fogLens",0,1,0,0);
  v("fogIesSettings",0,0,0,0);tex("iesAtlas",gb.material);
  tex("patternGobo",gb.material);
  if(!bindings)return 0;

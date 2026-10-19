@@ -81,6 +81,7 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         texture("patternGobo",gobo);
         auto ies=gb.material;
         if(entry.iesProfile){const auto found=ctx.textures.find(entry.iesTexture.id);if(found==ctx.textures.end()||!BGFXAdapter::isValid(found->second.handle))continue;ies=found->second.handle;}
+        vector("fogLens",entry.focusDistance,float(entry.prismCount),entry.prismAngle,entry.prismRotation);
         vector("fogIesSettings",entry.iesProfile?1.f:0.f,0,0,0);texture("iesAtlas",ies);
         math::FVector3 center,extent;performanceLightBounds(entry,center,extent);
         vector("fogLightBoundsCenter",center.x,center.y,center.z,0);vector("fogLightBoundsExtent",extent.x,extent.y,extent.z,0);

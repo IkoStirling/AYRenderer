@@ -5,7 +5,6 @@
 #include <numbers>
 namespace ayt::render {
 namespace {
-float smooth(float a,float b,float v){const float t=std::clamp((v-a)/(b-a),0.f,1.f);return t*t*(3-2*t);}
 float transmission(const math::FVector3& origin,const math::FVector3& target,VolumetricSettings fog){
     fog=sanitizeVolumetricSettings(fog);if(!fog.enabled||fog.density<=0)return 1;
     const auto delta=target-origin;const float distance=delta.length();if(distance<1e-6f)return 1;
@@ -67,17 +66,13 @@ bool buildFixtureEmitterBatch(std::span<const PerformanceLight> lights,
         const float radius=std::max(physicalRadius,settings.minimumPixelRadius*clip.w/pixelScale);
         const float marginX=radius*std::abs(projection(0,0)),marginY=radius*std::abs(projection(1,1));
         if(clip.x< -clip.w-marginX||clip.x>clip.w+marginX||clip.y< -clip.w-marginY||clip.y>clip.w+marginY){++next.culled;continue;}
-        const float beam=smooth(l.coneCosOuter,l.coneCosInner,facing);
-        const float angular=beam+(1-beam)*settings.offAxisGlow*facing;
+        const float angular=performanceLightAngular(entry,toEye,settings.offAxisGlow);
         const double footprintRatio=double(physicalRadius)/radius;
         const float energy=float(footprintRatio*footprintRatio);
         const float throughFog=transmission(orthographic?l.position+toEye*distance:eye,l.position,medium);
         // Double keeps small apertures finite before the explicit HDR bound.
-        float iesWeight=1;
-        if(entry.iesProfile){const auto d=l.spotDirection,a=std::abs(d.y)>.99f?math::FVector3(0,0,1):math::FVector3(0,1,0);const auto right=a.cross(d).normalize(),up=d.cross(right).normalize();
-            iesWeight=entry.iesProfile->sample(float(std::acos(std::clamp(d.dot(toEye),-1.f,1.f))*180/std::numbers::pi),float(std::atan2(up.dot(toEye),right.dot(toEye))*180/std::numbers::pi))/entry.iesProfile->peakCandela();}
         const double scale=double(performanceLightIntensity(entry))*settings.radianceScale
-            *angular*iesWeight/(entry.intensityUnit==LightIntensityUnit::Legacy?1.0:std::max(double(facing),1e-6))/(std::numbers::pi*double(entry.apertureRadius)*entry.apertureRadius);
+            *angular/(entry.intensityUnit==LightIntensityUnit::Legacy?1.0:std::max(double(facing),1e-6))/(std::numbers::pi*double(entry.apertureRadius)*entry.apertureRadius);
         math::FVector3 color;bool clamped=false;
         for(int i=0;i<3;++i){const double value=scale*l.color[i];clamped|=value>settings.maximumRadiance;color[i]=float(std::min(value,double(settings.maximumRadiance))*throughFog*energy);}
         if(color.x<=0&&color.y<=0&&color.z<=0){++next.culled;continue;}

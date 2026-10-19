@@ -5,7 +5,7 @@ namespace ayt::render {
 class Renderer;
 struct FixtureEmitterSettings {
     /// Unitless presentation calibration: on-axis radiance = intensity / exit
-    /// area * radianceScale. Does not reinterpret existing light intensity units.
+    /// area * radianceScale. Resolved physical/Legacy units come from performanceLightIntensity.
     float radianceScale=1;
     float maximumRadiance=10000; // [1,60000], before exposure/Bloom.
     float minimumPixelRadius=.75f; // [0,4], area-energy compensated footprint.
@@ -16,7 +16,7 @@ struct FixtureEmitterStats {
 };
 /// Prepare at most256 oriented circular HDR exit apertures from validated Spot
 /// lights. Point/zero aperture/zero intensity lights do not emit geometry.
-/// Front core/field angular fade, iris and constantFlux follow the light packet;
+/// Front core/field angular fade, iris, prism lobes, IES and intensity units follow the light packet;
 /// optional offAxisGlow adds a faint front-hemisphere lens glow. RGB is clamped
 /// before half-float HDR submission; no inverse-square factor is applied to
 /// resolved surface radiance. Footprint widening preserves integrated energy.

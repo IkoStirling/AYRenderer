@@ -22,6 +22,10 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
             || !finite(entry.patternFocus,0,1) || !finite(entry.iris,.01f,1)
             || !finite(entry.apertureRadius,0,1) || !finite(entry.shadowSoftness,0,4)
             || (l.type==LightType::Point&&(l.castShadow||entry.volumetric!=0||entry.pattern!=LightPattern::Open||entry.constantFlux))
+            || !finite(entry.focusDistance,0,10000)||entry.prismCount<1||entry.prismCount>8
+            || !finite(entry.prismAngle,0,.35f)||!finite(entry.prismRotation,-100000,100000)
+            || (l.type==LightType::Spot&&entry.prismAngle>0&&std::acos(l.coneCosOuter)+entry.prismAngle>1.56f)
+            || (l.type==LightType::Point&&(entry.prismCount!=1||entry.focusDistance!=0))
             || entry.intensityUnit>LightIntensityUnit::Lumen
             || (bool(entry.iesProfile)!=entry.iesTexture.isValid())
             || (entry.iesProfile&&(l.type!=LightType::Spot||entry.iesProfile->peakCandela()<=0))
@@ -46,6 +50,7 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
         if(light.castShadow && light.intensity>0 && next.shadowSources.count<limits.shadowLights) {
             next.shadowSlots[i]=static_cast<int32_t>(next.shadowSources.count);
             Light shadow=light;shadow.color={0,0,0};
+            if(next.lights[i].prismCount>1)shadow.coneCosOuter=std::cos(std::acos(light.coneCosOuter)+next.lights[i].prismAngle);
             next.shadowSources.add(shadow);
         }
     }
@@ -73,18 +78,37 @@ float performanceLightIntensity(const PerformanceLight& entry) noexcept {
     }
     return float(std::min(double(l.intensity)/(scale*luminance),1e30));
 }
-void performanceLightBounds(const PerformanceLight& entry,math::FVector3& center,math::FVector3& halfExtent) {
-    const auto& light=entry.light;const auto d=light.spotDirection;
-    if(light.type==LightType::Point){center=light.position;halfExtent={light.range,light.range,light.range};return;}
-    const auto base=light.position+d*light.range;
-    const float radius=entry.apertureRadius+light.range*std::tan(std::acos(light.coneCosOuter));
-    for(int i=0;i<3;++i) {
-        const float extent=radius*std::sqrt(std::max(0.f,1-d[i]*d[i]));
-        const float apertureExtent=entry.apertureRadius*std::sqrt(std::max(0.f,1-d[i]*d[i]));
-        const float low=std::min(light.position[i]-apertureExtent,base[i]-extent);
-        const float high=std::max(light.position[i]+apertureExtent,base[i]+extent);
-        center[i]=(low+high)*.5f;halfExtent[i]=std::max(.0001f,(high-low)*.5f);
+math::FVector3 performanceLightLobeDirection(const PerformanceLight& entry,uint8_t index) noexcept {
+    const auto d=entry.light.spotDirection;if(entry.prismCount<=1||entry.prismAngle==0)return d;
+    const auto a=std::abs(d.y)>.99f?math::FVector3(0,0,1):math::FVector3(0,1,0),right=a.cross(d).normalize(),up=d.cross(right).normalize();
+    const float angle=entry.prismRotation+float(index)*6.283185307179586f/entry.prismCount;
+    return d*std::cos(entry.prismAngle)+(right*std::cos(angle)+up*std::sin(angle))*std::sin(entry.prismAngle);
+}
+float performanceLightFocusBlur(const PerformanceLight& entry,float distance) noexcept {
+    if(entry.focusDistance<=0||!std::isfinite(distance)||distance<0)return 0;
+    const double pupil=double(entry.apertureRadius)*entry.iris;
+    const double beam=entry.apertureRadius+double(distance)*std::tan(std::acos(entry.light.coneCosOuter));
+    return float(std::min(2.0,pupil*std::abs(1-double(distance)/entry.focusDistance)/std::max(beam,1e-9)));
+}
+float performanceLightAngular(const PerformanceLight& entry,const math::FVector3& ray,float glow) noexcept {
+    float value=0;const auto& l=entry.light;
+    for(uint8_t i=0;i<entry.prismCount;++i){const auto d=performanceLightLobeDirection(entry,i);const float facing=d.dot(ray);
+        const float t=std::clamp((facing-l.coneCosOuter)/(l.coneCosInner-l.coneCosOuter),0.f,1.f),beam=t*t*(3-2*t);
+        float ies=1;if(entry.iesProfile){const auto a=std::abs(d.y)>.99f?math::FVector3(0,0,1):math::FVector3(0,1,0),right=a.cross(d).normalize(),up=d.cross(right).normalize();
+            ies=entry.iesProfile->sample(float(std::acos(std::clamp(facing,-1.f,1.f))*57.29577951308232),float(std::atan2(up.dot(ray),right.dot(ray))*57.29577951308232))/entry.iesProfile->peakCandela();}
+        value+=(beam+(1-beam)*glow*std::max(facing,0.f))*ies;
     }
+    return value/entry.prismCount;
+}
+void performanceLightBounds(const PerformanceLight& entry,math::FVector3& center,math::FVector3& halfExtent) {
+    const auto& light=entry.light;
+    if(light.type==LightType::Point){center=light.position;halfExtent={light.range,light.range,light.range};return;}
+    math::FVector3 low=light.position,high=light.position;
+    const float radius=entry.apertureRadius+light.range*std::tan(std::acos(light.coneCosOuter));
+    for(uint8_t j=0;j<entry.prismCount;++j){const auto d=performanceLightLobeDirection(entry,j),base=light.position+d*light.range;
+        for(int i=0;i<3;++i){const float disk=std::sqrt(std::max(0.f,1-d[i]*d[i])),extent=radius*disk,aperture=entry.apertureRadius*disk;low[i]=std::min({low[i],base[i]-extent,light.position[i]-aperture});high[i]=std::max({high[i],base[i]+extent,light.position[i]+aperture});}}
+    center=(low+high)*.5f;halfExtent=(high-low)*.5f;
+    for(int i=0;i<3;++i)halfExtent[i]=std::max(.0001f,halfExtent[i]);
 }
 LightScreenRect performanceLightRect(const PerformanceLight& entry,const math::Float4x4& vp,uint16_t width,uint16_t height) {
     if(!width||!height||entry.light.intensity<=0)return {};

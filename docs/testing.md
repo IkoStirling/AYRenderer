@@ -532,3 +532,10 @@ D3D12单灯空中场景也完成实际渲染与截图。
 color/flux normalization and Legacy preservation. FixtureEmittersGpu (AY_EMITTER_GPU_TEST=d3d11/d3d12)
 adds real main-view IES surface/volume energy and directional readback. Contracts155/1193,
 Sequence105/3871, shaders12/208 and each GPU backend3/93 passed; owned inventory1006/10.
+
+
+2026-10-19 optical stage: FixtureOpticsTests independently integrate prism angular energy,
+check focal pupil geometry and conservative lobe bounds. LightShowOpticsTests verify continuous
+focus/rotation and stepped topology. Real D3D11/D3D12 readback verifies rotating lobe locations
+and defocused image-edge contrast. Contracts157/1223, Sequence106/3888, shaders12/208,
+each GPU backend4/143, Studio optics8-frame smoke passed. SDK doctor126/53/83/542,0 errors/warnings.

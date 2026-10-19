@@ -63,6 +63,26 @@ fn performanceBeamInterval(origin:vec3, ray:vec3, position:vec3, axis:vec3, cone
  if(end<=begin){return vec2(0.0)}
  return vec2(begin,end)
 }
+fn performanceLobeDirection(axis:vec3, right:vec3, up:vec3, lens:vec4, index:float):vec3 {
+ if(lens.y<1.5 || lens.z<0.000001){return axis}
+ let angle=lens.w+index*6.283185307/lens.y
+ return axis*cos(lens.z)+(right*cos(angle)+up*sin(angle))*sin(lens.z)
+}
+fn performanceFocusBlur(distance:float, cone:vec4, iris:float, lens:vec4):float {
+ if(lens.x<=0.0){return 0.0}
+ return min(2.0,cone.w*iris*abs(1.0-max(distance,0.0)/lens.x)/max(cone.w+max(distance,0.0)*cone.z,0.000000001))
+}
+fn performancePrismInterval(origin:vec3, ray:vec3, position:vec3, axis:vec3, right:vec3, up:vec3, cone:vec4, reach:float, segment:vec2, lens:vec4):vec2 {
+ if(lens.y<1.5){return performanceBeamInterval(origin,ray,position,axis,cone,reach,segment)}
+ let begin=segment.y;let end=segment.x
+ for(lobe in range(int(lens.y),8)){
+  let d=performanceLobeDirection(axis,right,up,lens,float(lobe))
+  let hit=performanceBeamInterval(origin,ray,position,d,cone,reach,segment)
+  if(hit.y>hit.x){begin=min(begin,hit.x);end=max(end,hit.y)}
+ }
+ if(end<=begin){return vec2(0.0)}
+ return vec2(begin,end)
+}
 fn performanceGoboUv(p:vec2, settings:vec4):vec2 {
  let c=cos(settings.y);let s=sin(settings.y)
  return vec2(p.x*c-p.y*s,p.x*s+p.y*c)*settings.z*0.5+vec2(0.5)
@@ -80,12 +100,11 @@ fn performancePattern(p:vec2, settings:vec4, optics:vec4, textureMask:float):flo
  if(settings.x>2.5 && settings.x<3.5){result=1.0-smoothstep(0.07-optics.x*0.2,0.12+optics.x*0.2,abs(length(uv)-0.55))}
  if(settings.x>3.5 && settings.x<4.5){
   let ray=0.0
-  for(j in range(5)) {
-   let a=float(j)*1.25663706
-   let along=dot(uv,vec2(cos(a),sin(a)))
-   let across=abs(dot(uv,vec2(-sin(a),cos(a))))
-   ray=max(ray,(1.0-smoothstep(0.03-optics.x*0.2,0.08+optics.x*0.2,across))*step(0.0,along))
-  }
+  ray=max(ray,(1.0-smoothstep(0.03-optics.x*0.2,0.08+optics.x*0.2,abs(dot(uv,vec2(-sin(0.000000000),cos(0.000000000))))))*step(0.0,dot(uv,vec2(cos(0.000000000),sin(0.000000000)))))
+  ray=max(ray,(1.0-smoothstep(0.03-optics.x*0.2,0.08+optics.x*0.2,abs(dot(uv,vec2(-sin(1.256637060),cos(1.256637060))))))*step(0.0,dot(uv,vec2(cos(1.256637060),sin(1.256637060)))))
+  ray=max(ray,(1.0-smoothstep(0.03-optics.x*0.2,0.08+optics.x*0.2,abs(dot(uv,vec2(-sin(2.513274120),cos(2.513274120))))))*step(0.0,dot(uv,vec2(cos(2.513274120),sin(2.513274120)))))
+  ray=max(ray,(1.0-smoothstep(0.03-optics.x*0.2,0.08+optics.x*0.2,abs(dot(uv,vec2(-sin(3.769911180),cos(3.769911180))))))*step(0.0,dot(uv,vec2(cos(3.769911180),sin(3.769911180)))))
+  ray=max(ray,(1.0-smoothstep(0.03-optics.x*0.2,0.08+optics.x*0.2,abs(dot(uv,vec2(-sin(5.026548240),cos(5.026548240))))))*step(0.0,dot(uv,vec2(cos(5.026548240),sin(5.026548240)))))
   result=ray
  }
  return result*iris
@@ -107,6 +126,7 @@ material PerformanceSurface {
  uniform vec4 performanceRight
  uniform vec4 performanceUp
  uniform vec4 performancePatternSettings
+ uniform vec4 performanceLens
  uniform vec4 performanceIesSettings
  uniform vec4 performancePatternOptics
  uniform vec4 performanceEye
@@ -127,30 +147,49 @@ material PerformanceSurface {
   let distance=length(delta)
   let outward=delta/max(distance,0.00001)
   let L=outward*-1.0
-  let axial=dot(delta,performanceDirection.xyz)
-  let projected=vec2(dot(delta,performanceRight.xyz),dot(delta,performanceUp.xyz))/max(performanceCone.w+axial*performanceCone.z,0.00001)
-  let beam=1.0;let pattern=1.0
+  let response=1.0
   if(performanceDirection.w<0.5){
-  let textureMask=1.0
-  if(performancePatternSettings.x>4.5){
-   let goboUv=performanceGoboUv(projected,performancePatternSettings)
-   let inside=step(0.0,goboUv.x)*step(goboUv.x,1.0)*step(0.0,goboUv.y)*step(goboUv.y,1.0)
-   let texel=sampleLod(patternGobo,goboUv,0.0)
-   if(performancePatternOptics.x>0.01){
-    let blur=performancePatternOptics.x*0.025
-    texel=(texel+sampleLod(patternGobo,goboUv+vec2(blur,0.0),0.0)
-          +sampleLod(patternGobo,goboUv-vec2(blur,0.0),0.0)
-          +sampleLod(patternGobo,goboUv+vec2(0.0,blur),0.0)
-          +sampleLod(patternGobo,goboUv-vec2(0.0,blur),0.0))*0.2
+  let optical=0.0
+  for(lobe in range(int(performanceLens.y),8)){
+   let beamAxis=performanceLobeDirection(performanceDirection.xyz,performanceRight.xyz,performanceUp.xyz,performanceLens,float(lobe))
+   let reference=vec3(0.0,1.0,0.0)
+   if(abs(beamAxis.y)>0.99){reference=vec3(0.0,0.0,1.0)}
+   let beamRight=normalize(cross(reference,beamAxis));let beamUp=normalize(cross(beamAxis,beamRight))
+   let axial=dot(delta,beamAxis)
+   let projected=vec2(dot(delta,beamRight),dot(delta,beamUp))/max(performanceCone.w+axial*performanceCone.z,0.00001)
+   let defocus=performanceFocusBlur(axial,performanceCone,performancePatternOptics.y,performanceLens)
+   let localOptics=performancePatternOptics
+   let textureMask=1.0
+   if(performancePatternSettings.x>4.5){
+    let goboUv=performanceGoboUv(projected,performancePatternSettings)
+    let inside=step(0.0,goboUv.x)*step(goboUv.x,1.0)*step(0.0,goboUv.y)*step(goboUv.y,1.0)
+    let texel=sampleLod(patternGobo,goboUv,0.0)
+    if(performancePatternOptics.x>0.01 || defocus>0.0001){
+     let blur=performancePatternOptics.x*0.025+defocus*performancePatternSettings.z*0.5
+     texel=(texel+sampleLod(patternGobo,goboUv+vec2(blur,0.0),0.0)
+           +sampleLod(patternGobo,goboUv-vec2(blur,0.0),0.0)
+           +sampleLod(patternGobo,goboUv+vec2(0.0,blur),0.0)
+           +sampleLod(patternGobo,goboUv-vec2(0.0,blur),0.0))*0.2
+    }
+    textureMask=dot(texel.rgb,vec3(0.2126,0.7152,0.0722))*texel.a*inside
    }
-   textureMask=dot(texel.rgb,vec3(0.2126,0.7152,0.0722))*texel.a*inside
+   let pattern=performancePattern(projected,performancePatternSettings,localOptics,textureMask)
+   if(defocus>0.0001 && performancePatternSettings.x>0.5 && performancePatternSettings.x<4.5){
+    let pupil=defocus
+    pattern=(pattern+performancePattern(projected+vec2(pupil,0.0),performancePatternSettings,localOptics,1.0)
+                    +performancePattern(projected-vec2(pupil,0.0),performancePatternSettings,localOptics,1.0)
+                    +performancePattern(projected+vec2(0.0,pupil),performancePatternSettings,localOptics,1.0)
+                    +performancePattern(projected-vec2(0.0,pupil),performancePatternSettings,localOptics,1.0))*0.2
+   }
+   let beam=performanceBeamProfile(delta,beamAxis,performanceCone,performanceRight.w)
+   let distribution=1.0
+   if(performanceIesSettings.x>0.5){distribution=sampleLod(iesAtlas,performanceIesUv(delta,beamAxis,beamRight,beamUp),0.0).r}
+   optical=optical+beam*pattern*distribution/performanceLens.y
   }
-  pattern=performancePattern(projected,performancePatternSettings,performancePatternOptics,textureMask)
-  beam=performanceBeamProfile(delta,performanceDirection.xyz,performanceCone,performanceRight.w)
+  response=optical
   }
-  if(performanceIesSettings.x>0.5){pattern=pattern*sampleLod(iesAtlas,performanceIesUv(delta,performanceDirection.xyz,performanceRight.xyz,performanceUp.xyz),0.0).r}
   let falloff=clamp(1.0-distance/performancePosition.w,0.0,1.0)
-  let attenuation=falloff*falloff/max(distance*distance,max(0.01,performanceCone.w*performanceCone.w))*beam*pattern
+  let attenuation=falloff*falloff/max(distance*distance,max(0.01,performanceCone.w*performanceCone.w))*response
   let visibility=1.0
   if(performanceShadowSettings.x>0.5){
    let clip=performanceShadow*vec4(position.xyz,1.0)

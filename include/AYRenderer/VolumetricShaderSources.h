@@ -1,7 +1,7 @@
 #pragma once
 #include "AYRenderer/PerformanceShaderSources.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v11_ies";
+inline constexpr char kVolumetricCacheKey[]="volumetric_v12_lens_prism";
 inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
@@ -31,6 +31,7 @@ material Volumetric {
  uniform vec4 fogLightColor
  uniform vec4 fogSpot
  uniform vec4 fogPatternSettings
+ uniform vec4 fogLens
  uniform vec4 fogIesSettings
  uniform vec4 fogPatternOptics
  uniform vec4 fogPatternRight
@@ -68,7 +69,7 @@ material Volumetric {
    begin=max(begin,max(max(min(a.x,b.x),min(a.y,b.y)),min(a.z,b.z)))
    end=min(end,min(min(max(a.x,b.x),max(a.y,b.y)),max(a.z,b.z)))
    if(fogLightPosition.w>1.5){
-    let segment=performanceBeamInterval(origin,direction,fogLightPosition.xyz,fogLightDirection.xyz,fogSpot,fogLightDirection.w,vec2(begin,end))
+    let segment=performancePrismInterval(origin,direction,fogLightPosition.xyz,fogLightDirection.xyz,fogPatternRight.xyz,fogPatternUp.xyz,fogSpot,fogLightDirection.w,vec2(begin,end),fogLens)
     begin=segment.x;end=segment.y
    }
   }
@@ -79,7 +80,7 @@ material Volumetric {
   // A four-point quadrature is sufficient for the smooth box extinction;
   // only scattering needs the user's full per-beam step budget.
   if(fogOptions.z>0.5 && fogOptions.w>0.5 && fogOptions.w<1.5){sampleCount=4.0}
-  if(fogOptions.w>1.5 && fogLightPosition.w>1.5 && fogPatternSettings.x<0.5){
+  if(fogOptions.w>1.5 && fogLightPosition.w>1.5 && fogPatternSettings.x<0.5 && fogLens.y<1.5){
    let midPoint=origin+direction*((begin+end)*0.5)-fogLightPosition.xyz
    let radius=fogSpot.w+max(0.0,dot(midPoint,fogLightDirection.xyz))*fogSpot.z
    // At least 16 samples across a normal chord; use the user's higher budget
@@ -128,25 +129,44 @@ material Volumetric {
     attenuation=cutoff*cutoff/max(lightDistance*lightDistance,max(0.01,fogSpot.w*fogSpot.w))
     if(fogLightPosition.w>1.5) {
      let delta=fogSample-fogLightPosition.xyz
-     attenuation=attenuation*performanceBeamProfile(delta,fogLightDirection.xyz,fogSpot,fogPatternRight.w)
-     let axial=dot(delta,fogLightDirection.xyz)
-     let projected=vec2(dot(delta,fogPatternRight.xyz),dot(delta,fogPatternUp.xyz))/max(fogSpot.w+axial*fogSpot.z,0.00001)
-     let textureMask=1.0
-     if(fogPatternSettings.x>4.5){
-      let goboUv=performanceGoboUv(projected,fogPatternSettings)
-      let inside=step(0.0,goboUv.x)*step(goboUv.x,1.0)*step(0.0,goboUv.y)*step(goboUv.y,1.0)
-      let texel=sampleLod(patternGobo,goboUv,0.0)
-      if(fogPatternOptics.x>0.01){
-       let blur=fogPatternOptics.x*0.025
-       texel=(texel+sampleLod(patternGobo,goboUv+vec2(blur,0.0),0.0)
-             +sampleLod(patternGobo,goboUv-vec2(blur,0.0),0.0)
-             +sampleLod(patternGobo,goboUv+vec2(0.0,blur),0.0)
-             +sampleLod(patternGobo,goboUv-vec2(0.0,blur),0.0))*0.2
-      }
-      textureMask=dot(texel.rgb,vec3(0.2126,0.7152,0.0722))*texel.a*inside
-     }
-     if(fogIesSettings.x>0.5){attenuation=attenuation*sampleLod(iesAtlas,performanceIesUv(delta,fogLightDirection.xyz,fogPatternRight.xyz,fogPatternUp.xyz),0.0).r}
-     attenuation=attenuation*performancePattern(projected,fogPatternSettings,fogPatternOptics,textureMask)
+  let optical=0.0
+  for(lobe in range(int(fogLens.y),8)){
+   let beamAxis=performanceLobeDirection(fogLightDirection.xyz,fogPatternRight.xyz,fogPatternUp.xyz,fogLens,float(lobe))
+   let reference=vec3(0.0,1.0,0.0)
+   if(abs(beamAxis.y)>0.99){reference=vec3(0.0,0.0,1.0)}
+   let beamRight=normalize(cross(reference,beamAxis));let beamUp=normalize(cross(beamAxis,beamRight))
+   let axial=dot(delta,beamAxis)
+   let projected=vec2(dot(delta,beamRight),dot(delta,beamUp))/max(fogSpot.w+axial*fogSpot.z,0.00001)
+   let defocus=performanceFocusBlur(axial,fogSpot,fogPatternOptics.y,fogLens)
+   let localOptics=fogPatternOptics
+   let textureMask=1.0
+   if(fogPatternSettings.x>4.5){
+    let goboUv=performanceGoboUv(projected,fogPatternSettings)
+    let inside=step(0.0,goboUv.x)*step(goboUv.x,1.0)*step(0.0,goboUv.y)*step(goboUv.y,1.0)
+    let texel=sampleLod(patternGobo,goboUv,0.0)
+    if(fogPatternOptics.x>0.01 || defocus>0.0001){
+     let blur=fogPatternOptics.x*0.025+defocus*fogPatternSettings.z*0.5
+     texel=(texel+sampleLod(patternGobo,goboUv+vec2(blur,0.0),0.0)
+           +sampleLod(patternGobo,goboUv-vec2(blur,0.0),0.0)
+           +sampleLod(patternGobo,goboUv+vec2(0.0,blur),0.0)
+           +sampleLod(patternGobo,goboUv-vec2(0.0,blur),0.0))*0.2
+    }
+    textureMask=dot(texel.rgb,vec3(0.2126,0.7152,0.0722))*texel.a*inside
+   }
+   let pattern=performancePattern(projected,fogPatternSettings,localOptics,textureMask)
+   if(defocus>0.0001 && fogPatternSettings.x>0.5 && fogPatternSettings.x<4.5){
+    let pupil=defocus
+    pattern=(pattern+performancePattern(projected+vec2(pupil,0.0),fogPatternSettings,localOptics,1.0)
+                    +performancePattern(projected-vec2(pupil,0.0),fogPatternSettings,localOptics,1.0)
+                    +performancePattern(projected+vec2(0.0,pupil),fogPatternSettings,localOptics,1.0)
+                    +performancePattern(projected-vec2(0.0,pupil),fogPatternSettings,localOptics,1.0))*0.2
+   }
+   let beam=performanceBeamProfile(delta,beamAxis,fogSpot,fogPatternRight.w)
+   let distribution=1.0
+   if(fogIesSettings.x>0.5){distribution=sampleLod(iesAtlas,performanceIesUv(delta,beamAxis,beamRight,beamUp),0.0).r}
+   optical=optical+beam*pattern*distribution/fogLens.y
+  }
+     attenuation=attenuation*optical
     }
    }
    let visibility=1.0

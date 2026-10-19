@@ -192,11 +192,9 @@ struct FixtureEmitterGpuFixture {
         readback=bgfx::createTexture2D(64,64,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
         return bgfx::isValid(readback)&&cube.isValid()&&black.isValid();
     }
-    std::array<uint8_t,64*64*4> sampleIes(const std::shared_ptr<const ayt::render::IesProfile>& profile,bool volume){
+    std::array<uint8_t,64*64*4> sampleLight(const ayt::render::PerformanceLight& light,bool volume){
         using namespace ayt::render;renderer.setPostProcessBloomStrength(0);
         VolumetricSettings fog;fog.enabled=volume;fog.density=.1f;fog.scattering=1;fog.anisotropy=0;fog.steps=64;fog.debugView=2;renderer.setVolumetricSettings(fog);
-        PerformanceLight light;light.id=7;light.light=Light::spot({0,0,-2},{0,0,1},10,1,.98f,.75f,{1,0,0});light.intensityUnit=LightIntensityUnit::Candela;
-        TextureHandle atlas;if(profile){atlas=createIesTexture(renderer,*profile);CHECK(atlas.isValid());light.iesProfile=profile;light.iesTexture=atlas;}
         CHECK(renderer.setPerformanceLights({&light,1}));RenderScene scene;
         renderer.setMaterialColor(black,"baseColor",1,1,1,1);scene.add(cube,black,ayt::math::scale(1.f,1.f,.1f));
         for(int i=0;i<3;++i){renderer.beginFrame({0,0,0,1});renderer.render(scene);renderer.endFrame();}
@@ -205,7 +203,13 @@ struct FixtureEmitterGpuFixture {
             bgfx::blit(112,readback,0,0,color);const auto ready=bgfx::readTexture(readback,pixels.data());auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(renderer);
             for(int i=0;i<120&&adapter->gpuFrameCounter()<ready;++i)renderer.endFrame();CHECK(adapter->gpuFrameCounter()>=ready);
         }
-        CHECK(renderer.setPerformanceLights({}));if(atlas.isValid())renderer.destroyTexture(atlas);return pixels;
+        CHECK(renderer.setPerformanceLights({}));return pixels;
+    }
+    std::array<uint8_t,64*64*4> sampleIes(const std::shared_ptr<const ayt::render::IesProfile>& profile,bool volume){
+        using namespace ayt::render;
+        PerformanceLight light;light.id=7;light.light=Light::spot({0,0,-2},{0,0,1},10,1,.98f,.75f,{1,0,0});light.intensityUnit=LightIntensityUnit::Candela;
+        TextureHandle atlas;if(profile){atlas=createIesTexture(renderer,*profile);CHECK(atlas.isValid());light.iesProfile=profile;light.iesTexture=atlas;}
+        const auto pixels=sampleLight(light,volume);if(atlas.isValid())renderer.destroyTexture(atlas);return pixels;
     }
     std::array<uint8_t,64*64*4> sample(int mode,bool bloom=false,float density=0){
         renderer.setPostProcessBloomStrength(bloom?1.f:0.f);
@@ -270,6 +274,36 @@ TEST_CASE(real_ies_distribution_matches_surface_and_volume_directions){
         const auto clip=projection*view*ayt::math::FVector4(.5f,0,0,1);
         CHECK(ies[clip.x>0?1:0]>ies[clip.x>0?0:1]);
     }
+#else
+    SKIP_TEST("Windows real-device acceptance required");
+#endif
+}
+TEST_CASE(real_prism_lobes_rotate_and_distance_focus_changes_pattern_contrast){
+#ifdef _WIN32
+    using namespace ayt::render;
+    const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Requires isolated real-device optical acceptance");
+    FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+    PerformanceLight p;p.id=7;p.light=Light::spot({0,0,-2},{0,0,1},10,1,std::cos(.04f),std::cos(.08f),{1,0,0});p.apertureRadius=.02f;
+    ayt::math::Float4x4 view,projection;CHECK(f.renderer.mainCameraMatrices(view,projection));
+    const auto probe=[&](const auto& pixels,float x,float y){const auto clip=projection*view*ayt::math::FVector4(x,y,-.1f,1);const int cx=int((clip.x/clip.w*.5f+.5f)*64),cy=int((.5f-clip.y/clip.w*.5f)*64);double sum=0;
+        for(int yy=cy-1;yy<=cy+1;++yy)for(int xx=cx-1;xx<=cx+1;++xx)if(xx>=0&&xx<64&&yy>=0&&yy<64)sum+=pixels[(yy*64+xx)*4];return sum;};
+    for(bool volume:{false,true}){
+        auto zero=p;zero.light.intensity=0;const auto baseline=f.sampleLight(zero,volume);
+        const auto one=f.sampleLight(p,volume);p.prismCount=2;p.prismAngle=.2f;p.prismRotation=0;const auto horizontal=f.sampleLight(p,volume);
+        p.prismRotation=1.570796327f;const auto vertical=f.sampleLight(p,volume);
+        const auto hx=probe(horizontal,.385f,0)+probe(horizontal,-.385f,0),hy=probe(horizontal,0,.385f)+probe(horizontal,0,-.385f);
+        const auto vx=probe(vertical,.385f,0)+probe(vertical,-.385f,0),vy=probe(vertical,0,.385f)+probe(vertical,0,-.385f);
+        std::fprintf(stderr,"[Prism probe] volume=%d H=%.0f/%.0f V=%.0f/%.0f center=%.0f/%.0f\n",int(volume),hx,hy,vx,vy,probe(one,0,0),probe(horizontal,0,0));
+        CHECK(hx>hy+10);CHECK(vy>vx+10);
+        if(!volume)CHECK(probe(horizontal,0,0)-probe(baseline,0,0)<(probe(one,0,0)-probe(baseline,0,0))*.5);
+        p.prismCount=1;p.prismAngle=p.prismRotation=0;
+    }
+    p.light.coneCosInner=std::cos(.25f);p.light.coneCosOuter=std::cos(.3f);p.apertureRadius=.15f;p.pattern=LightPattern::Texture;p.focusDistance=1.9f;
+    std::array<uint8_t,32*32*4> edge{};for(int y=0;y<32;++y)for(int x=0;x<32;++x){const auto i=(y*32+x)*4;edge[i]=edge[i+1]=edge[i+2]=x<16?255:0;edge[i+3]=255;}
+    auto texture=f.renderer.createTextureFromRgba8(32,32,edge.data());CHECK(texture.isValid());p.goboTexture=texture;
+    const auto sharp=f.sampleLight(p,false);p.focusDistance=.25f;const auto blurred=f.sampleLight(p,false);
+    const auto variation=[](const auto& pixels){double sum=0;for(int y=29;y<=34;++y)for(int x=23;x<41;++x)sum=std::max(sum,double(std::abs(int(pixels[(y*64+x)*4])-int(pixels[(y*64+x+1)*4]))));return sum;};
+    const auto a=variation(sharp),b=variation(blurred);std::fprintf(stderr,"[Focus probe] sharp=%.0f defocused=%.0f\n",a,b);CHECK(a>10);CHECK(b<a*.95);f.renderer.destroyTexture(texture);
 #else
     SKIP_TEST("Windows real-device acceptance required");
 #endif

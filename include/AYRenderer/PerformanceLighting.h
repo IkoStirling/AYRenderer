@@ -41,6 +41,14 @@ struct PerformanceLight {
     /// Keep both paired; rotating pattern does not rotate the photometric web.
     std::shared_ptr<const IesProfile> iesProfile;
     TextureHandle iesTexture;
+    /// Geometric image focus distance in meters/world units, [0,10000]; zero
+    /// preserves legacy focus. Finite pupil yields a distance-dependent blur.
+    float focusDistance=0;
+    /// One (disabled) or2..8 equal-energy prism lobes. Each keeps the authored
+    /// cone and shares intensity/count; tilt is [0,.35] radians about the axis.
+    uint8_t prismCount=1;
+    float prismAngle=0,prismRotation=0;
+
 
 };
 struct PerformanceLightBudget {
@@ -71,6 +79,12 @@ float performanceLightFluxScale(const PerformanceLight& light) noexcept;
 /// Resolve physical/legacy units to the shared scene-linear intensity.
 /// No range fade, inverse square, mask, or exposure is applied here.
 float performanceLightIntensity(const PerformanceLight& light) noexcept;
+/// Deterministic lobe direction; requires a validated light and index<count.
+math::FVector3 performanceLightLobeDirection(const PerformanceLight& light,uint8_t index) noexcept;
+/// Circle-of-confusion radius divided by beam radius at axialDistance.
+float performanceLightFocusBlur(const PerformanceLight& light,float axialDistance) noexcept;
+/// Far-field angular response (prism/IES), excluding inverse square and Gobo.
+float performanceLightAngular(const PerformanceLight& light,const math::FVector3& direction,float offAxisGlow=0) noexcept;
 void performanceLightBounds(const PerformanceLight& light,math::FVector3& center,math::FVector3& halfExtent);
 /// Conservative projected range bounds. Near-plane intersections use the full
 /// viewport; scissor never clips an in-range surface or scattering sample.

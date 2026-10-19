@@ -13,7 +13,7 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         || !ctx.adapter.isInitialized() || ctx.adapter.isNoopBackend())return 0;
     BlackboardGBufferView gb;
     if(!ctx.resourceBlackboard->resolveGBuffer(gb) || !_geometry.ensure(ctx.adapter))return 0;
-    if(!_program.isValid())_program=ctx.pool.acquire(kPerformanceSurfaceSource,"performance_surface_v7_ies");
+    if(!_program.isValid())_program=ctx.pool.acquire(kPerformanceSurfaceSource,"performance_surface_v8_lens_prism");
     if(!_program.isValid())return 0;
     bool valid=true;
     const auto texture=[&](const char* name,bgfx::TextureHandle handle){
@@ -57,6 +57,7 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         texture("patternGobo",gobo);
         auto ies=gb.albedo;
         if(entry.iesProfile){const auto found=ctx.textures.find(entry.iesTexture.id);if(found==ctx.textures.end()||!BGFXAdapter::isValid(found->second.handle))continue;ies=found->second.handle;}
+        vector("performanceLens",entry.focusDistance,float(entry.prismCount),entry.prismAngle,entry.prismRotation);
         vector("performanceIesSettings",entry.iesProfile?1.f:0.f,0,0,0);texture("iesAtlas",ies);
         float matrix[16];toBgfxColumnMajor(math::Float4x4::identity(),matrix);
         float shadowRect[4]={0,0,1,1};float bias=ctx.frame.shadowBias;bool shadowed=false;

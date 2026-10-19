@@ -314,3 +314,30 @@ TEST_CASE(physical_flux_intensity_distance_color_and_legacy_compatibility) {
     PerformanceLighting packet;CHECK(packet.assign({&p,1},{}));p.iesTexture={};CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights.size()==1);
 }
 TEST_SUITE_END
+
+TEST_SUITE(FixtureOpticsTests)
+TEST_CASE(finite_pupil_focus_uses_distance_and_iris_with_legacy_disabled) {
+    auto p=light(1);p.apertureRadius=.1f;p.light.coneCosOuter=std::cos(.1f);p.focusDistance=10;
+    CHECK(performanceLightFocusBlur(p,10)==0);CHECK(performanceLightFocusBlur(p,5)>0);CHECK(performanceLightFocusBlur(p,20)>0);
+    const auto blur=performanceLightFocusBlur(p,5);CHECK(std::abs(blur-.05f/(.1f+5*std::tan(.1f)))<1e-6f);
+    p.iris=.5f;CHECK(std::abs(performanceLightFocusBlur(p,5)-blur*.5f)<1e-6f);
+    p.focusDistance=0;CHECK(performanceLightFocusBlur(p,5)==0);
+    p.focusDistance=10;p.apertureRadius=0;CHECK(performanceLightFocusBlur(p,5)==0);
+}
+TEST_CASE(prism_rotates_real_lobes_preserves_total_angular_energy_and_bounds) {
+    auto p=light(1);p.light.coneCosInner=std::cos(.02f);p.light.coneCosOuter=std::cos(.04f);p.apertureRadius=.03f;
+    const auto central=p.light.spotDirection;CHECK(performanceLightAngular(p,central)==1);
+    p.prismCount=4;p.prismAngle=.2f;CHECK(performanceLightAngular(p,central)==0);
+    const auto lobe=performanceLightLobeDirection(p,0);CHECK(std::abs(lobe.length()-1)<1e-6f);CHECK(std::abs(performanceLightAngular(p,lobe)-.25f)<1e-5f);
+    p.prismRotation=.785398163f;CHECK(performanceLightAngular(p,lobe)==0);const auto rotated=performanceLightLobeDirection(p,0);CHECK(std::abs(performanceLightAngular(p,rotated)-.25f)<1e-5f);
+    ayt::math::FVector3 center,extent;performanceLightBounds(p,center,extent);
+    for(uint8_t i=0;i<p.prismCount;++i){const auto end=p.light.position+performanceLightLobeDirection(p,i)*p.light.range;for(int a=0;a<3;++a)CHECK(std::abs(end[a]-center[a])<=extent[a]+1e-4f);}
+    // Integrate a wider cone to avoid under-resolving a narrow beam in this
+    // independent equal-solid-angle spherical quadrature.
+    p.light.coneCosInner=.95f;p.light.coneCosOuter=.8f;double sum=0;constexpr int n=128,m=256;
+    for(int y=0;y<n;++y){const float c=-1+(y+.5f)*2/n,r=std::sqrt(1-c*c);for(int x=0;x<m;++x){const float a=(x+.5f)*6.283185307f/m;sum+=performanceLightAngular(p,{r*std::cos(a),c,r*std::sin(a)});}}
+    const double integrated=sum*12.566370614359172/(n*m);CHECK(std::abs(integrated-spotSolidAngle(.95f,.8f))<.002);
+    PerformanceLighting packet;CHECK(packet.assign({&p,1},{}));p.prismCount=9;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].prismCount==4);
+    p.prismCount=4;p.focusDistance=-1;CHECK(!packet.assign({&p,1},{}));
+}
+TEST_SUITE_END

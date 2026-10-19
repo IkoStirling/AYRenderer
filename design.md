@@ -1728,3 +1728,19 @@ IesProfile::parse只接受LM-63-1995/2002/2019、Type C、TILT=NONE、ballast字
 createIesTexture上传257×129线性RGBA8角度图，CPU灯口与GPU表面/体积共享坐标基；
 8bit峰值归一化会量化极弱旁瓣。Host配对不可变profile与存活atlas，Renderer检查句柄后复制灯包。
 有效立体角以128点余弦空间求积，水平角均值由原始采样分段线性积分；极窄IES尖峰需提高采样质量。
+
+
+## 2026-10-19 距离焦平面与棱镜
+
+focusDistance>0使用有限出光口/iris作为几何瞳孔，距焦面z处的弥散圆半径为
+apertureRadius×iris×abs(1-z/focusDistance)，除以该处光束半径得到投影滤波足迹。
+焦面处额外模糊为零，零focusDistance精确保留旧柔焦；图案使用有界五点瞳孔滤波，
+不是衍射/像差/连续光学卷积。patternFocus仍是独立的作者柔化参数。
+
+prismCount为1（禁用）或2..8，prismAngle[0,.35]rad，prismRotation为连续弧度。
+每束保持原核心/外场发散，绕主轴倾斜并按束数分配强度；表面/烟雾/可见灯口共享方向与IES。
+有限瞳孔的分束在出光口附近允许真实几何重叠；不人为挖空中心。
+CPU裁剪取所有分束包围盒并集，体积解析各束交段的保守并集，再对实际每束求值。
+阴影仍同一出光位置，投影外场扩大覆盖分束；非面积光阴影。
+同灯仍一个表面和一个体积draw，shader最多8束，体积保留最多64步；稀疏宽分束可能欠采样，
+不保证与单束相同GPU成本。五条固定Star图案射线展开，保留Shader1024迭代乘积安全门。
