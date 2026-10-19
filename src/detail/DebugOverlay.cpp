@@ -37,6 +37,7 @@ void DebugOverlay::onBeginFrame()
     _stats.graph = {};
     _stats.graph.peakTransientTargets = _peakTransientTargets;
     _stats.resources = {};
+    _stats.volumetric = {};
     setVisibilityStats(0, 0, 0);
     const auto now = std::chrono::steady_clock::now();
     if (_lastFrameStart.time_since_epoch().count() != 0) {
@@ -131,7 +132,7 @@ std::string_view passNameForView(uint16_t view,
     case 31:          return "AutoExposure";
     case 13:          return "DepthHaze";
     case 32:          return "SSR";
-    case 33: case 242: return "Volumetric";
+    case 33: case 241: case 242: return "Volumetric";
     case 14:          return "SSAO";
     case 15:          return "PostProcess";
     case 16:         return "Present";

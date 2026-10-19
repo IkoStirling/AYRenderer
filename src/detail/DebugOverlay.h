@@ -40,6 +40,8 @@ public:
         _stats.instancedObjects = objects;
     }
 
+    void setVolumetricStats(const VolumetricFrameStats& stats) { _stats.volumetric=stats; }
+
     const RenderFrameStats& stats() const noexcept { return _stats; }
 
 private:

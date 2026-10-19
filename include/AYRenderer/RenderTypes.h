@@ -133,10 +133,20 @@ struct RenderResourceFrameStats {
     uint16_t persistentHistoryResources = 0;
 };
 
+/// Current CPU-submitted volume integration layout. Empty when no volume result
+/// was produced; cell counts describe allocation, not GPU visibility/readback.
+struct VolumetricFrameStats {
+    bool froxel=false;
+    uint16_t integrationWidth=0,integrationHeight=0;
+    uint8_t depthSlices=0;
+    uint32_t froxelCells=0;
+};
+
 /// Renderer-owned diagnostics snapshot: CPU cadence, backend GPU timing,
 /// pass submissions and resource/visibility counts. getFrameStats() borrows it;
 /// copy before retaining across frames or shutdown. GPU results may lag CPU.
 struct RenderFrameStats {
+    VolumetricFrameStats volumetric;
     // Wall-clock cadence between consecutive beginFrame calls. Unlike the
     // old render-only timer this includes simulation, event polling, VSync,
     // hot-reload polling and host sleeps, so fps is the rate users see.

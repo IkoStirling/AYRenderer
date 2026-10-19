@@ -117,7 +117,8 @@ enum class FgResourceId : uint8_t {
     VolumetricColor = 28,
     BaseGBuffer = 29,
     VolumetricIntegration = 30, // optional reduced-resolution radiance/transmission
-    Count        = 31,
+    FroxelField = 31, // optional packed coefficient RGB / extinction sigma atlas
+    Count        = 32,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。
@@ -146,6 +147,8 @@ struct FgTextureDesc {
     bool                      withDepth = false;
     // Edge/mask resources must not interpolate adjacent classifications.
     bool                      pointSampled = false;
+    // Optional absolute internal atlas extent. Zero retains the scaled viewport axis.
+    uint16_t absoluteWidth = 0, absoluteHeight = 0;
 };
 
 // Pass 声明 ── 描述一个 logical pass 读哪些资源、写哪些资源、

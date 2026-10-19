@@ -17,10 +17,12 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
     BlackboardGBufferView gb;
     if(!ctx.resourceBlackboard->resolveGBuffer(gb)||!ctx.resourceBlackboard->findProduced(BlackboardResourceId::LightingColor))return 0;
     const auto input=adapter.getFboAttachment(selectSceneColorSourceFbo(ctx),0);
-    const bool reduced=settings.downsample>1;
-    const uint16_t width=uint16_t((uint32_t(ctx.viewportWidth)+settings.downsample-1)/settings.downsample);
-    const uint16_t height=uint16_t((uint32_t(ctx.viewportHeight)+settings.downsample-1)/settings.downsample);
-    const auto target=ctx.frameGraph->resolve(reduced?FgResourceId::VolumetricIntegration:FgResourceId::VolumetricColor);
+    const auto grid=runtimeVolumetricGridLayout(settings,ctx.viewportWidth,ctx.viewportHeight);
+    const bool froxel=grid.valid(),reduced=froxel||settings.downsample>1;
+    const uint8_t volumeView=froxel?kInjectionViewId:kViewId;
+    const uint16_t width=froxel?grid.atlasWidth:uint16_t((uint32_t(ctx.viewportWidth)+settings.downsample-1)/settings.downsample);
+    const uint16_t height=froxel?grid.atlasHeight:uint16_t((uint32_t(ctx.viewportHeight)+settings.downsample-1)/settings.downsample);
+    const auto target=ctx.frameGraph->resolve(froxel?FgResourceId::FroxelField:reduced?FgResourceId::VolumetricIntegration:FgResourceId::VolumetricColor);
     if(!BGFXAdapter::isValid(input)||!BGFXAdapter::isValid(target))return 0;
     const auto output=adapter.getFboAttachment(target,0);
     if(!BGFXAdapter::isValid(output)||input.idx==output.idx)return 0;
@@ -40,27 +42,31 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
     uniform("fogInverseViewProjection",inv,64);uniform("fogView",view,64);
     vector("fogCamera",ctx.frame.cameraPosition.x,ctx.frame.cameraPosition.y,ctx.frame.cameraPosition.z,std::abs(ctx.frame.projection.row[3].w)>.5f?1.f:0.f);
     vector("fogMedium",settings.density,settings.scattering,settings.anisotropy,settings.maxDistance);
-    vector("fogIntegration",reduced?1.f:0.f,0,0,0);
+    vector("fogIntegration",reduced?1.f:0.f,froxel?float(grid.columns):0.f,froxel?float(grid.rows):0.f,froxel?float(grid.slices):0.f);
     vector("fogNoise",settings.noiseStrength,settings.noiseScale,settings.noiseTime,0);
     vector("fogCenter",settings.center.x,settings.center.y,settings.center.z,bgfx::getCaps()->homogeneousDepth?-1.f:0.f);
     vector("fogExtent",settings.halfExtent.x,settings.halfExtent.y,settings.halfExtent.z,0);
     vector("fogTint",settings.tint.x,settings.tint.y,settings.tint.z,0);
     texture("sceneColor",input);texture("worldPosition",gb.worldPosition);texture("geometryCoverage",gb.material);
     };
-    configureFullscreenPassView(adapter,kViewId,target,0,0,width,height);
-    adapter.setViewMode(kViewId,bgfx::ViewMode::Sequential);
+    configureFullscreenPassView(adapter,volumeView,target,0,0,width,height);
+    adapter.setViewMode(volumeView,bgfx::ViewMode::Sequential);
     const auto vp=ctx.frame.projection*ctx.frame.view;
-    uint32_t draws=0;
+    if(froxel&&!beginFroxelInjection(ctx,target,grid))return 0;
+    uint32_t draws=froxel?1:0;
     // Extinction is a property of the medium, applied once before additive
     // single-scattering contributions. Repeatedly compositing fog darkens N times.
     for(size_t iteration=0;iteration<=packet.lights.size();++iteration) {
         const bool extinction=iteration==0;
+        if(froxel&&settings.debugView==1)break;
+        if(froxel&&extinction)continue;
         PerformanceLight empty;empty.light=Light::spot({0,0,0},{0,-1,0},1,0,.95f,.9f,{0,0,0});
         const auto& entry=extinction?empty:packet.lights[iteration-1];const auto& light=entry.light;
         auto rect=LightScreenRect{0,0,width,height,true};
         if(!extinction) {
             if(entry.volumetric<=0||light.intensity<=0)continue;
-            rect=performanceLightRect(entry,vp,width,height);if(!rect.visible)continue;
+            rect=performanceLightRect(entry,vp,froxel?ctx.viewportWidth:width,froxel?ctx.viewportHeight:height);if(!rect.visible)continue;
+            if(froxel)rect={0,0,width,height,true};
             if(packet.stats.volumeDraws>=packet.budget.volumeLights){++packet.stats.volumeBudgetSkipped;continue;}
         }
         auto gobo=gb.material;
@@ -70,7 +76,7 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
             gobo=found->second.handle;
         }
         uploadFrame();
-        vector("fogOptions",float(settings.steps),float(settings.debugView),settings.local?1.f:0.f,extinction?1.f:2.f);
+        vector("fogOptions",float(settings.steps),float(settings.debugView),!froxel&&settings.local?1.f:0.f,extinction?1.f:2.f);
         vector("fogLightPosition",light.position.x,light.position.y,light.position.z,float(light.type));
         const auto direction=light.spotDirection;
         vector("fogLightDirection",direction.x,direction.y,direction.z,light.range);
@@ -111,11 +117,13 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         _geometry.bind(adapter);adapter.setDrawScissor(rect.x,rect.y,rect.width,rect.height);
         if(extinction)adapter.setStateDepthTestAlways();
         else adapter.setState(BGFX_STATE_WRITE_RGB|BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE,BGFX_STATE_BLEND_ONE));
-        shader::DrawCallContext submit;submit.viewId=kViewId;submit.state=0;_program.submit(submit);++draws;
+        shader::DrawCallContext submit;submit.viewId=volumeView;submit.state=0;_program.submit(submit);++draws;
         if(!extinction)++packet.stats.volumeDraws;
         if(settings.debugView==1)break; // Transmittance has no light-dependent term.
     }
     adapter.resetDrawScissor();
+    if(froxel){ctx.frameGraph->markProduced(FgResourceId::FroxelField);return draws+finishFroxelIntegration(ctx,target,input,grid);}
+    _stats.integrationWidth=width;_stats.integrationHeight=height;
     if(reduced){ctx.frameGraph->markProduced(FgResourceId::VolumetricIntegration);return draws+finishIntegration(ctx,target,input);}
     ctx.frameGraph->markProduced(FgResourceId::VolumetricColor);
     ctx.resourceBlackboard->publishProduced(BlackboardResourceId::VolumetricColor,BlackboardResourceLifetime::Transient,target,output,ctx.viewportWidth,ctx.viewportHeight,0);

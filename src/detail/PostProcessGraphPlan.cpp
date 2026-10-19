@@ -199,7 +199,14 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     if (input.volumetric) {
         graph.addResource(FgResourceId::VolumetricColor, graphTextureDesc(RenderPassSlot::Volumetric, RenderPassResourceId::VolumetricColor));
         std::vector<FgResourceId> writes{FgResourceId::VolumetricColor};
-        if (input.volumetricDownsample >= 2) {
+        if (input.volumetricGrid.valid()) {
+            auto low = graphTextureDesc(RenderPassSlot::Volumetric, RenderPassResourceId::VolumetricColor);
+            low.pointSampled = true;low.absoluteWidth=input.volumetricGrid.width;low.absoluteHeight=input.volumetricGrid.height;
+            graph.addResource(FgResourceId::VolumetricIntegration,low);writes.push_back(FgResourceId::VolumetricIntegration);
+            auto field=low;field.format=bgfx::TextureFormat::RGBA32F;
+            field.absoluteWidth=input.volumetricGrid.atlasWidth;field.absoluteHeight=input.volumetricGrid.atlasHeight;
+            graph.addResource(FgResourceId::FroxelField,field);writes.push_back(FgResourceId::FroxelField);
+        } else if (input.volumetricDownsample >= 2) {
             auto low = graphTextureDesc(RenderPassSlot::Volumetric, RenderPassResourceId::VolumetricColor);
             low.scale = input.volumetricDownsample >= 4 ? FgTextureScale::Quarter : FgTextureScale::Half;
             low.pointSampled = true;

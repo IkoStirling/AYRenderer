@@ -1,7 +1,7 @@
 #pragma once
 #include "AYRenderer/PerformanceShaderSources.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v14_separate_integration";
+inline constexpr char kVolumetricCacheKey[]="volumetric_v15_froxel_coefficients";
 inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
@@ -45,9 +45,14 @@ material Volumetric {
  fragment {
   in vUv:texcoord
   let uv=vec2(vUv.x,1.0-vUv.y)
-  let raw=sample(sceneColor,uv)
-  let wp=sample(worldPosition,uv)
-  let coverage=sample(geometryCoverage,uv).a
+  let gridSlice=0.0
+  if(fogIntegration.y>0.5){
+   let tileX=floor(uv.x*fogIntegration.y);let tileY=floor(uv.y*fogIntegration.z)
+   gridSlice=tileY*fogIntegration.y+tileX
+   uv=vec2(uv.x*fogIntegration.y-tileX,uv.y*fogIntegration.z-tileY)
+  }
+  let raw=vec4(0.0);let wp=vec4(0.0);let coverage=0.0
+  if(fogIntegration.y<0.5){raw=sample(sceneColor,uv);wp=sample(worldPosition,uv);coverage=sample(geometryCoverage,uv).a}
   let farH=fogInverseViewProjection*vec4(uv.x*2.0-1.0,1.0-uv.y*2.0,1.0,1.0)
   let nearH=fogInverseViewProjection*vec4(uv.x*2.0-1.0,1.0-uv.y*2.0,fogCenter.w,1.0)
   let origin=mix(fogCamera.xyz,nearH.xyz/nearH.w,fogCamera.w)
@@ -57,6 +62,10 @@ material Volumetric {
   let direction=delta/max(length(delta),0.00001)
   let begin=0.0
   let end=distance
+  if(fogIntegration.y>0.5){
+   begin=exp(log(1.0+fogMedium.w)*gridSlice/fogIntegration.w)-1.0
+   end=min(end,exp(log(1.0+fogMedium.w)*(gridSlice+1.0)/fogIntegration.w)-1.0)
+  }
   if (fogOptions.z>0.5) {
    let safeDirection=mix(vec3(0.00001),direction,step(vec3(0.00001),abs(direction)))
    let a=(fogCenter.xyz-fogExtent.xyz-origin)/safeDirection
@@ -65,7 +74,7 @@ material Volumetric {
    end=min(distance,min(min(max(a.x,b.x),max(a.y,b.y)),max(a.z,b.z)))
   }
   let mediumBegin=begin
-  if(fogOptions.w>1.5){
+  if(fogOptions.w>1.5&&fogIntegration.y<0.5){
    let safeDirection=mix(vec3(0.00001),direction,step(vec3(0.00001),abs(direction)))
    let a=(fogLightBoundsCenter.xyz-fogLightBoundsExtent.xyz-origin)/safeDirection
    let b=(fogLightBoundsCenter.xyz+fogLightBoundsExtent.xyz-origin)/safeDirection
@@ -90,6 +99,7 @@ material Volumetric {
    // for long/grazing chords. Patterned beams retain the full sample budget.
    sampleCount=min(fogOptions.x,max(16.0,ceil((end-begin)/max(0.02,radius*max(0.01,fogPatternOptics.y)*0.125))))
   }
+  if(fogIntegration.y>0.5){sampleCount=1.0}
   let ds=max(end-begin,0.0)/sampleCount
   let transmission=exp(-fogMedium.x*max(begin-mediumBegin,0.0))
   if((fogOptions.z>0.5 || fogNoise.x>0.001) && begin>mediumBegin){
@@ -239,7 +249,8 @@ material Volumetric {
    let mu=dot(L,direction)
    let phaseBase=max(1.0+g*g-2.0*g*mu,0.001)
    let phase=(1.0-g*g)/(12.5663706*phaseBase*sqrt(phaseBase))
-   radiance=radiance+transmission*(1.0-stepT)*fogMedium.y*fogTint.rgb*fogLightColor.rgb*attenuation*visibility*phase
+   if(fogIntegration.y>0.5){radiance=radiance+fogMedium.y*fogTint.rgb*fogLightColor.rgb*attenuation*visibility*phase}
+   else {radiance=radiance+transmission*(1.0-stepT)*fogMedium.y*fogTint.rgb*fogLightColor.rgb*attenuation*visibility*phase}
    transmission=transmission*stepT
   }
   } else {

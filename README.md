@@ -32,7 +32,7 @@ createCameraOutput/cameraOutputTexture/destroyCameraOutput 管理可采样颜色
 独立视图不使用主视图的 Deferred、TAA/Motion/曝光历史或编辑器选中视图；WorldLit2D
 在显式 Forward batch 中拒绝。详见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
 CPU/Noop 用例 CameraViews；独立 D3D11 读回用例 CameraViewsGpu。
-离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为144。
+离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为143。
 
 ## Deferred Decal v1（2026-10-06）
 
@@ -53,7 +53,7 @@ Deferred HDR：Lighting → SSR → DepthHaze → Volumetric → Transparent →
 8..64 次确定性中点积分，Beer–Lambert 消光 + HG 单次散射；一个按原场景索引选择的
 方向光／点光／Spot，方向光 CSM/Spot 读取本帧阴影；点光全向阴影仍不支持。
 全局或局部轴对齐盒介质，颜色为散射 albedo tint；天空参与积分，零密度无目标/绘制。
-首版全分辨率，无 froxel、纹理化流体模拟、多重散射或独立历史；
+当前支持可选低分辨率积分和froxel（见后文），无流体模拟、多重散射或独立历史；
 透明自身尚未在介质中积分（在雾后合成），不冒充完整体积透明材质。
 
 ## 新画面能力：SSR v1（2026-10-06）
@@ -672,3 +672,15 @@ GPU完成帧可滞后CPU；Renderer CPU帧内时间不覆盖Host的演出求值/
 2026-10-19 局部雾重建补充：重建消光的4点密度规则同时应用局部盒.75..1柔边权重与动画噪声，
 修复局部设置下散射和消光密度不一致。常量全局路径保持原解析式。
 真实GPU回归新增局部/全局×静态/动画×1/2/4分辨率对照，两后端各1项1298断言通过。
+
+
+## 2026-10-19 有界 froxel 系数网格
+
+VolumetricSettings.froxel默认关闭；tile4/8/16、深度16/32/64，cell预算65536..4194304、默认1048576。
+XY分辨率同时受纹理轴限与cell预算约束。RGBA32F八列atlas保存RGB入射散射系数和alpha消光系数，
+局部柔边/动画密度独立写一次，各灯复用完整光学与阴影核，只加RGB，随后按观察距离对数切片做Beer积分。
+默认1920x828、tile8、32切片为240x104x32=798720cell（field约12.2MiB），不分配逐格灯列表。
+无RGBA32F framebuffer能力回退原ray路径；网格启用时downsample不参与布局。极细图案可能欠采样。
+场景颜色/alpha仍全分辨率，深度感知重建及当前介质消光沿用既有路径；无历史或多重散射。
+新增FroxelField资源ID31，原ID不变；view241注入、33积分、242重建，UI单Pass容量143。
+RenderFrameStats.volumetric报告实际积分宽高、切片、cell数及启用状态；关闭帧清零。

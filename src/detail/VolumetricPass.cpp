@@ -1,6 +1,7 @@
 #include "detail/VolumetricPass.h"
 #include "AYRenderer/VolumetricShaderSources.h"
 #include "detail/VolumeReconstructionSource.h"
+#include "detail/FroxelShaderSources.h"
 #include "detail/PassExecContext.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/RenderResourceBlackboard.h"
@@ -10,15 +11,17 @@
 #include <cmath>
 namespace ayt::render::detail {
 uint32_t VolumetricPass::execute(PassExecContext& ctx) {
- auto& adapter=ctx.adapter;const auto s=sanitizeVolumetricSettings(ctx.frame.volumetric);
+ _stats={};auto& adapter=ctx.adapter;const auto s=sanitizeVolumetricSettings(ctx.frame.volumetric);
  if(!s.enabled||s.density<=0||!adapter.isInitialized()||adapter.isNoopBackend()||!ctx.frameGraph||!ctx.resourceBlackboard||!ctx.viewportWidth||!ctx.viewportHeight)return 0;
  if(ctx.performanceLights)return executePerformance(ctx);
  BlackboardGBufferView gb;
  if(!ctx.resourceBlackboard->resolveGBuffer(gb)||!ctx.resourceBlackboard->findProduced(BlackboardResourceId::LightingColor))return 0;
  auto input=adapter.getFboAttachment(selectSceneColorSourceFbo(ctx),0);
- const bool reduced=s.downsample>1;
- const uint16_t width=uint16_t((uint32_t(ctx.viewportWidth)+s.downsample-1)/s.downsample),height=uint16_t((uint32_t(ctx.viewportHeight)+s.downsample-1)/s.downsample);
- auto target=ctx.frameGraph->resolve(reduced?FgResourceId::VolumetricIntegration:FgResourceId::VolumetricColor);
+ const auto grid=runtimeVolumetricGridLayout(s,ctx.viewportWidth,ctx.viewportHeight);
+ const bool froxel=grid.valid(),reduced=froxel||s.downsample>1;
+ const uint8_t volumeView=froxel?kInjectionViewId:kViewId;
+ const uint16_t width=froxel?grid.atlasWidth:uint16_t((uint32_t(ctx.viewportWidth)+s.downsample-1)/s.downsample),height=froxel?grid.atlasHeight:uint16_t((uint32_t(ctx.viewportHeight)+s.downsample-1)/s.downsample);
+ auto target=ctx.frameGraph->resolve(froxel?FgResourceId::FroxelField:reduced?FgResourceId::VolumetricIntegration:FgResourceId::VolumetricColor);
  if(!BGFXAdapter::isValid(input)||!BGFXAdapter::isValid(target))return 0;
  auto output=adapter.getFboAttachment(target,0);
  if(!BGFXAdapter::isValid(output)||input.idx==output.idx)return 0;
@@ -35,9 +38,9 @@ uint32_t VolumetricPass::execute(PassExecContext& ctx) {
  u("fogInverseViewProjection",inv,64);u("fogView",view,64);
  v("fogCamera",ctx.frame.cameraPosition.x,ctx.frame.cameraPosition.y,ctx.frame.cameraPosition.z,std::abs(ctx.frame.projection.row[3].w)>0.5f?1.f:0.f);
  v("fogMedium",s.density,s.scattering,s.anisotropy,s.maxDistance);
- v("fogIntegration",reduced?1.f:0.f,0,0,0);
+ v("fogIntegration",reduced?1.f:0.f,froxel?float(grid.columns):0.f,froxel?float(grid.rows):0.f,froxel?float(grid.slices):0.f);
  v("fogNoise",s.noiseStrength,s.noiseScale,s.noiseTime,0);
- v("fogOptions",float(s.steps),float(s.debugView),s.local?1.f:0.f,0);
+ v("fogOptions",float(s.steps),float(s.debugView),!froxel&&s.local?1.f:0.f,froxel?2.f:0.f);
  v("fogCenter",s.center.x,s.center.y,s.center.z,bgfx::getCaps()->homogeneousDepth?-1.f:0.f);
  v("fogExtent",s.halfExtent.x,s.halfExtent.y,s.halfExtent.z,0);v("fogTint",s.tint.x,s.tint.y,s.tint.z,0);
  Light light=Light::directional(ctx.frame.lightDirection,ctx.frame.lightColor);
@@ -83,8 +86,11 @@ uint32_t VolumetricPass::execute(PassExecContext& ctx) {
  v("fogIesSettings",0,0,0,0);tex("iesAtlas",gb.material);
  tex("patternGobo",gb.material);
  if(!bindings)return 0;
- configureFullscreenPassView(adapter,kViewId,target,0,0,width,height);
- _geometry.bind(adapter);adapter.setStateDepthTestAlways();shader::DrawCallContext submit;submit.viewId=kViewId;submit.state=0;_program.submit(submit);
+ if(froxel&&!beginFroxelInjection(ctx,target,grid))return 0;
+ configureFullscreenPassView(adapter,volumeView,target,0,0,width,height);
+ _geometry.bind(adapter);if(froxel)adapter.setState(BGFX_STATE_WRITE_RGB|BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE,BGFX_STATE_BLEND_ONE));else adapter.setStateDepthTestAlways();shader::DrawCallContext submit;submit.viewId=volumeView;submit.state=0;_program.submit(submit);
+ if(froxel){ctx.frameGraph->markProduced(FgResourceId::FroxelField);return 2+finishFroxelIntegration(ctx,target,input,grid);}
+ _stats.integrationWidth=width;_stats.integrationHeight=height;
  if(reduced){ctx.frameGraph->markProduced(FgResourceId::VolumetricIntegration);return 1+finishIntegration(ctx,target,input);}
  ctx.frameGraph->markProduced(FgResourceId::VolumetricColor);
  ctx.resourceBlackboard->publishProduced(BlackboardResourceId::VolumetricColor,BlackboardResourceLifetime::Transient,target,output,ctx.viewportWidth,ctx.viewportHeight,0);
@@ -107,7 +113,8 @@ uint32_t VolumetricPass::finishIntegration(PassExecContext& ctx,bgfx::FrameBuffe
  v("fogCamera",ctx.frame.cameraPosition.x,ctx.frame.cameraPosition.y,ctx.frame.cameraPosition.z,std::abs(ctx.frame.projection.row[3].w)>.5f?1.f:0.f);
  v("fogMedium",s.density,s.scattering,s.anisotropy,s.maxDistance);v("fogOptions",float(s.steps),float(s.debugView),s.local?1.f:0.f,0);
  v("fogCenter",s.center.x,s.center.y,s.center.z,bgfx::getCaps()->homogeneousDepth?-1.f:0.f);v("fogExtent",s.halfExtent.x,s.halfExtent.y,s.halfExtent.z,0);v("fogNoise",s.noiseStrength,s.noiseScale,s.noiseTime,0);
- const float width=float((uint32_t(ctx.viewportWidth)+s.downsample-1)/s.downsample),height=float((uint32_t(ctx.viewportHeight)+s.downsample-1)/s.downsample);
+ const auto grid=runtimeVolumetricGridLayout(s,ctx.viewportWidth,ctx.viewportHeight);
+ const float width=grid.valid()?float(grid.width):float((uint32_t(ctx.viewportWidth)+s.downsample-1)/s.downsample),height=grid.valid()?float(grid.height):float((uint32_t(ctx.viewportHeight)+s.downsample-1)/s.downsample);
  v("reconstructionGrid",width,height,1.f/width,1.f/height);
  tex("sceneColor",input);tex("worldPosition",gb.worldPosition);tex("geometryCoverage",gb.material);tex("fogIntegral",low);
  if(!valid)return 0;
@@ -116,5 +123,5 @@ uint32_t VolumetricPass::finishIntegration(PassExecContext& ctx,bgfx::FrameBuffe
  ctx.frameGraph->markProduced(FgResourceId::VolumetricColor);ctx.resourceBlackboard->publishProduced(BlackboardResourceId::VolumetricColor,BlackboardResourceLifetime::Transient,target,output,ctx.viewportWidth,ctx.viewportHeight,0);
  return 1;
 }
-void VolumetricPass::destroyResources(BGFXAdapter& adapter){_program.reset();_reconstruction.reset();_geometry.destroy(adapter);}
+void VolumetricPass::destroyResources(BGFXAdapter& adapter){_program.reset();_reconstruction.reset();_froxelDensity.reset();_froxelIntegration.reset();_stats={};_geometry.destroy(adapter);}
 }

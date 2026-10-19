@@ -27,6 +27,12 @@ struct VolumetricSettings {
     float noiseStrength = 0;
     float noiseScale = 0.2f; // cycles per world unit, [0.01,2]
     float noiseTime = 0; // seconds, supplied by the host's show clock
+    /// Optional bounded view-frustum coefficient grid. Default false keeps ray marching.
+    /// Grid XY resolution is capped by texture limits/cell budget; downsample is ray-only.
+    bool froxel = false;
+    uint8_t froxelTileSize = 8; // requested pixels/cell in XY: 4,8,16
+    uint8_t froxelSlices = 32; // logarithmic observer-distance slices:16,32,64
+    uint32_t froxelMaxCells = 1048576; // [65536,4194304], allocated cells never exceed this
 };
 inline VolumetricSettings sanitizeVolumetricSettings(VolumetricSettings s) noexcept {
     auto finite=[](float x,float fallback,float lo,float hi){return std::isfinite(x)?std::clamp(x,lo,hi):fallback;};
@@ -35,6 +41,9 @@ inline VolumetricSettings sanitizeVolumetricSettings(VolumetricSettings s) noexc
     s.downsample=s.downsample>=4?4:s.downsample>=2?2:1;
     s.steps=std::clamp<uint8_t>(s.steps,8,64); s.lightIndex=std::min<uint8_t>(s.lightIndex,7); s.debugView=std::min<uint8_t>(s.debugView,2);
     for(int i=0;i<3;++i) {s.center[i]=finite(s.center[i],0,-100000,100000);s.halfExtent[i]=finite(s.halfExtent[i],10,.01f,10000);s.tint[i]=finite(s.tint[i],1,0,1);}
+    s.froxelTileSize=s.froxelTileSize>=16?16:s.froxelTileSize>=8?8:4;
+    s.froxelSlices=s.froxelSlices>=64?64:s.froxelSlices>=32?32:16;
+    s.froxelMaxCells=std::clamp<uint32_t>(s.froxelMaxCells,65536,4194304);
     s.noiseStrength=finite(s.noiseStrength,0,0,1);
     s.noiseScale=finite(s.noiseScale,.2f,.01f,2);
     s.noiseTime=finite(s.noiseTime,0,-100000,100000);

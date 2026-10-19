@@ -1897,6 +1897,7 @@ void Renderer::render(const RenderScene& scene)
         && fogPass && fogPass->isEnabled() && gbufferPassPtr && gbufferPassPtr->isEnabled()
         && lightingPassPtr && lightingPassPtr->isEnabled();
     graphInput.volumetricDownsample = frame.volumetric.downsample;
+    graphInput.volumetricGrid = detail::runtimeVolumetricGridLayout(frame.volumetric,fgW,fgH);
     if (graphInput.volumetric && !detail::BGFXAdapter::isValid(graphInput.gbuffer))
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
     graphInput.bloomExtract = bloomStages.extract;
@@ -2051,6 +2052,10 @@ void Renderer::render(const RenderScene& scene)
     // cleanly when the adapter is uninitialized or Noop.
     detail::configureRenderViewOrder(_impl->adapter);
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
+    if (_impl->resourceBlackboard.findProduced(detail::BlackboardResourceId::VolumetricColor)) {
+        if (const auto* volume=_impl->pipeline.findPass<detail::VolumetricPass>())
+            _impl->debugOverlay.setVolumetricStats(volume->stats());
+    }
     // Commit temporal state as a pair. A skipped/failed resolve must not
     // leave color at t-2 while motion advances to t-1; a failed motion pass
     // must likewise never reuse its old object snapshots on the next frame.

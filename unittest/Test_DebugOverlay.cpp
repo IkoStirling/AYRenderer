@@ -191,7 +191,7 @@ TEST_CASE(nonzero_gpu_timings_survive_cpu_merge_and_map_to_current_passes)
         "Present", "FXAA", "SMAA", "EditorOverlay", "Transparent", "Forward2DOpaque", "SSR", "Volumetric", "BloomBlur", "AutoExposure"};
     for (const auto* name : names) cpu.push_back({name, 3u, 1.5f, 99.0f});
     const uint16_t ids[] = {18, 25, 3, 4, 5, 245, 16, 17, 247, 248, 249,
-                           251, 252, 9, 253, 254, 246, 32, 33, 242, 11, 12, 26, 27, 28, 29, 30, 31};
+                           251, 252, 9, 253, 254, 246, 32, 33, 241, 242, 11, 12, 26, 27, 28, 29, 30, 31};
     std::vector<bgfx::ViewStats> views(std::size(ids));
     for (size_t i = 0; i < views.size(); ++i) {
         views[i].view = ids[i];
@@ -206,7 +206,7 @@ TEST_CASE(nonzero_gpu_timings_survive_cpu_merge_and_map_to_current_passes)
     gpu.numViews = static_cast<uint16_t>(views.size());
     gpu.viewStats = views.data();
     overlay.updateFrameStats(30, 10, cpu, &gpu);
-    const float expected[] = {4, 2, 2, 4, 2, 2, 6, 4, 6, 2, 2, 4, 14, 2};
+    const float expected[] = {4, 2, 2, 4, 2, 2, 6, 4, 6, 2, 2, 6, 14, 2};
     CHECK(overlay.stats().gpuFrameTimeMs == 20.0f);
     CHECK(overlay.stats().gpuFrameNumber == 7u);
     for (size_t i = 0; i < cpu.size(); ++i) {

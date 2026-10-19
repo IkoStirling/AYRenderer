@@ -487,6 +487,8 @@ public:
     /// and scattering; the host supplies time each frame when animation is wanted.
     /// downsample1/2/4 changes scattering only; full-resolution extinction and
     /// depth-aware reconstruction retain scene RGB/alpha and avoid depth-edge bleeding.
+    /// Optional froxel uses a bounded coefficient grid instead of per-ray steps;
+    /// tile/slice/cell caps and device fallback are reported by frame statistics.
     void setVolumetricSettings(const VolumetricSettings& settings);
     VolumetricSettings volumetricSettings() const noexcept;
     /// Owner-thread, copies up to16 positive-scale projectors in stable order.

@@ -14,7 +14,7 @@ TEST_CASE(complete_catalog_prewarms_normal_paths_without_compiler) {
     namespace fs=std::filesystem;
     const auto root=fs::temp_directory_path()/("shader_production_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     struct Cleanup { fs::path root; ~Cleanup() {std::error_code ec;fs::remove_all(root,ec);} } cleanup{root};
-    const auto jobs=builtinShaderJobs(); CHECK(jobs.size()==70);
+    const auto jobs=builtinShaderJobs(); CHECK(jobs.size()==72);
     bool hasInstancedPoints=false;
     for(const auto& job:jobs)hasInstancedPoints|=job.name=="emissive_point_instanced";
     CHECK(hasInstancedPoints);

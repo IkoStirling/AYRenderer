@@ -24,6 +24,7 @@
 #include "detail/VolumetricPass.h"
 #include "detail/SsrPass.h"
 #include "detail/LightingPass.h"
+#include "detail/RenderViewOrder.h"
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/PassExecContext.h"
@@ -767,6 +768,43 @@ TEST_CASE(reduced_volume_preserves_full_scene_edges_and_extinguishes_only_once) 
    if(noise==0&&!localBox)for(int y=0;y<4;++y)for(int x=0;x<4;++x){const float px=(x+.5f)*.5f-1,py=1-(y+.5f)*.5f,z=x<2?1.f:10.f,T=std::exp(-.2f*std::sqrt(px*px+py*py+z*z));const auto i=y*4+x;CHECK(std::abs(pixels[i][x%2?1:0]-T)<.001f);}
   }
  }
+ pass.destroyResources(f.adapter);
+#else
+ SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(froxel_coefficients_follow_beer_and_preserve_atlas_resize_and_two_light_energy) {
+#ifdef _WIN32
+ const auto* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Isolated device required");
+ PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+ bgfx::setViewOrder(0,kRenderViewCapacity,kRenderViewRemap.data());
+ std::array<Pixel,16> positions{};for(int y=0;y<4;++y)for(int x=0;x<4;++x)positions[y*4+x]={(x+.5f)*.5f-1,1-(y+.5f)*.5f,1,1};
+ const auto world=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(positions.data(),sizeof(positions)));f.textures.push_back(world);
+ const auto white=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),surface=f.input({0,0,0,1});
+ FrameGraph graph(f.adapter);RenderResourceBlackboard bb;ayt::render::RenderScene scene;std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;std::unordered_map<uint64_t,GpuMaterial> materials;
+ FrameContext frame;frame.volumetric.enabled=true;frame.volumetric.froxel=true;frame.volumetric.froxelTileSize=4;frame.volumetric.froxelSlices=16;frame.volumetric.maxDistance=2;frame.volumetric.density=.2f;frame.volumetric.anisotropy=0;frame.volumetric.scattering=.8f;frame.lightDirection={0,0,-1};frame.lightColor={2,0,0};
+ PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.sceneFbo=f.target;ctx.resourceBlackboard=&bb;ctx.frameGraph=&graph;
+ const auto prepare=[&]{
+  configureRenderViewOrder(f.adapter);f.render("","return vec4(1.0)",{},3);configureRenderViewOrder(f.adapter);
+  bb.beginFrame();bb.publishGBuffer(f.target,white,normal,world,surface,surface,4,4,1,true);bb.publishProduced(BlackboardResourceId::LightingColor,BlackboardResourceLifetime::External,f.target,f.targetTexture,4,4,1);
+  PostProcessGraphPlanInput in;in.width=in.height=4;in.finalLdr=true;in.sceneColor=f.target;in.gbuffer=f.target;in.volumetric=true;in.volumetricGrid=runtimeVolumetricGridLayout(frame.volumetric,4,4);CHECK(in.volumetricGrid.valid());CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);
+ };
+ const auto probe=[&](bgfx::TextureHandle texture,float u,float v){configureRenderViewOrder(f.adapter);f.render("texture2d gridProbe","return sample(gridProbe,vec2("+std::to_string(u)+","+std::to_string(v)+"))",[&](const auto& p){const auto b=p.getTextureBinding("gridProbe");CHECK(b!=ayt::shader::InvalidBinding);p.setTexture(p.getTextureStage(b),b,toShaderTexture(texture));},244);
+  // Read the completed probe in a separate submission; a remapped view must
+  // never make this oracle observe the previous contents of the target.
+  return f.readImage(f.targetTexture,200);};
+ VolumetricPass pass;prepare();CHECK(pass.execute(ctx)==4);CHECK(pass.stats().froxel);CHECK(pass.stats().froxelCells==16);CHECK(pass.stats().integrationWidth==1);CHECK(pass.stats().depthSlices==16);
+ auto pixels=probe(f.adapter.getFboAttachment(graph.resolve(FgResourceId::VolumetricColor),0),.5f,.5f);CHECK(pixels.size()==16);
+ const float T=std::exp(-.2f),L=(1-T)*.8f*2/(4*3.141592653589793f);for(const auto& p:pixels){CHECK(std::abs(p[0]-(T+L))<.001f);CHECK(std::abs(p[1]-T)<.001f);CHECK(p[3]==1);}
+ std::fprintf(stderr,"[Froxel Beer] red=%.6f green=%.6f expected=%.6f/%.6f cells=%u\n",pixels[0][0],pixels[0][1],T+L,T,pass.stats().froxelCells);
+ auto atlas=probe(f.adapter.getFboAttachment(graph.resolve(FgResourceId::FroxelField),0),.0625f,.25f);if(!atlas.empty())std::fprintf(stderr,"[Froxel atlas] red=%.6f sigma=%.6f\n",atlas[0][0],atlas[0][3]);CHECK(!atlas.empty());if(!atlas.empty()){CHECK(std::abs(atlas[0][3]-.2f)<.00001f);CHECK(std::abs(atlas[0][0]-.8f*2/(4*3.141592653589793f))<.00001f);}
+ ayt::render::PerformanceLight red,blue;red.id=1;red.light=ayt::render::Light::spot({0,0,-20},{0,0,1},100,10000,.99f,.98f,{1,0,0});blue=red;blue.id=2;blue.light.color={0,0,1};const std::array lights{red,blue};ayt::render::PerformanceLighting packet;CHECK(packet.assign(lights,{}));ctx.performanceLights=&packet;frame.volumetric.density=.1f;frame.volumetric.froxelSlices=64;
+ prepare();CHECK(pass.execute(ctx)==5);CHECK(pass.stats().froxelCells==64);CHECK(packet.stats.volumeDraws==2);
+ pixels=probe(f.adapter.getFboAttachment(graph.resolve(FgResourceId::VolumetricColor),0),.5f,.5f);CHECK(pixels.size()==16);double expected=0;for(int i=0;i<10000;++i){const double z=(i+.5)/10000.,d=20+z,cut=1-d/100;expected+=std::exp(-.1*z)*.1*.8*10000*cut*cut/(d*d)/(4*3.141592653589793)/10000;}
+ if(!pixels.empty())std::fprintf(stderr,"[Froxel packet] red=%.6f green=%.6f expectedL=%.6f\n",pixels[0][0],pixels[0][1],expected);
+ for(const auto& p:pixels){CHECK(std::abs(p[0]-(std::exp(-.1)+expected))<.003);CHECK(std::abs(p[2]-p[0])<.0001f);CHECK(std::abs(p[1]-std::exp(-.1))<.001);CHECK(p[3]==1);}
+ atlas=probe(f.adapter.getFboAttachment(graph.resolve(FgResourceId::FroxelField),0),.0625f,.5625f);CHECK(!atlas.empty());if(!atlas.empty()){const double a=std::exp(std::log(3.)*32/64)-1,b=std::exp(std::log(3.)*33/64)-1,d=20+(a+b)*.5,cut=1-d/100,coefficient=.8*10000*cut*cut/(d*d)/(4*3.141592653589793);CHECK(std::abs(atlas[0][0]-coefficient)<.0001);CHECK(std::abs(atlas[0][2]-coefficient)<.0001);CHECK(std::abs(atlas[0][3]-.1f)<.00001f);}
  pass.destroyResources(f.adapter);
 #else
  SKIP_TEST("Windows device fixture required");

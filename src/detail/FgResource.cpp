@@ -402,8 +402,8 @@ bool FrameGraph::compile()
         if (r.isExternal || !r.live) {
             continue;
         }
-        r.physicalW = scaledDim(_viewportW, r.desc.scale);
-        r.physicalH = scaledDim(_viewportH, r.desc.scale);
+        r.physicalW = (r.desc.absoluteWidth?r.desc.absoluteWidth:scaledDim(_viewportW, r.desc.scale));
+        r.physicalH = (r.desc.absoluteHeight?r.desc.absoluteHeight:scaledDim(_viewportH, r.desc.scale));
         // Unique group per owned live RT — no auto-alias (F6.1).
         r.aliasGroup = nextAliasGroup;
         ++nextAliasGroup;
@@ -508,8 +508,8 @@ bgfx::FrameBufferHandle FrameGraph::resolve(FgResourceId id) const
     uint16_t w = r.physicalW;
     uint16_t h = r.physicalH;
     if (w == 0 || h == 0) {
-        w = scaledDim(_viewportW, r.desc.scale);
-        h = scaledDim(_viewportH, r.desc.scale);
+        w = (r.desc.absoluteWidth?r.desc.absoluteWidth:scaledDim(_viewportW, r.desc.scale));
+        h = (r.desc.absoluteHeight?r.desc.absoluteHeight:scaledDim(_viewportH, r.desc.scale));
         r.physicalW = w;
         r.physicalH = h;
     }

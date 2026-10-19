@@ -587,3 +587,12 @@ smoke and invalid3divisor rejection passed. SDK129/53/91/551 clean; inventory102
 2026-10-19 局部雾重建补充：重建消光的4点密度规则同时应用局部盒.75..1柔边权重与动画噪声，
 修复局部设置下散射和消光密度不一致。常量全局路径保持原解析式。
 真实GPU回归新增局部/全局×静态/动画×1/2/4分辨率对照，两后端各1项1298断言通过。
+
+
+2026-10-19 froxel阶段：Contracts167/2094、PostProcess252/1361、SceneMaterial79/9965、UI114/377、
+FrameGraph41/159，Shader12/212（72生产变体及无编译器预热）；清单1031项/10分区。
+D3D11/D3D12各解析系数网格1项155断言、主Deferred1项46断言通过。
+主视图局部动画雾ray120311/grid120156，图案+分束91172/87868；预算与atlas resize均验证。
+45帧组合Studio预览实际160x64x32=327680cells、4表面/4体积/8透明draw，非法tile3退出2。
+SDK129能力/53模块/91检索/551符号，0错误0警告；未查看图片。
+原FixtureEmittersGpu 9项/395断言在D3D11与D3D12均通过。

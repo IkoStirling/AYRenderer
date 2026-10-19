@@ -197,9 +197,9 @@ struct FixtureEmitterGpuFixture {
         readback=bgfx::createTexture2D(64,64,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
         return bgfx::isValid(readback)&&cube.isValid()&&black.isValid();
     }
-    std::array<uint8_t,64*64*4> sampleLight(const ayt::render::PerformanceLight& light,bool volume,uint8_t downsample=1){
+    std::array<uint8_t,64*64*4> sampleLight(const ayt::render::PerformanceLight& light,bool volume,uint8_t downsample=1,const ayt::render::VolumetricSettings* overrideFog=nullptr){
         using namespace ayt::render;renderer.setPostProcessBloomStrength(0);
-        VolumetricSettings fog;fog.enabled=volume;fog.downsample=downsample;fog.density=.1f;fog.scattering=1;fog.anisotropy=0;fog.steps=64;fog.debugView=2;renderer.setVolumetricSettings(fog);
+        VolumetricSettings fog;fog.enabled=volume;fog.downsample=downsample;fog.density=.1f;fog.scattering=1;fog.anisotropy=0;fog.steps=64;fog.debugView=2;if(overrideFog)fog=*overrideFog;renderer.setVolumetricSettings(fog);
         CHECK(renderer.setPerformanceLights({&light,1}));RenderScene scene;
         renderer.setMaterialColor(black,"baseColor",1,1,1,1);scene.add(cube,black,ayt::math::scale(1.f,1.f,.1f));
         for(int i=0;i<3;++i){renderer.beginFrame({0,0,0,1});renderer.render(scene);renderer.endFrame();}
@@ -463,6 +463,30 @@ TEST_CASE(real_main_view_scattering_reconstruction_is_bounded_and_conserves_ener
  const auto energy=emitterRedEnergy(full),halfEnergy=emitterRedEnergy(half),quarterEnergy=emitterRedEnergy(quarter);
  std::fprintf(stderr,"[Reduced volume] full=%.0f half=%.0f quarter=%.0f\n",energy,halfEnergy,quarterEnergy);
  CHECK(energy>1000);CHECK(halfEnergy>energy*.8);CHECK(halfEnergy<energy*1.15);CHECK(quarterEnergy>energy*.7);CHECK(quarterEnergy<energy*1.2);
+#else
+ SKIP_TEST("Windows device fixture required");
+#endif
+}
+TEST_SUITE_END
+
+TEST_SUITE(FroxelVolumeGpu)
+TEST_CASE(real_main_view_grid_preserves_optics_and_local_medium_with_bounded_allocation) {
+#ifdef _WIN32
+ const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Isolated real-device acceptance required");
+ FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+ using namespace ayt::render;
+ PerformanceLight lamp;lamp.id=1;lamp.light=Light::spot({-.5f,0,-2},{0,0,1},10,4,.95f,.8f,{1,0,0});lamp.apertureRadius=.1f;
+ VolumetricSettings fog;fog.enabled=true;fog.density=.1f;fog.scattering=1;fog.anisotropy=0;fog.steps=64;fog.debugView=2;fog.maxDistance=10;fog.froxelTileSize=4;fog.froxelSlices=64;fog.froxelMaxCells=65536;
+ for(int mode=0;mode<3;++mode){
+  if(mode==1){fog.local=true;fog.center={-.3f,0,-1};fog.halfExtent={2,2,2};fog.noiseStrength=.4f;fog.noiseTime=3;}
+  if(mode==2){lamp.prismCount=2;lamp.prismAngle=.15f;lamp.pattern=LightPattern::Stripes;}
+  fog.froxel=false;const auto ray=f.sampleLight(lamp,true,1,&fog);
+  fog.froxel=true;const auto grid=f.sampleLight(lamp,true,1,&fog);const auto stats=f.renderer.getFrameStats().volumetric;
+  const auto reference=emitterRedEnergy(ray),actual=emitterRedEnergy(grid);
+  std::fprintf(stderr,"[Froxel main] mode=%d ray=%.0f grid=%.0f cells=%u\n",mode,reference,actual,stats.froxelCells);
+  CHECK(reference>500);CHECK(actual>reference*.65);CHECK(actual<reference*1.35);
+  CHECK(stats.froxel);CHECK(stats.depthSlices==64);CHECK(stats.froxelCells>0);CHECK(stats.froxelCells<=fog.froxelMaxCells);
+ }
 #else
  SKIP_TEST("Windows device fixture required");
 #endif
