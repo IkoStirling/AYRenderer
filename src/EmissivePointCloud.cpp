@@ -2,6 +2,7 @@
 #include <AYRenderer.h>
 #include <bgfx/bgfx.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iterator>
 #include <utility>
@@ -77,7 +78,9 @@ bool buildEmissivePointLights(std::span<const EmissivePoint> points,
     const auto fail=[&](const char* message){if(error)*error=message;return false;};
     const auto finite=[](float v,float lo,float hi){return std::isfinite(v)&&v>=lo&&v<=hi;};
     if(points.size()>65536||settings.maxLights>64||!finite(settings.cellSize,.01f,10000)
-        ||!finite(settings.range,.01f,1000)||!finite(settings.intensityScale,0,100))
+        ||!finite(settings.range,.01f,1000)||!finite(settings.intensityScale,0,100)
+        ||!finite(settings.contactDistance,0,10)||!finite(settings.contactThickness,.001f,5)
+        ||!finite(settings.contactBias,0,.5f)||!finite(settings.contactStrength,0,1))
         return fail("Invalid point lighting settings/budget");
     bool canonical=true;
     for(size_t i=0;i<points.size();++i){
@@ -106,21 +109,61 @@ bool buildEmissivePointLights(std::span<const EmissivePoint> points,
     struct Cell {Key key;double rgb[3]{},center[3]{},energy=0;math::FVector3 position;float reach=0;};
     std::vector<Cell> cells;cells.reserve(std::min<size_t>(points.size(),64));
     std::unordered_map<Key,size_t,Hash> grid;grid.reserve(std::min<size_t>(points.size(),1024));
+    using Neighborhood=std::array<size_t,8>;
+    std::unordered_map<Key,Neighborhood,Hash> neighborhoods;
+    if(settings.smoothCells)neighborhoods.reserve(std::min<size_t>(points.size(),1024));
     std::vector<size_t> membership(points.size(),size_t(-1));
     EmissivePointLightingStats next;next.source=uint32_t(points.size());
+    // Merge truncated world-edge nodes even when float multiplication rounds
+    // the last interior node exactly onto the boundary.
+    const int edgeHigh=int(std::floor(100000.0/settings.cellSize));
+    const int edgeLow=int(std::ceil(-100000.0/settings.cellSize));
+    const int maxNode=edgeHigh*settings.cellSize>=100000.f?edgeHigh:edgeHigh+1;
+    const int minNode=edgeLow*settings.cellSize<=-100000.f?edgeLow:edgeLow-1;
     for(size_t n=0;n<points.size();++n){
         const size_t i=canonical?n:order[n];const auto& p=points[i];
         const double weight=(.2126*p.color.x+.7152*p.color.y+.0722*p.color.z)*p.intensity*settings.intensityScale;
         if(weight<=0)continue;
-        const Key key{int(std::floor(p.position.x/settings.cellSize)),int(std::floor(p.position.y/settings.cellSize)),int(std::floor(p.position.z/settings.cellSize))};
-        const auto [it,inserted]=grid.try_emplace(key,cells.size());
-        if(inserted)cells.push_back(Cell{key});
-        membership[i]=it->second;auto& cell=cells[it->second];cell.energy+=weight;++next.contributing;
-        for(int j=0;j<3;++j){cell.rgb[j]+=double(p.color[j])*p.intensity*settings.intensityScale;cell.center[j]+=p.position[j]*weight;}
+        ++next.contributing;
+        double gx=0,gy=0,gz=0;Key base;
+        if(settings.smoothCells){
+            gx=double(p.position.x)/settings.cellSize;gy=double(p.position.y)/settings.cellSize;gz=double(p.position.z)/settings.cellSize;
+            base={int(std::floor(gx)),int(std::floor(gy)),int(std::floor(gz))};
+        }else{
+            // Preserve the original float-division cell classification exactly.
+            base={int(std::floor(p.position.x/settings.cellSize)),int(std::floor(p.position.y/settings.cellSize)),int(std::floor(p.position.z/settings.cellSize))};
+        }
+        const double fractions[3]{gx-base.x,gy-base.y,gz-base.z};
+        const double rgb[3]{double(p.color.x)*p.intensity*settings.intensityScale,double(p.color.y)*p.intensity*settings.intensityScale,double(p.color.z)*p.intensity*settings.intensityScale};
+        Neighborhood* neighborhood=nullptr;
+        if(settings.smoothCells){
+            const auto [it,inserted]=neighborhoods.try_emplace(base);
+            if(inserted)it->second.fill(size_t(-1));neighborhood=&it->second;
+        }
+        for(int corner=0;corner<(settings.smoothCells?8:1);++corner){
+            double share=1;
+            if(settings.smoothCells)for(int j=0;j<3;++j)share*=((corner>>j)&1)?fractions[j]:1-fractions[j];
+            if(share<=0)continue;
+            size_t cellIndex=neighborhood?(*neighborhood)[corner]:size_t(-1);
+            if(cellIndex==size_t(-1)){
+                Key key=base;
+                if(settings.smoothCells){
+                    key.x=std::clamp(key.x+(corner&1),minNode,maxNode);key.y=std::clamp(key.y+((corner>>1)&1),minNode,maxNode);key.z=std::clamp(key.z+((corner>>2)&1),minNode,maxNode);
+                }
+                const auto [it,inserted]=grid.try_emplace(key,cells.size());
+                if(inserted)cells.push_back(Cell{key});cellIndex=it->second;
+                if(neighborhood)(*neighborhood)[corner]=cellIndex;
+            }
+            if(!settings.smoothCells)membership[i]=cellIndex;
+            auto& cell=cells[cellIndex];cell.energy+=weight*share;
+            for(int j=0;j<3;++j){cell.rgb[j]+=rgb[j]*share;if(!settings.smoothCells)cell.center[j]+=p.position[j]*weight;}
+        }
     }
     for(auto& cell:cells){
-        cell.position={float(cell.center[0]/cell.energy),float(cell.center[1]/cell.energy),float(cell.center[2]/cell.energy)};
-        cell.reach=settings.range;
+        if(settings.smoothCells){
+            cell.position={std::clamp(cell.key.x*settings.cellSize,-100000.f,100000.f),std::clamp(cell.key.y*settings.cellSize,-100000.f,100000.f),std::clamp(cell.key.z*settings.cellSize,-100000.f,100000.f)};
+            cell.reach=settings.range+std::sqrt(3.f)*settings.cellSize;
+        }else{cell.position={float(cell.center[0]/cell.energy),float(cell.center[1]/cell.energy),float(cell.center[2]/cell.energy)};cell.reach=settings.range;}
     }
     for(size_t i=0;i<points.size();++i)if(membership[i]!=size_t(-1)){
         auto& cell=cells[membership[i]];cell.reach=std::max(cell.reach,settings.range+(points[i].position-cell.position).length());
@@ -132,6 +175,8 @@ bool buildEmissivePointLights(std::span<const EmissivePoint> points,
         bool clamped=false;for(auto& c:cell.rgb){clamped|=c>1e9;c=std::min(c,1e9);}next.clampedCells+=clamped?1:0;
         const float intensity=float(std::clamp(std::max({cell.rgb[0],cell.rgb[1],cell.rgb[2]}),1e-30,100000.0));
         PerformanceLight light;light.volumetric=0;
+        light.pointContactDistance=settings.contactDistance;light.pointContactThickness=settings.contactThickness;
+        light.pointContactBias=settings.contactBias;light.pointContactStrength=settings.contactStrength;
         light.light=Light::point(cell.position,std::min(cell.reach,10000.f),intensity,
             {float(cell.rgb[0]/intensity),float(cell.rgb[1]/intensity),float(cell.rgb[2]/intensity)});
         Candidate candidate{light,cell.energy,cell.key};

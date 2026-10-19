@@ -466,6 +466,47 @@ TEST_CASE(performance_point_pass_lights_surfaces_outside_spot_axis) {
 #endif
 }
 
+TEST_CASE(point_contact_occlusion_rejects_visible_blockers_but_keeps_background_and_disable) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    const auto albedo=f.input({1,1,1,0}),normal=f.input({.5f,.5f,0,1}),coverage=f.input({0,0,0,1});
+    const auto grid=[&](bool blocked,bool covered){
+        std::array<Pixel,16> pixels;
+        for(int y=0;y<4;++y)for(int x=0;x<4;++x)pixels[y*4+x]=covered?Pixel{0,0,0,(x>=2?0.f:1.f)}:Pixel{(-.75f+x*.5f)*(blocked&&x>=2?4.5f:5.f),(.75f-y*.5f)*(blocked&&x>=2?4.5f:5.f),blocked&&x>=2?-.5f:0.f,1};
+        auto texture=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(pixels.data(),sizeof(pixels)));
+        f.textures.push_back(texture);return texture;
+    };
+    const auto flat=grid(false,false),blocked=grid(true,false),sky=grid(false,true);
+    RenderResourceBlackboard blackboard;ayt::render::PerformanceLight light;light.light=ayt::render::Light::point({4,0,-1},10,100,{1,1,1});light.volumetric=0;
+    light.pointContactDistance=2;light.pointContactThickness=.4f;light.pointContactBias=.01f;
+    ayt::render::PerformanceLighting packet;ayt::render::RenderScene scene;
+    std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;std::unordered_map<uint64_t,GpuMaterial> materials;
+    FrameContext frame;frame.cameraPosition={0,0,-5};
+    frame.view(2,3)=5;
+    frame.projection(2,2)=1.020202f;frame.projection(2,3)=-.2020202f;
+    frame.projection(3,2)=1;frame.projection(3,3)=0;
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.performanceLights=&packet;ctx.resourceBlackboard=&blackboard;
+    PerformanceLightPass pass;
+    const auto render=[&](bgfx::TextureHandle world,bgfx::TextureHandle mask,float strength,float distance){
+        checkPixels(f.render("","return vec4(0.0)"),{0,0,0,0});
+        light.pointContactStrength=strength;light.pointContactDistance=distance;CHECK(packet.assign({&light,1},{}));
+        blackboard.beginFrame();blackboard.publishGBuffer(f.target,albedo,normal,world,mask,mask,4,4,1,true);
+        configureFullscreenPassView(f.adapter,8,f.target,0,0,4,4);CHECK(pass.execute(ctx)==1);
+        return f.readImage(f.targetTexture,9);
+    };
+    const auto unblocked=render(flat,coverage,1,2),occluded=render(blocked,coverage,1,2);
+    const auto disabled=render(blocked,coverage,1,0),half=render(blocked,coverage,.5f,2),uncovered=render(blocked,sky,1,2);
+    CHECK(unblocked.size()==16);CHECK(occluded.size()==16);CHECK(disabled.size()==16);CHECK(half.size()==16);CHECK(uncovered.size()==16);
+    for(int y=0;y<4;++y){const auto i=y*4+1;CHECK(unblocked[i][0]>.01f);CHECK(occluded[i][0]<unblocked[i][0]*.01f);
+        CHECK(std::abs(disabled[i][0]-unblocked[i][0])<.0001f);CHECK(std::abs(half[i][0]-unblocked[i][0]*.5f)<.0001f);
+        CHECK(std::abs(uncovered[i][0]-unblocked[i][0])<.0001f);}
+    pass.destroy(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
 TEST_CASE(performance_volume_real_pass_extinguishes_once_and_adds_two_light_colors) {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");

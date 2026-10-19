@@ -56,6 +56,13 @@ struct PerformanceLight {
     uint8_t prismCount=1;
     float prismAngle=0,prismRotation=0;
 
+    /// Optional Point-only screen-space contact occlusion: trace at most8
+    /// GBuffer samples over distance[0,10] (0 disabled), thickness[.001,5],
+    /// bias[0,.5], strength[0,1]. View-dependent, opaque visible blockers only;
+    /// no cubemap shadow allocation, offscreen/transparent blockers or GI.
+    float pointContactDistance=0,pointContactThickness=.2f,pointContactBias=.02f,pointContactStrength=1;
+
+
 
 };
 struct PerformanceLightBudget {

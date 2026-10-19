@@ -22,6 +22,11 @@ bool bindPerformanceSurfaceLight(PassExecContext& ctx,shader::ShaderResource& pr
     }
     // ShaderResource pending bindings are consumed by each submit.
     vector("performanceEye",ctx.frame.cameraPosition.x,ctx.frame.cameraPosition.y,ctx.frame.cameraPosition.z,0);
+    float contactVp[16];toBgfxColumnMajor(ctx.frame.projection*ctx.frame.view,contactVp);
+    uniform("performanceViewProjection",contactVp,64);
+    float contactView[16];toBgfxColumnMajor(ctx.frame.view,contactView);uniform("performanceView",contactView,64);
+    vector("performanceContact",l.type==LightType::Point?entry.pointContactDistance:0,entry.pointContactThickness,entry.pointContactBias,entry.pointContactStrength);
+    texture("contactPosition",gb.worldPosition);texture("contactCoverage",gb.material);
     const auto d=l.spotDirection;
     const auto axis=std::abs(d.y)>.99f?math::FVector3(0,0,1):math::FVector3(0,1,0);
     const auto right=axis.cross(d).normalize();const auto up=d.cross(right).normalize();

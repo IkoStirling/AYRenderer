@@ -127,6 +127,8 @@ material PerformanceSurface {
  texture2d surfaceNormal
  texture2d surfacePosition
  texture2d surfaceCoverage
+ texture2d contactPosition
+ texture2d contactCoverage
  texture2d shadowAtlas
  texture2d patternGobo
  texture2d iesAtlas
@@ -143,6 +145,9 @@ material PerformanceSurface {
  uniform vec4 performanceIesSettings
  uniform vec4 performancePatternOptics
  uniform vec4 performanceEye
+ uniform vec4 performanceContact
+ uniform mat4 performanceViewProjection
+ uniform mat4 performanceView
  uniform mat4 performanceShadow
  uniform vec4 performanceShadowRect
  uniform vec4 performanceShadowSettings
@@ -204,6 +209,23 @@ material PerformanceSurface {
   let falloff=clamp(1.0-distance/performancePosition.w,0.0,1.0)
   let attenuation=falloff*falloff/max(distance*distance,max(0.01,performanceCone.w*performanceCone.w))*response
   let visibility=1.0
+  if(performanceDirection.w>0.5 && performanceContact.x>0.0 && performanceContact.w>0.0){
+   let traceLength=min(distance,performanceContact.x)
+   for(contactTap in range(8)){
+    let fraction=(float(contactTap)+0.5)/8.0
+    let rayPoint=position.xyz+N*performanceContact.z+L*(traceLength*fraction)
+    let clipContact=performanceViewProjection*vec4(rayPoint,1.0)
+    if(clipContact.w>0.00001){
+     let contactUv=vec2(clipContact.x/clipContact.w*0.5+0.5,0.5-clipContact.y/clipContact.w*0.5)
+     if(contactUv.x>0.0 && contactUv.x<1.0 && contactUv.y>0.0 && contactUv.y<1.0){
+      let seen=sampleLod(contactPosition,contactUv,0.0).xyz
+      let seenCoverage=sampleLod(contactCoverage,contactUv,0.0).a
+      let gap=(performanceView*vec4(rayPoint-seen,0.0)).z
+      if(seenCoverage>0.999 && gap>performanceContact.z && gap<performanceContact.y){visibility=1.0-performanceContact.w}
+     }
+    }
+   }
+  }
   if(performanceShadowSettings.x>0.5){
    let clip=performanceShadow*vec4(position.xyz,1.0)
    let q=clip.xyz/max(clip.w,0.00001)

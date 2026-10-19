@@ -715,3 +715,22 @@ destroyTexture/shutdown清除绑定并失效独立体积历史，host纹理需�
 ray、froxel密度写入、全分辨率消光与CPU灯口读取同一场；GPU两层Z插值并使用显式LOD0避免动态循环导数展开。
 分离消光/灯口最多16采样，legacy单Pass可共用最多64 ray步，froxel每格中心；高频网格仍可能欠采样，非精确体素积分或流体。
 网格图案是消光倍数，不新增彩色透射、透明雾积分、多重散射或硬件控制。
+
+### 连续点阵聚合与有界排名过渡
+
+EmissivePointLightingSettings.smoothCells默认false；true把RGB按三线性权重分给8个固定世界网格节点。
+预算/钳制前保持RGB和位置一阶矩，±100000世界边界节点截断除外；不再跨硬桶突变，不能保证预算裁剪后能量守恒。
+范围扩展sqrt(3)*cellSize并受10000总上限约束；最多524288候选节点，最多64灯，仍独立于可见点数预算。
+EmissivePointLightingHistory::update接收time和transitionSeconds[0,1]，只用于smoothCells。
+最多maxLights个槽，旧节点先淡出释放，再准入新节点淡入；可能出现短暂能量降低，保持原RGB不改变色相。
+同时间不推进，逆时/超过.25秒缺帧/配置变化重置；全黑立即清空。显式seek/编辑调用reset；默认无历史。
+Presenter setPointLighting(settings,transitionSeconds=0)保留原路径，可显式resetPointLightingHistory；Studio跳播会重置。
+Studio --point-smooth、--point-transition秒，点照明按钮按off/hard/smooth循环；不改变schema8。
+
+Point PerformanceLight可选pointContactDistance[0,10]、pointContactThickness[.001,5]、pointContactBias[0,.5]、pointContactStrength[0,1]。
+距离0默认关闭；EmissivePointLightingSettings的contact*复制到聚合灯。共享不透明/标准透明受光绑定执行最多8次采样。
+使用当前GBuffer世界位置/覆盖率沿向光方向短距追踪，比较相机空间前向深度以判断可见遮挡；厚度和偏移是世界单位。
+只检测当前视图中的不透明遮挡，不能处理离屏、背面、多层透明或完整点光阴影；不占cube/Spot shadow槽。
+Studio --point-occlusion距离显式开启。现有Spot必须保持pointContactDistance=0。
+
+连续聚合缓存每个硬格的8邻节点索引（最多65536个邻域），同格点不重复8次哈希；零权重角按需创建，无空能量节点。固定节点不计算未使用的重心。

@@ -12,7 +12,7 @@ inline std::string performanceTransparentUniform(std::string_view name){
 inline std::string makePerformanceTransparentSource(){
     std::string source=kPbrPhoskiaSource;
     const auto replace=[&](const std::string& from,const std::string& to){const auto at=source.find(from);if(at==source.npos)return false;source.replace(at,from.size(),to);return true;};
-    if(!replace("material PBR {","material PerformanceTransparent {\n texture2d patternGobo\n texture2d iesAtlas\n texture2d shadowAtlas\n uniform vec4 performanceBlend"))return {};
+    if(!replace("material PBR {","material PerformanceTransparent {\n texture2d patternGobo\n texture2d iesAtlas\n texture2d shadowAtlas\n texture2d contactPosition\n texture2d contactCoverage\n uniform vec4 performanceBlend"))return {};
     const auto uniformsAt=kPerformanceSurfaceSource.find(" uniform vec4 performancePosition");
     const auto uniformsEnd=kPerformanceSurfaceSource.find(" vertex {",uniformsAt);
     const auto materialAt=source.find(" uniform vec4 performanceBlend");

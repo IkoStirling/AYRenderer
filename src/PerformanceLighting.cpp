@@ -23,6 +23,9 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
             || !finite(entry.patternFocus,0,1) || !finite(entry.iris,.01f,1)
             || !finite(entry.apertureRadius,0,1) || !finite(entry.shadowSoftness,0,4)
             || (l.type==LightType::Point&&(l.castShadow||entry.volumetric!=0||entry.pattern!=LightPattern::Open||entry.constantFlux))
+            || !finite(entry.pointContactDistance,0,10)||!finite(entry.pointContactThickness,.001f,5)
+            || !finite(entry.pointContactBias,0,.5f)||!finite(entry.pointContactStrength,0,1)
+            || (l.type!=LightType::Point&&entry.pointContactDistance>0)
             || !finite(entry.areaShadowBias,0,.1f)|| !finite(entry.focusDistance,0,10000)||entry.prismCount<1||entry.prismCount>8
             || !finite(entry.prismAngle,0,.35f)||!finite(entry.prismRotation,-100000,100000)
             || (l.type==LightType::Spot&&entry.prismAngle>0&&std::acos(l.coneCosOuter)+entry.prismAngle>1.56f)

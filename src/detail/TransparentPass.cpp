@@ -804,7 +804,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
             else if(mat->second.materialModel==MaterialModel::StandardLit)++performance->stats.transparentUnsupportedMaterials;
         }
         if(hasPbr){
-            if(!_performanceProgram.isValid())_performanceProgram=ctx.pool.acquire(performanceTransparentSource(),"performance_transparent_v2_isolated_material");
+            if(!_performanceProgram.isValid())_performanceProgram=ctx.pool.acquire(performanceTransparentSource(),"performance_transparent_v3_point_contact");
             if(!_performanceProgram.isValid()){static bool reported=false;if(!reported){reported=true;for(const auto& message:ctx.pool.lastCompileErrors())std::fprintf(stderr,"[TransparentCompile] %s\n",message.c_str());}}
             if(_performanceProgram.isValid()){
                 const auto vp=frame.projection*frame.view;

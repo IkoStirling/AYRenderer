@@ -627,3 +627,13 @@ D3D11/D3D12各density atlas1/702、三种积分路径/双灯/resize/零场1/541�
 最后一次相同90样本64灯/1万点/1920x828默认无密度图配置：Presenter3.1807ms、点批次2.2276ms、
 整帧CPU15.8719/GPU9.1274ms、10000可见实例。是本机Debug样本，未据此承诺普遍帧率。
 资源格式登记与SDK写schema8、旧1..7空雾迁移同步；没有查看图片或连接演出硬件。
+
+2026-10-20 continuous-point validation: Contracts175/2321, Sequence120/4157,
+SceneMaterial79/10042, PostProcess252/1363, Shader12/213 (73 production variants) passed.
+D3D11/D3D12 coherent-perspective contact probes each1/376; legacy point surface each1/139.
+D3D12 combined Studio45 frames:1000 visible points,16 lights,froxel/history,16.67ms shutter.
+Inventory: Renderer1043/10 partitions, Sequence120/3. SDK129/53/97 search/565 symbols,0 errors/warnings.
+Debug/D3D11 1920x828,64 fixtures/10k points,16 aggregate lights,80 surface/12 volume/4 shadow,
+24 steps,90 samples: initial smooth aggregation25.8929ms; cached smooth5.3723ms.
+Final hard/smooth/contact aggregation4.1573/5.3723/7.3837ms, GPU11.4194/12.6907/15.6380ms.
+All retain10k visible instances/16 lights. Process timing varies; no universal FPS claim.

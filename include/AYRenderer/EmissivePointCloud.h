@@ -12,23 +12,51 @@ struct EmissivePoint {
     float intensity=4,radius=.05f;
 };
 /// Optional surface-light approximation, independent of visible-point sampling.
-/// World-anchored cells sum linear RGB energy at a luminance-weighted center.
+/// Hard cells sum linear RGB at a luminance-weighted center; smoothCells
+/// distributes it continuously to fixed grid nodes.
 struct EmissivePointLightingSettings {
     uint16_t maxLights=16; // [0,64]; zero disables aggregation.
     float cellSize=8, range=20, intensityScale=.01f;
+    /// Trilinearly distribute RGB to eight world-anchored grid nodes. False
+    /// retains hard cells and energy-weighted centers. No temporal state here.
+    bool smoothCells=false;
+    /// Copied to generated Point lights; same screen-space bounds/limitations.
+    float contactDistance=0,contactThickness=.2f,contactBias=.02f,contactStrength=1;
 };
 struct EmissivePointLightingStats {
     uint32_t source=0, contributing=0, occupiedCells=0, selectedLights=0, budgetSkipped=0, clampedCells=0;
+    uint32_t fadingLights=0,deferredCells=0;
+    bool historyReset=false;
 };
 /// Build at most64 unshadowed, non-volumetric Point lights from <=65536 points.
 /// Brightest cells win, ties use lexicographic cell coordinates; stable IDs fix
 /// accumulation order. No camera/visibility budget affects illumination. Cell
-/// transitions and budget changes can pop; this is not per-point GI/occlusion.
+/// transitions and budget changes can pop in hard mode; smoothCells and the
+/// optional history address these separately. Contact occlusion is view-dependent.
 /// Invalid values/duplicate IDs leave output and stats intact. RGB above1e9
 /// per cell clamps with an explicit counter. Output IDs are local [0,N).
 bool buildEmissivePointLights(std::span<const EmissivePoint> points,
     EmissivePointLightingSettings settings,std::vector<PerformanceLight>& output,
     EmissivePointLightingStats& stats,std::string* error=nullptr);
+/// Optional owner-thread rank transition cache for smoothCells=true. Keeps at
+/// most maxLights slots, fades departing cells out before admitting new cells.
+/// Reset on seek/edit; backward time, gaps>0.25s, settings changes and all-black
+/// input reset automatically. Repeated timestamps do not advance fades.
+/// Fades may temporarily reduce energy; no per-point shadows or GI implied.
+class EmissivePointLightingHistory final {
+public:
+    bool update(std::span<const EmissivePoint> points,EmissivePointLightingSettings settings,
+        double time,float transitionSeconds,std::vector<PerformanceLight>& output,
+        EmissivePointLightingStats& stats,std::string* error=nullptr);
+    void reset() noexcept { _slots.clear();_valid=false; }
+private:
+    struct Slot { PerformanceLight light;float gain=1; };
+    std::vector<Slot> _slots;
+    EmissivePointLightingSettings _settings;
+    double _time=0;
+    float _transition=0;
+    bool _valid=false;
+};
 struct EmissivePointSettings {
     float minimumPixelRadius=.75f;
     bool preserveEnergy=true;

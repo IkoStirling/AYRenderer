@@ -299,6 +299,71 @@ TEST_CASE(surface_shader_uses_production_frontend_and_bounded_procedural_pattern
 }
 TEST_SUITE_END
 
+TEST_SUITE(EmissivePointLightingContinuityTests)
+TEST_CASE(continuous_grid_preserves_rgb_and_first_moment_and_crosses_cell_boundaries) {
+    EmissivePointLightingSettings settings;settings.smoothCells=true;settings.intensityScale=1;settings.maxLights=64;
+    std::vector<EmissivePoint> points{{1,{3,2,1},{1,.5f,0},8,.1f},{2,{4,3,2},{0,.5f,1},4,.1f}};
+    std::vector<PerformanceLight> lights,reordered;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(stats.contributing==2);CHECK(lights.size()==8);
+    double rgb[3]{},moment[3]{};
+    for(const auto& light:lights)for(int c=0;c<3;++c){const double energy=light.light.color[c]*light.light.intensity;rgb[c]+=energy;moment[c]+=energy*light.light.position.x;}
+    CHECK(std::abs(rgb[0]-8)<1e-5);CHECK(std::abs(rgb[1]-6)<1e-5);CHECK(std::abs(rgb[2]-4)<1e-5);
+    CHECK(std::abs(moment[0]-24)<1e-5);CHECK(std::abs(moment[1]-20)<1e-5);CHECK(std::abs(moment[2]-16)<1e-5);
+    std::reverse(points.begin(),points.end());CHECK(buildEmissivePointLights(points,settings,reordered,stats));
+    CHECK(reordered.size()==lights.size());for(size_t i=0;i<lights.size();++i)CHECK(reordered[i].light.intensity==lights[i].light.intensity);
+    for(auto& point:points)point.position=point.id==1?ayt::math::FVector3(0,0,0):ayt::math::FVector3(1,1,1);
+    CHECK(buildEmissivePointLights(points,settings,reordered,stats));
+    double mixed[3]{};for(const auto& light:reordered)for(int c=0;c<3;++c)mixed[c]+=light.light.color[c]*light.light.intensity;
+    CHECK(std::abs(mixed[0]-8)<1e-5);CHECK(std::abs(mixed[1]-6)<1e-5);CHECK(std::abs(mixed[2]-4)<1e-5);
+    points.resize(1);points[0].color={1,1,1};points[0].intensity=1;points[0].position={7.9999f,0,0};
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));points[0].position.x=8.0001f;
+    CHECK(buildEmissivePointLights(points,settings,reordered,stats));
+    double l1=0;for(const auto& a:lights){double value=0;for(const auto& b:reordered)if(a.light.position.x==b.light.position.x)value=b.light.intensity;l1+=std::abs(a.light.intensity-value);}
+    for(const auto& b:reordered)if(std::none_of(lights.begin(),lights.end(),[&](const auto& a){return a.light.position.x==b.light.position.x;}))l1+=b.light.intensity;
+    CHECK(l1<.0001);
+    points[0].position={100000,-100000,100000};settings.cellSize=9999;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));PerformanceLighting packet;CHECK(packet.assign(lights,{}));
+    settings.cellSize=.01f;CHECK(buildEmissivePointLights(points,settings,lights,stats));
+    for(size_t i=0;i<lights.size();++i)for(size_t j=i+1;j<lights.size();++j)CHECK((lights[i].light.position-lights[j].light.position).length()>0);
+}
+TEST_CASE(rank_fades_release_slots_before_new_admission_and_reset_without_black_afterglow) {
+    EmissivePointLightingSettings settings;settings.smoothCells=true;settings.maxLights=1;settings.intensityScale=1;
+    std::vector<EmissivePoint> points{{1,{0,0,0},{1,1,1},2,.1f},{2,{16,0,0},{1,1,1},1,.1f}};
+    EmissivePointLightingHistory history;std::vector<PerformanceLight> lights;EmissivePointLightingStats stats;
+    CHECK(history.update(points,settings,0,.1f,lights,stats));CHECK(stats.historyReset);CHECK(lights.size()==1);CHECK(lights[0].light.position.x==0);
+    points[1].intensity=3;
+    CHECK(history.update(points,settings,.05,.1f,lights,stats));CHECK(!stats.historyReset);CHECK(lights.size()==1);CHECK(lights[0].light.position.x==0);CHECK(std::abs(lights[0].light.intensity-1)<1e-5);CHECK(stats.deferredCells==1);
+    CHECK(history.update(points,settings,.05,.1f,lights,stats));CHECK(std::abs(lights[0].light.intensity-1)<1e-5);
+    CHECK(history.update(points,settings,.101,.1f,lights,stats));CHECK(lights.empty());
+    CHECK(history.update(points,settings,.151,.1f,lights,stats));CHECK(lights.size()==1);CHECK(lights[0].light.position.x==16);CHECK(std::abs(lights[0].light.intensity-1.5)<1e-4);
+    CHECK(history.update(points,settings,.202,.1f,lights,stats));CHECK(lights.size()==1);CHECK(lights[0].light.intensity==3);
+    CHECK(history.update(points,settings,0,.1f,lights,stats));CHECK(stats.historyReset);
+    points[0].intensity=points[1].intensity=0;CHECK(history.update(points,settings,.01,.1f,lights,stats));CHECK(lights.empty());CHECK(stats.historyReset);
+    points[0].intensity=2;CHECK(history.update(points,settings,.02,.1f,lights,stats));
+    CHECK(history.update(points,settings,1,.1f,lights,stats));CHECK(stats.historyReset);CHECK(lights.size()==1);
+    const auto before=lights[0].light.intensity;CHECK(!history.update(points,settings,-1,.1f,lights,stats));CHECK(lights[0].light.intensity==before);
+    settings.range=0;CHECK(!history.update(points,settings,1,.1f,lights,stats));CHECK(lights[0].light.intensity==before);
+    settings.range=20;settings.maxLights=0;CHECK(history.update(points,settings,1.01,.1f,lights,stats));CHECK(lights.empty());
+}
+TEST_CASE(hard_grid_keeps_legacy_float_classification_at_decimal_cell_edges) {
+    EmissivePointLightingSettings settings;settings.cellSize=.01f;
+    std::vector<EmissivePoint> points{{1,{.03f,0,0},{1,1,1},1,.1f},{2,{.035f,0,0},{1,1,1},1,.1f}};
+    std::vector<PerformanceLight> lights;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(stats.occupiedCells==1);CHECK(lights.size()==1);
+    CHECK(std::abs(lights[0].light.position.x-.0325f)<1e-6);
+}
+TEST_CASE(contact_settings_copy_to_points_and_reject_invalid_packet_transactionally) {
+    EmissivePointLightingSettings settings;settings.contactDistance=2;settings.contactThickness=.4f;
+    std::vector<EmissivePoint> points{{1,{0,0,0},{1,1,1},2,.1f}};
+    std::vector<PerformanceLight> lights;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(lights[0].pointContactDistance==2);
+    CHECK(lights[0].pointContactThickness==.4f);PerformanceLighting packet;CHECK(packet.assign(lights,{}));CHECK(packet.stats.shadowLights==0);
+    auto invalid=lights[0];invalid.pointContactThickness=0;CHECK(!packet.assign({&invalid,1},{}));CHECK(packet.lights[0].pointContactDistance==2);
+    invalid=light(1);invalid.pointContactDistance=1;CHECK(!packet.assign({&invalid,1},{}));
+    settings.contactDistance=11;CHECK(!buildEmissivePointLights(points,settings,lights,stats));CHECK(lights[0].pointContactDistance==2);
+}
+TEST_SUITE_END
+
 TEST_SUITE(PhotometryTests)
 TEST_CASE(lm63_type_c_sampling_symmetry_and_transactional_rejection) {
     const std::string data="IESNA:LM-63-2002\n[TEST] measured\nTILT=NONE\n1 1000 2 3 2 1 2 .1 .2 .3\n1 1 20\n0 45 90\n0 180\n10 20 0\n30 40 0\n";
@@ -438,4 +503,5 @@ TEST_CASE(transparent_replay_limits_are_transactional) {
     limits.transparentDraws=128;limits.transparentLightsPerObject=33;CHECK(!packet.assign({&p,1},limits));
     limits.transparentDraws=0;limits.transparentLightsPerObject=0;CHECK(packet.assign({&p,1},limits));
 }
+
 TEST_SUITE_END
