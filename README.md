@@ -1,5 +1,17 @@
 # AYRenderer
 
+## 参考图色板创作（2026-10-19）
+
+`StylizationPalette.h`提供无GPU的RGBA8取色，alpha加权、5-bit直方图和weighted median cut，
+最多16 Mi像素、2..16色；输出可以少于请求，单一bin复制为两色。失败不替换输出。
+其颜色空间与FixedPalette显示RGB匹配，不是感知均匀量化或跨平台逐位确定性承诺。
+`AYRenderer_RenderStyleTool palette <image> <output.rsl> [colors]`生成独立look；
+`inspect <look.rsl>`读/迁移后打印规范配置。该工具不初始化设备，也不需要production shader目录。
+`demo/looks/palette-reference.png`和同名可编辑SVG为32色参考图，标准库脚本
+`demo/GeneratePaletteReference.py`可重建；`reference-palette.rsl`是它生成的8色色板。
+`AYRenderer_ColorStylizationDemo --gallery --look <file.rsl> --hidden --output <dir>`导出自定义look；
+也可加`--motion-gallery`生成单look的两管线动态序列。
+
 ## 时间风格与动态内容（2026-10-19）
 
 新增Afterimage、StopMotion、TileRefresh和TimeEcho起点，左右箭头遍历十六个look。

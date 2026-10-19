@@ -1,5 +1,14 @@
 # AYRenderer Design
 
+## 2026-10-19 — 有界CPU色板提取
+
+StylizationPalette只持有值，输入RGBA8/尺寸/请求色数；不引入Renderer状态、纹理或资源路径。
+32768个bin存储uint64 alpha权重/RGB和，遍历像素的次序不改变这些整数累积。
+根据bin均值的加权方差选择盒/轴，weighted median拆分至目标数量或无可拆分bin；
+box均值使用原始RGB和，最终亮度排序，稳定ID处理并列。显示RGB metric与FixedPalette一致。
+直方图是近似压缩，同bin的细微色差不会产生独立条目；不是全局最优或bitwise跨平台协议。
+工具生成的look不保存源图路径，仍用schema3，无新文件类型或隐藏依赖。
+
 ## 2026-10-19 — 独立艺术历史与截图完成队列
 
 TemporalFeedback slot28/view53，FG TemporalColor34/FeedbackHistory35，Count36。

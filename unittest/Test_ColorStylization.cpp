@@ -2,6 +2,7 @@
 #include "AYRenderer.h"
 #include "AYRenderer/ColorStylizationShaderSources.h"
 #include "AYRenderer/ColorStylizationLook.h"
+#include "AYRenderer/StylizationPalette.h"
 #include "AYShader/Phoskia.h"
 #include "AYShader/BGFXConverter.h"
 #include "detail/ColorStylizationPass.h"
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <iostream>
 #include <limits>
+#include <vector>
 
 using namespace ayt::render;
 using namespace ayt::render::detail;
@@ -295,5 +297,56 @@ TEST_CASE(temporal_settings_identity_schema_migration_and_no_device_gate)
     const auto plan=buildPostProcessGraphPlan(graph,in);CHECK(plan.compileSucceeded);
     CHECK(plan.presentationSource==FgResourceId::TemporalColor);CHECK(graph.shouldExecute(RenderPassSlot::TemporalFeedback));
     CHECK_FALSE(graph.shouldExecute(RenderPassSlot::AnalogDisplay));
+}
+TEST_CASE(palette_extraction_ignores_transparency_and_weights_partial_alpha)
+{
+    const uint8_t pixels[]={129,10,20,255,130,10,20,85,255,255,255,0};
+    StylizationPalette palette;std::string error="old error";
+    CHECK(extractStylizationPalette(pixels,3,1,8,palette,&error));CHECK(error.empty());
+    CHECK(palette.size==2);CHECK(palette.contributingPixels==2);
+    for(int i=0;i<16;++i) {
+        CHECK_FLOAT_EQ(palette.colors[i].r,129.25f/255.f,1e-6f);
+        CHECK_FLOAT_EQ(palette.colors[i].g,10.f/255.f,1e-6f);
+        CHECK_FLOAT_EQ(palette.colors[i].b,20.f/255.f,1e-6f);
+    }
+}
+TEST_CASE(palette_extraction_preserves_distinct_colors_and_is_independent_of_pixel_order)
+{
+    const uint8_t colors[][4]={{255,0,0,255},{0,255,0,255},{0,0,255,255},{255,255,0,255},{0,255,255,255},{255,0,255,255}};
+    std::vector<uint8_t> pixels,reversed;
+    for(int repeat=0;repeat<3;++repeat)for(const auto& c:colors)pixels.insert(pixels.end(),c,c+4);
+    for(size_t i=pixels.size()/4;i>0;--i)reversed.insert(reversed.end(),pixels.begin()+(i-1)*4,pixels.begin()+i*4);
+    StylizationPalette a,b;CHECK(extractStylizationPalette(pixels,18,1,16,a));
+    CHECK(extractStylizationPalette(reversed,3,6,16,b));CHECK(a.size==6);CHECK(a.contributingPixels==18);
+    for(int i=0;i<16;++i) {
+        CHECK(a.colors[i].r==b.colors[i].r && a.colors[i].g==b.colors[i].g && a.colors[i].b==b.colors[i].b);
+    }
+    for(const auto& c:colors) {
+        bool found=false;for(int i=0;i<a.size;++i)found|=a.colors[i].r==c[0]/255.f && a.colors[i].g==c[1]/255.f && a.colors[i].b==c[2]/255.f;
+        CHECK(found);
+    }
+}
+TEST_CASE(palette_extraction_uniform_grayscale_has_balanced_four_level_centers)
+{
+    std::vector<uint8_t> pixels;for(int i=0;i<256;++i)for(int c=0;c<4;++c)pixels.push_back(uint8_t(c==3?255:i));
+    StylizationPalette palette;CHECK(extractStylizationPalette(pixels,256,1,4,palette));CHECK(palette.size==4);
+    for(int i=0;i<4;++i) {
+        const float expected=(31.5f+i*64.f)/255.f;
+        CHECK_FLOAT_EQ(palette.colors[i].r,expected,1e-6f);CHECK_FLOAT_EQ(palette.colors[i].g,expected,1e-6f);
+        CHECK_FLOAT_EQ(palette.colors[i].b,expected,1e-6f);
+    }
+}
+TEST_CASE(palette_extraction_rejects_invalid_input_without_replacing_output)
+{
+    StylizationPalette palette;palette.size=7;palette.contributingPixels=91;palette.colors[0]={.2f,.4f,.6f};
+    std::string error;const uint8_t invisible[]={1,2,3,0};
+    CHECK_FALSE(extractStylizationPalette({},0,1,4,palette,&error));CHECK_FALSE(error.empty());
+    CHECK_FALSE(extractStylizationPalette(invisible,2,1,4,palette,&error));
+    CHECK_FALSE(extractStylizationPalette(invisible,1,1,4,palette,&error));
+    CHECK_FALSE(extractStylizationPalette(invisible,1,1,1,palette,&error));
+    CHECK_FALSE(extractStylizationPalette(invisible,1,1,17,palette,&error));
+    CHECK_FALSE(extractStylizationPalette({},std::numeric_limits<uint32_t>::max(),std::numeric_limits<uint32_t>::max(),4,palette,&error));
+    CHECK(palette.size==7);CHECK(palette.contributingPixels==91);
+    CHECK(palette.colors[0].r==.2f && palette.colors[0].g==.4f && palette.colors[0].b==.6f);
 }
 TEST_SUITE_END

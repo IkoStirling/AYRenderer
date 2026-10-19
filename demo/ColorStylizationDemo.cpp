@@ -85,9 +85,6 @@ int main(int argc,char** argv)
         else if(arg=="--output" && i+1<argc)output=argv[++i];
         else {std::fprintf(stderr,"Usage: AYRenderer_ColorStylizationDemo [--gallery | --motion-gallery] [--hidden] [--d3d12] [--output directory] [--look file.rsl] [--write-presets]\n");return 2;}
     }
-    if(gallery && !lookPath.empty()) {
-        std::fprintf(stderr,"--look selects an interactive look; --gallery exports the built-in presets\n");return 2;
-    }
     std::filesystem::create_directories(output);
     if(writePresets) {
         for(int i=0;i<lookCount;++i) {
@@ -162,7 +159,7 @@ int main(int argc,char** argv)
     for(auto value:materials)valid=valid && value.isValid();
     if(!valid){renderer.shutdown();DestroyWindow(window);return 1;}
     int preset=1;bool deferred=false,paused=false;uint32_t tick=0;int previousGallery=-1;
-    const int batchLookCount=motionGallery?5:lookCount,framesPerLook=motionGallery?100:24;
+    const int batchLookCount=!lookPath.empty()?1:motionGallery?5:lookCount,framesPerLook=motionGallery?100:24;
     renderer.setColorStylizationSettings(lookPath.empty()?colorStylizationPreset(ColorStylizationPreset::PixelRetro):customLook);
     const auto start=std::chrono::steady_clock::now();float time=0;
     std::array<bool,256> wasDown{};
@@ -181,7 +178,7 @@ int main(int argc,char** argv)
             if(motionGallery && preset>0)preset+=11;
             renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());
             renderer.setShadowsEnabled(false);
-            renderer.setColorStylizationSettings(colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)));
+            renderer.setColorStylizationSettings(lookPath.empty()?colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)):customLook);
         }
         if(!gallery && GetForegroundWindow()==window) {
             for(int i=0;i<10;++i)if(pressed('0'+i)) {
@@ -269,7 +266,7 @@ int main(int argc,char** argv)
         }
         ++tick;
         std::wstring title=L"Retro Color Gallery | ";title+=deferred?L"Deferred | ":L"Forward | ";
-        for(const char* p=names[preset];*p;++p)title+=wchar_t(*p);
+        for(const char* p=lookPath.empty()?names[preset]:"Custom Look";*p;++p)title+=wchar_t(*p);
         title+=L" | 0..9 / arrows look, F pipeline, Space freeze, G grade, F9 save";
         SetWindowTextW(window,title.c_str());
     }

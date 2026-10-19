@@ -2,6 +2,11 @@ set(AY_SHADER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../AYShader")
 set(AY_RESOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource")
 include("${AY_SHADER_ROOT}/cmake/AYBgfx.cmake")
 
+# CPU authoring utility: no device or production shader staging is needed.
+add_executable(AYRenderer_RenderStyleTool RenderStyleTool.cpp)
+target_link_libraries(AYRenderer_RenderStyleTool PRIVATE AYRenderer)
+target_include_directories(AYRenderer_RenderStyleTool PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+
 if(WIN32)
     add_executable(AYRenderer_ColorStylizationDemo ColorStylizationDemo.cpp)
     target_link_libraries(AYRenderer_ColorStylizationDemo PRIVATE AYRenderer user32 gdi32)

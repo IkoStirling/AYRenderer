@@ -1,5 +1,15 @@
 # AYRenderer 测试维护
 
+## 参考图取色（2026-10-19）
+
+定向PostProcess整组通过；与已保存的其他八组证据合计957例/15739断言，inventory1000例/10分区。
+新增四例/102断言检查alpha权重、透明排除、像素顺序、已知离散色恢复、均匀灰阶中心和失败保留。
+独立RenderStyleTool从32色参考图生成8色RSL，无GPU；自定义look画廊在D3D11导出两管线成功，
+逐像素全部位于嵌入色板±1字节内。Editor AssetBrowser25例/357断言、Shell48例/1395断言通过。
+取色服务与已有原图/缩略图服务共用CPU解码，含UTF-8源路径、预算先验和错误图片检查。
+证据：`palette-cpu-*`、`renderer-palette-postprocess.log`、`editor-palette-*.json`、
+`palette-native-summary.json`、`gallery-reference-palette/`、`palette-authoring-overview.png`。
+
 ## 时间风格与动态导出（2026-10-19）
 
 本阶段八个受影响CPU组通过，截图队列完成后SceneMaterial组再次通过；保留首阶段Audit证据，
