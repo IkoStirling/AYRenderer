@@ -211,10 +211,12 @@ struct FixtureEmitterGpuFixture {
         TextureHandle atlas;if(profile){atlas=createIesTexture(renderer,*profile);CHECK(atlas.isValid());light.iesProfile=profile;light.iesTexture=atlas;}
         const auto pixels=sampleLight(light,volume);if(atlas.isValid())renderer.destroyTexture(atlas);return pixels;
     }
-    std::array<uint8_t,64*64*4> sample(int mode,bool bloom=false,float density=0){
+    std::array<uint8_t,64*64*4> sample(int mode,bool bloom=false,float density=0,ayt::render::LensEffectsSettings lens={}){
+        renderer.setLensEffects(lens);
         renderer.setPostProcessBloomStrength(bloom?1.f:0.f);
         ayt::render::VolumetricSettings fog;fog.enabled=density>0;fog.density=density;renderer.setVolumetricSettings(fog);
         ayt::render::PerformanceLight light;light.id=7;light.light=ayt::render::Light::spot({0,0,0},{0,0,-1},10,10,.95f,.8f,{1,0,0});light.apertureRadius=.25f;
+        if(mode==5)light.light.position={.65f,0,0};
         if(mode==1)light.light.spotDirection={.98f,0,-.2f};if(mode==2)light.light.spotDirection={0,0,1};
         ayt::math::Float4x4 view,projection;CHECK(renderer.mainCameraMatrices(view,projection));
         ayt::render::RenderScene scene;std::string error;
@@ -304,6 +306,24 @@ TEST_CASE(real_prism_lobes_rotate_and_distance_focus_changes_pattern_contrast){
     const auto sharp=f.sampleLight(p,false);p.focusDistance=.25f;const auto blurred=f.sampleLight(p,false);
     const auto variation=[](const auto& pixels){double sum=0;for(int y=29;y<=34;++y)for(int x=23;x<41;++x)sum=std::max(sum,double(std::abs(int(pixels[(y*64+x)*4])-int(pixels[(y*64+x+1)*4]))));return sum;};
     const auto a=variation(sharp),b=variation(blurred);std::fprintf(stderr,"[Focus probe] sharp=%.0f defocused=%.0f\n",a,b);CHECK(a>10);CHECK(b<a*.95);f.renderer.destroyTexture(texture);
+#else
+    SKIP_TEST("Windows real-device acceptance required");
+#endif
+}
+TEST_CASE(camera_glare_uses_visible_hdr_and_zero_bloom_without_occlusion_leaks){
+#ifdef _WIN32
+    using namespace ayt::render;
+    const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Requires isolated real-device camera glare acceptance");
+    FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+    LensEffectsSettings lens;lens.enabled=true;lens.starStrength=2;lens.starAxes=1;lens.starLength=.2f;lens.ghostStrength=0;
+    const auto baseline=f.sample(0),horizontal=f.sample(0,false,0,lens);lens.starRotation=1.570796327f;const auto vertical=f.sample(0,false,0,lens);
+    const auto region=[](const auto& pixels,int x0,int y0,int x1,int y1){double sum=0;for(int y=y0;y<y1;++y)for(int x=x0;x<x1;++x)sum+=pixels[(y*64+x)*4];return sum;};
+    const auto h=region(horizontal,43,29,62,35),v=region(vertical,43,29,62,35),none=region(baseline,43,29,62,35);
+    std::fprintf(stderr,"[Lens probe] horizontal=%.0f vertical=%.0f disabled=%.0f\n",h,v,none);CHECK(h>none+20);CHECK(h>v+20);
+    lens.starStrength=0;lens.ghostStrength=1;lens.dispersion=.01f;
+    const auto source=f.sample(5),ghost=f.sample(5,false,0,lens);CHECK(region(ghost,0,0,28,64)>region(source,0,0,28,64)+20);
+    lens.starStrength=2;const auto blocked=f.sample(3,false,0,lens);CHECK(emitterRedEnergy(blocked)<emitterRedEnergy(ghost)*.02);
+    lens.enabled=false;const auto disabled=f.sample(0,false,0,lens);CHECK(disabled==baseline);
 #else
     SKIP_TEST("Windows real-device acceptance required");
 #endif

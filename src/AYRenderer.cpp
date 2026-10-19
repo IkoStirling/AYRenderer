@@ -485,6 +485,7 @@ struct Renderer::Impl {
 
     // R5+ (Phase PostProcess) — per-host post-process knobs.
     // Defaults = no effect (bloom=0, exposure=1, ripple=0, tonemap=None).
+    LensEffectsSettings            lensEffects;
     float                          postProcessBloomStrength  = 0.0f;
     float                          postProcessBloomThreshold = 1.0f;
     float                          postProcessBloomSoftKnee  = 0.5f;
@@ -1437,6 +1438,7 @@ void Renderer::render(const RenderScene& scene)
     // R5+ — host-configured post-process knobs. Rendered every frame
     // even when the value hasn't changed because the FrameContext is
     // stack-local; cost is negligible (3 floats + 1 byte enum).
+    frame.lensEffects = sanitizeLensEffects(_impl->lensEffects);
     frame.bloomStrength    = detail::sanitizeBloomStrength(
         _impl->postProcessBloomStrength);
     frame.exposure         = detail::sanitizePostProcessExposure(
@@ -1808,7 +1810,7 @@ void Renderer::render(const RenderScene& scene)
         fgW,
         fgH) && backendReady;
     const detail::BloomStageState bloomStages = detail::selectBloomStages(
-        frame.bloomStrength,
+        lensEffectsActive(frame.lensEffects)?std::max(frame.bloomStrength,1.f):frame.bloomStrength,
         bloomExtractPassPtr != nullptr,
         bloomExtractPassPtr != nullptr && bloomExtractPassPtr->isEnabled(),
         bloomBlurPassPtr != nullptr,
@@ -3072,6 +3074,8 @@ bool Renderer::lightingEnabled() const noexcept
     return lighting != nullptr && lighting->isEnabled();
 }
 
+void Renderer::setLensEffects(const LensEffectsSettings& settings){if(_impl)_impl->lensEffects=sanitizeLensEffects(settings);}
+LensEffectsSettings Renderer::lensEffects() const noexcept {return _impl?_impl->lensEffects:LensEffectsSettings{};}
 void Renderer::setPostProcessBloomStrength(float strength)
 {
     if (!_impl) {

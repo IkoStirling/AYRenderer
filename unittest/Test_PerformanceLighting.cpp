@@ -341,3 +341,13 @@ TEST_CASE(prism_rotates_real_lobes_preserves_total_angular_energy_and_bounds) {
     p.prismCount=4;p.focusDistance=-1;CHECK(!packet.assign({&p,1},{}));
 }
 TEST_SUITE_END
+
+TEST_SUITE(LensEffectsTests)
+TEST_CASE(disabled_defaults_and_finite_shared_graph_settings) {
+    LensEffectsSettings settings;CHECK(!lensEffectsActive(settings));settings.enabled=true;CHECK(lensEffectsActive(settings));
+    settings.starStrength=settings.ghostStrength=0;CHECK(!lensEffectsActive(settings));settings.starStrength=1;CHECK(lensEffectsActive(settings));
+    settings.starAxes=255;settings.starLength=3;settings.ghostStrength=-1;settings.starStrength=std::numeric_limits<float>::infinity();settings.dispersion=std::numeric_limits<float>::quiet_NaN();
+    const auto clean=sanitizeLensEffects(settings);CHECK(clean.starAxes==4);CHECK(clean.starLength==.25f);CHECK(clean.starStrength==0);CHECK(clean.ghostStrength==0);CHECK(clean.dispersion==0);CHECK(!lensEffectsActive(clean));
+    Renderer renderer;CHECK(!renderer.lensEffects().enabled);renderer.setLensEffects(settings);CHECK(renderer.lensEffects().starAxes==4);CHECK(!lensEffectsActive(renderer.lensEffects()));
+}
+TEST_SUITE_END

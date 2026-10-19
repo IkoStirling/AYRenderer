@@ -4,6 +4,7 @@
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
 #include "AYRenderer/SsrSettings.h"
+#include "AYRenderer/LensEffects.h"
 #include "AYRenderer/VolumetricSettings.h"
 #include "AYRenderer/DeferredDecal.h"
 #include "AYRenderer/CameraViews.h"
@@ -389,6 +390,12 @@ public:
     void setPostProcessBloomThreshold(float threshold);
     void setPostProcessBloomSoftKnee(float softKnee);
     void setPostProcessExposure(float exposure);
+    /// Camera glare from current, depth-occluded HDR highlights. Defaults off;
+    /// sanitized controls apply before exposure/tonemap, shared Bloom extraction
+    /// can run with Bloom strength0. Does not trace a physical camera lens.
+    void setLensEffects(const LensEffectsSettings& settings);
+    /// Stored sanitized camera glare settings; Renderer owns the copy.
+    LensEffectsSettings lensEffects() const noexcept;
     // GPU scene-luminance metering with a persistent 1x1 adaptation history.
     // Manual exposure remains as an artistic compensation multiplier.
     void setAutoExposureEnabled(bool enabled);

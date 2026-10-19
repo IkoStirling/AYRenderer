@@ -539,3 +539,9 @@ check focal pupil geometry and conservative lobe bounds. LightShowOpticsTests ve
 focus/rotation and stepped topology. Real D3D11/D3D12 readback verifies rotating lobe locations
 and defocused image-edge contrast. Contracts157/1223, Sequence106/3888, shaders12/208,
 each GPU backend4/143, Studio optics8-frame smoke passed. SDK doctor126/53/83/542,0 errors/warnings.
+
+
+2026-10-19 camera stage: Contracts158/1236, PostProcess252/1357, Sequence106/3888;
+D3D11 and D3D12 each5/184 cover zero-Bloom glare, rotation, ghosts, source occlusion and disabled
+pixel identity. Production shaders12/208 passed in isolation after one transient shaderc process
+initialization failure in a concurrent run. SDK127/53/86/544 passed; owned inventory1011/10.

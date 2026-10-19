@@ -145,7 +145,7 @@ TEST_CASE(r51_fallback_is_an_independent_minimal_blit)
 TEST_CASE(r51_cache_keys_pin_both_production_programs)
 {
     CHECK(std::string(ayt::render::detail::kPostProcessCacheKeyCStr)
-          == "postprocess_tonemap_aces_v13_auto_exposure_fs");
+          == "postprocess_tonemap_v14_lens_effects");
     CHECK(std::string(ayt::render::detail::kPostProcessFallbackCacheKeyCStr)
           == "postprocess_fallback_blit_v11_minimal_fs");
 }

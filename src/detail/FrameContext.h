@@ -2,6 +2,7 @@
 
 #include "AYMath/MathTypes.h"
 #include "AYRenderer/SsrSettings.h"
+#include "AYRenderer/LensEffects.h"
 #include "AYRenderer/VolumetricSettings.h"
 
 #include <cstdint>
@@ -26,6 +27,7 @@ struct FrameContext {
     ayt::math::FVector3 lightColor      = ayt::math::FVector3(1.0f, 1.0f, 1.0f);
 
     float             timeSeconds      = 0.0f;
+    LensEffectsSettings lensEffects;
     float             bloomStrength    = 0.0f;
     float             exposure         = 1.0f;
     // Display gamma encode (pow(c, 1/gamma)). 2.2 ≈ sRGB OETF.

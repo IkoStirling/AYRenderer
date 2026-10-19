@@ -43,6 +43,8 @@ material PostProcess {
     uniform vec4 exposure
     uniform vec4 autoExposureEnabled
     uniform vec4 tonemapMode
+    uniform vec4 lensStrength
+    uniform vec4 lensShape
     uniform vec4 gammaParams
     vertex {
         in  pos : position
@@ -61,6 +63,43 @@ material PostProcess {
         let raw = sampled.xyz * combinedExposure
         let withBloom = raw
                       + bloomSample.xyz * bloomStrength.x * combinedExposure
+        if(lensStrength.x>0.0 || lensStrength.y>0.0){
+        let glare=vec3(0.0)
+        if(lensStrength.x>0.0){
+         let weightSum=0.0
+         for(axis in range(int(lensShape.y),4)){
+          let angle=lensShape.x+float(axis)*3.14159265/lensShape.y
+          let ray=vec2(cos(angle)/lensShape.w,sin(angle))*lensShape.z
+          for(tap in range(16)){
+           let t=(float(tap)-7.5)/7.5
+           let w=(1.0-abs(t))*(1.0-abs(t))
+           let q=uv+ray*t
+           let inside=step(0.0,q.x)*step(q.x,1.0)*step(0.0,q.y)*step(q.y,1.0)
+           glare=glare+sampleLod(bloomTexture,q,0.0).rgb*w*inside*lensStrength.x
+           weightSum=weightSum+w
+          }
+         }
+         glare=glare/max(weightSum,0.00001)
+        }
+        if(lensStrength.y>0.0){
+         let p=uv-vec2(0.5)
+         for(ghost in range(3)){
+          let scale=0.6+float(ghost)*0.6
+          let q=vec2(0.5)-p*scale
+          let spread=p*lensStrength.z
+          let qr=q+spread;let qb=q-spread
+          let inside=step(0.0,q.x)*step(q.x,1.0)*step(0.0,q.y)*step(q.y,1.0)
+          let insideR=step(0.0,qr.x)*step(qr.x,1.0)*step(0.0,qr.y)*step(qr.y,1.0)
+          let insideB=step(0.0,qb.x)*step(qb.x,1.0)*step(0.0,qb.y)*step(qb.y,1.0)
+          let red=sampleLod(bloomTexture,qr,0.0).r*insideR
+          let green=sampleLod(bloomTexture,q,0.0).g*inside
+          let blue=sampleLod(bloomTexture,qb,0.0).b*insideB
+          glare=glare+vec3(red,green,blue)*lensStrength.y/(1.0+float(ghost))
+         }
+        }
+        let dirt=0.5+0.25*sin(uv.x*97.0+sin(uv.y*41.0))+0.25*sin(uv.y*113.0+sin(uv.x*53.0))
+        withBloom=withBloom+glare*combinedExposure*(1.0+lensStrength.w*dirt)
+        }
         let cx = max(withBloom.x, 0.0)
         let cy = max(withBloom.y, 0.0)
         let cz = max(withBloom.z, 0.0)
@@ -86,7 +125,7 @@ material PostProcess {
 
 // v12 removes the dead uTime ABI and consumes sanitized display parameters.
 constexpr const char* kPostProcessCacheKey =
-    "postprocess_tonemap_aces_v13_auto_exposure_fs";
+    "postprocess_tonemap_v14_lens_effects";
 
 // Deliberately independent minimal fallback. If a primary-only language or
 // math feature fails to compile, this still has a high chance of restoring a
@@ -216,6 +255,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         && _uExposure      != ayt::shader::InvalidBinding
         && _uAutoExposureEnabled != ayt::shader::InvalidBinding
         && _uTonemapMode   != ayt::shader::InvalidBinding
+        && _uLensStrength != ayt::shader::InvalidBinding && _uLensShape != ayt::shader::InvalidBinding
         && _uGammaParams   != ayt::shader::InvalidBinding
         && _tSceneColor    != ayt::shader::InvalidBinding
         && _tBloomTexture  != ayt::shader::InvalidBinding
@@ -337,6 +377,10 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     const float autoExposurePad[4] = {
         autoExposureReady ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f
     };
+    const auto lens=sanitizeLensEffects(frame.lensEffects);
+    const bool lensReady=bloomSourceReady&&lensEffectsActive(lens);
+    const float lensStrengthPad[4]={lensReady?lens.starStrength:0.f,lensReady?lens.ghostStrength:0.f,lens.dispersion,lens.dirtStrength};
+    const float lensShapePad[4]={lens.starRotation,float(lens.starAxes),lens.starLength,float(viewportWidth)/std::max(1.f,float(viewportHeight))};
     const float tonemapPad[4] = {
         static_cast<float>(std::clamp(
             static_cast<int32_t>(frame.tonemapMode), int32_t{0}, int32_t{2})),
@@ -359,6 +403,8 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
                             sizeof(autoExposurePad));
         _program.setUniform(_uTonemapMode, tonemapPad, sizeof(tonemapPad));
         _program.setUniform(_uGammaParams, gammaPad, sizeof(gammaPad));
+        _program.setUniform(_uLensStrength,lensStrengthPad,sizeof(lensStrengthPad));
+        _program.setUniform(_uLensShape,lensShapePad,sizeof(lensShapePad));
     }
 
     ayt::shader::DrawCallContext sub;
@@ -423,6 +469,8 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
             primary.getUniformBinding("autoExposureEnabled");
         const ayt::shader::BindingId tonemapMode =
             primary.getUniformBinding("tonemapMode");
+        const auto lensStrength=primary.getUniformBinding("lensStrength");
+        const auto lensShape=primary.getUniformBinding("lensShape");
         const ayt::shader::BindingId gammaParams =
             primary.getUniformBinding("gammaParams");
         const ayt::shader::BindingId sceneColor =
@@ -436,6 +484,7 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
             && exposure != ayt::shader::InvalidBinding
             && autoExposureEnabled != ayt::shader::InvalidBinding
             && tonemapMode != ayt::shader::InvalidBinding
+            && lensStrength != ayt::shader::InvalidBinding && lensShape != ayt::shader::InvalidBinding
             && gammaParams != ayt::shader::InvalidBinding
             && sceneColor != ayt::shader::InvalidBinding
             && bloomTexture != ayt::shader::InvalidBinding
@@ -447,6 +496,7 @@ void PostProcessPass::ensureProgram(shader::ShaderResourcePool& pool)
             _uAutoExposureEnabled = autoExposureEnabled;
             _uTonemapMode = tonemapMode;
             _uGammaParams = gammaParams;
+            _uLensStrength=lensStrength;_uLensShape=lensShape;
             _tSceneColor = sceneColor;
             _tBloomTexture = bloomTexture;
             _tAutoExposureTexture = autoExposureTexture;
@@ -526,6 +576,7 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
     _uAutoExposureEnabled = ayt::shader::InvalidBinding;
     _uTonemapMode   = ayt::shader::InvalidBinding;
     _uGammaParams   = ayt::shader::InvalidBinding;
+    _uLensStrength=_uLensShape=ayt::shader::InvalidBinding;
     _tSceneColor    = ayt::shader::InvalidBinding;
     _tBloomTexture  = ayt::shader::InvalidBinding;
     _tAutoExposureTexture = ayt::shader::InvalidBinding;

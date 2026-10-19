@@ -152,7 +152,7 @@ constexpr const char* kFinalPPExpectedSubstrings[] = {
 };
 
 constexpr const char* kExpectedFinalPPCacheKey =
-    "postprocess_tonemap_aces_v13_auto_exposure_fs";
+    "postprocess_tonemap_v14_lens_effects";
 
 } // namespace
 
