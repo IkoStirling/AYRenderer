@@ -4,6 +4,7 @@
 #include <AYRenderer.h>
 #include <AYRenderer/EmissivePointCloud.h>
 #include <AYRenderer/FixtureEmitters.h>
+#include <AYRenderer/FixtureHousings.h>
 #include <AYRenderer/PbrShaderSources.h>
 #include <numeric>
 #include <algorithm>
@@ -172,6 +173,7 @@ struct FixtureEmitterGpuFixture {
     ayt::render::Renderer renderer;
     bgfx::TextureHandle readback=BGFX_INVALID_HANDLE;
     ayt::render::FixtureEmitters emitters;
+    ayt::render::FixtureHousings housings;
     ayt::render::SceneLights dark;
     ayt::render::MeshHandle cube;
     ayt::render::MaterialHandle black;
@@ -211,15 +213,17 @@ struct FixtureEmitterGpuFixture {
         TextureHandle atlas;if(profile){atlas=createIesTexture(renderer,*profile);CHECK(atlas.isValid());light.iesProfile=profile;light.iesTexture=atlas;}
         const auto pixels=sampleLight(light,volume);if(atlas.isValid())renderer.destroyTexture(atlas);return pixels;
     }
-    std::array<uint8_t,64*64*4> sample(int mode,bool bloom=false,float density=0,ayt::render::LensEffectsSettings lens={}){
+    std::array<uint8_t,64*64*4> sample(int mode,bool bloom=false,float density=0,ayt::render::LensEffectsSettings lens={},bool housing=false,ayt::render::FixtureHousingSettings body={},bool lampOff=false){
         renderer.setLensEffects(lens);
         renderer.setPostProcessBloomStrength(bloom?1.f:0.f);
         ayt::render::VolumetricSettings fog;fog.enabled=density>0;fog.density=density;renderer.setVolumetricSettings(fog);
         ayt::render::PerformanceLight light;light.id=7;light.light=ayt::render::Light::spot({0,0,0},{0,0,-1},10,10,.95f,.8f,{1,0,0});light.apertureRadius=.25f;
+        if(lampOff)light.light.intensity=0;
         if(mode==5)light.light.position={.65f,0,0};
         if(mode==1)light.light.spotDirection={.98f,0,-.2f};if(mode==2)light.light.spotDirection={0,0,1};
         ayt::math::Float4x4 view,projection;CHECK(renderer.mainCameraMatrices(view,projection));
         ayt::render::RenderScene scene;std::string error;
+        if(housing)CHECK(housings.append(renderer,scene,{&light,1},body,&error));
         CHECK(emitters.append(renderer,scene,{&light,1},view,projection,64,64,{},&error));CHECK(error.empty());
         if(mode==3||mode==4)scene.add(cube,black,ayt::math::translate(mode==4?-1.5f:0.f,0.f,-1.f)*ayt::math::scale(mode==4?1.5f:3.f,3.f,.2f));
         for(int i=0;i<3;++i){renderer.beginFrame({0,0,0,1});renderer.render(scene);renderer.endFrame();}
@@ -324,6 +328,26 @@ TEST_CASE(camera_glare_uses_visible_hdr_and_zero_bloom_without_occlusion_leaks){
     const auto source=f.sample(5),ghost=f.sample(5,false,0,lens);CHECK(region(ghost,0,0,28,64)>region(source,0,0,28,64)+20);
     lens.starStrength=2;const auto blocked=f.sample(3,false,0,lens);CHECK(emitterRedEnergy(blocked)<emitterRedEnergy(ghost)*.02);
     lens.enabled=false;const auto disabled=f.sample(0,false,0,lens);CHECK(disabled==baseline);
+#else
+    SKIP_TEST("Windows real-device acceptance required");
+#endif
+}
+TEST_CASE(opaque_fixture_hood_and_hinged_leaves_occlude_the_real_exit){
+#ifdef _WIN32
+    using namespace ayt::render;
+    const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Requires isolated real-device fixture housing acceptance");
+    FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+    const auto front=f.sample(0),frontHousing=f.sample(0,false,0,{},true),frontDark=f.sample(0,false,0,{},true,{},true);
+    const double direct=emitterRedEnergy(front),frontExcess=emitterRedEnergy(frontHousing)-emitterRedEnergy(frontDark);
+    CHECK(frontExcess>direct*.8);CHECK(f.housings.stats().fixtures==1);CHECK(f.housings.stats().parts==2);
+    const auto side=f.sample(1),sideHousing=f.sample(1,false,0,{},true),sideDark=f.sample(1,false,0,{},true,{},true);
+    const double sideExcess=emitterRedEnergy(sideHousing)-emitterRedEnergy(sideDark);
+    CHECK(sideExcess<emitterRedEnergy(side)*.2);
+    FixtureHousingSettings leaves;leaves.shadeLeaves=true;leaves.leafAngle=.5f;
+    const auto shaded=f.sample(0,false,0,{},true,leaves),dark=f.sample(0,false,0,{},true,leaves,true);
+    const double shadedExcess=emitterRedEnergy(shaded)-emitterRedEnergy(dark);
+    std::fprintf(stderr,"[Housing probe] front=%.0f hood=%.0f oblique=%.0f/%.0f leaves=%.0f\n",direct,frontExcess,emitterRedEnergy(side),sideExcess,shadedExcess);
+    CHECK(shadedExcess<frontExcess*.99);CHECK(shadedExcess>frontExcess*.1);CHECK(f.housings.stats().parts==6);
 #else
     SKIP_TEST("Windows real-device acceptance required");
 #endif

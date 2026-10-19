@@ -545,3 +545,9 @@ each GPU backend4/143, Studio optics8-frame smoke passed. SDK doctor126/53/83/54
 D3D11 and D3D12 each5/184 cover zero-Bloom glare, rotation, ghosts, source occlusion and disabled
 pixel identity. Production shaders12/208 passed in isolation after one transient shaderc process
 initialization failure in a concurrent run. SDK127/53/86/544 passed; owned inventory1011/10.
+
+
+2026-10-19 housing stage: Contracts160/1355, both D3D backends6/238 including hood/leaf
+opaque occlusion with dark-body baseline subtraction. Studio housing/shade/disabled smokes passed;
+invalid dimensions exit2. SDK127/53/87/545 passed; inventory1014/10. No production shader
+source changed; shared PBR/particle variants remain68.

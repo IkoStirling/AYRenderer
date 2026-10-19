@@ -1,6 +1,7 @@
 #include <AYRenderer.h>
 #include <AYRenderer/EmissivePointCloud.h>
 #include <AYRenderer/FixtureEmitters.h>
+#include <AYRenderer/FixtureHousings.h>
 #include <AYMath/MathUtils.h>
 #include <AYRenderer/PerformanceShaderSources.h>
 #include <AYShader/Phoskia.h>
@@ -349,5 +350,28 @@ TEST_CASE(disabled_defaults_and_finite_shared_graph_settings) {
     settings.starAxes=255;settings.starLength=3;settings.ghostStrength=-1;settings.starStrength=std::numeric_limits<float>::infinity();settings.dispersion=std::numeric_limits<float>::quiet_NaN();
     const auto clean=sanitizeLensEffects(settings);CHECK(clean.starAxes==4);CHECK(clean.starLength==.25f);CHECK(clean.starStrength==0);CHECK(clean.ghostStrength==0);CHECK(clean.dispersion==0);CHECK(!lensEffectsActive(clean));
     Renderer renderer;CHECK(!renderer.lensEffects().enabled);renderer.setLensEffects(settings);CHECK(renderer.lensEffects().starAxes==4);CHECK(!lensEffectsActive(renderer.lensEffects()));
+}
+TEST_SUITE_END
+
+TEST_SUITE(FixtureHousingTests)
+TEST_CASE(geometry_follows_axis_and_survives_dark_fixture_with_bounded_parts) {
+    auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,1};p.light.intensity=0;p.apertureRadius=.2f;
+    FixtureHousingSettings settings;settings.shadeLeaves=true;std::vector<FixtureHousingDraw> draws;FixtureHousingStats stats;
+    CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(stats.fixtures==1);CHECK(stats.parts==6);CHECK(draws.size()==6);
+    const auto back=draws[0].world*ayt::math::FVector4(0,0,-1,1),front=draws[1].world*ayt::math::FVector4(0,0,1,1);
+    CHECK(std::abs(back.z+.6f)<1e-6);CHECK(std::abs(front.z-.1f)<1e-6);
+    CHECK(draws[2].part==FixtureHousingPart::Leaf);const auto oldX=draws[2].world(0,3);settings.leafAngle=.5f;
+    CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(draws[2].world(0,3)<oldX);
+    for(const auto& draw:draws)for(int i=0;i<16;++i)CHECK(std::isfinite(draw.world.ptr()[i]));
+    std::vector<PerformanceLight> lights(256,p);for(size_t i=0;i<lights.size();++i)lights[i].id=uint32_t(i);
+    CHECK(buildFixtureHousingDraws(lights,settings,draws,stats));CHECK(stats.parts==1536);CHECK(stats.fixtures==256);
+}
+TEST_CASE(invalid_settings_preserve_output_and_point_or_zero_exit_have_no_body) {
+    auto p=light(1);p.apertureRadius=.2f;std::vector<FixtureHousingDraw> draws;FixtureHousingStats stats;FixtureHousingSettings settings;
+    CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(stats.parts==2);settings.hoodLength=-1;
+    CHECK(!buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(stats.parts==2);CHECK(draws.size()==2);
+    settings.hoodLength=0;CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(stats.parts==1);
+    p.apertureRadius=0;CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(draws.empty());
+    p.light.type=LightType::Point;p.volumetric=0;p.apertureRadius=.2f;CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(draws.empty());
 }
 TEST_SUITE_END
