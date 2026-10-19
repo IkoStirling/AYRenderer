@@ -582,3 +582,8 @@ Housing96objects: backenddraw102->9, instanced96, RGBdifference0. Volume energy1
 Full scene CPU sample45.501->20.644ms after contiguous housing meshes; downsample is still opt-in.
 Isolated64light volume GPU2.824/1.644/.611ms for divisors1/2/4. Combined45-frame Studio effects
 smoke and invalid3divisor rejection passed. SDK129/53/91/551 clean; inventory1028/10 clean.
+
+
+2026-10-19 局部雾重建补充：重建消光的4点密度规则同时应用局部盒.75..1柔边权重与动画噪声，
+修复局部设置下散射和消光密度不一致。常量全局路径保持原解析式。
+真实GPU回归新增局部/全局×静态/动画×1/2/4分辨率对照，两后端各1项1298断言通过。

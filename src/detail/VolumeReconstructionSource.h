@@ -1,6 +1,6 @@
 #pragma once
 namespace ayt::render::detail {
-inline constexpr char kVolumeReconstructionKey[]="volume_reconstruction_v1_depth_aware";
+inline constexpr char kVolumeReconstructionKey[]="volume_reconstruction_v2_local_medium_fade";
 inline constexpr char kVolumeReconstructionSource[]=R"(
 material VolumeReconstruction {
  texture2d sceneColor
@@ -42,12 +42,19 @@ material VolumeReconstruction {
   // Extinction remains full resolution: scene edges never inherit a neighbor's
   // path length, and no downsampled scene RGB is ever displayed.
   let transmission=exp(-fogMedium.x*max(end-begin,0.0))
-  if(fogNoise.x>0.001){
+  if(fogOptions.z>0.5||fogNoise.x>0.001){
    transmission=1.0
    for(k in range(4)){
     let pre=origin+direction*(begin+(float(k)+0.5)*(end-begin)*0.25)
-    let p=pre*fogNoise.y+vec3(fogNoise.z*0.17,fogNoise.z*0.11,fogNoise.z*0.14)
-    let weight=clamp(1.0+fogNoise.x*(0.5*sin(p.x+p.z*0.73)+0.35*sin(p.y*1.7-p.z*1.1)+0.15*sin(p.x*1.3+p.y*0.6)),0.15,1.85)
+    let weight=1.0
+    if(fogOptions.z>0.5){
+     let local=abs(pre-fogCenter.xyz)/fogExtent.xyz
+     weight=1.0-smoothstep(0.75,1.0,max(max(local.x,local.y),local.z))
+    }
+    if(fogNoise.x>0.001){
+     let p=pre*fogNoise.y+vec3(fogNoise.z*0.17,fogNoise.z*0.11,fogNoise.z*0.14)
+     weight=weight*clamp(1.0+fogNoise.x*(0.5*sin(p.x+p.z*0.73)+0.35*sin(p.y*1.7-p.z*1.1)+0.15*sin(p.x*1.3+p.y*0.6)),0.15,1.85)
+    }
     transmission=transmission*exp(-fogMedium.x*max(end-begin,0.0)*0.25*weight)
    }
   }

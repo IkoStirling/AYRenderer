@@ -753,7 +753,8 @@ TEST_CASE(reduced_volume_preserves_full_scene_edges_and_extinguishes_only_once) 
  FrameContext frame;frame.volumetric.enabled=true;frame.volumetric.density=.2f;frame.volumetric.scattering=.8f;frame.volumetric.steps=16;
  PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.sceneFbo=f.target;ctx.resourceBlackboard=&bb;ctx.frameGraph=&graph;ctx.performanceLights=&packet;
  VolumetricPass pass;
- for(float noise:{0.f,.4f}){
+ for(bool localBox:{false,true})for(float noise:{0.f,.4f}){
+  frame.volumetric.local=localBox;frame.volumetric.center={0,0,3};frame.volumetric.halfExtent={2,2,3};
   frame.volumetric.noiseStrength=noise;frame.volumetric.noiseTime=3;std::vector<Pixel> reference;
   for(uint8_t factor:{1,2,4}){
    frame.volumetric.downsample=factor;copy(checker,0);
@@ -763,7 +764,7 @@ TEST_CASE(reduced_volume_preserves_full_scene_edges_and_extinguishes_only_once) 
    const auto output=f.adapter.getFboAttachment(graph.resolve(FgResourceId::VolumetricColor),0);const auto pixels=copy(output,244);CHECK(pixels.size()==16);if(pixels.size()!=16)break;
    if(factor==1)reference=pixels;
    for(size_t i=0;i<16;++i){for(int c=0;c<4;++c)CHECK(std::abs(pixels[i][c]-reference[i][c])<.001f);CHECK(std::abs(pixels[i][3]-.75f)<.001f);CHECK(pixels[i][int(i%4)%2?0:1]==0);}
-   if(noise==0)for(int y=0;y<4;++y)for(int x=0;x<4;++x){const float px=(x+.5f)*.5f-1,py=1-(y+.5f)*.5f,z=x<2?1.f:10.f,T=std::exp(-.2f*std::sqrt(px*px+py*py+z*z));const auto i=y*4+x;CHECK(std::abs(pixels[i][x%2?1:0]-T)<.001f);}
+   if(noise==0&&!localBox)for(int y=0;y<4;++y)for(int x=0;x<4;++x){const float px=(x+.5f)*.5f-1,py=1-(y+.5f)*.5f,z=x<2?1.f:10.f,T=std::exp(-.2f*std::sqrt(px*px+py*py+z*z));const auto i=y*4+x;CHECK(std::abs(pixels[i][x%2?1:0]-T)<.001f);}
   }
  }
  pass.destroyResources(f.adapter);
