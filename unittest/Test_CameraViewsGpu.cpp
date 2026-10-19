@@ -112,12 +112,12 @@ TEST_SUITE_END
 TEST_SUITE(EmissivePointsGpu)
 TEST_CASE(single_instanced_point_matches_cpu_quad_in_a_real_view) {
 #ifdef _WIN32
-    if (!std::getenv("AY_POINT_GPU_TEST")) SKIP_TEST("Requires an isolated Windows D3D11 device");
+    const auto* backend=std::getenv("AY_POINT_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Requires isolated Windows D3D11/D3D12 device");
     HWND window=CreateWindowExW(0,L"STATIC",L"Emissive point GPU regression",WS_OVERLAPPED,
         0,0,64,64,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     CHECK(window!=nullptr);if(!window)return;
     ayt::render::Renderer renderer;
-    ayt::render::InitDesc desc;desc.windowHandle=window;desc.backend=ayt::render::Backend::Direct3D11;
+    ayt::render::InitDesc desc;desc.windowHandle=window;desc.backend=std::string(backend)=="d3d12"?ayt::render::Backend::Direct3D12:ayt::render::Backend::Direct3D11;
     desc.width=64;desc.height=64;desc.vsync=false;desc.msaa=0;
     CHECK(renderer.initialize(desc));
     if(!renderer.isInitialized()){DestroyWindow(window);return;}

@@ -270,6 +270,21 @@ TEST_CASE(point_instances_preserve_cpu_selection_hdr_and_bounded_batches) {
     CHECK(!buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},instances,instanceStats));
     CHECK(instanceStats.visible==9);
 }
+TEST_CASE(instance_storage_reuse_overwrites_all_fields_and_keeps_batch_edges_after_shrink) {
+ std::vector<EmissivePoint> points(20000);for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].position={float(i%10)*.01f,0,.5f};points[i].radius=.02f;points[i].color={float(i%7)+.25f,2,3};points[i].intensity=float(i%5)+1;}
+ const auto identity=ayt::math::Float4x4::identity();std::vector<ParticleDrawData> batches;EmissivePointStats stats;
+ CHECK(buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},batches,stats));CHECK(batches.size()==2);
+ for(auto& batch:batches)std::fill(batch.instanceData.begin(),batch.instanceData.end(),std::numeric_limits<float>::quiet_NaN());
+ for(auto& p:points){p.radius=.03f;p.color.x*=.5f;}
+ CHECK(buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},batches,stats));
+ for(const auto& batch:batches)CHECK(std::all_of(batch.instanceData.begin(),batch.instanceData.end(),[](float value){return std::isfinite(value);}));
+ for(const size_t index:{0u,16382u,16383u,16384u,19999u}){
+  const auto& p=points[index];const float expected[16]={p.position.x,p.position.y,p.position.z,p.radius,1,0,0,0,0,1,0,0,p.color.x*p.intensity,p.color.y*p.intensity,p.color.z*p.intensity,1};
+  const auto* actual=batches[index/16383].instanceData.data()+(index%16383)*16;for(int field=0;field<16;++field)CHECK(actual[field]==expected[field]);
+ }
+ CHECK(buildEmissivePointInstanceBatches(std::span<const EmissivePoint>(points).first(3),identity,identity,100,100,{},batches,stats));CHECK(batches.size()==1);CHECK(batches[0].instanceData.size()==48);
+ CHECK(buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},batches,stats));CHECK(stats.visible==20000);CHECK(batches.size()==2);CHECK(batches[1].instanceData.size()==3617*16);
+}
 TEST_CASE(instanced_point_shader_uses_production_frontend) {
     ayt::shader::phoskia::Compiler compiler;ayt::shader::phoskia::ir::IRProgram program;
     std::vector<std::string> errors;

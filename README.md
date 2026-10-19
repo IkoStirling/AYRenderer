@@ -697,3 +697,11 @@ historyUsed是帧级重投影资格，不是逐格接受数；最近采样、无
 
 FrameGraph::resolve对external借用也要求本帧declared：效果关闭未重导入时返回invalid，
 避免Owner已释放旧FBO后仍查询其附件；本阶段历史关停真实GPU用例覆盖此路径。
+
+
+## 2026-10-20 点实例连续写入
+
+实例数据按批次一次resize后写完整64字节记录，避免每点vector::insert与迭代器扩容检查。
+沿用相同裁剪、稳定ID预算、半径/覆盖能量及16浮点布局；缩放重用和16383边界有CPU回归。
+独立D3D11/D3D12点实例与CPU四边形读回对照通过AY_POINT_GPU_TEST选择后端。
+这项CPU准备优化不等同GPU筛选/compaction或点光聚合稳定性。

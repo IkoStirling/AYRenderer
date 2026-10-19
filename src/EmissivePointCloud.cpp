@@ -7,6 +7,7 @@
 #include <utility>
 #include <unordered_map>
 #include <numeric>
+#include <cstring>
 
 namespace ayt::render {
 namespace {
@@ -191,8 +192,8 @@ bool buildEmissivePointInstanceBatches(std::span<const EmissivePoint> points,
     for(std::size_t i=0;i<needed;++i) {
         auto& batch=batches[i];
         const auto count=std::min(kPointsPerBatch,selection.visible.size()-i*kPointsPerBatch);
-        batch.vertices.clear();batch.indices.clear();batch.instanceData.clear();
-        batch.instanceData.reserve(count*16);
+        batch.vertices.clear();batch.indices.clear();
+        batch.instanceData.resize(count*16);
         batch.instanceStride=16*sizeof(float);batch.world3D=true;
     }
     for(const auto& selected:selection.visible) {
@@ -205,7 +206,7 @@ bool buildEmissivePointInstanceBatches(std::span<const EmissivePoint> points,
             selection.up.x,selection.up.y,selection.up.z,0,
             radiance.x,radiance.y,radiance.z,1
         };
-        batch.instanceData.insert(batch.instanceData.end(),std::begin(instance),std::end(instance));
+        std::memcpy(batch.instanceData.data()+(next.visible%kPointsPerBatch)*16,instance,sizeof(instance));
         ++next.visible;
     }
     next.batches=static_cast<uint32_t>(needed);next.instanced=next.visible!=0;
