@@ -68,6 +68,25 @@ template<class T> void decode(const Json& source,T& value) {
     }
 }
 bool fail(std::string* error,const std::string& message) {if(error)*error=message;return false;}
+
+// JSON numbers are doubles, while look controls are Float32. Compare the decoded
+// values, not the writer's decimal spelling. Object/array shape remains strict.
+bool matchesDocument(const Json& expected,const Json& source) {
+    if(expected.is_object()) {
+        if(!source.is_object() || expected.size()!=source.size())return false;
+        for(auto it=expected.begin();it!=expected.end();++it)
+            if(!source.contains(it.key()) || !matchesDocument(it.value(),source.at(it.key())))return false;
+        return true;
+    }
+    if(expected.is_array()) {
+        if(!source.is_array() || expected.size()!=source.size())return false;
+        for(size_t i=0;i<expected.size();++i)if(!matchesDocument(expected[i],source[i]))return false;
+        return true;
+    }
+    if(expected.is_number_float())return source.is_number()
+        && std::isfinite(source.get<float>()) && expected.get<float>()==source.get<float>();
+    return expected==source;
+}
 }
 
 std::string serializeColorStylizationLook(const ColorStylizationSettings& settings) {
@@ -98,7 +117,7 @@ bool parseColorStylizationLook(std::string_view text,ColorStylizationSettings& o
         if(version<4 && static_cast<uint8_t>(settings.colorMapping)>2)
             return fail(error,"ValueBands mapping requires look schema4");
         settings=sanitizeColorStylization(settings);
-        if(document(settings,version)!=root) return fail(error,"Unknown field or value outside the look contract");
+        if(!matchesDocument(document(settings,version),root)) return fail(error,"Unknown field or value outside the look contract");
         output=settings;return true;
     } catch(const std::exception& e) {return fail(error,e.what());}
 }

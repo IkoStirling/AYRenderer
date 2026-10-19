@@ -1,5 +1,24 @@
 # AYRenderer 测试维护
 
+## 最终内容与架构收口（2026-10-19）
+
+色板演示两管线各32帧，相邻31对均有实际变化，几何固定；`palette-performance.gif`含并排过程。
+Shader整组12例/211断言通过，新增原生argv调用检查完整包成功/缺一个变体拒绝。
+单独复制包后翻转阶段字节，`--check`返回1；原包保持完整。源码脚本变更实际触发完整70变体
+生成32.16秒，随后无内容变化的工具时间戳触发仅验证复用，目标总耗时4.30秒，无shaderc调用。
+生产包再次stage进演示目标成功，未改格式或放宽严格加载。
+随后组合作者作品暴露短小数被JSON double整体比较误拒的问题，保留首次拒绝日志后修正Float32域比较。
+PostProcess269例/1778断言通过，其中新增一例30断言；短小数、规范往返、范围和嵌套未知字段边界均覆盖。
+CPU九组最终证据合计960例/15795断言（复用未变化组的已成功报告），不把历史重复执行次数累加。
+最终inventory1003例/10分区，无遗漏重复。PaperEcho/PhosphorStop两管线各32帧，变化对数分别31/23；
+前者首版纸墨对比度不足，调整双色与强度后另存最终序列。`combined-looks.gif`展示组合结果。
+一键精选导出脚本实际完成11章/332张PNG，每章实际载入的look副本与清单SHA256相符；
+已有输出目录另次调用被拒且清单未改。最终包`final-showcase-pack/`，总览`showcase-overview.png`，
+动态合集`showcase-motion.gif`。脚本是内容导出器，不将导出帧数计为测试用例覆盖。
+证据：`renderer-final-shader.log`、`shader-check-corrupt.log`、`shader-reuse-final-*.log`、
+`build-final-integrated.log`、`final-cpu-reports/`、`palette-performance-summary.json`、
+`combined-paper-echo-initial-refusal.log`、`renderer-short-decimal-postprocess.log`、`combined-looks-summary.json`。
+
 ## 保色分层补入（2026-10-19）
 
 PostProcess268例通过；与保留的八组证据合计959例/15763断言。

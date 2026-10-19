@@ -27,9 +27,18 @@ function(ay_stage_production_shaders target)
     endforeach()
     if(NOT TARGET AYProductionShaders)
         add_custom_command(OUTPUT "${_shader_package}/manifest.json"
-            COMMAND $<TARGET_FILE:AYRenderer_ShaderBuild>
-                "${AY_PRODUCTION_SHADER_PLATFORM}" "${AY_PRODUCTION_SHADER_PROFILE}" "${_shader_package}"
+            COMMAND ${CMAKE_COMMAND}
+                "-DSHADER_TOOL=$<TARGET_FILE:AYRenderer_ShaderBuild>"
+                "-DSHADER_LIBRARY=$<TARGET_FILE:AYShader>"
+                "-DSHADERC=${AY_SHADER_SHADERC_PATH}"
+                "-DPLATFORM=${AY_PRODUCTION_SHADER_PLATFORM}"
+                "-DPROFILE=${AY_PRODUCTION_SHADER_PROFILE}"
+                "-DPACKAGE=${_shader_package}"
+                "-DTOOL_SOURCE=${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/RendererShaderBuild.cpp"
+                "-DINCLUDE_ROOTS=${AY_SHADER_BGFX_COMMON_DIR};${AY_SHADER_BGFX_SRC_DIR}"
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/BuildProductionShaders.cmake"
             DEPENDS AYRenderer_ShaderBuild "${AY_SHADER_SHADERC_PATH}" ${_shader_dependencies}
+                "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/BuildProductionShaders.cmake"
             VERBATIM COMMENT "Building production shader variants")
         add_custom_target(AYProductionShaders DEPENDS "${_shader_package}/manifest.json")
     endif()

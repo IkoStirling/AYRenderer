@@ -9,6 +9,7 @@
 #include "AYMath/MathUtils.h"
 #include "ProceduralGalleryGeometry.h"
 #include "DemoUtf8Arguments.h"
+#include "PalettePerformance.h"
 
 #include <array>
 #include <chrono>
@@ -74,7 +75,7 @@ int runGallery(int argc,char** argv)
 {
     using namespace ayt::render;
     using namespace ayt::math;
-    bool gallery=false,motionGallery=false,hidden=false,writePresets=false;
+    bool gallery=false,motionGallery=false,animatePalette=false,hidden=false,writePresets=false;
     int sceneOverride=-1;
     std::string lookPath;
     Backend backend=Backend::Direct3D11;
@@ -82,6 +83,7 @@ int runGallery(int argc,char** argv)
     for(int i=1;i<argc;++i) {
         const std::string arg=argv[i];
         if(arg=="--gallery")gallery=true;
+        else if(arg=="--animate-palette")animatePalette=true;
         else if(arg=="--motion-gallery"){gallery=true;motionGallery=true;}
         else if(arg=="--scene" && i+1<argc) {
             const std::string value=argv[++i];sceneOverride=-1;
@@ -95,7 +97,7 @@ int runGallery(int argc,char** argv)
         else if(arg=="--hidden")hidden=true;
         else if(arg=="--d3d12")backend=Backend::Direct3D12;
         else if(arg=="--output" && i+1<argc)output=argv[++i];
-        else {std::fprintf(stderr,"Usage: AYRenderer_ColorStylizationDemo [--gallery | --motion-gallery] [--hidden] [--d3d12] [--output directory] [--look file.rsl] [--write-presets] [--scene auto|gallery|city|character|workshop|observatory|canal]\n");return 2;}
+        else {std::fprintf(stderr,"Usage: AYRenderer_ColorStylizationDemo [--gallery | --motion-gallery] [--animate-palette] [--hidden] [--d3d12] [--output directory] [--look file.rsl] [--write-presets] [--scene auto|gallery|city|character|workshop|observatory|canal]\n");return 2;}
     }
     std::filesystem::create_directories(output);
     if(writePresets) {
@@ -112,6 +114,9 @@ int runGallery(int argc,char** argv)
     if(!lookPath.empty()) {
         std::string error;if(!loadColorStylizationLook(lookPath,customLook,&error)) {
             std::fprintf(stderr,"%s\n",error.c_str());return 1;
+        }
+        if(animatePalette && (!customLook.enabled || customLook.colorMapping!=StylizationColorMapping::FixedPalette)) {
+            std::fprintf(stderr,"--animate-palette requires an enabled Fixed Palette look\n");return 2;
         }
     }
     constexpr uint16_t width=960,height=540;
@@ -194,15 +199,20 @@ int runGallery(int argc,char** argv)
         && whiteTexture.isValid() && ramp.isValid() && planetTexture.isValid();
     for(auto value:materials)valid=valid && value.isValid();
     if(!valid){renderer.shutdown();DestroyWindow(window);return 1;}
-    int preset=1;bool deferred=false,paused=false,customSelected=!lookPath.empty();uint32_t tick=0;int previousGallery=-1;
-    const int batchLookCount=!lookPath.empty()?1:motionGallery?5:lookCount,framesPerLook=motionGallery?100:24;
-    renderer.setColorStylizationSettings(lookPath.empty()?colorStylizationPreset(ColorStylizationPreset::PixelRetro):customLook);
-    const auto start=std::chrono::steady_clock::now();float time=0;
+    int preset=animatePalette?int(ColorStylizationPreset::Sunset):1;bool deferred=false,paused=false,customSelected=!lookPath.empty();uint32_t tick=0;int previousGallery=-1;
+    const int batchLookCount=animatePalette || !lookPath.empty()?1:motionGallery?5:lookCount,framesPerLook=motionGallery?100:24;
+    ColorStylizationSettings paletteBase;
+    const auto applyLook=[&](const ColorStylizationSettings& look){renderer.setColorStylizationSettings(look);paletteBase=renderer.colorStylizationSettings();};
+    applyLook(lookPath.empty()?colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)):customLook);
+    auto previousFrameTime=std::chrono::steady_clock::now();float time=0;
     std::array<bool,256> wasDown{};
     auto pressed=[&](int key) {bool down=(GetAsyncKeyState(key)&0x8000)!=0;bool edge=down&&!wasDown[key];wasDown[key]=down;return edge;};
     std::puts("0..9 / arrows preset | Tab scene | F Forward/Deferred | Space freeze | G color grading | F9 capture | Esc quit");
     int failures=0;
     while(state.running && (!gallery || tick<2*batchLookCount*framesPerLook)) {
+        const auto now=std::chrono::steady_clock::now();
+        const float elapsed=std::chrono::duration<float>(now-previousFrameTime).count();
+        previousFrameTime=now;
         MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) {
             if(message.message==WM_QUIT)state.running=false;
             TranslateMessage(&message);DispatchMessageW(&message);
@@ -211,20 +221,21 @@ int runGallery(int argc,char** argv)
         const int galleryIndex=int(tick/framesPerLook);
         if(gallery && galleryIndex!=previousGallery) {
             previousGallery=galleryIndex;deferred=galleryIndex>=batchLookCount;preset=galleryIndex%batchLookCount;
-            if(motionGallery && preset>0)preset+=11;
+            if(motionGallery && !animatePalette && preset>0)preset+=11;
+            if(animatePalette && lookPath.empty())preset=int(ColorStylizationPreset::Sunset);
             renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());
             renderer.setShadowsEnabled(false);
-            renderer.setColorStylizationSettings(lookPath.empty()?colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)):customLook);
+            applyLook(lookPath.empty()?colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)):customLook);
         }
         if(!gallery && GetForegroundWindow()==window) {
             for(int i=0;i<10;++i)if(pressed('0'+i)) {
                 customSelected=false;
-                preset=i;renderer.setColorStylizationSettings(colorStylizationPreset(static_cast<ColorStylizationPreset>(i)));
+                preset=i;applyLook(colorStylizationPreset(static_cast<ColorStylizationPreset>(i)));
             }
             const bool previousLook=pressed(VK_LEFT),nextLook=pressed(VK_RIGHT);
             if(previousLook || nextLook) {
                 customSelected=false;
-                preset=(preset+(previousLook?lookCount-1:1))%lookCount;renderer.setColorStylizationSettings(colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)));
+                preset=(preset+(previousLook?lookCount-1:1))%lookCount;applyLook(colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)));
             }
             if(pressed(VK_TAB)){sceneOverride=(sceneOverride+1)%6;renderer.notifyCameraCut();}
             if(pressed('F')){deferred=!deferred;renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());}
@@ -232,7 +243,12 @@ int runGallery(int argc,char** argv)
             if(pressed('G')){renderer.setColorGradingPreset(ColorGradingPreset::Warm);renderer.setColorGradingEnabled(!renderer.colorGradingEnabled());}
         }
         if(gallery)time=motionGallery?float(tick%framesPerLook)/30.f:.8f;
-        else if(!paused)time=std::chrono::duration<float>(std::chrono::steady_clock::now()-start).count();
+        else if(!paused)time+=elapsed;
+        if(animatePalette) {
+            const float paletteTime=gallery?float(tick%framesPerLook)/30.f:time;
+            renderer.setColorStylizationSettings(demo::palettePerformance(paletteBase,paletteTime));
+            if(gallery)time=.8f; // Keep geometry fixed in exported palette performances.
+        }
         RenderScene scene;
         scene.add(cube,floorMaterial,translate(0,-.2f,1)*scale(12,.25f,9));
         const int exhibit=sceneOverride>=0?sceneOverride:motionGallery?2:preset>=16?4:preset>=12?2:preset==10?2:preset==11?1:preset<6?0:preset==6?1:preset==7?2:3;
@@ -333,7 +349,7 @@ int runGallery(int argc,char** argv)
         bool capture=gallery ? (motionGallery?localFrame>=4 && localFrame%3==1:localFrame==20)
             : GetForegroundWindow()==window && pressed(VK_F9);
         if(capture) {
-            const auto base=output/((deferred?std::string("deferred-"):std::string("forward-"))+std::to_string(preset)
+            const auto base=output/((deferred?std::string("deferred-"):std::string("forward-"))+std::to_string(animatePalette?0:preset)
                 +(motionGallery?"-"+std::to_string(localFrame):""));
             if(!renderer.captureScreenshot(base.string()+".png"))++failures;
             std::printf("Capture %s\n",base.string().c_str());
@@ -348,7 +364,7 @@ int runGallery(int argc,char** argv)
         }
         ++tick;
         std::wstring title=L"Retro Color Gallery | ";title+=deferred?L"Deferred | ":L"Forward | ";
-        for(const char* p=customSelected?"Custom Look":names[preset];*p;++p)title+=wchar_t(*p);
+        for(const char* p=animatePalette?"Palette Morph":customSelected?"Custom Look":names[preset];*p;++p)title+=wchar_t(*p);
         title+=L" | ";for(const char* p=sceneNames[exhibit];*p;++p)title+=wchar_t(*p);
         title+=L" | arrows look, Tab scene, F pipeline, Space freeze, F9 save";
         SetWindowTextW(window,title.c_str());

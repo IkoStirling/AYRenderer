@@ -1,5 +1,26 @@
 # AYRenderer
 
+## 色板动态与生产构建复用（2026-10-19）
+
+`--animate-palette`以3.2秒循环在原始、暖色、冷色三个实际色板之间平滑插值；
+默认Sunset，也可搭配启用FixedPalette的`--look`。它改变颜色值而非仅排列最近色列表。
+交互模式Space冻结时间，恢复时从暂停点继续，F切换管线；动态批量导出冻结几何，以区分颜色变化与物体运动：
+
+```powershell
+AYRenderer_ColorStylizationDemo --motion-gallery --animate-palette --hidden --scene observatory --look demo/looks/reference-palette.rsl --output palette-performance
+```
+
+该配方只在demo Host推进既有值配置，不引入新的运行时动画API、look字段或GPU历史。
+另附PaperEcho和PhosphorStop两个独立组合作者look，含网点/双色/残影及固定色板/停格/显示模拟；
+选择与使用方法见[作品集](demo/looks/README.md)。内置preset仍18项。
+`demo/ExportStyleShowcase.ps1`以全新目录导出六章精选和可选动态内容，附实际look快照及摘要清单。
+
+生产shader生成增加本地内容复用：输入指纹相同后仍用`AYRenderer_ShaderBuild <platform> <profile> <package> --check`
+验证完整目录、目标、源码/define覆盖和阶段字节摘要，再复用现有包。编译器/AYShader库、生成工具源码、
+构建脚本、include内容或目录变动会失效；缺包、损坏或覆盖不足回到完整70变体构建。
+私有`.inputs`状态位于包目录之外，不随安装/发布；包协议与严格运行时加载保持原样。
+这是可信本地构建复用，尚无逐变体持久缓存、共享缓存认证或并发源码编辑快照协议。
+
 ## 保色明暗分层（2026-10-19）
 
 ValueBands对max(R,G,B)作2..32阶量化，按统一增益缩放RGB，保留非黑色的通道比例；
@@ -23,6 +44,7 @@ Windows画廊/离线工具从wmain接收UTF-16并转换UTF-8，支持参考图�
 其颜色空间与FixedPalette显示RGB匹配，不是感知均匀量化或跨平台逐位确定性承诺。
 `AYRenderer_RenderStyleTool palette <image> <output.rsl> [colors]`生成独立look；
 `inspect <look.rsl>`读/迁移后打印规范配置。该工具不初始化设备，也不需要production shader目录。
+JSON数值按Float32控件读取，允许`0.12`这样的短小数；仍拒绝未知字段、错误类型和越界配置。
 `demo/looks/palette-reference.png`和同名可编辑SVG为32色参考图，标准库脚本
 `demo/GeneratePaletteReference.py`可重建；`reference-palette.rsl`是它生成的8色色板。
 `AYRenderer_ColorStylizationDemo --gallery --look <file.rsl> --hidden --output <dir>`导出自定义look；

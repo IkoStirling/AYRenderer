@@ -2137,27 +2137,23 @@ void Renderer::render(const RenderScene& scene)
         ++s_compositeLog;
     }
 
-    // Dispatched via RenderPipeline::executeAll in registration order
-    // [ForwardOpaque, Transparent, PostProcess, FXAA, Present, UI].
-    // ForwardOpaquePass
-    // writes the depth buffer first; TransparentPass reuses that depth
+    // FrameGraph eligibility gates the pipeline's registered passes.
+    // Opaque geometry writes depth first; transparency reuses that depth
     // with DEPTH_TEST_LEQUAL but does not WRITE_Z. Transparent submission is
     // stable back-to-front: explicit DrawItem::sortKey first, camera distance
     // second, with Sequential view mode preserving that CPU order.
-    // PostProcessPass writes FrameGraph FinalLdrColor; FXAA may promote
-    // PresentSource to FxaaColor, then PresentPass samples the current source
-    // into the Game View backbuffer rect. UIPass ignores the viewId arg and
+    // The main LDR chain runs AA, outline, grading, artistic color, temporal
+    // feedback, display simulation and Present. Each successful stage promotes
+    // PresentSource; Present samples it into the Game View rect. UI runs after
+    // these image effects. UIPass ignores the viewId arg and
     // delegates to its injected UIRenderBackend (see UIPass.h for the
     // chrome lifecycle contract — execute() DOES call flushBatches;
     // beginFrame/endFrame stay on the host's UIManager::render lambda).
     //
-    // Per-pass isEnabled() guards are honored by the pipeline. As of
-    // E5 (§5.4, 2026-07-22) the canonical default mounts Shadow at
-    // slot 0 *enabled* (no opt-in required). Hosts that want to opt
-    // out pass a custom desc that omits the Shadow slot — there is no
-    // public setShadowsEnabled setter yet (deliberately deferred;
-    // Editor / demo / unittest have no consumer). The shadow FBO is
-    // a depth-only offscreen target; ShadowPass::execute Noop-gates
+    // Shadow mounting follows the pipeline descriptor; setShadowsEnabled
+    // controls an installed pass. Its depth-only target and submit gate
+    // honor the same backend/Noop ownership rules as other passes.
+    // ShadowPass::execute Noop-gates
     // cleanly when the adapter is uninitialized or Noop.
     detail::configureRenderViewOrder(_impl->adapter);
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);

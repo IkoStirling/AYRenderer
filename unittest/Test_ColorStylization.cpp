@@ -225,6 +225,39 @@ TEST_CASE(look_document_round_trip_rejects_unknown_and_preserves_output)
     CHECK_FALSE(parseColorStylizationLook(duplicate,output,&error));
 }
 
+TEST_CASE(look_authoring_accepts_short_float_decimals_but_keeps_shape_and_range_strict)
+{
+    auto text=serializeColorStylizationLook(colorStylizationPreset(ColorStylizationPreset::CelPaint));
+    const auto replaceNumber=[](std::string& document,const char* key,const char* value) {
+        const auto field=document.find(std::string("\"")+key+"\":");
+        if(field==std::string::npos)return false;
+        const auto begin=document.find(':',field)+1,end=document.find_first_of(",}\n",begin);
+        document.replace(begin,end-begin,std::string(" ")+value);return true;
+    };
+    CHECK(replaceNumber(text,"ditherStrength","0.12"));
+    CHECK(replaceNumber(text,"printGamma","1.3"));
+    CHECK(replaceNumber(text,"historyWeight","0.72"));
+    CHECK(replaceNumber(text,"historyOffsetX","0.6"));
+    CHECK(replaceNumber(text,"grainStrength","0.018"));
+    ColorStylizationSettings output;std::string error;
+    CHECK(parseColorStylizationLook(text,output,&error));CHECK(error.empty());
+    CHECK(output.ditherStrength==.12f);CHECK(output.printGamma==1.3f);
+    CHECK(output.temporal.historyWeight==.72f);CHECK(output.temporal.historyOffsetX==.6f);
+    CHECK(output.display.grainStrength==.018f);
+    const auto saved=serializeColorStylizationLook(output);
+    CHECK(parseColorStylizationLook(saved,output,&error));
+    for(const auto& pair:std::array<std::pair<const char*,const char*>,5>{{
+        {"ditherStrength","1.01"},{"printGamma","0.2"},{"historyOffsetX","64.01"},
+        {"printAngle","180"},{"grainStrength","0.251"}}}) {
+        auto invalid=text;CHECK(replaceNumber(invalid,pair.first,pair.second));
+        CHECK_FALSE(parseColorStylizationLook(invalid,output,&error));
+        CHECK(serializeColorStylizationLook(output)==saved);
+    }
+    auto unknown=text;unknown.insert(unknown.find("\"display\": {")+std::string("\"display\": {").size(),"\"typo\":0,");
+    CHECK_FALSE(parseColorStylizationLook(unknown,output,&error));
+    CHECK(serializeColorStylizationLook(output)==saved);
+}
+
 TEST_CASE(outline_has_independent_gate_and_graph_dependency)
 {
     ColorStylizationSettings s;s.enabled=true;s.pixelationEnabled=false;s.posterizationEnabled=false;

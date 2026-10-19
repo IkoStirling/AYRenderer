@@ -8,6 +8,15 @@
 #include <chrono>
 #include <filesystem>
 #include <set>
+#include <array>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <spawn.h>
+#include <sys/wait.h>
+#include <cerrno>
+extern char** environ;
+#endif
 using namespace ayt::render::detail;
 TEST_SUITE(ShaderProductionTests)
 TEST_CASE(complete_catalog_prewarms_normal_paths_without_compiler) {
@@ -29,6 +38,21 @@ TEST_CASE(complete_catalog_prewarms_normal_paths_without_compiler) {
     CHECK(!ayt::shader::validateShaderBuildCoverage(manifest,wrongMacro,errors));
     const auto package=root/"windows-s_5_0"/"engine";
     CHECK(ayt::shader::writeShaderBuildPackage(report,package.string(),errors));
+#ifdef AY_RENDERER_SHADER_BUILD_TOOL
+    std::array<std::string,5> checkArguments{AY_RENDERER_SHADER_BUILD_TOOL,"windows","s_5_0",package.string(),"--check"};
+    const auto checkPackage=[&]() {
+        char* args[]={checkArguments[0].data(),checkArguments[1].data(),checkArguments[2].data(),checkArguments[3].data(),checkArguments[4].data(),nullptr};
+#ifdef _WIN32
+        return int(_spawnv(_P_WAIT,args[0],args));
+#else
+        pid_t child=0;if(posix_spawn(&child,args[0],nullptr,nullptr,args,environ)!=0)return -1;
+        int status=0;pid_t result;
+        do{result=waitpid(child,&status,0);}while(result<0 && errno==EINTR);
+        return result==child && WIFEXITED(status)?WEXITSTATUS(status):-1;
+#endif
+    };
+    CHECK(checkPackage()==0);
+#endif
     bgfx::Init init;init.type=bgfx::RendererType::Noop;
     const bool initialized=bgfx::init(init);CHECK(initialized);if(!initialized)return;
     {
@@ -59,6 +83,9 @@ TEST_CASE(complete_catalog_prewarms_normal_paths_without_compiler) {
         fs::rename(package,root/"saved");
         report.entries.pop_back();
         CHECK(ayt::shader::writeShaderBuildPackage(report,package.string(),errors));
+#ifdef AY_RENDERER_SHADER_BUILD_TOOL
+        CHECK(checkPackage()==1);
+#endif
         CHECK(!loadProductionShaderPackages(pool,root,true,errors));
         pool.shutdown();
     }

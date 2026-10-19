@@ -1,5 +1,23 @@
 # AYRenderer Design
 
+## 2026-10-19 — Host色板演示与本地生产shader复用
+
+作者组合配方暴露了原JSON整体double比较误拒短小数的问题。解析仍先严格解码、清洗并核对完整形状；
+数值比较改为Float32控件域，未知字段/缺字段、整数和bool类型、非法范围与旧schema枚举门禁保持。
+序列化仍输出规范Float32值；短小数首次读入可能规范化文本，但不会隐式丢字段或修改文件。
+
+PalettePerformance为demo私有纯值配方，从固定base计算每帧结果，避免前帧颜色反复插值造成漂移。
+原色/暖色/冷色三段smoothstep闭环；仅FixedPalette启用。批量固定几何时间，只推进配色。
+
+ProductionShaders的CMake驱动在独占私有状态锁下计算输入SHA256，覆盖目标/profile、AYShader
+链接产物、shaderc、工具源码/脚本和所有已配置include文本；不把无关Renderer链接产物摘要作为失效依据。
+命中时`--check`从磁盘读取完整包、验证所有阶段摘要与当前builtinShaderJobs覆盖，不能只信sidecar。
+验证后重算输入以拒绝期间发生的输入变化，随后仅更新manifest时间戳满足生成器增量依赖。
+不命中则沿用ShaderBuildSession和publishDirectory完整生成/发布，成功后才原子替换私有状态。
+状态和锁在运行时包旁而非包内；既有staging/install不会携带它们。显式工具无`--check`仍总是生成。
+只保证正常依赖构建下的本地复用，不提供不受信任缓存认证或任意并行源码编辑的一致性快照。
+冷构建仍编译整个目录；按job粒度持久缓存应另行设计，避免把私有状态变成新运行时格式。
+
 ## 2026-10-19 — 保色分层复用颜色阶段
 
 ValueBands追加mapping enum3，在同一个ColorStylization shader中对最大RGB分量量化，再统一缩放RGB。

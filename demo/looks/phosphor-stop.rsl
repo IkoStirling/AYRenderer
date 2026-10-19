@@ -1,0 +1,150 @@
+{
+  "colorLevels": 6,
+  "colorMapping": 2,
+  "display": {
+    "chromaticOffset": 0.2,
+    "curvature": 0.025,
+    "enabled": true,
+    "grainStrength": 0.012,
+    "maskStrength": 0.08,
+    "noiseSeed": 151,
+    "scanlineStrength": 0.18,
+    "vignetteStrength": 0.18
+  },
+  "ditherStrength": 0.16,
+  "enabled": true,
+  "highlightColor": [
+    1.0,
+    0.8999999761581421,
+    0.6800000071525574
+  ],
+  "inkColor": [
+    0.02500000037252903,
+    0.03500000014901161,
+    0.054999999701976776
+  ],
+  "outlineColor": [
+    0.014999999664723873,
+    0.019999999552965164,
+    0.03999999910593033
+  ],
+  "outlineDepthThreshold": 0.029999999329447746,
+  "outlineLuminanceThreshold": 0.11999999731779099,
+  "outlineMode": 0,
+  "outlineNormalThreshold": 0.25,
+  "outlineStrength": 0.6499999761581421,
+  "outlineWidth": 1.0,
+  "palette": [
+    [
+      0.008,
+      0.024,
+      0.028
+    ],
+    [
+      0.015,
+      0.1,
+      0.11
+    ],
+    [
+      0.025,
+      0.28,
+      0.24
+    ],
+    [
+      0.08,
+      0.48,
+      0.34
+    ],
+    [
+      0.28,
+      0.72,
+      0.46
+    ],
+    [
+      0.66,
+      0.91,
+      0.65
+    ],
+    [
+      0.91,
+      1.0,
+      0.84
+    ],
+    [
+      0.91,
+      1.0,
+      0.84
+    ],
+    [
+      0.91,
+      1.0,
+      0.84
+    ],
+    [
+      0.91,
+      1.0,
+      0.84
+    ],
+    [
+      0.91,
+      1.0,
+      0.84
+    ],
+    [
+      0.91,
+      1.0,
+      0.84
+    ],
+    [
+      0.91,
+      1.0,
+      0.84
+    ],
+    [
+      0.91,
+      1.0,
+      0.84
+    ],
+    [
+      0.91,
+      1.0,
+      0.84
+    ],
+    [
+      0.91,
+      1.0,
+      0.84
+    ]
+  ],
+  "paletteSize": 7,
+  "paperColor": [
+    0.9599999785423279,
+    0.9300000071525574,
+    0.8299999833106995
+  ],
+  "pixelSize": 3,
+  "pixelationEnabled": true,
+  "posterizationEnabled": false,
+  "printAngle": 45.0,
+  "printGamma": 1.0,
+  "printPattern": 0,
+  "printSpacing": 7.0,
+  "printStrength": 1.0,
+  "schemaVersion": 4,
+  "shadowColor": [
+    0.03500000014901161,
+    0.054999999701976776,
+    0.11999999731779099
+  ],
+  "temporal": {
+    "enabled": true,
+    "historyOffsetX": 0.0,
+    "historyOffsetY": 0.0,
+    "historyWeight": 0.8500000238418579,
+    "holdFrames": 4,
+    "mode": 1,
+    "noiseSeed": 0,
+    "tileSize": 24
+  },
+  "type": "Aliyat.ColorStylizationLook"
+}

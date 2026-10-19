@@ -11,6 +11,7 @@ namespace ayt::render {
 /// assets, Scene mutation or automatic ResourceManager/Cook/Pak integration.
 /// Serialization sanitizes runtime values. Parsing rejects malformed, unknown,
 /// incomplete or out-of-range documents (64 KiB limit), preserving output on failure.
+/// Numeric controls decode as Float32; valid short JSON decimals are accepted.
 std::string serializeColorStylizationLook(const ColorStylizationSettings& settings);
 bool parseColorStylizationLook(std::string_view text, ColorStylizationSettings& output,
                               std::string* error = nullptr);
