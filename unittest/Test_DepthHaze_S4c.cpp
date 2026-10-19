@@ -170,7 +170,7 @@ TEST_CASE(deferred_pipeline_matches_data_dependencies) {
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 65u);
+    CHECK(order.size() == 70u);
     const auto rank = [&order](bgfx::ViewId view) {
         return std::find(order.begin(), order.end(), view);
     };
@@ -180,6 +180,9 @@ TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     CHECK(std::count(order.begin(), order.end(), 243u) == 1);
     CHECK(rank(243u) < rank(9u));
     CHECK(rank(243u) < rank(246u));
+    const bgfx::ViewId pointChain[]{50,51,52,53,54};
+    for(size_t i=0;i<std::size(pointChain);++i){CHECK(std::count(order.begin(),order.end(),pointChain[i])==1);if(i)CHECK(rank(pointChain[i-1])<rank(pointChain[i]));}
+    CHECK(rank(53u)<rank(9u));
 
     const bgfx::ViewId dependencyChain[] = {
         7, 3, 14,       // GBuffer, motion vectors, SSAO

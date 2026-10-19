@@ -505,3 +505,21 @@ TEST_CASE(transparent_replay_limits_are_transactional) {
 }
 
 TEST_SUITE_END
+
+TEST_SUITE(EmissivePointGpuFallbackTests)
+TEST_CASE(cpu_builders_drop_borrowed_gpu_callbacks_when_switching_paths) {
+    std::vector<EmissivePoint> points{{1,{0,0,0},{1,0,0},1,.1f}};std::vector<ParticleDrawData> batches(1);EmissivePointStats stats;
+    const auto identity=ayt::math::Float4x4::identity();int token=1;
+    const auto seed=[&](){batches[0].gpuStream=&token;batches[0].submitGpu=[](void*,uint16_t){};};
+    seed();CHECK(buildEmissivePointBatches(points,identity,identity,64,64,{},batches,stats));CHECK(batches.size()==1);CHECK(!batches[0].gpuStream);CHECK(!batches[0].submitGpu);CHECK(stats.countsExact);
+    seed();CHECK(buildEmissivePointInstanceBatches(points,identity,identity,64,64,{},batches,stats));CHECK(!batches[0].gpuStream);CHECK(!batches[0].submitGpu);CHECK(!stats.gpuCulling);
+}
+TEST_CASE(noop_and_visible_budget_fallback_keep_exact_cpu_counts) {
+    Renderer renderer;InitDesc init;init.backend=Backend::Noop;CHECK(renderer.initialize(init));
+    EmissivePointCloud cloud;RenderScene scene;std::vector<EmissivePoint> points{{1,{0,0,0},{1,0,0},1,.1f},{2,{.2f,0,0},{0,0,1},1,.1f}};
+    const auto identity=ayt::math::Float4x4::identity();EmissivePointSettings settings;settings.preferGpuCulling=true;settings.maxPoints=1;std::string error;
+    CHECK(cloud.append(renderer,scene,points,identity,identity,64,64,settings,&error));CHECK(error.empty());CHECK(!cloud.stats().gpuCulling);CHECK(cloud.stats().countsExact);CHECK(cloud.stats().visible==1);CHECK(cloud.stats().gpuFallback==EmissivePointGpuFallback::VisibleBudget);
+    settings.maxPoints=65536;scene.clear();CHECK(cloud.append(renderer,scene,points,identity,identity,64,64,settings,&error));CHECK(error.empty());CHECK(!cloud.stats().gpuCulling);CHECK(cloud.stats().countsExact);CHECK(cloud.stats().visible==2);CHECK(cloud.stats().gpuFallback==EmissivePointGpuFallback::Unavailable);
+    renderer.shutdown();
+}
+TEST_SUITE_END

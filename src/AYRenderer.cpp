@@ -1,3 +1,4 @@
+#include "detail/GpuPointState.h"
 #include "AYRenderer.h"
 
 #include "AYRenderer/F1DiagFlags.h"
@@ -352,6 +353,7 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
 struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
     ayt::shader::ShaderResourcePool    shaderPool;
+    std::shared_ptr<detail::GpuPointContext> gpuPoints;
     detail::RenderTargetPool      renderTargetPool{adapter};
     // Product default = RenderPipelineDesc::makeDefault()
     // (Shadow → FO → Transparent → PostProcess → UI), Shadow enabled
@@ -1281,9 +1283,11 @@ void Renderer::shutdown()
     _impl->renderTargetPool.shutdown();
 
     ayt::resource::ResourceManager::instance().setOnHotReload({});
+    if(_impl->gpuPoints)_impl->gpuPoints->releaseBeforeDeviceShutdown();
     _impl->resources.shutdown();
     _impl->shaderPool.shutdown();
     _impl->adapter.shutdown();
+    if(_impl->gpuPoints){_impl->gpuPoints->afterDeviceShutdown();_impl->gpuPoints.reset();}
     // Shutdown joins the submission thread, so a last-frame screenshot may
     // only become readable now. Image conversion uses no live GPU resources.
     if (!_impl->finalizeScreenshotBase.empty()) {
@@ -1291,6 +1295,12 @@ void Renderer::shutdown()
         _impl->finalizeScreenshotBase.clear();
     }
     _impl->shaderPoolReady = false;
+}
+
+std::shared_ptr<detail::GpuPointState> Renderer::createGpuPointState(std::string* error) {
+    if(!_impl||!_impl->adapter.isInitialized()){if(error)*error="Renderer is not initialized";return {};}
+    if(!_impl->gpuPoints)_impl->gpuPoints=detail::GpuPointContext::create(_impl->adapter,_impl->aliveToken,error);
+    return _impl->gpuPoints?_impl->gpuPoints->createState(error):nullptr;
 }
 
 bool Renderer::isInitialized() const noexcept
@@ -1303,6 +1313,7 @@ void Renderer::beginFrame(const ClearDesc& clear)
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+    if(_impl->gpuPoints)_impl->gpuPoints->poll();
     _impl->cameraViewBatchSubmitted = false; _impl->cameraFrameOpen = true;
     _impl->compositeSceneViewId = -1;
     _impl->pipeline.resetFrameStats();
@@ -2271,7 +2282,11 @@ bool Renderer::renderViews(std::span<const CameraRenderView> views) {
             view.x,view.y,view.width,view.height,frame,firstView,fbo};
         ctx.drawLists = &lists;
         state->opaque.execute(ctx);
+        _impl->adapter.setViewFrameBuffer(firstView,fbo);
+        _impl->adapter.setViewRect(firstView,view.output.id?0:view.x,view.output.id?0:view.y,view.width,view.height);
         _impl->adapter.setViewClearRaw(firstView,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,view.clearRgba,1.f,0);
+        // Empty opaque scenes still execute the camera's requested clear.
+        _impl->adapter.touch(firstView);
         ctx.viewId = uint8_t(firstView + 1);
         state->transparent.execute(ctx);
         detail::Forward2DOpaquePass overlay(uint8_t(firstView + 2));
@@ -2456,6 +2471,7 @@ void Renderer::endFrame()
                                    _impl->viewportX, _impl->viewportY,
                                    _impl->viewportW, _impl->viewportH);
     _impl->adapter.endFrame();
+    if(_impl->gpuPoints)_impl->gpuPoints->poll();
     _impl->debugOverlay.onFrameSubmitted();
     _impl->compositeSceneViewId = -1;
 

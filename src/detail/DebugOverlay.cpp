@@ -1,3 +1,4 @@
+#include "detail/GpuPointState.h"
 #include "detail/DebugOverlay.h"
 
 #include <bgfx/bgfx.h>
@@ -173,6 +174,7 @@ void DebugOverlay::updateFrameStats(
     _stats.sceneItems = sceneItems;
     _stats.passes = passStats;
     _stats.gpuFrameTimeMs = 0.0f;
+    _stats.pointGpuTimeMs=0;_stats.pointGpuReadbackTimeMs=0;
     _stats.backendDrawCalls = 0;
     _stats.backendBlitCalls = 0;
     _stats.gpuFrameNumber = 0;
@@ -198,6 +200,10 @@ void DebugOverlay::updateFrameStats(
 
     for (uint16_t i = 0; i < bgfxStats->numViews; ++i) {
         const bgfx::ViewStats& view = bgfxStats->viewStats[i];
+        if(view.view>=kPointMarkView&&view.view<=kPointCompactView){
+            _stats.pointGpuTimeMs+=ticksToMs(view.gpuTimeBegin,view.gpuTimeEnd,bgfxStats->gpuTimerFreq);continue;
+        }
+        if(view.view==kPointReadbackView){_stats.pointGpuReadbackTimeMs+=ticksToMs(view.gpuTimeBegin,view.gpuTimeEnd,bgfxStats->gpuTimerFreq);continue;}
         const std::string_view passName = passNameForView(view.view, _stats.passes);
         if (passName.empty()) {
             continue;

@@ -34,6 +34,8 @@ struct PreviewSceneCamera;
 namespace detail {
 class BGFXAdapter;
 class RenderTargetPool;
+class GpuPointContext;
+class GpuPointState;
 struct CameraViewsTestAccess;
 }
 
@@ -631,6 +633,8 @@ public:
 
 private:
     friend class UIRenderBackend;
+    friend class EmissivePointCloud;
+    std::shared_ptr<detail::GpuPointState> createGpuPointState(std::string* error);
     bool cameraOutputMatches(CameraOutputHandle output, uint16_t width, uint16_t height) const noexcept;
     void renderPreviewScene(const RenderScene& scene, const PreviewSceneCamera& camera,
                             uint16_t framebuffer, uint16_t width, uint16_t height,

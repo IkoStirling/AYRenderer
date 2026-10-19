@@ -637,3 +637,14 @@ Debug/D3D11 1920x828,64 fixtures/10k points,16 aggregate lights,80 surface/12 vo
 24 steps,90 samples: initial smooth aggregation25.8929ms; cached smooth5.3723ms.
 Final hard/smooth/contact aggregation4.1573/5.3723/7.3837ms, GPU11.4194/12.6907/15.6380ms.
 All retain10k visible instances/16 lights. Process timing varies; no universal FPS claim.
+
+2026-10-20 GPU point acceptance: D3D11/D3D12 each2 cases/231 assertions,
+all full-image CPU/GPU comparisons max difference0, including dense65536 last output,
+partial257 tiles, oblique camera, subpixel energy, black frames, budgets, path switch,
+readback-in-flight owner destruction and device shutdown. Six baked stages built.
+Contracts177/2343, SceneMaterial79/10401, UI114/377, FrameGraph41/159,
+PostProcess252/1373, Sequence120/4157, Shader12/213(73 standard variants) passed.
+Inventory1046/10 and120/3; SDK129 capabilities/53 modules/99 searches/566 symbols,0 errors/warnings.
+Same Debug/D3D11 90 samples: point CPU1.9881->.9917ms; GPU compute.7098ms.
+Frame CPU23.5177->22.0014ms, GPU12.0987->12.6955ms, a measured tradeoff.
+Async sample10000/10000; D3D12 combined sample1000/1000 with froxel history/contact/shutter passed.

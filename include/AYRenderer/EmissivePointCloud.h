@@ -5,6 +5,7 @@
 #include <string>
 namespace ayt::render {
 class Renderer;
+namespace detail { class GpuPointState; }
 struct EmissivePoint {
     uint32_t id=0;
     math::FVector3 position{0,0,0};
@@ -66,10 +67,24 @@ struct EmissivePointSettings {
     /// Prefer one hardware instance per visible point when supported; the
     /// existing CPU quad path remains the fallback and comparison mode.
     bool preferInstancing=true;
+    /// Opt-in D3D11/12 compute culling, stable compaction and indirect draw.
+    /// Falls back to CPU when unsupported or source.size()>maxPoints, keeping
+    /// the stable-ID budget rule. No current visible count is read synchronously.
+    bool preferGpuCulling=false;
+    /// Optional asynchronous sampled counts, labelled with submission serial.
+    /// Normal GPU rendering performs no readback and never waits for the GPU.
+    bool gpuDiagnostics=false;
 };
+enum class EmissivePointGpuFallback : uint8_t { None,Unavailable,VisibleBudget,InstancingDisabled,Resources };
 struct EmissivePointStats {
     uint32_t source=0,visible=0,culled=0,budgetSkipped=0,batches=0;
     bool instanced=false;
+    bool gpuCulling=false,countsExact=true,gpuSampleValid=false;
+    EmissivePointGpuFallback gpuFallback=EmissivePointGpuFallback::None;
+    uint64_t gpuSubmittedSerial=0,gpuSampleSerial=0;
+    uint32_t gpuSampleSource=0,gpuSampleVisible=0;
+    // On GPU, visible/culled are unknown (0), not an estimate of this frame.
+
 };
 /// CPU quad preparation for deterministic tests and non-instanced backends.
 /// No births/lifetimes/RNG and no SceneLights per point. Input must be finite;
@@ -91,11 +106,17 @@ public:
     /// Borrowed scene payloads live until this object's next append/destruction;
     /// use an OwnedCpu RenderScene when retaining frames. Renderer must outlive use.
     /// Recreate this object after Renderer shutdown/reinitialize.
+    /// GPU streams stay borrowed even in OwnedCpu scenes: retain this owner
+    /// through rendering and do not retain GPU frames across another append.
     bool append(Renderer& renderer,RenderScene& scene,std::span<const EmissivePoint> points,
         const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
         EmissivePointSettings settings={},std::string* error=nullptr);
+    /// Value snapshot refreshed by append. GPU mode leaves current visible/
+    /// culled counts unknown (countsExact=false); optional sampled counts carry
+    /// their own source count and older submission serial. No GPU calls/waits.
     EmissivePointStats stats() const noexcept { return _stats; }
 private:
+    std::shared_ptr<detail::GpuPointState> _gpuState;
     std::vector<ParticleDrawData> _batches;
     EmissivePointStats _stats;
     Renderer* _renderer=nullptr;

@@ -186,6 +186,10 @@ struct RenderFrameStats {
     // Geometry submissions (including repeated shadow cascades), not unique entities.
     uint32_t instancedDrawCalls = 0;
     uint32_t instancedObjects = 0;
+    /// Optional completed-frame GPU intervals for point mark/count/prefix/
+    /// compact and diagnostic blit. Same gpuFrameNumber/zero rules as above;
+    /// readback time excludes CPU mapping and asynchronous queue latency.
+    float pointGpuTimeMs=0,pointGpuReadbackTimeMs=0;
 };
 
 struct ClearDesc {

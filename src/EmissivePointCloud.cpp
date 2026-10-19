@@ -1,3 +1,4 @@
+#include "detail/GpuPointState.h"
 #include <AYRenderer/EmissivePointCloud.h>
 #include <AYRenderer.h>
 #include <bgfx/bgfx.h>
@@ -20,7 +21,7 @@ struct PointSelection {
 };
 constexpr std::size_t kPointsPerBatch=16383;
 
-bool selectVisiblePoints(std::span<const EmissivePoint> points,const math::Float4x4& view,
+bool validatePointInput(std::span<const EmissivePoint> points,const math::Float4x4& view,
     const math::Float4x4& projection,uint16_t width,uint16_t height,EmissivePointSettings settings,
     PointSelection& output,std::string* error) {
     const auto fail=[&](const char* text){if(error)*error=text;return false;};
@@ -38,8 +39,16 @@ bool selectVisiblePoints(std::span<const EmissivePoint> points,const math::Float
     for(int i=0;i<16;++i)if(!std::isfinite(inverse.ptr()[i]))return fail("Singular point cloud camera");
     output.right={inverse(0,0),inverse(1,0),inverse(2,0)};
     output.up={inverse(0,1),inverse(1,1),inverse(2,1)};
-    const auto vp=projection*view;const float scale=std::abs(projection(1,1))*height*.5f;
+    const float scale=std::abs(projection(1,1))*height*.5f;
     if(scale<.00001f)return fail("Degenerate point cloud projection");
+    return true;
+}
+
+bool selectVisiblePoints(std::span<const EmissivePoint> points,const math::Float4x4& view,
+    const math::Float4x4& projection,uint16_t width,uint16_t height,EmissivePointSettings settings,
+    PointSelection& output,std::string* error) {
+    if(!validatePointInput(points,view,projection,width,height,settings,output,error))return false;
+    const auto vp=projection*view;const float scale=std::abs(projection(1,1))*height*.5f;
     EmissivePointStats next;next.source=static_cast<uint32_t>(points.size());
     std::vector<VisiblePoint> visible;visible.reserve(points.size());
     for(std::size_t index=0;index<points.size();++index) {
@@ -206,7 +215,7 @@ bool buildEmissivePointBatches(std::span<const EmissivePoint> points,const math:
     for(std::size_t i=0;i<needed;++i){
         auto& b=batches[i];const auto count=std::min(kPointsPerBatch,visible.size()-i*kPointsPerBatch);
         b.vertices.clear();b.vertices.reserve(count*4);b.indices.clear();b.indices.reserve(count*6);
-        b.instanceData.clear();b.instanceStride=0;b.world3D=true;
+        b.instanceData.clear();b.instanceStride=0;b.world3D=true;b.gpuStream=nullptr;b.submitGpu=nullptr;
     }
     for(const auto& selected:visible) {
         const auto& p=points[selected.index];
@@ -239,7 +248,7 @@ bool buildEmissivePointInstanceBatches(std::span<const EmissivePoint> points,
         const auto count=std::min(kPointsPerBatch,selection.visible.size()-i*kPointsPerBatch);
         batch.vertices.clear();batch.indices.clear();
         batch.instanceData.resize(count*16);
-        batch.instanceStride=16*sizeof(float);batch.world3D=true;
+        batch.instanceStride=16*sizeof(float);batch.world3D=true;batch.gpuStream=nullptr;batch.submitGpu=nullptr;
     }
     for(const auto& selected:selection.visible) {
         const auto& point=points[selected.index];
@@ -262,10 +271,29 @@ bool EmissivePointCloud::append(Renderer& renderer,RenderScene& scene,std::span<
     EmissivePointSettings settings,std::string* error) {
     const auto* caps=bgfx::getCaps();
     const bool instancing=settings.preferInstancing&&caps&&(caps->supported&BGFX_CAPS_INSTANCING);
-    const bool built=instancing
-        ?buildEmissivePointInstanceBatches(points,view,projection,width,height,settings,_batches,_stats,error)
-        :buildEmissivePointBatches(points,view,projection,width,height,settings,_batches,_stats,error);
-    if(!built)return false;
+    bool gpu=false;auto fallback=EmissivePointGpuFallback::None;
+    if(settings.preferGpuCulling&&!points.empty()){
+        PointSelection validated;
+        if(!validatePointInput(points,view,projection,width,height,settings,validated,error))return false;
+        if(_renderer!=&renderer)_gpuState.reset();
+        if(_gpuState&&!_gpuState->alive()){if(error)*error="Recreate point cloud after Renderer shutdown/reinitialize";return false;}
+        if(points.size()>settings.maxPoints)fallback=EmissivePointGpuFallback::VisibleBudget;
+        else if(!settings.preferInstancing)fallback=EmissivePointGpuFallback::InstancingDisabled;
+        else if(!instancing)fallback=EmissivePointGpuFallback::Unavailable;
+        else {
+            if(!_gpuState||_gpuState.use_count()>1)_gpuState=renderer.createGpuPointState(error);
+            if(_gpuState&&_gpuState->prepare(points,view,projection,width,height,settings,_stats,error)){
+                _batches.resize(1);auto& batch=_batches.front();batch=ParticleDrawData{};batch.world3D=true;
+                batch.gpuStream=_gpuState.get();batch.submitGpu=[](void* state,uint16_t id){static_cast<detail::GpuPointState*>(state)->submit(id);};gpu=true;
+            }else{fallback=_gpuState?EmissivePointGpuFallback::Resources:EmissivePointGpuFallback::Unavailable;_gpuState.reset();}
+        }
+    }
+    if(!gpu){
+        const bool built=instancing
+            ?buildEmissivePointInstanceBatches(points,view,projection,width,height,settings,_batches,_stats,error)
+            :buildEmissivePointBatches(points,view,projection,width,height,settings,_batches,_stats,error);
+        if(!built)return false;_stats.gpuFallback=fallback;
+    }
     if(_batches.empty())return true;
     if(_renderer!=&renderer){_renderer=&renderer;_quad={};_texture={};_material={};_instancedMaterial={};}
     if(!_texture.isValid()) {

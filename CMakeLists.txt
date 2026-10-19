@@ -28,6 +28,32 @@ set_property(SOURCE ${AYRENDERER_SOURCES} APPEND PROPERTY OBJECT_DEPENDS
 
 add_library(AYRenderer STATIC ${AYRENDERER_SOURCES})
 
+# Optional Windows compute/indirect path. Runtime consumes embedded DXBC only;
+# AYShader is a build-tool dependency, with no compiler paths in the point path.
+if(WIN32 AND TARGET AYShader AND TARGET bgfx::bgfx)
+    add_executable(AYRenderer_PointShaderBake EXCLUDE_FROM_ALL tools/GpuPointShaderBake.cpp)
+    target_link_libraries(AYRenderer_PointShaderBake PRIVATE AYShader)
+    set(_ay_point_shader_dir "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>/point-gpu")
+    file(GLOB_RECURSE _ay_point_shader_includes CONFIGURE_DEPENDS
+        "${AY_SHADER_BGFX_SRC_DIR}/*.sh" "${AY_SHADER_BGFX_COMMON_DIR}/*.sh")
+    add_custom_command(OUTPUT "${_ay_point_shader_dir}/GpuPointBinaries.h"
+        BYPRODUCTS "${_ay_point_shader_dir}/mark.bin" "${_ay_point_shader_dir}/count.bin"
+            "${_ay_point_shader_dir}/prefix.bin" "${_ay_point_shader_dir}/compact.bin"
+            "${_ay_point_shader_dir}/vertex.bin" "${_ay_point_shader_dir}/fragment.bin"
+            "${_ay_point_shader_dir}/manifest.json"
+        COMMAND $<TARGET_FILE:AYRenderer_PointShaderBake>
+            --shaderc "${AY_SHADER_SHADERC_PATH}" --bgfx-include "${AY_SHADER_BGFX_SRC_DIR}"
+            --common-include "${AY_SHADER_BGFX_COMMON_DIR}" --output "${_ay_point_shader_dir}"
+        DEPENDS AYRenderer_PointShaderBake src/detail/GpuPointShaders.h src/detail/GpuPointShaderBinary.h
+            "${AY_SHADER_SHADERC_PATH}" ${_ay_point_shader_includes}
+        COMMENT "Compiling and embedding point cull/compact shaders" VERBATIM)
+    add_custom_target(AYRenderer_PointShaders DEPENDS "${_ay_point_shader_dir}/GpuPointBinaries.h")
+    target_sources(AYRenderer PRIVATE "${_ay_point_shader_dir}/GpuPointBinaries.h")
+    target_include_directories(AYRenderer PRIVATE "${_ay_point_shader_dir}")
+    target_compile_definitions(AYRenderer PRIVATE AY_RENDERER_POINT_GPU=1)
+endif()
+
+
 target_include_directories(AYRenderer PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

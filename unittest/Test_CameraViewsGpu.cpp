@@ -110,6 +110,76 @@ TEST_CASE(independent_camera_layers_outputs_and_resize_are_verified_by_gpu_readb
 TEST_SUITE_END
 
 TEST_SUITE(EmissivePointsGpu)
+TEST_CASE(compute_compaction_matches_pixels_and_counts_across_tiles_budgets_and_zero_frames) {
+#ifdef _WIN32
+    const auto* backend=std::getenv("AY_POINT_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Requires isolated Windows D3D11/D3D12 device");
+    HWND window=CreateWindowExW(0,L"STATIC",L"Point compaction regression",WS_OVERLAPPED,0,0,64,64,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window!=nullptr);if(!window)return;
+    ayt::render::Renderer renderer;ayt::render::InitDesc desc;desc.windowHandle=window;
+    desc.backend=std::string(backend)=="d3d12"?ayt::render::Backend::Direct3D12:ayt::render::Backend::Direct3D11;
+    desc.width=desc.height=64;desc.vsync=false;desc.msaa=0;CHECK(renderer.initialize(desc));
+    if(!renderer.isInitialized()){DestroyWindow(window);return;}
+    auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(renderer);auto output=renderer.createCameraOutput(64,64);CHECK(output.id!=0);
+    auto readback=bgfx::createTexture2D(64,64,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);CHECK(bgfx::isValid(readback));
+    const ayt::math::FVector3 eye{3,2,-3};const auto view=ayt::math::lh::lookAt(eye,{0,0,0},{0,1,0});
+    const auto projection=ayt::math::lh::perspective(ayt::math::radians(50.f),1,.1f,100);
+    ayt::render::EmissivePoint point;point.id=7;point.color={.2f,.6f,1};point.intensity=1.3f;point.radius=.4f;
+    std::vector<ayt::render::EmissivePoint> points{point};ayt::render::EmissivePointCloud cloud;
+    const auto sample=[&](bool gpu,uint32_t budget,uint32_t expected){
+        ayt::render::RenderScene scene;std::string error;ayt::render::EmissivePointSettings settings;
+        settings.preferGpuCulling=gpu;settings.gpuDiagnostics=gpu;settings.maxPoints=budget;
+        CHECK(cloud.append(renderer,scene,points,view,projection,64,64,settings,&error));CHECK(error.empty());
+        const bool active=gpu&&points.size()<=budget;const auto wantedSerial=cloud.stats().gpuSubmittedSerial;
+        CHECK(cloud.stats().gpuCulling==active);CHECK(cloud.stats().countsExact==!active);
+        if(gpu&&!active)CHECK(cloud.stats().gpuFallback==ayt::render::EmissivePointGpuFallback::VisibleBudget);
+        if(!active)CHECK(cloud.stats().visible==expected);
+        ayt::render::CameraRenderView camera;camera.scene=&scene;camera.position=eye;camera.view=view;camera.projection=projection;camera.width=camera.height=64;camera.output=output;camera.clearRgba=0x000000ff;
+        const std::array views{camera};for(int frame=0;frame<3;++frame){renderer.beginFrame();CHECK(renderer.renderViews(views));renderer.endFrame();}
+        const auto fbo=bgfx::FrameBufferHandle{ayt::render::detail::CameraViewsTestAccess::framebuffer(renderer,output)};
+        bgfx::blit(112,readback,0,0,adapter->getFboAttachment(fbo,0));renderer.endFrame();std::array<uint8_t,64*64*4> pixels{};
+        const auto ready=bgfx::readTexture(readback,pixels.data());for(int frame=0;frame<120&&adapter->gpuFrameCounter()<=ready;++frame)renderer.endFrame();CHECK(adapter->gpuFrameCounter()>ready);
+        if(active){bool observed=false;
+            for(int attempt=0;attempt<24;++attempt){renderer.endFrame();ayt::render::RenderScene probe;CHECK(cloud.append(renderer,probe,points,view,projection,64,64,settings,&error));
+                const auto stats=cloud.stats();
+                if(stats.gpuSampleValid&&stats.gpuSampleSerial>=wantedSerial){CHECK(stats.gpuSampleSource==points.size());CHECK(stats.gpuSampleVisible==expected);
+                    CHECK(stats.gpuSampleSerial<stats.gpuSubmittedSerial);CHECK(stats.visible==0);CHECK(!stats.countsExact);observed=true;break;}}
+            CHECK(observed);}
+        return pixels;
+    };
+    const auto compare=[](const auto& cpu,const auto& gpu){unsigned maximum=0;uint64_t sum=0;
+        for(size_t i=0;i<cpu.size();++i){const auto difference=unsigned(std::abs(int(cpu[i])-int(gpu[i])));maximum=std::max(maximum,difference);sum+=difference;}
+        std::cerr<<"[Point compaction] maximum="<<maximum<<" mean="<<double(sum)/cpu.size()<<'\n';CHECK(maximum<=3);CHECK(double(sum)/cpu.size()<.1);};
+    const auto cpu=sample(false,65536,1),gpu=sample(true,65536,1),cpuAgain=sample(false,65536,1);compare(cpu,gpu);compare(cpu,cpuAgain);
+    CHECK(cpu[(32*64+32)*4+2]>20);CHECK(gpu[(32*64+32)*4+2]>20);
+    points[0].radius=.001f;points[0].intensity=1000;
+    const auto tinyCpu=sample(false,65536,1),tinyGpu=sample(true,65536,1);compare(tinyCpu,tinyGpu);
+    // Exercise the last compacted output slot, not only the last source slot.
+    points.assign(65536,point);for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].color={0,0,0};points[i].radius=.001f;}
+    points.back()=point;points.back().id=65535;
+    const auto denseGpu=sample(true,65536,65536),denseCpu=sample(false,65536,65536);compare(denseCpu,denseGpu);
+    CHECK(denseGpu[(32*64+32)*4+2]>20);
+    points.assign(65536,point);for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].position={1000,0,1000};}points.back().position={0,0,0};
+    const auto maximumGpu=sample(true,65536,1),maximumCpu=sample(false,65536,1);compare(maximumCpu,maximumGpu);
+    points.resize(257);points[0].position={0,0,0};points[0].intensity=0;points[1].position=eye*2.f;points.back().position={0,0,0};
+    const auto partialGpu=sample(true,65536,1),partialCpu=sample(false,65536,1);compare(partialCpu,partialGpu);
+    for(auto& p:points)p.intensity=0;const auto dark=sample(true,65536,0);bool black=true;for(size_t i=0;i<dark.size();i+=4)black&=dark[i]==0&&dark[i+1]==0&&dark[i+2]==0;CHECK(black);
+    points.back().intensity=1.3f;points[2].position={-.2f,0,0};points[2].intensity=1.3f;points[3].position={.2f,0,0};points[3].intensity=1.3f;
+    const auto boundedGpu=sample(true,2,2),boundedCpu=sample(false,2,2);compare(boundedCpu,boundedGpu);CHECK(boundedCpu[(32*64+32)*4+2]>20);sample(true,0,0);
+    // Drop a cloud with an already queued CPU read while the device continues.
+    {ayt::render::EmissivePointCloud temporary;ayt::render::RenderScene scene;ayt::render::EmissivePointSettings settings;settings.preferGpuCulling=true;settings.gpuDiagnostics=true;
+     std::vector<ayt::render::EmissivePoint> one{point};CHECK(temporary.append(renderer,scene,one,view,projection,64,64,settings));CHECK(temporary.stats().gpuCulling);
+     ayt::render::CameraRenderView camera;camera.scene=&scene;camera.position=eye;camera.view=view;camera.projection=projection;camera.width=camera.height=64;camera.output=output;
+     renderer.beginFrame();CHECK(renderer.renderViews(std::array{camera}));renderer.endFrame();renderer.endFrame();}
+    for(int frame=0;frame<6;++frame)renderer.endFrame();
+    // Pending readback destinations remain owned through device shutdown.
+    points.assign(1,point);ayt::render::RenderScene pending;ayt::render::EmissivePointSettings settings;settings.preferGpuCulling=true;settings.gpuDiagnostics=true;
+    CHECK(cloud.append(renderer,pending,points,view,projection,64,64,settings));CHECK(cloud.stats().gpuCulling);
+    renderer.endFrame();renderer.endFrame();
+    renderer.destroyCameraOutput(output);bgfx::destroy(readback);renderer.shutdown();DestroyWindow(window);
+#else
+    SKIP_TEST("Windows device required");
+#endif
+}
 TEST_CASE(single_instanced_point_matches_cpu_quad_in_a_real_view) {
 #ifdef _WIN32
     const auto* backend=std::getenv("AY_POINT_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Requires isolated Windows D3D11/D3D12 device");
