@@ -17,6 +17,12 @@ TEST_CASE(settings_are_finite_bounded_and_default_off) {
     CHECK(s.enabled); CHECK(s.strength == 1); CHECK(s.maxDistance == 0.1f);
     CHECK(s.steps == 64); CHECK(s.debugView == 2);
 }
+TEST_CASE(indirect_settings_are_sanitized_and_independent_from_specular) {
+    Renderer renderer;CHECK(!renderer.screenSpaceIndirectSettings().enabled);CHECK(!renderer.ssrSettings().enabled);
+    ScreenSpaceIndirectSettings s;s.enabled=true;s.strength=std::numeric_limits<float>::quiet_NaN();s.maxDistance=-1;s.thickness=100;s.rays=255;s.steps=0;
+    renderer.setScreenSpaceIndirectSettings(s);const auto clean=renderer.screenSpaceIndirectSettings();
+    CHECK(clean.enabled);CHECK(clean.strength==.5f);CHECK(clean.maxDistance==.1f);CHECK(clean.thickness==2);CHECK(clean.rays==4);CHECK(clean.steps==4);CHECK(!renderer.ssrSettings().enabled);
+}
 TEST_CASE(graph_adds_hdr_dependency_and_disabled_branch_is_not_live) {
     BGFXAdapter adapter; FrameGraph graph(adapter);
     PostProcessGraphPlanInput in; in.width = 64; in.height = 32;

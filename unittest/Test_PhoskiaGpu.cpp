@@ -707,6 +707,39 @@ TEST_CASE(ssr_real_pass_reflects_lit_receivers_without_environment_or_ambient) {
 #endif
 }
 
+TEST_CASE(indirect_real_pass_transfers_color_once_and_respects_material_and_zero_paths) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    std::array<Pixel,16> positions{},normals{};
+    for(int y=0;y<4;++y)for(int x=0;x<4;++x){positions[y*4+x]={(x+.5f)*.5f-1,1-(y+.5f)*.5f,x==0?2.f:2.55f,1};normals[y*4+x]=x==0?Pixel{.570710678f,.5f,.994974747f,1}:Pixel{0,.5f,.5f,1};}
+    auto grid=[&](const auto& data){auto t=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(data.data(),sizeof(data)));f.textures.push_back(t);return t;};
+    const auto world=grid(positions),normal=grid(normals),surface=f.input({0,0,0,1}),dielectric=f.input({.5f,.5f,.5f,0}),metal=f.input({.5f,.5f,.5f,1}),black=f.input({0,0,0,0}),uncovered=f.input({0,0,0,0});
+    FrameGraph graph(f.adapter);PostProcessGraphPlanInput in;in.width=in.height=4;in.finalLdr=true;in.sceneColor=f.target;in.gbuffer=f.target;in.ssr=true;CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);
+    RenderResourceBlackboard bb;ayt::render::RenderScene scene;std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;std::unordered_map<uint64_t,GpuMaterial> materials;
+    FrameContext frame;frame.ssr.enabled=false;frame.screenIndirect.enabled=true;frame.screenIndirect.strength=1;frame.screenIndirect.rays=1;frame.screenIndirect.steps=24;frame.screenIndirect.maxDistance=3;frame.screenIndirect.thickness=.02f;frame.cameraPosition={0,0,0};
+    LightingPass lighting;SsrPass pass;PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.sceneFbo=f.target;ctx.resourceBlackboard=&bb;ctx.frameGraph=&graph;ctx.lightingPass=&lighting;
+    double unit=0;
+    for(int mode=0;mode<8;++mode){
+        frame.screenIndirect.strength=mode==5?.5f:1.f;frame.screenIndirect.rays=mode==6?4:1;frame.screenIndirect.steps=mode==6?32:24;
+        const float radiance=mode==1?2.f:mode==4?0.f:1.f;f.render("","return vec4("+std::to_string(radiance)+",0.0,0.0,1.0)");
+        bb.beginFrame();bb.publishGBuffer(f.target,mode==2?metal:mode==3?black:dielectric,normal,world,mode==7?uncovered:surface,surface,4,4,1,true);bb.publishProduced(BlackboardResourceId::LightingColor,BlackboardResourceLifetime::External,f.target,f.targetTexture,4,4,1);
+        CHECK(pass.execute(ctx)==1);const auto output=f.adapter.getFboAttachment(graph.resolve(FgResourceId::SsrColor),0);
+        const auto pixels=f.render("texture2d indirectResult","return sample(indirectResult,vec2(0.125,0.375))",[&](const auto& p){const auto b=p.getTextureBinding("indirectResult");p.setTexture(p.getTextureStage(b),b,toShaderTexture(output));},34);
+        CHECK(pixels.size()==16);if(pixels.empty())break;const auto value=pixels[0];std::fprintf(stderr,"[Indirect bounce] mode=%d input=%.1f output=%.4f\n",mode,radiance,value[0]);
+        CHECK(value[1]==0);CHECK(value[2]==0);CHECK(value[3]==1);
+        if(mode==0){CHECK(value[0]>1.05f);CHECK(value[0]<1.48f);unit=value[0];}
+        else if(mode==1)CHECK(std::abs(value[0]-unit*2)<.005f);
+        else if(mode==5)CHECK(std::abs(value[0]-(1+(unit-1)*.5))<.003f);
+        else if(mode==6){CHECK(value[0]>=1);CHECK(value[0]<=1.48f);}
+        else CHECK(std::abs(value[0]-radiance)<.001f);
+    }
+    frame.screenIndirect.strength=0;CHECK(pass.execute(ctx)==0);frame.screenIndirect.enabled=false;CHECK(pass.execute(ctx)==0);pass.destroyResources(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
 TEST_CASE(phoskia_release_package_relocation_and_repeated_gpu_lifetimes_preserve_pixels) {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");

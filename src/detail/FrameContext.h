@@ -2,6 +2,7 @@
 
 #include "AYMath/MathTypes.h"
 #include "AYRenderer/SsrSettings.h"
+#include "AYRenderer/ScreenSpaceIndirect.h"
 #include "AYRenderer/LensEffects.h"
 #include "AYRenderer/VolumetricSettings.h"
 
@@ -133,6 +134,7 @@ struct FrameContext {
     float cullingMarginY = 0.0f;
     bool cullingHomogeneousDepth = false;
     SsrSettings ssr;
+    ScreenSpaceIndirectSettings screenIndirect;
     VolumetricSettings volumetric;
     bool decalsEnabled = false;
 };

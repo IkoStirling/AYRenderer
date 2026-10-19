@@ -511,6 +511,7 @@ struct Renderer::Impl {
     // §S2 v1 — SSAO host knobs (FrameContext defaults stay off).
     bool                           ssaoEnabled  = false;
     SsrSettings                    ssr;
+    ScreenSpaceIndirectSettings    screenIndirect;
     VolumetricSettings             volumetric;
     bool                          decalsEnabled = false;
     std::vector<DeferredDecal>     decals;
@@ -1450,6 +1451,7 @@ void Renderer::render(const RenderScene& scene)
     // §S4d — DepthHaze knobs (Editor / host). Defaults keep haze off.
     frame.hazeEnabled      = _impl->depthHazeEnabled;
     frame.ssr = _impl->ssr;
+    frame.screenIndirect = _impl->screenIndirect;
     frame.volumetric = _impl->volumetric;
     frame.decalsEnabled = _impl->decalsEnabled;
     frame.hazeStrength     = detail::sanitizeDepthHazeStrength(
@@ -1870,7 +1872,8 @@ void Renderer::render(const RenderScene& scene)
     }
     graphInput.ssao = ssaoPassEnabled;
     const auto* ssrPass = _impl->pipeline.findPass<detail::SsrPass>();
-    graphInput.ssr = frame.ssr.enabled && frame.ssr.strength > 0
+    graphInput.ssr = ((frame.ssr.enabled && frame.ssr.strength > 0)
+        || (frame.screenIndirect.enabled && frame.screenIndirect.strength > 0))
         && ssrPass && ssrPass->isEnabled() && gbufferPassPtr && lightingPassPtr;
     if (graphInput.ssr && !detail::BGFXAdapter::isValid(graphInput.gbuffer)) {
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
@@ -3377,6 +3380,13 @@ void Renderer::setSsrSettings(const SsrSettings& settings) {
 }
 SsrSettings Renderer::ssrSettings() const noexcept {
     return _impl ? _impl->ssr : SsrSettings{};
+}
+
+void Renderer::setScreenSpaceIndirectSettings(const ScreenSpaceIndirectSettings& settings) {
+    if (_impl) _impl->screenIndirect = sanitizeScreenSpaceIndirect(settings);
+}
+ScreenSpaceIndirectSettings Renderer::screenSpaceIndirectSettings() const noexcept {
+    return _impl ? _impl->screenIndirect : ScreenSpaceIndirectSettings{};
 }
 
 void Renderer::setDepthHazeEnabled(bool enabled)

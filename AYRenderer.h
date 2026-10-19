@@ -4,6 +4,7 @@
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
 #include "AYRenderer/SsrSettings.h"
+#include "AYRenderer/ScreenSpaceIndirect.h"
 #include "AYRenderer/LensEffects.h"
 #include "AYRenderer/VolumetricSettings.h"
 #include "AYRenderer/DeferredDecal.h"
@@ -476,6 +477,11 @@ public:
     /// Owner-thread settings are sanitized; disabled/zero strength allocates nothing.
     void setSsrSettings(const SsrSettings& settings);
     SsrSettings ssrSettings() const noexcept;
+    /// Copy/sanitize bounded screen-space diffuse bounce settings on the owner thread.
+    /// Main Deferred only; requires current opaque Lighting/GBuffer. No offscreen GI.
+    void setScreenSpaceIndirectSettings(const ScreenSpaceIndirectSettings& settings);
+    ScreenSpaceIndirectSettings screenSpaceIndirectSettings() const noexcept;
+
     /// Deferred-only medium, owner-thread setter; copied finite settings, default off.
     /// Optional noiseStrength/Scale/Time vary density consistently for extinction
     /// and scattering; the host supplies time each frame when animation is wanted.

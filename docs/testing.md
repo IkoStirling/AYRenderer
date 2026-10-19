@@ -565,3 +565,10 @@ transparent alpha increments177/89, rear60, stack208 vs207 expected, Gobo/IES an
 Each backend real no-IBL SSR1/27, scene1/2 -> reflected1.5010/3.0020; both legacy SSR cases passed.
 Studio glass/reflections smoke and invalid-budget rejection passed. SDK127/53/88/545 clean;
 Renderer inventory1021/10 clean. SSR remains on-screen opaque only; no refraction or indirect bounce yet.
+
+
+2026-10-19 single diffuse screen-bounce stage: Contracts164/1395, PostProcess252/1357,
+Shader12/209 (69 variants/no-compiler prewarm). Each D3D11/12 indirect real pass1/86,
+plus three existing SSR cases; unit/double1.3193/2.6387, half-strength1.1592,4ray/32step1.0938.
+Metal/black/uncovered preserve input; zero light stays zero. GI-only and combined Studio8-frame
+smokes passed, invalid5rays exit2. SDK128/53/88/547 clean, inventory1023/10 clean.
