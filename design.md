@@ -31,7 +31,7 @@ GPU view64..111分配三Pass连续区间，原主管线/编辑器/粒子view保�
 RendererSubSystem在每视图自己的相机/aspect下提取OwnedCpu packet后恢复主视口；
 主镜头3D mask在presentation副本过滤，原Scene完整保留。该路径明确为Forward，
 完整Deferred多视图仍需独立的Pass/FrameGraph/blackboard/历史与view命名空间设计。
-UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，最大单Pass预算143；
+UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，最大单Pass预算142；
 constexpr容量与公开上限静态交叉检查，防止布局变更后重用同帧GPU view。
 范围、使用方式与实际验收见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
 
@@ -1039,7 +1039,7 @@ StylizationDepth=31仅为借用依赖，实际Forward scene depth与Deferred原�
 独立gate与提交后semantic提升；失败保留上游。AA → Outline → Grading → Color/Print → Present。
 Color/Print不引入GBuffer sampler；Outline按设置引入depth/normal，使用相对view-space depth
 阈值而非直接比较非线性device depth。GBuffer必须当帧、同尺寸、同generation；缺失几何输入旁路。
-默认两个阶段都关闭，无目标、无draw。全量view remap64项，UI排除50/51，单Pass离屏预算143。
+默认两个阶段都关闭，无目标、无draw。全量view remap64项，UI排除50/51，单Pass离屏预算142。
 离线catalog68个job；颜色与轮廓各一个shader，轻量开关用uniform，不产生布尔组合排列。
 
 颜色：物理块的真实中心texel（偶数向左/上，截短块重算）；Bayer4按虚拟像素排列；RGB量化或
@@ -1687,3 +1687,13 @@ Deferred 无IBL环境项改为与现有 PBR相同的 albedo*(0.03+cube)*AO；IBL
 Lighting shader 版本为 lighting_v34_scene_background_pbr_parity，生产catalog仍67项。
 画廊以同一内置PBR和完整法线/切线/UV比较。不同自定义shader、SSAO/SSR等路径专属能力
 仍可产生有意差异；不将全场景像素逐字节相等作为管线契约。
+
+### AnalogDisplay composition (2026-10-19)
+
+Display simulation is an independent post-color stage, not three repetitions of palette/print mapping
+for chromatic samples. Slot27/view52 reads the produced PresentSource and publishes DisplayColor33
+only after submit. It shares PresentationStage's resource safety check with color and outline.
+The shared helper owns no GPU resource and contains no effect algorithm. Default off/identity has no node/lease/draw.
+The shared procedural noise function uses bounded integer-domain float arithmetic rather than sin hashes;
+it is seeded grain and is not a blue-noise provider. The view-local physical mask is independent of warped image UV.
+Look v2 adds a strict display object; v1 migration fills display disabled. No runtime-history data is serialized.

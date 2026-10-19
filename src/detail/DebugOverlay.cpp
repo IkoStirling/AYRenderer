@@ -121,6 +121,7 @@ std::string_view passNameForView(uint16_t view,
     case 22: case 23: case 24: case 25: return "Shadow";
     case 3:          return "MotionVector";
     case 4:          return "ColorGrading";
+    case 52:         return "AnalogDisplay";
     case 51:         return "StylizedOutline";
     case 50:         return "ColorStylization";
     case 5: case 245: return "TAA";

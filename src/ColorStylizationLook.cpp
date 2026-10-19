@@ -18,13 +18,20 @@ Json encodeColor(StylizationColor c) { return Json::array({c.r,c.g,c.b}); }
 template<class T> Json encode(const T& value) {
     if constexpr(std::is_enum_v<T>) return static_cast<int>(value);
     else if constexpr(std::is_same_v<T,StylizationColor>) return encodeColor(value);
+    else if constexpr(std::is_same_v<T,AnalogDisplaySettings>) {
+        Json result=Json::object();
+        detail::visitAnalogDisplayFields(value,[&](const char* key,const auto& field){result[key]=encode(field);});
+        return result;
+    }
     else if constexpr(std::is_same_v<T,std::array<StylizationColor,16>>) {
         auto array=Json::array(); for(auto c:value) array.push_back(encodeColor(c)); return array;
     } else return value;
 }
-Json document(const ColorStylizationSettings& s) {
-    Json result{{"type","Aliyat.ColorStylizationLook"},{"schemaVersion",1}};
-    detail::visitColorStylizationFields(s,[&](const char* key,const auto& value){result[key]=encode(value);});
+Json document(const ColorStylizationSettings& s,int version=2) {
+    Json result{{"type","Aliyat.ColorStylizationLook"},{"schemaVersion",version}};
+    const auto field=[&](const char* key,const auto& value){result[key]=encode(value);};
+    if(version==1)detail::visitColorStylizationFieldsV1(s,field);
+    else detail::visitColorStylizationFields(s,field);
     return result;
 }
 template<class T> void decode(const Json& source,T& value) {
@@ -43,6 +50,9 @@ template<class T> void decode(const Json& source,T& value) {
     } else if constexpr(std::is_same_v<T,StylizationColor>) {
         if(!source.is_array() || source.size()!=3) throw std::runtime_error("Expected three RGB components");
         decode(source[0],value.r);decode(source[1],value.g);decode(source[2],value.b);
+    } else if constexpr(std::is_same_v<T,AnalogDisplaySettings>) {
+        if(!source.is_object())throw std::runtime_error("Expected display object");
+        detail::visitAnalogDisplayFields(value,[&](const char* key,auto& field){decode(source.at(key),field);});
     } else {
         if(!source.is_array() || source.size()!=value.size()) throw std::runtime_error("Expected 16 palette entries");
         for(size_t i=0;i<value.size();++i) decode(source[i],value[i]);
@@ -69,11 +79,14 @@ bool parseColorStylizationLook(std::string_view text,ColorStylizationSettings& o
         const auto root=Json::parse(text.begin(),text.end(),callback);
         if(!root.is_object() || !root.contains("type") || root["type"]!="Aliyat.ColorStylizationLook"
             || !root.contains("schemaVersion") || !root["schemaVersion"].is_number_integer()
-            || root["schemaVersion"]!=1) return fail(error,"Unsupported look type or schema version");
+            || (root["schemaVersion"]!=1 && root["schemaVersion"]!=2)) return fail(error,"Unsupported look type or schema version");
+        const int version=root["schemaVersion"].get<int>();
         ColorStylizationSettings settings;
-        detail::visitColorStylizationFields(settings,[&](const char* key,auto& value){decode(root.at(key),value);});
+        const auto field=[&](const char* key,auto& value){decode(root.at(key),value);};
+        if(version==1)detail::visitColorStylizationFieldsV1(settings,field);
+        else detail::visitColorStylizationFields(settings,field);
         settings=sanitizeColorStylization(settings);
-        if(document(settings)!=root) return fail(error,"Unknown field or value outside the look contract");
+        if(document(settings,version)!=root) return fail(error,"Unknown field or value outside the look contract");
         output=settings;return true;
     } catch(const std::exception& e) {return fail(error,e.what());}
 }

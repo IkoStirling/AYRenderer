@@ -21,6 +21,7 @@
 #include "detail/DeferredDecalPass.h"
 #include "detail/ColorStylizationPass.h"
 #include "detail/StylizedOutlinePass.h"
+#include "detail/AnalogDisplayPass.h"
 #include "detail/RenderViewOrder.h"
 #include "detail/DeferredDecalVisibility.h"
 #include "detail/PostProcessGraphPlan.h"
@@ -444,6 +445,67 @@ TEST_CASE(stylized_outline_real_pass_depth_normal_and_luminance_edges) {
         if(differences)std::cerr<<"Outline mode="<<mode<<" mismatches="<<differences<<'\n';
         CHECK(differences==0);
         for(int i=0;i<3;++i)f.adapter.endFrame();
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(analog_display_real_pass_physical_mask_and_channel_offsets) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!backend[0])SKIP_TEST("Isolated device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    configureRenderViewOrder(f.adapter);
+    std::array<std::array<uint8_t,4>,16> pixels;
+    for(int y=0;y<4;++y)for(int x=0;x<4;++x)pixels[y*4+x]={uint8_t(40+40*x),uint8_t(80+20*y),uint8_t(160-30*x),uint8_t(60+10*x+15*y)};
+    auto input=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA8,
+        BGFX_TEXTURE_RT|BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(pixels.data(),sizeof(pixels)));
+    auto source=bgfx::createFrameBuffer(1,&input,false);f.textures.push_back(input);CHECK(bgfx::isValid(source));
+    struct SourceCleanup{bgfx::FrameBufferHandle h;~SourceCleanup(){if(bgfx::isValid(h))bgfx::destroy(h);}} sourceCleanup{source};
+    auto readback=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
+    f.textures.push_back(readback);CHECK(bgfx::isValid(readback));
+    AnalogDisplayPass pass;FrameGraph graph(f.adapter);
+    struct PassCleanup{AnalogDisplayPass& p;BGFXAdapter& a;~PassCleanup(){p.destroyResources(a);}} passCleanup{pass,f.adapter};
+    FrameContext frame;ayt::render::RenderScene scene;
+    std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;
+    std::unordered_map<uint64_t,GpuMaterial> materials;
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame,0};ctx.frameGraph=&graph;
+    for(int variant=0;variant<4;++variant) {
+        ayt::render::ColorStylizationSettings look;look.enabled=true;auto& s=look.display;s.enabled=true;
+        s.scanlineStrength=s.maskStrength=s.chromaticOffset=s.curvature=s.vignetteStrength=s.grainStrength=0;
+        if(variant==0)s.scanlineStrength=.5f;
+        if(variant==1)s.maskStrength=.5f;
+        if(variant==2)s.chromaticOffset=1;
+        if(variant==3){s.grainStrength=.2f;s.noiseSeed=35717;}
+        pass.setSettings(look);
+        graph.beginFrame(4,4);graph.importExternal(FgResourceId::FinalLdrColor,source);
+        graph.addResource(FgResourceId::DisplayColor,{bgfx::TextureFormat::RGBA8,FgTextureScale::Full,true,false,true});
+        graph.addPass({"AnalogDisplay",{FgResourceId::FinalLdrColor},{FgResourceId::DisplayColor},true});
+        graph.addPass({"Present",{FgResourceId::DisplayColor},{},true,true});
+        graph.setResolvedSemantic(FgSemantic::PresentSource,FgResourceId::FinalLdrColor);
+        CHECK(graph.compile());CHECK(pass.execute(ctx)==0);graph.markProduced(FgResourceId::FinalLdrColor);
+        CHECK(pass.execute(ctx)==1);const auto result=graph.resolveSemantic(FgSemantic::PresentSource);
+        CHECK(result.idx==graph.resolve(FgResourceId::DisplayColor).idx);
+        bgfx::blit(55,readback,0,0,f.adapter.getFboAttachment(result,0));
+        std::array<std::array<uint8_t,4>,16> actual{};const auto ready=bgfx::readTexture(readback,actual.data());
+        for(int i=0;i<120 && f.adapter.gpuFrameCounter()<ready;++i)f.adapter.endFrame();
+        CHECK(f.adapter.gpuFrameCounter()>=ready);int mismatch=0;
+        for(int y=0;y<4;++y)for(int x=0;x<4;++x)for(int c=0;c<4;++c) {
+            float expected=pixels[y*4+x][c];
+            if(c<3 && variant==0 && y%2)expected*=.5f;
+            if(c<3 && variant==1 && c!=x%3)expected*=.5f;
+            if(variant==2 && c==0)expected=pixels[y*4+std::min(x+1,3)][0];
+            if(variant==2 && c==2)expected=pixels[y*4+std::max(x-1,0)][2];
+            if(variant==3 && c<3) {
+                const int u=(x+int(s.noiseSeed)%251)%251,v=(y+int(s.noiseSeed)/251)%251;
+                int rank=(u*67+v*131)%251;rank=(rank*rank*3+u*v*11+u*29+v*73)%251;
+                const float noise=(rank+.5f)/251-.5f;
+                expected=std::clamp(expected+noise*.2f*255,0.f,255.f);
+            }
+            if(std::abs(int(actual[y*4+x][c])-int(std::lround(expected)))>1)++mismatch;
+        }
+        if(mismatch)std::cerr<<"Display variant="<<variant<<" mismatches="<<mismatch<<'\n';
+        CHECK(mismatch==0);
     }
 #else
     SKIP_TEST("Windows device fixture required");

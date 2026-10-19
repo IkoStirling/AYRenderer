@@ -5,7 +5,7 @@ namespace ayt::render::detail {
 // Persistence has a single field inventory. Keep runtime implementation and UI
 // independent of JSON, and add every new look field here in the same change.
 template<class Settings,class Visitor>
-void visitColorStylizationFields(Settings& s, Visitor&& v)
+void visitColorStylizationFieldsV1(Settings& s, Visitor&& v)
 {
 #define AY_STYLE_FIELD(name) v(#name,s.name)
     AY_STYLE_FIELD(enabled); AY_STYLE_FIELD(pixelationEnabled); AY_STYLE_FIELD(pixelSize);
@@ -19,6 +19,17 @@ void visitColorStylizationFields(Settings& s, Visitor&& v)
     AY_STYLE_FIELD(outlineNormalThreshold); AY_STYLE_FIELD(outlineLuminanceThreshold);
     AY_STYLE_FIELD(outlineStrength); AY_STYLE_FIELD(outlineColor);
 #undef AY_STYLE_FIELD
+}
+
+template<class Settings,class Visitor>
+void visitAnalogDisplayFields(Settings& s,Visitor&& v) {
+    v("enabled",s.enabled);v("scanlineStrength",s.scanlineStrength);v("maskStrength",s.maskStrength);
+    v("chromaticOffset",s.chromaticOffset);v("curvature",s.curvature);
+    v("vignetteStrength",s.vignetteStrength);v("grainStrength",s.grainStrength);v("noiseSeed",s.noiseSeed);
+}
+template<class Settings,class Visitor>
+void visitColorStylizationFields(Settings& s,Visitor&& v) {
+    visitColorStylizationFieldsV1(s,v);v("display",s.display);
 }
 
 } // namespace ayt::render::detail

@@ -42,6 +42,7 @@ struct PostProcessGraphPlanInput {
     bgfx::FrameBufferHandle baseGBuffer = BGFX_INVALID_HANDLE;
     bool colorStylization = false;
     bool stylizedOutline = false;
+    bool analogDisplay = false;
     bool stylizationDepth = false;
     bool stylizationNormals = false;
 };

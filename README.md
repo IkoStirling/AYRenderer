@@ -16,7 +16,7 @@ Forward 自定义光照算法和 Deferred 统一 PBR 并不等价；画廊统一
 ## 风格化创作工具箱（2026-10-19）
 
 `setColorStylizationSettings` 复制并清洗完整look，状态跨重建/resize保留；默认关闭。
-主视图顺序为 AA → StylizedOutline → ColorGrading → ColorStylization → Present → Editor/UI。
+主视图顺序为 AA → StylizedOutline → ColorGrading → ColorStylization → AnalogDisplay → Present → Editor/UI。
 轮廓与颜色有独立gate和输出，关闭时不声明节点/目标，不做identity draw。
 独立renderViews/preview不运行该链；所有颜色处理包含已合成的主视口背景，窗口外部与UI不参与。
 
@@ -49,8 +49,8 @@ ResourceManager/Cook/Pak。Editor Render面板可编辑参数与hex色板、保�
 
 Windows `AYRenderer_ColorStylizationDemo` 含彩色展台、Noir城市、动作角色和机械工坊，无外部素材。
 0..9切换look，F切换管线，Space冻结，G切换分级，F9截图。
-`--gallery --hidden --output <directory>` 导出两管线各十张；`--d3d12`切换后端；
-`--write-presets`写出十个`.rsl`，`--look <file.rsl>`加载自定义配置。
+`--gallery --hidden --output <directory>` 导出两管线各十二张；`--d3d12`切换后端；
+`--write-presets`写出十二个`.rsl`，`--look <file.rsl>`加载自定义配置。
 离线catalog包括实际两个阶段的shader。验证入口见[测试说明](docs/testing.md)。
 
 ## 相机视口与输出（2026-10-14）
@@ -62,7 +62,7 @@ createCameraOutput/cameraOutputTexture/destroyCameraOutput 管理可采样颜色
 独立视图不使用主视图的 Deferred、TAA/Motion/曝光历史或编辑器选中视图；WorldLit2D
 在显式 Forward batch 中拒绝。详见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
 CPU/Noop 用例 CameraViews；独立 D3D11 读回用例 CameraViewsGpu。
-离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为143。
+离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为142。
 
 ## Deferred Decal v1（2026-10-06）
 
@@ -531,3 +531,15 @@ Regression sources are included. Runtime tests and interactive editor acceptance
 
 预设与参数清洗实现位于`src/ColorStylizationSettings.cpp`，公共头只保留值类型与声明。
 调整作品配色不再迫使每个Renderer/Editor消费方重编；字段或ABI变更仍需完整重编。
+
+## 显示器模拟补充（2026-10-19）
+
+`look.display`独立控制扫描线、RGB荧光列mask、0..4像素色差、0..0.25曲率、暗角和0..0.25颗粒。
+总enabled与display.enabled同时开启后生效；六项全零也是无draw旁路。独立slot27/view52在颜色/印刷后，
+输出FG DisplayColor=33；艺术色板结果先完成再接受屏幕变换。没有持久history或噪声纹理；transient输出由FrameGraph分配。mask基于物理视口，
+颗粒使用可复用的`ayScreenNoise`有界程序散列与uint16种子。可由Host推进seed；不声称blue noise或VHS。
+Alpha跟随warp采样，扫描线/mask/颗粒/黑色边框RGB不调制alpha。独立renderViews仍不执行主链。
+Arcade/Broadcast为新增预设，方向键循环十二套；可直接载入`demo/looks/arcade.rsl`与`broadcast.rsl`。
+`.rsl`写schema2，完整schema1继续读取，默认关闭display；旧样例0..9保持schema1作为兼容资料。
+`PresentationStage`只集中当前帧输入、目标无别名与提交后提升的共同安全边界，效果算法/资源仍各自所有。
+离线目录69项，固定view65项，UI单Pass预算142。

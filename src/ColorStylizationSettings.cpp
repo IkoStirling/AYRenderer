@@ -63,6 +63,16 @@ ColorStylizationSettings colorStylizationPreset(ColorStylizationPreset preset) n
         result.outlineMode = StylizationOutlineMode::Depth;
         result.outlineColor = {.65f,.88f,1};
         break;
+    case ColorStylizationPreset::Arcade:
+    case ColorStylizationPreset::Broadcast:
+        result.enabled=true;result.pixelationEnabled=false;result.posterizationEnabled=false;
+        result.display.enabled=true;
+        if(preset==ColorStylizationPreset::Broadcast) {
+            result.display.scanlineStrength=.12f;result.display.maskStrength=.04f;
+            result.display.chromaticOffset=1.5f;result.display.curvature=.02f;
+            result.display.grainStrength=.08f;result.display.vignetteStrength=.3f;
+        }
+        break;
     default: break;
     }
     return result;
@@ -98,6 +108,7 @@ ColorStylizationSettings sanitizeColorStylization(ColorStylizationSettings value
     value.outlineLuminanceThreshold=finiteClamp(value.outlineLuminanceThreshold,.01f,1,.12f);
     value.outlineStrength=finiteClamp(value.outlineStrength,0,1,1);
     value.outlineColor=color(value.outlineColor);
+    value.display=sanitizeAnalogDisplay(value.display);
     return value;
 }
 

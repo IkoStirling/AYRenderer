@@ -3,19 +3,16 @@
 #include "AYRenderer/ColorStylizationShaderSources.h"
 #include "detail/FgResource.h"
 #include "detail/PassExecContext.h"
+#include "detail/PresentationStage.h"
 
 namespace ayt::render::detail {
 
 uint32_t ColorStylizationPass::execute(PassExecContext& ctx)
 {
-    if (!active() || !ctx.adapter.isInitialized() || ctx.adapter.isNoopBackend()
-        || !ctx.viewportWidth || !ctx.viewportHeight || !ctx.frameGraph
-        || !ctx.frameGraph->semanticProducedThisFrame(FgSemantic::PresentSource)) return 0;
-    const auto source = ctx.frameGraph->resolveSemantic(FgSemantic::PresentSource);
-    const auto target = ctx.frameGraph->resolve(FgResourceId::StylizedColor);
-    if (!BGFXAdapter::isValid(source) || !BGFXAdapter::isValid(target) || source.idx == target.idx) return 0;
-    const auto color = ctx.adapter.getFboAttachment(source, 0);
-    if (!BGFXAdapter::isValid(color) || !_geometry.ensure(ctx.adapter)) return 0;
+    if(!active())return 0;
+    PresentationStageTargets targets;
+    if(!resolvePresentationStage(ctx,FgResourceId::StylizedColor,targets) || !_geometry.ensure(ctx.adapter))return 0;
+    const auto target=targets.target;const auto color=targets.input;
     if (!_program.isValid()) {
         if (_retryFrames) { --_retryFrames; return 0; }
         _program = ctx.pool.acquire(kColorStylizationPhoskiaSource,kColorStylizationCacheKey);

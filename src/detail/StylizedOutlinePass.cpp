@@ -4,15 +4,14 @@
 #include "detail/PassExecContext.h"
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/BgfxMatrix.h"
+#include "detail/PresentationStage.h"
 namespace ayt::render::detail {
 uint32_t StylizedOutlinePass::execute(PassExecContext& ctx) {
     auto& a=ctx.adapter;
-    if(!active() || !a.isInitialized() || a.isNoopBackend() || !ctx.viewportWidth || !ctx.viewportHeight
-        || !ctx.frameGraph || !ctx.frameGraph->semanticProducedThisFrame(FgSemantic::PresentSource))return 0;
-    auto source=ctx.frameGraph->resolveSemantic(FgSemantic::PresentSource);
-    auto target=ctx.frameGraph->resolve(FgResourceId::OutlinedColor);
-    if(!BGFXAdapter::isValid(source)||!BGFXAdapter::isValid(target)||source.idx==target.idx)return 0;
-    auto color=a.getFboAttachment(source,0);if(!BGFXAdapter::isValid(color))return 0;
+    if(!active())return 0;
+    PresentationStageTargets targets;
+    if(!resolvePresentationStage(ctx,FgResourceId::OutlinedColor,targets))return 0;
+    const auto target=targets.target;const auto color=targets.input;
     BlackboardGBufferView gb;
     const bool hasGbuffer=ctx.resourceBlackboard && ctx.resourceBlackboard->resolveGBuffer(gb)
         && gb.width==ctx.viewportWidth && gb.height==ctx.viewportHeight;
@@ -57,8 +56,7 @@ uint32_t StylizedOutlinePass::execute(PassExecContext& ctx) {
     if(!ready)return 0;
     configureFullscreenPassView(a,kViewId,target,0,0,ctx.viewportWidth,ctx.viewportHeight);
     _geometry.bind(a);a.setStateDepthTestAlways();_program.submit({kViewId,0});
-    ctx.frameGraph->markProduced(FgResourceId::OutlinedColor);
-    ctx.frameGraph->setResolvedSemantic(FgSemantic::PresentSource,FgResourceId::OutlinedColor);return 1;
+    publishPresentationStage(ctx,FgResourceId::OutlinedColor);return 1;
 }
 void StylizedOutlinePass::destroyResources(BGFXAdapter& adapter) {
     _program.reset();_geometry.destroy(adapter);_retryFrames=0;

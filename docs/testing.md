@@ -1,5 +1,16 @@
 # AYRenderer 测试维护
 
+## 显示模拟补入阶段（2026-10-19）
+
+八个受影响CPU组通过；保留首阶段已通过的Audit组后，合计949例/15464断言。
+新显示GPU用例D3D11/D3D12各27断言，逐像素核对扫描线、RGB列mask、通道采样、alpha，
+并用独立整数域参考核对确定性颗粒。共享PresentationStage调整后，颜色114与轮廓26断言的
+D3D11真实用例均复测通过。GLSL/D3D三阶段编译、schema1迁移至2与严格坏文件检查通过。
+Editor Shell47例通过，新增display状态/seed恢复；模式相关控件显隐不丢值。
+离线目录69项，UI单Pass预算142；严格画廊两管线各十二张，新增Arcade/Broadcast有版本化样例文件。
+证据前缀`display-*`、`shared-stage-*`、`renderer-display.*`、`gallery-display-final/`。
+
+
 ## 2026-10-19 风格工具箱主阶段
 
 - CPU九分组948例/15354断言通过。新增slot26/view51后首轮旧表位置断言失败；更新对应

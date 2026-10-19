@@ -73,7 +73,7 @@ TEST_CASE(smaa_append_only_abi_resources_and_views_are_locked)
     CHECK(static_cast<uint8_t>(FgResourceId::SmaaEdges) == 9u);
     CHECK(static_cast<uint8_t>(FgResourceId::SmaaBlendWeights) == 10u);
     CHECK(static_cast<uint8_t>(FgResourceId::SmaaColor) == 11u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 33u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 34u);
     CHECK(ayt::render::detail::SMAAPass::kEdgeViewId == 247u);
     CHECK(ayt::render::detail::SMAAPass::kBlendWeightViewId == 248u);
     CHECK(ayt::render::detail::SMAAPass::kNeighborhoodViewId == 249u);
@@ -102,7 +102,7 @@ TEST_CASE(default_pipelines_order_smaa_between_fxaa_and_color_grading)
         CHECK(fxaa == post + (desc.contains(RenderPassSlot::TAA) ? 2u : 1u));
         CHECK(smaa == fxaa + 1u);
         CHECK(grading == smaa + 2u);
-        CHECK(present == grading + 2u);
+        CHECK(present == grading + 3u);
     }
 }
 
@@ -125,7 +125,7 @@ TEST_CASE(smaa_views_execute_in_three_stage_order_before_grading_and_present)
     CHECK(weight == edge + 1);
     CHECK(neighborhood == weight + 1);
     CHECK(grading == neighborhood + 2);
-    CHECK(present == grading + 2);
+    CHECK(present == grading + 3);
 }
 
 TEST_CASE(runtime_aa_toggles_are_mutually_exclusive_and_survive_rebuild)

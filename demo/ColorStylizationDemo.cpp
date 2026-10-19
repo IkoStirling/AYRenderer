@@ -62,8 +62,8 @@ ayt::render::MeshHandle createGalleryCube(ayt::render::Renderer& renderer)
     return renderer.createMesh(vertices.data(),uint32_t(vertices.size()),
         layout,indices.data(),uint32_t(indices.size()));
 }
-const char* names[]={"Neutral","Pixel Retro","Low Color","Dither Retro","Pocket","Sunset","Noir","Comic","Engraving","Blueprint"};
-constexpr int lookCount=10;
+const char* names[]={"Neutral","Pixel Retro","Low Color","Dither Retro","Pocket","Sunset","Noir","Comic","Engraving","Blueprint","Arcade","Broadcast"};
+constexpr int lookCount=12;
 }
 
 int main(int argc,char** argv)
@@ -165,7 +165,7 @@ int main(int argc,char** argv)
     const auto start=std::chrono::steady_clock::now();float time=0;
     std::array<bool,256> wasDown{};
     auto pressed=[&](int key) {bool down=(GetAsyncKeyState(key)&0x8000)!=0;bool edge=down&&!wasDown[key];wasDown[key]=down;return edge;};
-    std::puts("0..9 preset | F Forward/Deferred | Space freeze | G color grading | F9 capture | Esc quit");
+    std::puts("0..9 / arrows preset | F Forward/Deferred | Space freeze | G color grading | F9 capture | Esc quit");
     int failures=0;
     while(state.running && (!gallery || tick<2*lookCount*24)) {
         MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) {
@@ -181,8 +181,12 @@ int main(int argc,char** argv)
             renderer.setColorStylizationSettings(colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)));
         }
         if(!gallery && GetForegroundWindow()==window) {
-            for(int i=0;i<lookCount;++i)if(pressed('0'+i)) {
+            for(int i=0;i<10;++i)if(pressed('0'+i)) {
                 preset=i;renderer.setColorStylizationSettings(colorStylizationPreset(static_cast<ColorStylizationPreset>(i)));
+            }
+            const bool previousLook=pressed(VK_LEFT),nextLook=pressed(VK_RIGHT);
+            if(previousLook || nextLook) {
+                preset=(preset+(previousLook?lookCount-1:1))%lookCount;renderer.setColorStylizationSettings(colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)));
             }
             if(pressed('F')){deferred=!deferred;renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());}
             if(pressed(VK_SPACE))paused=!paused;
@@ -192,7 +196,7 @@ int main(int argc,char** argv)
         else if(!paused)time=std::chrono::duration<float>(std::chrono::steady_clock::now()-start).count();
         RenderScene scene;
         scene.add(cube,floorMaterial,translate(0,-.2f,1)*scale(12,.25f,9));
-        const int exhibit=preset<6?0:preset==6?1:preset==7?2:3;
+        const int exhibit=preset==10?2:preset==11?1:preset<6?0:preset==6?1:preset==7?2:3;
         if(exhibit==0) {
         scene.add(cube,rampMaterial,translate(0,2.3f,4)*scale(10,3,.2f));
         for(int i=0;i<6;++i) {
@@ -252,14 +256,14 @@ int main(int argc,char** argv)
         if(gallery && tick%24>=8) {
             const auto& stats=renderer.getFrameStats();
             uint32_t draws=0;for(const auto& pass:stats.passes)if(pass.name=="ColorStylization")draws+=pass.drawCalls;
-            if(!stats.graph.compileSucceeded || draws!=(preset==0?0u:1u)) {
+            if(!stats.graph.compileSucceeded || draws!=(colorStylizationActive(renderer.colorStylizationSettings())?1u:0u)) {
                 ++failures;std::fprintf(stderr,"Gallery graph/draw failure tick=%u draws=%u compiled=%d\n",tick,draws,int(stats.graph.compileSucceeded));
             }
         }
         renderer.endFrame();++tick;
         std::wstring title=L"Retro Color Gallery | ";title+=deferred?L"Deferred | ":L"Forward | ";
         for(const char* p=names[preset];*p;++p)title+=wchar_t(*p);
-        title+=L" | 0..9 look, F pipeline, Space freeze, G grade, F9 save";
+        title+=L" | 0..9 / arrows look, F pipeline, Space freeze, G grade, F9 save";
         SetWindowTextW(window,title.c_str());
     }
     if(gallery)for(const char* path:{"forward","deferred"})for(int i=0;i<lookCount;++i)

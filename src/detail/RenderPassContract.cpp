@@ -211,7 +211,12 @@ constexpr std::array<RenderPassResourceRead, 6> kStyleReads = {{
 constexpr std::array<RenderPassResourceWrite, 1> kStyleWrites = {{
     output(Id::StylizedColor,Life::Transient,Format::RGBA8),
 }};
-constexpr std::array<RenderPassResourceRead, 7> kPresentReads = {{
+constexpr std::array<RenderPassResourceRead, 7> kDisplayReads = {{
+    required(Id::FinalLdrColor),optional(Id::TaaColor),optional(Id::FxaaColor),optional(Id::SmaaColor),
+    optional(Id::OutlinedColor),optional(Id::ColorGradedColor),optional(Id::StylizedColor),
+}};
+constexpr std::array<RenderPassResourceWrite, 1> kDisplayWrites = {{output(Id::DisplayColor,Life::Transient,Format::RGBA8)}};
+constexpr std::array<RenderPassResourceRead, 8> kPresentReads = {{
     required(Id::FinalLdrColor),
     optional(Id::TaaColor),
     optional(Id::FxaaColor),
@@ -219,6 +224,7 @@ constexpr std::array<RenderPassResourceRead, 7> kPresentReads = {{
     optional(Id::ColorGradedColor),
     optional(Id::StylizedColor),
     optional(Id::OutlinedColor),
+    optional(Id::DisplayColor),
 }};
 constexpr std::array<RenderPassResourceRead, 7> kOutlineReads = {{
     required(Id::FinalLdrColor),optional(Id::TaaColor),optional(Id::FxaaColor),optional(Id::SmaaColor),
@@ -277,9 +283,9 @@ constexpr std::array<RenderPassResourceWrite, 1> kVolumetricWrites = {{
     output(Id::VolumetricColor, Life::Transient, Format::RGBA16F),
 }};
 
-const std::array<RenderPassContract, 27>& contracts() noexcept
+const std::array<RenderPassContract, 28>& contracts() noexcept
 {
-    static const std::array<RenderPassContract, 27> table = {{
+    static const std::array<RenderPassContract, 28> table = {{
         {RenderPassSlot::Shadow, "Shadow", noReads, kShadowWrites, false},
         {RenderPassSlot::Skybox, "Skybox", noReads, kSkyboxWrites, false},
         {RenderPassSlot::ForwardOpaque, "ForwardOpaque", kForwardReads,
@@ -323,6 +329,7 @@ const std::array<RenderPassContract, 27>& contracts() noexcept
         {RenderPassSlot::DeferredDecal, "DeferredDecal", kDecalReads, kDecalWrites, true},
         {RenderPassSlot::ColorStylization, "ColorStylization", kStyleReads, kStyleWrites, false},
         {RenderPassSlot::StylizedOutline, "StylizedOutline", kOutlineReads, kOutlineWrites, false},
+        {RenderPassSlot::AnalogDisplay, "AnalogDisplay", kDisplayReads, kDisplayWrites, false},
     }};
     return table;
 }

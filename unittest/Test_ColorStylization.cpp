@@ -7,6 +7,7 @@
 #include "detail/ColorStylizationPass.h"
 #include "detail/StylizedOutlinePass.h"
 #include "AYRenderer/StylizedOutlineShaderSources.h"
+#include "AYRenderer/AnalogDisplayShaderSources.h"
 #include "detail/FgResource.h"
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/RenderPassContract.h"
@@ -60,12 +61,13 @@ TEST_CASE(canonical_order_and_reserved_view)
         auto style=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::ColorStylization);
         CHECK(style!=desc.passes.end());
         CHECK(*(style-1)==RenderPassSlot::ColorGrading);
-        CHECK(*(style+1)==RenderPassSlot::Present);
+        CHECK(*(style+1)==RenderPassSlot::AnalogDisplay);
+        CHECK(*(style+2)==RenderPassSlot::Present);
         CHECK(validateRenderPipelineContracts(desc.passes).valid());
     }
     auto view=std::find(kRenderViewOrder.begin(),kRenderViewOrder.end(),ColorStylizationPass::kViewId);
-    CHECK(view!=kRenderViewOrder.end()); CHECK(*(view-1)==4); CHECK(*(view+1)==16);
-    CHECK(nextUiViewRange(50,1)==52);
+    CHECK(view!=kRenderViewOrder.end()); CHECK(*(view-1)==4); CHECK(*(view+1)==52);
+    CHECK(nextUiViewRange(50,1)==53);
     CHECK(static_cast<uint8_t>(RenderPassSlot::StylizedOutline)==26);
     Renderer renderer;
     renderer.configurePipeline({{RenderPassSlot::PostProcess,RenderPassSlot::ColorStylization,RenderPassSlot::UI}});
@@ -172,6 +174,11 @@ TEST_CASE(shader_compiles_portable_and_d3d_with_complete_bindings)
         CHECK(outline.success);
         CHECK(std::any_of(outline.textures.begin(),outline.textures.end(),[](auto& t){return t.name=="outlineDepth";}));
         CHECK(std::any_of(outline.uniforms.begin(),outline.uniforms.end(),[](auto& u){return u.name=="outlineInverseProjection";}));
+        ayt::shader::CompiledShaderProgram display;
+        compiler.compileToProgram(analogDisplayPhoskiaSource(),{},backend,display);
+        for(auto& error:display.errors)std::cerr<<error<<'\n';
+        CHECK(display.success);
+        CHECK(std::any_of(display.uniforms.begin(),display.uniforms.end(),[](auto& u){return u.name=="displayViewport";}));
     }
 }
 
@@ -191,7 +198,7 @@ TEST_CASE(look_document_round_trip_rejects_unknown_and_preserves_output)
         CHECK(serializeColorStylizationLook(output)==text);
     }
     for(const auto& pair:std::array<std::pair<std::string,std::string>,5>{{
-        {"\"schemaVersion\": 1","\"schemaVersion\": 2"},
+        {"\"schemaVersion\": 2","\"schemaVersion\": 3"},
         {"\"outlineWidth\": 3.0","\"outlineWidth\": 99"},
         {"\"pixelSize\": 6","\"pixelSize\": 1.5"},
         {"\"enabled\": true","\"enabled\": 1"},
@@ -229,5 +236,28 @@ TEST_CASE(outline_has_independent_gate_and_graph_dependency)
     in.stylizedOutline=false;in.stylizationDepth=false;in.stylizationNormals=false;
     CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);
     CHECK_FALSE(graph.shouldExecute(RenderPassSlot::StylizedOutline));
+}
+
+TEST_CASE(display_bypasses_identity_and_migrates_v1_look_with_display_off)
+{
+    AnalogDisplaySettings s;CHECK_FALSE(analogDisplayActive(s));
+    s.enabled=true;s.scanlineStrength=s.maskStrength=s.chromaticOffset=s.curvature=s.vignetteStrength=s.grainStrength=0;
+    CHECK_FALSE(analogDisplayActive(s));s.scanlineStrength=std::numeric_limits<float>::infinity();
+    s.maskStrength=-1;s.curvature=99;s.grainStrength=99;s=sanitizeAnalogDisplay(s);
+    CHECK(s.scanlineStrength==0);CHECK(s.maskStrength==0);CHECK(s.curvature==.25f);CHECK(s.grainStrength==.25f);
+    CHECK(analogDisplayActive(s));
+    ColorStylizationSettings old;std::string error;
+    CHECK(loadColorStylizationLook(std::string(AY_RENDERER_SOURCE_DIR)+"/demo/looks/9.rsl",old,&error));
+    CHECK_FALSE(old.display.enabled);CHECK(old.outlineMode==StylizationOutlineMode::Depth);
+    auto modern=colorStylizationPreset(ColorStylizationPreset::Arcade);
+    CHECK_FALSE(colorStylizationActive(modern));CHECK(analogDisplayActive(modern.display));
+    const auto text=serializeColorStylizationLook(modern);ColorStylizationSettings restored;
+    CHECK(parseColorStylizationLook(text,restored,&error));
+    CHECK(serializeColorStylizationLook(restored)==text);
+    BGFXAdapter a;FrameGraph graph(a);PostProcessGraphPlanInput in;
+    in.width=320;in.height=180;in.sceneColor={1};in.finalLdr=true;in.analogDisplay=true;
+    const auto plan=buildPostProcessGraphPlan(graph,in);CHECK(plan.compileSucceeded);
+    CHECK(plan.presentationSource==FgResourceId::DisplayColor);
+    CHECK_FALSE(graph.shouldExecute(RenderPassSlot::ColorStylization));CHECK(graph.shouldExecute(RenderPassSlot::AnalogDisplay));
 }
 TEST_SUITE_END

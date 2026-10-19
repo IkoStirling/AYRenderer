@@ -8,6 +8,7 @@
 #include "detail/ColorGradingPass.h"
 #include "detail/ColorStylizationPass.h"
 #include "detail/StylizedOutlinePass.h"
+#include "detail/AnalogDisplayPass.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
 #include "detail/BloomPipeline.h"
@@ -112,6 +113,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::StylizedOutline,
         RenderPassSlot::ColorGrading,
         RenderPassSlot::ColorStylization,
+        RenderPassSlot::AnalogDisplay,
         RenderPassSlot::Present,
         RenderPassSlot::UI,
     }};
@@ -141,6 +143,8 @@ void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
         if (fxaaIt != desc.passes.end() && fxaaIt > insertAfter) {
             insertAfter = fxaaIt;
         }
+        const auto displayIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::AnalogDisplay);
+        if(displayIt!=desc.passes.end() && displayIt>insertAfter)insertAfter=displayIt;
         const auto outlineIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::StylizedOutline);
         if(outlineIt!=desc.passes.end() && outlineIt>insertAfter)insertAfter=outlineIt;
         const auto gradingIt = std::find(desc.passes.begin(), desc.passes.end(),
@@ -239,6 +243,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::StylizedOutline,
         RenderPassSlot::ColorGrading,
         RenderPassSlot::ColorStylization,
+        RenderPassSlot::AnalogDisplay,
         RenderPassSlot::Present,
         RenderPassSlot::UI,
         // Fullscreen attachment overlay on view 250. It is mounted only in
@@ -284,6 +289,8 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::ColorStylizationPass>();
     case RenderPassSlot::StylizedOutline:
         return std::make_unique<detail::StylizedOutlinePass>();
+    case RenderPassSlot::AnalogDisplay:
+        return std::make_unique<detail::AnalogDisplayPass>();
     case RenderPassSlot::ColorGrading:
         return std::make_unique<detail::ColorGradingPass>();
     case RenderPassSlot::Present:
@@ -573,6 +580,7 @@ struct Renderer::Impl {
         if (auto* pass = pipeline.findPass<detail::StylizedOutlinePass>()) {
             pass->setSettings(colorStylization);
         }
+        if(auto* pass=pipeline.findPass<detail::AnalogDisplayPass>())pass->setSettings(colorStylization);
     }
 
     void applyEditorOverlayKnobs()
@@ -949,6 +957,9 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
+    if(auto* display=pipeline.findPass<detail::AnalogDisplayPass>()) {
+        if(adapter.isInitialized())display->destroyResources(adapter);
+    }
     if (auto* outline=pipeline.findPass<detail::StylizedOutlinePass>()) {
         if(adapter.isInitialized())outline->destroyResources(adapter);
     }
@@ -1265,6 +1276,9 @@ void Renderer::shutdown()
         }
     }
 
+    if(auto* display=_impl->pipeline.findPass<detail::AnalogDisplayPass>()) {
+        if(_impl->adapter.isInitialized())display->destroyResources(_impl->adapter);
+    }
     if (auto* outline=_impl->pipeline.findPass<detail::StylizedOutlinePass>()) {
         if(_impl->adapter.isInitialized())outline->destroyResources(_impl->adapter);
     }
@@ -1978,6 +1992,8 @@ void Renderer::render(const RenderScene& scene)
     graphInput.colorGrading = colorGradingStageEnabled;
     graphInput.colorStylization = finalLdrStageEnabled && colorStylizationPassPtr
         && colorStylizationPassPtr->isEnabled() && colorStylizationPassPtr->active();
+    const auto* displayPass=_impl->pipeline.findPass<detail::AnalogDisplayPass>();
+    graphInput.analogDisplay=finalLdrStageEnabled && displayPass && displayPass->isEnabled() && displayPass->active();
     auto* outlinePassPtr=_impl->pipeline.findPass<detail::StylizedOutlinePass>();
     graphInput.stylizedOutline=finalLdrStageEnabled && outlinePassPtr
         && outlinePassPtr->isEnabled() && outlinePassPtr->active();

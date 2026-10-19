@@ -6,7 +6,8 @@
 
 namespace ayt::render {
 
-/// Experimental .rsl look document v1. Self-contained settings; no referenced
+/// Experimental .rsl look document. Writes v2, reads complete v1/v2; v1 migrates
+/// with display simulation disabled. Self-contained settings; no referenced
 /// assets, Scene mutation or automatic ResourceManager/Cook/Pak integration.
 /// Serialization sanitizes runtime values. Parsing rejects malformed, unknown,
 /// incomplete or out-of-range documents (64 KiB limit), preserving output on failure.

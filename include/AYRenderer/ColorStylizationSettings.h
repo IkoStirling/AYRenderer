@@ -1,4 +1,5 @@
 #pragma once
+#include "AYRenderer/AnalogDisplaySettings.h"
 
 #include <algorithm>
 #include <array>
@@ -46,6 +47,7 @@ struct ColorStylizationSettings {
     float outlineLuminanceThreshold = .12f; // Display luminance difference, .01..1.
     float outlineStrength = 1;
     StylizationColor outlineColor{.015f,.02f,.04f};
+    AnalogDisplaySettings display;
 };
 
 enum class ColorStylizationPreset : uint8_t {
@@ -59,6 +61,8 @@ enum class ColorStylizationPreset : uint8_t {
     Comic = 7,
     Engraving = 8,
     Blueprint = 9,
+    Arcade = 10,
+    Broadcast = 11,
 };
 
 /// Construct a reusable runtime/editor look. Neutral and unknown values bypass.
