@@ -63,7 +63,10 @@ bool FixtureHousings::append(Renderer& renderer,RenderScene& scene,std::span<con
         renderer.setMaterialColor(_material,"baseColor",.012f,.014f,.018f,1);renderer.setMaterialFloat(_material,"roughness",.6f);renderer.setMaterialFloat(_material,"metallic",.4f);
     }
     if(!_body.isValid()||!_hood.isValid()||!_leaf.isValid()||!_material.isValid()){if(error)*error="Fixture housing GPU assets unavailable";return false;}
-    for(const auto& draw:_draws)scene.add(draw.part==FixtureHousingPart::Body?_body:draw.part==FixtureHousingPart::Hood?_hood:_leaf,_material,draw.world);
+    // Opaque order is independent of blending. Contiguous shared meshes let the
+    // existing rigid batcher instance bodies, hoods and leaves in every pass.
+    for(const auto part:{FixtureHousingPart::Body,FixtureHousingPart::Hood,FixtureHousingPart::Leaf})
+        for(const auto& draw:_draws)if(draw.part==part)scene.add(part==FixtureHousingPart::Body?_body:part==FixtureHousingPart::Hood?_hood:_leaf,_material,draw.world);
     if(error)error->clear();return true;
 }
 } // namespace ayt::render

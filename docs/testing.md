@@ -572,3 +572,13 @@ Shader12/209 (69 variants/no-compiler prewarm). Each D3D11/12 indirect real pass
 plus three existing SSR cases; unit/double1.3193/2.6387, half-strength1.1592,4ray/32step1.0938.
 Metal/black/uncovered preserve input; zero light stays zero. GI-only and combined Studio8-frame
 smokes passed, invalid5rays exit2. SDK128/53/88/547 clean, inventory1023/10 clean.
+
+
+2026-10-19 reduced volume / housing batches / profiler: Contracts166/2026, PostProcess252/1359,
+SceneMaterial79/9886, UI114/377, FrameGraph41/159, Sequence107/3902, Shader12/210(70 variants,
+no-compiler prewarm). Each D3D backend low-res extinction/checker/depth/noise1/674,
+main volume1/18, housing instance+native profiler1/17;9 prior optics/395 suite also passed per backend.
+Housing96objects: backenddraw102->9, instanced96, RGBdifference0. Volume energy110260/108787/109872.
+Full scene CPU sample45.501->20.644ms after contiguous housing meshes; downsample is still opt-in.
+Isolated64light volume GPU2.824/1.644/.611ms for divisors1/2/4. Combined45-frame Studio effects
+smoke and invalid3divisor rejection passed. SDK129/53/91/551 clean; inventory1028/10 clean.

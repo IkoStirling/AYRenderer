@@ -485,6 +485,8 @@ public:
     /// Deferred-only medium, owner-thread setter; copied finite settings, default off.
     /// Optional noiseStrength/Scale/Time vary density consistently for extinction
     /// and scattering; the host supplies time each frame when animation is wanted.
+    /// downsample1/2/4 changes scattering only; full-resolution extinction and
+    /// depth-aware reconstruction retain scene RGB/alpha and avoid depth-edge bleeding.
     void setVolumetricSettings(const VolumetricSettings& settings);
     VolumetricSettings volumetricSettings() const noexcept;
     /// Owner-thread, copies up to16 positive-scale projectors in stable order.
@@ -568,8 +570,11 @@ public:
         const EditorSelectionOutline2DState& state);
     EditorSelectionOutline2DState editorSelectionOutline2DState() const noexcept;
 
+    /// Enable the text HUD and backend per-view GPU timestamps; default off.
+    /// Profiler queries have a cost and require a supported native backend.
     void setDebugOverlayEnabled(bool enabled);
     bool isDebugOverlayEnabled() const noexcept;
+    /// Hide HUD text while retaining enabled per-view GPU profiling.
     void setDebugOverlaySuppressed(bool suppressed);
     bool isDebugOverlaySuppressed() const noexcept;
     // Editor presentation aid. bgfx applies this to submitted geometry while
@@ -577,6 +582,9 @@ public:
     void setWireframeEnabled(bool enabled);
     bool isWireframeEnabled() const noexcept;
     void resetDebugOverlayStats();
+    /// Borrowed diagnostic snapshot, updated each frame; copy before retaining
+    /// across frames/shutdown. GPU results may lag (gpuFrameNumber); zero view
+    /// timings mean unavailable/off, not measured zero work. Main fixed passes.
     const RenderFrameStats& getFrameStats() const noexcept;
 
     // Queue a backbuffer capture for this frame. Call after render(), before endFrame().

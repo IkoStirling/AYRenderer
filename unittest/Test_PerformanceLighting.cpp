@@ -368,6 +368,18 @@ TEST_CASE(geometry_follows_axis_and_survives_dark_fixture_with_bounded_parts) {
     std::vector<PerformanceLight> lights(256,p);for(size_t i=0;i<lights.size();++i)lights[i].id=uint32_t(i);
     CHECK(buildFixtureHousingDraws(lights,settings,draws,stats));CHECK(stats.parts==1536);CHECK(stats.fixtures==256);
 }
+TEST_CASE(shared_housing_meshes_form_contiguous_runs_without_losing_transforms) {
+    Renderer renderer;InitDesc init;init.backend=Backend::Noop;CHECK(renderer.initialize(init));
+    std::vector<PerformanceLight> lights;for(uint32_t i=0;i<6;++i){auto p=light(i+1);p.apertureRadius=.2f;p.light.position.x=float(i);lights.push_back(p);}
+    FixtureHousingSettings settings;settings.shadeLeaves=true;std::vector<FixtureHousingDraw> expected;FixtureHousingStats stats;CHECK(buildFixtureHousingDraws(lights,settings,expected,stats));
+    FixtureHousings housings;RenderScene scene;CHECK(housings.append(renderer,scene,lights,settings));CHECK(scene.items().size()==36);CHECK(housings.stats().parts==36);
+    size_t at=0;for(const auto part:{FixtureHousingPart::Body,FixtureHousingPart::Hood,FixtureHousingPart::Leaf}){
+        const auto mesh=scene.items()[at].mesh;
+        for(const auto& draw:expected)if(draw.part==part){const auto& item=scene.items()[at++];CHECK(item.mesh.id==mesh.id);for(int component=0;component<16;++component)CHECK(std::abs(item.world.ptr()[component]-draw.world.ptr()[component])<1e-6f);}
+    }
+    CHECK(at==36);CHECK(scene.items()[0].mesh.id!=scene.items()[6].mesh.id);CHECK(scene.items()[6].mesh.id!=scene.items()[12].mesh.id);
+    renderer.shutdown();
+}
 TEST_CASE(invalid_settings_preserve_output_and_point_or_zero_exit_have_no_body) {
     auto p=light(1);p.apertureRadius=.2f;std::vector<FixtureHousingDraw> draws;FixtureHousingStats stats;FixtureHousingSettings settings;
     CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(stats.parts==2);settings.hoodLength=-1;

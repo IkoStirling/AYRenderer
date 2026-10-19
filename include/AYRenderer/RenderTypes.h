@@ -133,6 +133,9 @@ struct RenderResourceFrameStats {
     uint16_t persistentHistoryResources = 0;
 };
 
+/// Renderer-owned diagnostics snapshot: CPU cadence, backend GPU timing,
+/// pass submissions and resource/visibility counts. getFrameStats() borrows it;
+/// copy before retaining across frames or shutdown. GPU results may lag CPU.
 struct RenderFrameStats {
     // Wall-clock cadence between consecutive beginFrame calls. Unlike the
     // old render-only timer this includes simulation, event polling, VSync,

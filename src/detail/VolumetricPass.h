@@ -11,7 +11,9 @@ public:
  void destroyResources(BGFXAdapter& adapter);
 private:
  uint32_t executePerformance(PassExecContext& ctx);
+ uint32_t finishIntegration(PassExecContext& ctx,bgfx::FrameBufferHandle integration,bgfx::TextureHandle input);
+ static constexpr uint8_t kReconstructViewId=242;
  FullscreenPassGeometry _geometry;
- shader::ShaderResource _program;
+ shader::ShaderResource _program,_reconstruction;
 };
 }

@@ -197,9 +197,9 @@ struct FixtureEmitterGpuFixture {
         readback=bgfx::createTexture2D(64,64,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
         return bgfx::isValid(readback)&&cube.isValid()&&black.isValid();
     }
-    std::array<uint8_t,64*64*4> sampleLight(const ayt::render::PerformanceLight& light,bool volume){
+    std::array<uint8_t,64*64*4> sampleLight(const ayt::render::PerformanceLight& light,bool volume,uint8_t downsample=1){
         using namespace ayt::render;renderer.setPostProcessBloomStrength(0);
-        VolumetricSettings fog;fog.enabled=volume;fog.density=.1f;fog.scattering=1;fog.anisotropy=0;fog.steps=64;fog.debugView=2;renderer.setVolumetricSettings(fog);
+        VolumetricSettings fog;fog.enabled=volume;fog.downsample=downsample;fog.density=.1f;fog.scattering=1;fog.anisotropy=0;fog.steps=64;fog.debugView=2;renderer.setVolumetricSettings(fog);
         CHECK(renderer.setPerformanceLights({&light,1}));RenderScene scene;
         renderer.setMaterialColor(black,"baseColor",1,1,1,1);scene.add(cube,black,ayt::math::scale(1.f,1.f,.1f));
         for(int i=0;i<3;++i){renderer.beginFrame({0,0,0,1});renderer.render(scene);renderer.endFrame();}
@@ -452,3 +452,48 @@ TEST_CASE(transparent_pbr_uses_shared_gobo_and_ies_distribution){
 }
 TEST_SUITE_END
 }
+
+TEST_SUITE(ReducedVolumeGpu)
+TEST_CASE(real_main_view_scattering_reconstruction_is_bounded_and_conserves_energy) {
+#ifdef _WIN32
+ const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Isolated real-device acceptance required");
+ FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+ ayt::render::PerformanceLight lamp;lamp.id=1;lamp.light=ayt::render::Light::spot({-.5f,0,-2},{0,0,1},10,4,.95f,.8f,{1,0,0});lamp.apertureRadius=.1f;
+ const auto full=f.sampleLight(lamp,true,1),half=f.sampleLight(lamp,true,2),quarter=f.sampleLight(lamp,true,4);
+ const auto energy=emitterRedEnergy(full),halfEnergy=emitterRedEnergy(half),quarterEnergy=emitterRedEnergy(quarter);
+ std::fprintf(stderr,"[Reduced volume] full=%.0f half=%.0f quarter=%.0f\n",energy,halfEnergy,quarterEnergy);
+ CHECK(energy>1000);CHECK(halfEnergy>energy*.8);CHECK(halfEnergy<energy*1.15);CHECK(quarterEnergy>energy*.7);CHECK(quarterEnergy<energy*1.2);
+#else
+ SKIP_TEST("Windows device fixture required");
+#endif
+}
+TEST_SUITE_END
+
+TEST_SUITE(FixtureHousingBatchGpu)
+TEST_CASE(grouped_housings_instance_without_changing_opaque_pixels) {
+#ifdef _WIN32
+ const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Isolated real-device acceptance required");
+ FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+ f.renderer.setDebugOverlayEnabled(true);f.renderer.setDebugOverlaySuppressed(true);
+ f.renderer.setAmbientStrength(1);f.renderer.setPostProcessExposure(8);f.renderer.setPostProcessBloomStrength(0);
+ std::vector<ayt::render::PerformanceLight> lights;
+ for(int i=0;i<16;++i){ayt::render::PerformanceLight p;p.id=uint32_t(i+1);p.light=ayt::render::Light::spot({(i%4-1.5f)*.4f,(i/4-1.5f)*.4f,0},ayt::math::FVector3((i%4-1.5f)*.1f,(i/4-1.5f)*.1f,-1).normalize(),10,0,.95f,.8f,{1,1,1});p.apertureRadius=.1f;lights.push_back(p);}
+ const auto render=[&](bool instanced){
+  f.renderer.setRigidInstancingEnabled(instanced);ayt::render::FixtureHousingSettings settings;settings.shadeLeaves=true;settings.leafAngle=.2f;
+  ayt::render::RenderScene scene;CHECK(f.housings.append(f.renderer,scene,lights,settings));CHECK(scene.items().size()==96);
+  for(int i=0;i<6;++i){f.renderer.beginFrame({0,0,0,1});f.renderer.render(scene);f.renderer.endFrame();}
+  const auto stats=f.renderer.getFrameStats();const auto color=bgfx::TextureHandle{ayt::render::detail::CameraViewsTestAccess::finalColor(f.renderer)};CHECK(bgfx::isValid(color));std::array<uint8_t,64*64*4> pixels{};
+  if(bgfx::isValid(color)){bgfx::blit(112,f.readback,0,0,color);const auto ready=bgfx::readTexture(f.readback,pixels.data());auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(f.renderer);for(int i=0;i<120&&adapter->gpuFrameCounter()<ready;++i)f.renderer.endFrame();CHECK(adapter->gpuFrameCounter()>=ready);}
+  return std::pair{pixels,stats};
+ };
+ const auto [individual,baseline]=render(false);const auto [batched,optimized]=render(true);
+ const double energy=emitterRedEnergy(individual);double difference=0;for(size_t i=0;i<individual.size();i+=4)for(size_t c=0;c<3;++c)difference+=std::abs(int(individual[i+c])-int(batched[i+c]));
+ std::fprintf(stderr,"[Housing batch] individual=%u grouped=%u objects=%u energy=%.0f difference=%.0f\n",baseline.backendDrawCalls,optimized.backendDrawCalls,optimized.instancedObjects,energy,difference);
+ double viewGpu=0;for(const auto& pass:optimized.passes)viewGpu+=pass.gpuTimeMs;
+ CHECK(viewGpu>0);CHECK(optimized.gpuFrameNumber>0);
+ CHECK(energy>500);CHECK(baseline.instancedDrawCalls==0);CHECK(optimized.instancedDrawCalls>=3);CHECK(optimized.instancedObjects>=96);CHECK(optimized.backendDrawCalls<baseline.backendDrawCalls/2);CHECK(difference<energy*.02+30);
+#else
+ SKIP_TEST("Windows device fixture required");
+#endif
+}
+TEST_SUITE_END

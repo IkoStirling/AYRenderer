@@ -17,7 +17,10 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
     BlackboardGBufferView gb;
     if(!ctx.resourceBlackboard->resolveGBuffer(gb)||!ctx.resourceBlackboard->findProduced(BlackboardResourceId::LightingColor))return 0;
     const auto input=adapter.getFboAttachment(selectSceneColorSourceFbo(ctx),0);
-    const auto target=ctx.frameGraph->resolve(FgResourceId::VolumetricColor);
+    const bool reduced=settings.downsample>1;
+    const uint16_t width=uint16_t((uint32_t(ctx.viewportWidth)+settings.downsample-1)/settings.downsample);
+    const uint16_t height=uint16_t((uint32_t(ctx.viewportHeight)+settings.downsample-1)/settings.downsample);
+    const auto target=ctx.frameGraph->resolve(reduced?FgResourceId::VolumetricIntegration:FgResourceId::VolumetricColor);
     if(!BGFXAdapter::isValid(input)||!BGFXAdapter::isValid(target))return 0;
     const auto output=adapter.getFboAttachment(target,0);
     if(!BGFXAdapter::isValid(output)||input.idx==output.idx)return 0;
@@ -37,13 +40,14 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
     uniform("fogInverseViewProjection",inv,64);uniform("fogView",view,64);
     vector("fogCamera",ctx.frame.cameraPosition.x,ctx.frame.cameraPosition.y,ctx.frame.cameraPosition.z,std::abs(ctx.frame.projection.row[3].w)>.5f?1.f:0.f);
     vector("fogMedium",settings.density,settings.scattering,settings.anisotropy,settings.maxDistance);
+    vector("fogIntegration",reduced?1.f:0.f,0,0,0);
     vector("fogNoise",settings.noiseStrength,settings.noiseScale,settings.noiseTime,0);
     vector("fogCenter",settings.center.x,settings.center.y,settings.center.z,bgfx::getCaps()->homogeneousDepth?-1.f:0.f);
     vector("fogExtent",settings.halfExtent.x,settings.halfExtent.y,settings.halfExtent.z,0);
     vector("fogTint",settings.tint.x,settings.tint.y,settings.tint.z,0);
     texture("sceneColor",input);texture("worldPosition",gb.worldPosition);texture("geometryCoverage",gb.material);
     };
-    configureFullscreenPassView(adapter,kViewId,target,0,0,ctx.viewportWidth,ctx.viewportHeight);
+    configureFullscreenPassView(adapter,kViewId,target,0,0,width,height);
     adapter.setViewMode(kViewId,bgfx::ViewMode::Sequential);
     const auto vp=ctx.frame.projection*ctx.frame.view;
     uint32_t draws=0;
@@ -53,10 +57,10 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         const bool extinction=iteration==0;
         PerformanceLight empty;empty.light=Light::spot({0,0,0},{0,-1,0},1,0,.95f,.9f,{0,0,0});
         const auto& entry=extinction?empty:packet.lights[iteration-1];const auto& light=entry.light;
-        auto rect=LightScreenRect{0,0,ctx.viewportWidth,ctx.viewportHeight,true};
+        auto rect=LightScreenRect{0,0,width,height,true};
         if(!extinction) {
             if(entry.volumetric<=0||light.intensity<=0)continue;
-            rect=performanceLightRect(entry,vp,ctx.viewportWidth,ctx.viewportHeight);if(!rect.visible)continue;
+            rect=performanceLightRect(entry,vp,width,height);if(!rect.visible)continue;
             if(packet.stats.volumeDraws>=packet.budget.volumeLights){++packet.stats.volumeBudgetSkipped;continue;}
         }
         auto gobo=gb.material;
@@ -112,6 +116,7 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         if(settings.debugView==1)break; // Transmittance has no light-dependent term.
     }
     adapter.resetDrawScissor();
+    if(reduced){ctx.frameGraph->markProduced(FgResourceId::VolumetricIntegration);return draws+finishIntegration(ctx,target,input);}
     ctx.frameGraph->markProduced(FgResourceId::VolumetricColor);
     ctx.resourceBlackboard->publishProduced(BlackboardResourceId::VolumetricColor,BlackboardResourceLifetime::Transient,target,output,ctx.viewportWidth,ctx.viewportHeight,0);
     return draws;

@@ -116,7 +116,8 @@ enum class FgResourceId : uint8_t {
     GBufferAlbedo = 27,
     VolumetricColor = 28,
     BaseGBuffer = 29,
-    Count        = 30,
+    VolumetricIntegration = 30, // optional reduced-resolution radiance/transmission
+    Count        = 31,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。

@@ -14,7 +14,7 @@ namespace ayt::render::detail
 void DebugOverlay::applyDebugMode()
 {
     uint32_t flags = BGFX_DEBUG_NONE;
-    if (_enabled) flags |= BGFX_DEBUG_TEXT;
+    if (_enabled) flags |= BGFX_DEBUG_TEXT | BGFX_DEBUG_PROFILER;
     bgfx::setDebug(flags);
 }
 
@@ -127,8 +127,11 @@ std::string_view passNameForView(uint16_t view,
     case 8:           return "Lighting";
     case 9: case 253: case 254: return "Transparent";
     case 10:          return "BloomExtract";
-    case 11: case 12: return "BloomBlur";
+    case 11: case 12: case 26: case 27: case 28: case 29: case 30: return "BloomBlur";
+    case 31:          return "AutoExposure";
     case 13:          return "DepthHaze";
+    case 32:          return "SSR";
+    case 33: case 242: return "Volumetric";
     case 14:          return "SSAO";
     case 15:          return "PostProcess";
     case 16:         return "Present";

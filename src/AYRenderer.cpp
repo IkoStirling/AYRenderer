@@ -1896,6 +1896,7 @@ void Renderer::render(const RenderScene& scene)
     graphInput.volumetric = backendReady && frame.volumetric.enabled && frame.volumetric.density > 0
         && fogPass && fogPass->isEnabled() && gbufferPassPtr && gbufferPassPtr->isEnabled()
         && lightingPassPtr && lightingPassPtr->isEnabled();
+    graphInput.volumetricDownsample = frame.volumetric.downsample;
     if (graphInput.volumetric && !detail::BGFXAdapter::isValid(graphInput.gbuffer))
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
     graphInput.bloomExtract = bloomStages.extract;
@@ -3723,6 +3724,8 @@ Renderer::editorSelectionOutline2DState() const noexcept
                  : EditorSelectionOutline2DState{};
 }
 
+/// Enable the text HUD and backend per-view GPU timers together. Suppression hides
+/// only text; profiled RenderFrameStats remain available. Default disabled.
 void Renderer::setDebugOverlayEnabled(bool enabled)
 {
     if (_impl) {

@@ -47,7 +47,7 @@ GPU view64..111分配三Pass连续区间，原主管线/编辑器/粒子view保�
 RendererSubSystem在每视图自己的相机/aspect下提取OwnedCpu packet后恢复主视口；
 主镜头3D mask在presentation副本过滤，原Scene完整保留。该路径明确为Forward，
 完整Deferred多视图仍需独立的Pass/FrameGraph/blackboard/历史与view命名空间设计。
-UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，最大单Pass预算145；
+UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，最大单Pass预算144；
 constexpr容量与公开上限静态交叉检查，防止布局变更后重用同帧GPU view。
 范围、使用方式与实际验收见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
 
@@ -1815,3 +1815,34 @@ ScreenSpaceIndirectSettings 经 Renderer::setScreenSpaceIndirectSettings 复制/
 再乘strength[0,1]并平均射线，保留alpha；金属1、黑反射率和零输入不增加漫反射。
 关闭项不依赖环境贴图。固定方向避免逐帧随机闪烁，但1..4射线会有离散欠采样；
 它不是离屏GI、探针、多次反弹、透明折射或时域累积。共享屏幕命中规则与SSR维护一致。
+
+
+## 2026-10-19 低分辨率体积积分与深度重建
+
+VolumetricSettings.downsample为每轴除数1/2/4，默认1保持原路径。2/4新增一个FrameGraph瞬态
+RGBA16F积分目标，尺寸ceil(viewport/divisor)，存储散射RGB/透射alpha；扩展灯仍一次介质消光、
+独立预算下逐灯积分和scissor，保留全部IES/Gobo/焦面/棱镜/PCSS。传统单灯也支持同一重建。
+本帧积分完成后用专用视图242重建到既有全分辨率VolumetricColor，再透明/Bloom；
+FrameGraph资源ID30追加VolumetricIntegration，旧ID不变，Count31。关闭或除数1不分配此附件。
+
+重建仅采散射，四点双线性权重结合GBuffer视空间深度和天空/几何分类；深度容差max(.05,.02×z)，
+4倍容差外拒绝，未覆盖的细前景不借背景散射（零散射回退）。消光仍在全分辨率按实际观察路径
+计算，动画密度沿用4点积分，场景RGB与alpha始终来自全分辨率源；不会把背景一起缩小模糊。
+增加一个重建draw，volumeDraws仍只数光源。低采样仍可能漏掉很细的光束/前景，不是froxel或历史重投影。
+
+242纳入固定视图保留，离屏UI分配器自动跳过；现有各ID与camera64..111不变。
+UIRenderBackend.kMaxOffscreenPaintsPerFrame从145变144，与实际保留容量一致，四视图组仍可留下空隙。
+
+
+## 2026-10-19 合批与逐视图性能诊断
+
+FixtureHousings::append按Body/Hood/Leaf共享网格分组，保持各部件矩阵与组内顺序，
+让既有GBuffer/Shadow刚体实例合批连续生效；buildFixtureHousingDraws的离线输出顺序不变。
+16灯/96部件D3D11和D3D12均从102后端draw降到9，instancedObjects96，RGB回读差0。
+实例对象数含多Pass/阴影重复，不等于独立实体数量。
+
+setDebugOverlayEnabled(true)现在同时启用BGFX_DEBUG_PROFILER；默认关闭查询。
+setDebugOverlaySuppressed(true)隐藏文字但保留采样，getFrameStats为逐帧更新的借用快照。
+DebugOverlay归并补全SSR32、体积33/242、Bloom11/12/26..30及曝光31；
+独立相机/动态离屏UI不逐项归属，0分项表示未启用/不支持，不应解释为零开销。
+GPU完成帧可滞后CPU；Renderer CPU帧内时间不覆盖Host的演出求值/Presenter工作。

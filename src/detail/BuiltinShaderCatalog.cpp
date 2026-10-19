@@ -1,5 +1,6 @@
 #include "detail/BuiltinShaderCatalog.h"
 #include "detail/PerformanceTransparentSource.h"
+#include "detail/VolumeReconstructionSource.h"
 #include "detail/LightingPass.h"
 #include "detail/RigidInstancing.h"
 #include "detail/WorldLit2DMaterialSource.h"
@@ -33,6 +34,7 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
         std::pair{"auto_exposure",kAutoExposurePhoskiaSource},
         std::pair{"ssr",kSsrPhoskiaSource},
         std::pair{"volumetric",kVolumetricPhoskiaSource},
+        std::pair{"volume_reconstruction",kVolumeReconstructionSource},
         std::pair{"deferred_decal",kDeferredDecalPhoskiaSource},
         std::pair{"particle_unlit",kParticlePhoskiaSource},
         std::pair{"emissive_point_instanced",kEmissivePointInstancedPhoskiaSource},

@@ -740,6 +740,38 @@ TEST_CASE(indirect_real_pass_transfers_color_once_and_respects_material_and_zero
 #endif
 }
 
+TEST_CASE(reduced_volume_preserves_full_scene_edges_and_extinguishes_only_once) {
+#ifdef _WIN32
+ const auto* backend=std::getenv("AY_TAA_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Isolated device required");
+ PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+ std::array<Pixel,16> colors{},positions{};for(int y=0;y<4;++y)for(int x=0;x<4;++x){colors[y*4+x]=x%2?Pixel{0,1,.25f,.75f}:Pixel{1,0,.25f,.75f};positions[y*4+x]={0,0,x<2?1.f:10.f,1};}
+ const auto grid=[&](const auto& data){const auto t=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(data.data(),sizeof(data)));f.textures.push_back(t);return t;};
+ const auto checker=grid(colors),world=grid(positions),normal=f.input({.5f,.5f,1,1}),coverage=f.input({0,0,0,1});
+ const auto copy=[&](bgfx::TextureHandle image,uint8_t view){return f.renderSource("material VolumeProbe {texture2d probeImage vertex {in pos:position;out vUv:texcoord=pos.xy*vec2(0.5)+vec2(0.5);return vec4(pos.xy,0.0,1.0)} fragment {in vUv:texcoord;return sample(probeImage,vec2(vUv.x,1.0-vUv.y))}}",[&](const auto& p){const auto b=p.getTextureBinding("probeImage");p.setTexture(p.getTextureStage(b),b,toShaderTexture(image));},view);};
+ FrameGraph graph(f.adapter);RenderResourceBlackboard bb;ayt::render::RenderScene scene;std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;std::unordered_map<uint64_t,GpuMaterial> materials;
+ ayt::render::PerformanceLight lamp;lamp.id=1;lamp.light=ayt::render::Light::spot({0,0,-2},{0,0,1},20,0,.9f,.8f,{1,0,0});ayt::render::PerformanceLighting packet;CHECK(packet.assign({&lamp,1},{}));
+ FrameContext frame;frame.volumetric.enabled=true;frame.volumetric.density=.2f;frame.volumetric.scattering=.8f;frame.volumetric.steps=16;
+ PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame};ctx.sceneFbo=f.target;ctx.resourceBlackboard=&bb;ctx.frameGraph=&graph;ctx.performanceLights=&packet;
+ VolumetricPass pass;
+ for(float noise:{0.f,.4f}){
+  frame.volumetric.noiseStrength=noise;frame.volumetric.noiseTime=3;std::vector<Pixel> reference;
+  for(uint8_t factor:{1,2,4}){
+   frame.volumetric.downsample=factor;copy(checker,0);
+   bb.beginFrame();bb.publishGBuffer(f.target,checker,normal,world,coverage,coverage,4,4,1,true);bb.publishProduced(BlackboardResourceId::LightingColor,BlackboardResourceLifetime::External,f.target,f.targetTexture,4,4,1);
+   PostProcessGraphPlanInput in;in.width=in.height=4;in.finalLdr=true;in.sceneColor=f.target;in.gbuffer=f.target;in.volumetric=true;in.volumetricDownsample=factor;CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);
+   CHECK(pass.execute(ctx)==(factor==1?1:2));CHECK(packet.stats.volumeDraws==0);
+   const auto output=f.adapter.getFboAttachment(graph.resolve(FgResourceId::VolumetricColor),0);const auto pixels=copy(output,244);CHECK(pixels.size()==16);if(pixels.size()!=16)break;
+   if(factor==1)reference=pixels;
+   for(size_t i=0;i<16;++i){for(int c=0;c<4;++c)CHECK(std::abs(pixels[i][c]-reference[i][c])<.001f);CHECK(std::abs(pixels[i][3]-.75f)<.001f);CHECK(pixels[i][int(i%4)%2?0:1]==0);}
+   if(noise==0)for(int y=0;y<4;++y)for(int x=0;x<4;++x){const float px=(x+.5f)*.5f-1,py=1-(y+.5f)*.5f,z=x<2?1.f:10.f,T=std::exp(-.2f*std::sqrt(px*px+py*py+z*z));const auto i=y*4+x;CHECK(std::abs(pixels[i][x%2?1:0]-T)<.001f);}
+  }
+ }
+ pass.destroyResources(f.adapter);
+#else
+ SKIP_TEST("Windows device fixture required");
+#endif
+}
+
 TEST_CASE(phoskia_release_package_relocation_and_repeated_gpu_lifetimes_preserve_pixels) {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");

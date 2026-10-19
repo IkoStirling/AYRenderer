@@ -198,8 +198,16 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
 
     if (input.volumetric) {
         graph.addResource(FgResourceId::VolumetricColor, graphTextureDesc(RenderPassSlot::Volumetric, RenderPassResourceId::VolumetricColor));
+        std::vector<FgResourceId> writes{FgResourceId::VolumetricColor};
+        if (input.volumetricDownsample >= 2) {
+            auto low = graphTextureDesc(RenderPassSlot::Volumetric, RenderPassResourceId::VolumetricColor);
+            low.scale = input.volumetricDownsample >= 4 ? FgTextureScale::Quarter : FgTextureScale::Half;
+            low.pointSampled = true;
+            graph.addResource(FgResourceId::VolumetricIntegration, low);
+            writes.push_back(FgResourceId::VolumetricIntegration);
+        }
         graph.addPass({"Volumetric", {result.hdrSceneSource, FgResourceId::GBufferWorldPosition, FgResourceId::GBufferSurface},
-                       {FgResourceId::VolumetricColor}, true, false, executionSlot(RenderPassSlot::Volumetric)});
+                       std::move(writes), true, false, executionSlot(RenderPassSlot::Volumetric)});
         result.hdrSceneSource = FgResourceId::VolumetricColor;
     }
     if (input.bloomExtract) {

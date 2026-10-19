@@ -1,7 +1,7 @@
 #pragma once
 #include "AYRenderer/PerformanceShaderSources.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v13_area_shadow";
+inline constexpr char kVolumetricCacheKey[]="volumetric_v14_separate_integration";
 inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
@@ -21,6 +21,7 @@ material Volumetric {
  uniform vec4 fogShadowParams
  uniform vec4 fogCamera
  uniform vec4 fogMedium
+ uniform vec4 fogIntegration
  uniform vec4 fogOptions
  uniform vec4 fogCenter
  uniform vec4 fogExtent
@@ -257,6 +258,10 @@ material Volumetric {
   if(fogOptions.w>1.5){result=vec4(radiance,0.0)}
   if(fogOptions.y>1.5) {result=vec4(radiance,raw.a)}
   else if(fogOptions.y>0.5) {result=vec4(vec3(transmission),raw.a)}
+  if(fogIntegration.x>0.5){
+   result=vec4(radiance,transmission)
+   if(fogOptions.w>1.5){result=vec4(radiance,0.0)}
+  }
   return result
  }
 }

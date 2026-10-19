@@ -1,5 +1,6 @@
 #include "detail/VolumetricPass.h"
 #include "AYRenderer/VolumetricShaderSources.h"
+#include "detail/VolumeReconstructionSource.h"
 #include "detail/PassExecContext.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/RenderResourceBlackboard.h"
@@ -15,7 +16,9 @@ uint32_t VolumetricPass::execute(PassExecContext& ctx) {
  BlackboardGBufferView gb;
  if(!ctx.resourceBlackboard->resolveGBuffer(gb)||!ctx.resourceBlackboard->findProduced(BlackboardResourceId::LightingColor))return 0;
  auto input=adapter.getFboAttachment(selectSceneColorSourceFbo(ctx),0);
- auto target=ctx.frameGraph->resolve(FgResourceId::VolumetricColor);
+ const bool reduced=s.downsample>1;
+ const uint16_t width=uint16_t((uint32_t(ctx.viewportWidth)+s.downsample-1)/s.downsample),height=uint16_t((uint32_t(ctx.viewportHeight)+s.downsample-1)/s.downsample);
+ auto target=ctx.frameGraph->resolve(reduced?FgResourceId::VolumetricIntegration:FgResourceId::VolumetricColor);
  if(!BGFXAdapter::isValid(input)||!BGFXAdapter::isValid(target))return 0;
  auto output=adapter.getFboAttachment(target,0);
  if(!BGFXAdapter::isValid(output)||input.idx==output.idx)return 0;
@@ -32,6 +35,7 @@ uint32_t VolumetricPass::execute(PassExecContext& ctx) {
  u("fogInverseViewProjection",inv,64);u("fogView",view,64);
  v("fogCamera",ctx.frame.cameraPosition.x,ctx.frame.cameraPosition.y,ctx.frame.cameraPosition.z,std::abs(ctx.frame.projection.row[3].w)>0.5f?1.f:0.f);
  v("fogMedium",s.density,s.scattering,s.anisotropy,s.maxDistance);
+ v("fogIntegration",reduced?1.f:0.f,0,0,0);
  v("fogNoise",s.noiseStrength,s.noiseScale,s.noiseTime,0);
  v("fogOptions",float(s.steps),float(s.debugView),s.local?1.f:0.f,0);
  v("fogCenter",s.center.x,s.center.y,s.center.z,bgfx::getCaps()->homogeneousDepth?-1.f:0.f);
@@ -79,11 +83,38 @@ uint32_t VolumetricPass::execute(PassExecContext& ctx) {
  v("fogIesSettings",0,0,0,0);tex("iesAtlas",gb.material);
  tex("patternGobo",gb.material);
  if(!bindings)return 0;
- configureFullscreenPassView(adapter,kViewId,target,0,0,ctx.viewportWidth,ctx.viewportHeight);
+ configureFullscreenPassView(adapter,kViewId,target,0,0,width,height);
  _geometry.bind(adapter);adapter.setStateDepthTestAlways();shader::DrawCallContext submit;submit.viewId=kViewId;submit.state=0;_program.submit(submit);
+ if(reduced){ctx.frameGraph->markProduced(FgResourceId::VolumetricIntegration);return 1+finishIntegration(ctx,target,input);}
  ctx.frameGraph->markProduced(FgResourceId::VolumetricColor);
  ctx.resourceBlackboard->publishProduced(BlackboardResourceId::VolumetricColor,BlackboardResourceLifetime::Transient,target,output,ctx.viewportWidth,ctx.viewportHeight,0);
  return 1;
 }
-void VolumetricPass::destroyResources(BGFXAdapter& adapter){_program.reset();_geometry.destroy(adapter);}
+uint32_t VolumetricPass::finishIntegration(PassExecContext& ctx,bgfx::FrameBufferHandle integration,bgfx::TextureHandle input){
+ auto& adapter=ctx.adapter;const auto s=sanitizeVolumetricSettings(ctx.frame.volumetric);
+ BlackboardGBufferView gb;if(!ctx.resourceBlackboard->resolveGBuffer(gb))return 0;
+ const auto target=ctx.frameGraph->resolve(FgResourceId::VolumetricColor);
+ const auto output=adapter.getFboAttachment(target,0),low=adapter.getFboAttachment(integration,0);
+ if(!BGFXAdapter::isValid(output)||!BGFXAdapter::isValid(low)||output.idx==low.idx||output.idx==input.idx)return 0;
+ if(!_reconstruction.isValid())_reconstruction=ctx.pool.acquire(kVolumeReconstructionSource,kVolumeReconstructionKey);
+ if(!_reconstruction.isValid())return 0;
+ bool valid=true;
+ const auto u=[&](const char* n,const void* data,uint32_t size){const auto b=_reconstruction.getUniformBinding(n);valid&=b!=shader::InvalidBinding;if(b!=shader::InvalidBinding)_reconstruction.setUniform(b,data,size);};
+ const auto v=[&](const char* n,float x,float y,float z,float w){const float data[4]={x,y,z,w};u(n,data,16);};
+ const auto tex=[&](const char* n,bgfx::TextureHandle t){const auto b=_reconstruction.getTextureBinding(n);valid&=b!=shader::InvalidBinding;if(b!=shader::InvalidBinding)_reconstruction.setTexture(_reconstruction.getTextureStage(b),b,toShaderTexture(t));};
+ float inverse[16],view[16];toBgfxColumnMajor((ctx.frame.projection*ctx.frame.view).inverse(),inverse);toBgfxColumnMajor(ctx.frame.view,view);
+ u("fogInverseViewProjection",inverse,64);u("fogView",view,64);
+ v("fogCamera",ctx.frame.cameraPosition.x,ctx.frame.cameraPosition.y,ctx.frame.cameraPosition.z,std::abs(ctx.frame.projection.row[3].w)>.5f?1.f:0.f);
+ v("fogMedium",s.density,s.scattering,s.anisotropy,s.maxDistance);v("fogOptions",float(s.steps),float(s.debugView),s.local?1.f:0.f,0);
+ v("fogCenter",s.center.x,s.center.y,s.center.z,bgfx::getCaps()->homogeneousDepth?-1.f:0.f);v("fogExtent",s.halfExtent.x,s.halfExtent.y,s.halfExtent.z,0);v("fogNoise",s.noiseStrength,s.noiseScale,s.noiseTime,0);
+ const float width=float((uint32_t(ctx.viewportWidth)+s.downsample-1)/s.downsample),height=float((uint32_t(ctx.viewportHeight)+s.downsample-1)/s.downsample);
+ v("reconstructionGrid",width,height,1.f/width,1.f/height);
+ tex("sceneColor",input);tex("worldPosition",gb.worldPosition);tex("geometryCoverage",gb.material);tex("fogIntegral",low);
+ if(!valid)return 0;
+ configureFullscreenPassView(adapter,kReconstructViewId,target,0,0,ctx.viewportWidth,ctx.viewportHeight);
+ _geometry.bind(adapter);adapter.setStateDepthTestAlways();shader::DrawCallContext submit;submit.viewId=kReconstructViewId;submit.state=0;_reconstruction.submit(submit);
+ ctx.frameGraph->markProduced(FgResourceId::VolumetricColor);ctx.resourceBlackboard->publishProduced(BlackboardResourceId::VolumetricColor,BlackboardResourceLifetime::Transient,target,output,ctx.viewportWidth,ctx.viewportHeight,0);
+ return 1;
+}
+void VolumetricPass::destroyResources(BGFXAdapter& adapter){_program.reset();_reconstruction.reset();_geometry.destroy(adapter);}
 }

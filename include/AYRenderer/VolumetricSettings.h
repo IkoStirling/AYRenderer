@@ -13,6 +13,9 @@ struct VolumetricSettings {
     float anisotropy = 0.2f;
     float maxDistance = 100.0f;
     uint8_t steps = 32;
+    /// Per-axis scattering resolution divisor: 1 legacy, 2 half, 4 quarter.
+    /// Full-resolution extinction and depth-aware reconstruction preserve scene detail.
+    uint8_t downsample = 1;
     uint8_t lightIndex = 0; // Legacy single-light selection; performance packets ignore it.
     uint8_t debugView = 0; // 0 composite, 1 transmittance, 2 radiance
     bool local = false;
@@ -29,6 +32,7 @@ inline VolumetricSettings sanitizeVolumetricSettings(VolumetricSettings s) noexc
     auto finite=[](float x,float fallback,float lo,float hi){return std::isfinite(x)?std::clamp(x,lo,hi):fallback;};
     s.density=finite(s.density,.025f,0,1); s.scattering=finite(s.scattering,.8f,0,1);
     s.anisotropy=finite(s.anisotropy,.2f,-.9f,.9f); s.maxDistance=finite(s.maxDistance,100,.1f,500);
+    s.downsample=s.downsample>=4?4:s.downsample>=2?2:1;
     s.steps=std::clamp<uint8_t>(s.steps,8,64); s.lightIndex=std::min<uint8_t>(s.lightIndex,7); s.debugView=std::min<uint8_t>(s.debugView,2);
     for(int i=0;i<3;++i) {s.center[i]=finite(s.center[i],0,-100000,100000);s.halfExtent[i]=finite(s.halfExtent[i],10,.01f,10000);s.tint[i]=finite(s.tint[i],1,0,1);}
     s.noiseStrength=finite(s.noiseStrength,0,0,1);

@@ -38,6 +38,7 @@ struct PostProcessGraphPlanInput {
     bool smaaIntermediatePointSampled = false;
     bool ssr = false;
     bool volumetric = false;
+    uint8_t volumetricDownsample = 1;
     bool decals = false;
     bgfx::FrameBufferHandle baseGBuffer = BGFX_INVALID_HANDLE;
 };
