@@ -1,5 +1,6 @@
 #include "detail/ForwardOpaquePass.h"
 #include "detail/RasterConvention.h"
+#include "detail/SceneLighting.h"
 
 #include "AYRenderer/RenderTypes.h"
 #include "detail/FrameContext.h"
@@ -252,21 +253,13 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         // Scene FBO is offscreen — clear it each frame (backbuffer clear
         // on view 0 does not touch this target).
         // §P2 M9 (2026-08-24) — magic clear color hoisted to kSceneClearRgba.
-        adapter.setViewClearRaw(viewId,
-                                BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                                /*rgba=*/ayt::render::kSceneClearRgba,
-                                /*depth=*/1.0f,
-                                /*stencil=*/0);
+        adapter.setViewClear(viewId, _sceneClear);
     } else {
         // Composite Game View hole: clear this view's rect so the panel
         // never inherits a stale/white backbuffer after UI hides the
         // placeholder Image. Matches RendererSubSystem composite clear.
         adapter.setViewRect(viewId, viewportX, viewportY, viewportWidth, viewportHeight);
-        adapter.setViewClearRaw(viewId,
-                                BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                                /*rgba=*/ayt::render::kSceneClearRgba,
-                                /*depth=*/1.0f,
-                                /*stencil=*/0);
+        adapter.setViewClear(viewId, _sceneClear);
     }
 
     // setViewClear only configures the view; bgfx applies it when the view is
@@ -279,6 +272,9 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     // state rebuild at the bottom of the loop overrides it on every
     // iteration (doubleSided toggles back-face culling). Removed.
 
+    const auto packedLights = packSceneLighting(ctx.sceneLights, frame);
+    const auto receiverShadows = packShadowAtlas(ctx.shadowPass, true);
+    const auto noShadows = packShadowAtlas(nullptr, false);
     uint32_t drawCount = 0;
 
     FrameDrawLists fallbackDrawLists;
@@ -369,6 +365,12 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         // §P2 L4 (2026-08-24) — `world` arg dropped (was unused).
         flushMaterial(material, textures, frame, adapter,
                       ctx.shadowPass, item.shadowFlags);
+        // PBR consumes the Lights arrays and active count, while SimpleLit
+        // consumes the legacy uniforms. Upload both from the same frame.
+        (void)uploadSceneLighting(material.shader, packedLights);
+        (void)uploadShadowAtlas(material.shader,
+            receivesShadow(item.shadowFlags) ? receiverShadows : noShadows);
+        bindMaterialEnvironment(material.shader, ctx);
 
         static uint32_t s_foDrawLog = 0;
         if (s_foDrawLog < 4) {

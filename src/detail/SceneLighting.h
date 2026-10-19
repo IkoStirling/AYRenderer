@@ -11,9 +11,10 @@ namespace ayt::render::detail
 {
 
 class ShadowPass;
+struct PassExecContext;
 
-// CPU-side light layout shared by deferred LightingPass and the forward
-// transparent fallback. Each array mirrors the Phoskia `Lights` block.
+// CPU-side light layout shared by deferred LightingPass and both forward
+// opaque/transparent material paths. Each array mirrors the Phoskia `Lights` block.
 struct PackedSceneLighting {
     alignas(16) float dirs[kMaxSceneLights][4]{};
     alignas(16) float colors[kMaxSceneLights][4]{};
@@ -46,5 +47,9 @@ bool uploadSceneLighting(ayt::shader::ShaderResource& shader,
 
 bool uploadShadowAtlas(ayt::shader::ShaderResource& shader,
                        const PackedShadowAtlas& packed);
+
+// Optional environment bindings and activation flags, shared by material passes.
+void bindMaterialEnvironment(ayt::shader::ShaderResource& shader,
+                             const PassExecContext& ctx);
 
 } // namespace ayt::render::detail

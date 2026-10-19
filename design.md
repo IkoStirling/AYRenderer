@@ -1665,3 +1665,22 @@ Module-local regression sources were updated. Runtime tests and interactive edit
 UIRenderBackend::debugClip exposes the actual effective logical rectangular clip and stencil/path depth during an active frame through the optional UI backend observation seam. It returns invalid outside a frame; it does not infer path outlines. Screen diagnostics render through UI while world diagnostics retain the existing renderer debug line path.
 
 Regression sources are included. Runtime tests and interactive editor acceptance are deferred for this content task; untested changes remain uncommitted.
+
+
+### 主视口背景与 Forward PBR 修正（2026-10-19）
+
+ClearDesc 从两种 begin frame 入口复制清洗到 Impl-owned sceneClear，再在 render 时送入
+ForwardOpaquePass/LightingPass sidecar；不增大 FrameContext/PassExecContext POD。
+Forward 清场保留 host RGB/alpha，Deferred 用 sceneBackground RGBA 和 skyMix.y 判断有效天空；
+背景匹配 BGFXAdapter 的8位清屏量化，避免同色浮点/字节两条路径产生偏差。
+LightingOutput alpha 由背景alpha/天空opaque/表面opaque组合；coverage只读 RT3.a，
+SSAO、Haze、SSR、TAA 不再需要也不得把 scene alpha 当作几何覆盖率。
+Composite view0 恢复 backbuffer，解除前一 Forward FBO 绑定，不让窗口清屏误写入场景附件。
+
+ForwardOpaque 原来只上传 lightDir/lightColor，PBR的 Lights 数组和 activeLightCount 未赋值，
+导致实际仅剩0.03基础环境光；现复用 SceneLighting 的 pack/upload 与阴影 atlas。
+bindMaterialEnvironment 从 Transparent 抽取到同一内部模块，两种材质 Pass 共用，不复制逻辑。
+Deferred 无IBL环境项改为与现有 PBR相同的 albedo*(0.03+cube)*AO；IBLv2物理积分路径不变。
+Lighting shader 版本为 lighting_v34_scene_background_pbr_parity，生产catalog仍67项。
+画廊以同一内置PBR和完整法线/切线/UV比较。不同自定义shader、SSAO/SSR等路径专属能力
+仍可产生有意差异；不将全场景像素逐字节相等作为管线契约。

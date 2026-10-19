@@ -1,5 +1,18 @@
 # AYRenderer
 
+## 主视口背景与着色路径一致性（2026-10-19 修正）
+
+`beginFrame(clear)` / `beginCompositeFrame(clear,...)` 的 clear RGBA 现在传递给主场景。
+RGB 为 scene-linear，finite/clamp 到0..1并遵循既有RGBA8清屏量化，再进入 tone-map/gamma
+与颜色风格化。Forward 不再覆盖为硬编码灰色；Deferred 无天空时不再写黑色/透明背景。
+有效天空覆盖背景；SceneColor alpha 表示合成图像透明度，几何 coverage 仍由 GBuffer RT3.a 提供。
+Composite 每帧显式把 view0 绑定回 backbuffer，视口外窗口清屏不接受后处理。
+
+Opaque Forward 与 Transparent 共用 SceneLighting 灯光数组、阴影和可用环境绑定；
+旧 SimpleLit 自定义 shader 继续接收单灯 uniform。内置 PBR 的无IBL环境项与 Deferred 对齐。
+Forward 自定义光照算法和 Deferred 统一 PBR 并不等价；画廊统一使用内置 PBR、同灯光和曝光。
+其对照验收同时检查两条管线的背景/alpha、视口边界和同材质受光，而非只比较 D3D11/12。
+
 ## 复古色彩风格化 v1（2026-10-19）
 
 `setColorStylizationSettings(ColorStylizationSettings)` 在主 Forward/Deferred 的 AA、颜色分级之后、

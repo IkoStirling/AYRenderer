@@ -1,5 +1,39 @@
 # AYRenderer 测试维护
 
+## 2026-10-19 前向/延迟背景及 PBR 一致性修正
+
+原 ColorStylization 画廊的前向/延迟差异不符合对照目的：ForwardOpaque 覆盖 host clear 为
+硬编码灰色，Deferred 无天空时输出黑色且alpha=0；展示又混用SimpleLit与Deferred PBR。
+后端PNG逐字节相等只验证D3D11/12，不能证明两条管线的背景、范围或光照一致。
+新增实际主 Renderer 回归进一步发现 Forward PBR 只收到单灯 uniform，Lights 数组/
+activeLightCount 未上传；背景RGB修复后，该用例仍以中心字节差26失败，补齐上传后为0。
+
+修复在两个 frame 入口保存finite/clamp clear RGBA，Forward/Deferred 使用同一清屏量化；
+场景alpha保留clear/sky/surface合成语义，coverage继续在RT3.a。Composite view0显式回到
+backbuffer；效果包含完整主视口及背景，视口外UI/window保持原始清屏。
+Forward opaque与透明共用已有材质环境绑定、SceneLights与阴影上传；Deferred无IBL环境项
+对齐现有PBR。画廊统一内置PBR及完整法线/切线/UV。
+
+- 最终 CPU 九组945例/15190断言通过，零skip。首轮仅旧源码顺序守卫寻找
+  setViewClearRaw 而失败；更新为带 _sceneClear 的 setViewClear 后，完整PostProcess257例通过。
+  成功的其它8组未重复；首轮日志/报告与最终分区JSON均保留。
+- 新 `AYRenderer_PhoskiaGpu.forward_deferred_background_and_stylization_share_viewport_and_pbr`
+  D3D11/D3D12各1例/214断言通过。真实PBR表面、全窗口和(13,9,128,96)嵌入视口、
+  两种背景颜色、风格开/关，逐像素核对背景RGBA与Bayer相位、视口外像素及中心材质色；
+  背景/外侧错误数0，PBR中心前向/延迟最大字节差0。
+- `AY_SHADER_RUNTIME_COMPILE=0` 重新生成两后端各8张960×540画廊，所有图编译/draw检查通过。
+  对应后端PNG字节差0；两管线背景RGBA完全相同，未风格化图最大差2/255。
+  量化后少数临界像素可差一个色阶：PixelRetro最大24、LowColor/DitherRetro最大85；
+  差异>1字节的像素比例分别0.0625%、0.01138%、0.13194%。这不是全局色调/作用范围差异，
+  不承诺含GBuffer量化和不同专属效果时逐像素等价。
+- 测试清单984例/10分区，无遗漏/重复；67项离线生产shader与AYEditorShell_Demo构建通过。
+  SDK doctor124能力/53模块/85检索/523入口，0错误、0警告。
+
+原始与最终证据：`out/render-background-parity-20261019/`，含新RGBA回归、分区报告、
+两管线/两后端PNG、gallery-comparison.json、gallery-overview.png和acceptance.json。
+旧画廊保留为修正前记录，不再用于证明前向/延迟视觉一致。
+
+
 ## 2026-10-19 ColorStylization v1 内容扩展
 
 新增主 Forward/Deferred 的像素化、RGB 色阶量化、Bayer4 有序抖动，三组可编辑预设与

@@ -4,7 +4,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include "AYRenderer.h"
-#include "AYRenderer/ShadowShaderSources.h"
+#include "AYRenderer/PbrShaderSources.h"
 #include "AYMath/MathUtils.h"
 
 #include <array>
@@ -38,19 +38,28 @@ ayt::render::MeshHandle createGalleryCube(ayt::render::Renderer& renderer)
         {{-.5f,.5f,-.5f},{.5f,.5f,-.5f},{.5f,.5f,.5f},{-.5f,.5f,.5f}},
         {{-.5f,-.5f,.5f},{.5f,-.5f,.5f},{.5f,-.5f,-.5f},{-.5f,-.5f,-.5f}}};
     const float normals[6][3]={{0,0,-1},{0,0,1},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
-    struct Vertex {float x,y,z,nx,ny,nz,u,v;};
+    struct Vertex {float x,y,z,nx,ny,nz,tx,ty,tz,tw,u,v;};
     std::array<Vertex,24> vertices{};std::array<uint16_t,36> indices{};
     const uint16_t flipped[6]={0,2,1,0,3,2},straight[6]={0,1,2,0,2,3};
     for(int face=0;face<6;++face) {
         for(int corner=0;corner<4;++corner) {
             auto* p=points[face][corner];auto* n=normals[face];
             vertices[face*4+corner]={p[0],p[1],p[2],n[0],n[1],n[2],
+                points[face][1][0]-points[face][0][0],
+                points[face][1][1]-points[face][0][1],
+                points[face][1][2]-points[face][0][2],face==1 ? -1.0f : 1.0f,
                 corner==1 || corner==2 ? 1.0f : 0.0f,corner<2 ? 1.0f : 0.0f};
         }
         for(int j=0;j<6;++j)indices[face*6+j]=uint16_t(face*4+(face==1?straight[j]:flipped[j]));
     }
+    ayt::render::VertexLayoutDesc layout;
+    using namespace ayt::render;
+    layout.add({VertexAttribute::Position,3,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::Normal,3,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::Tangent,4,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::TexCoord0,2,VertexComponentType::Float,false});
     return renderer.createMesh(vertices.data(),uint32_t(vertices.size()),
-        ayt::render::VertexLayoutDesc::position3Normal3TexCoord2(),indices.data(),uint32_t(indices.size()));
+        layout,indices.data(),uint32_t(indices.size()));
 }
 const char* names[]={"Neutral","Pixel Retro","Low Color","Dither Retro"};
 }
@@ -98,9 +107,17 @@ int main(int argc,char** argv)
     std::vector<TextureHandle> textures{whiteTexture};
     std::vector<MaterialHandle> materials;
     auto material=[&](float r,float g,float b,TextureHandle texture) {
-        auto value=renderer.createMaterialFromPhoskia(kSimpleLitShadowPhoskiaSource);
-        renderer.setMaterialTexture(value,"albedoMap",texture);
+        auto value=renderer.createMaterialFromPhoskia(kPbrPhoskiaSource);
+        renderer.setMaterialTexture(value,"baseColorTexture",texture);
         renderer.setMaterialColor(value,"baseColor",r,g,b,1);
+        renderer.setMaterialFloat(value,"metallic",0);
+        renderer.setMaterialFloat(value,"roughness",.65f);
+        renderer.setMaterialFloat(value,"ao",1);
+        renderer.setMaterialFloat(value,"opacity",1);
+        renderer.setMaterialFloat(value,"normalYSign",1);
+        for (const char* name : {"opacitySource","doubleSided","premultipliedAlpha","castSkinned"})
+            renderer.setMaterialFloat(value,name,0);
+        renderer.setMaterialVec3(value,"emissive",0,0,0);
         materials.push_back(value);return value;
     };
     auto floorMaterial=material(.14f,.22f,.32f,whiteTexture);

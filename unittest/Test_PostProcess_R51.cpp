@@ -231,7 +231,7 @@ TEST_CASE(r51_forward_clear_is_touched_before_draw_iteration)
 {
     const std::string source = readRendererFile(
         "src/detail/ForwardOpaquePass.cpp");
-    const std::size_t clear = source.find("adapter.setViewClearRaw(");
+    const std::size_t clear = source.find("adapter.setViewClear(viewId, _sceneClear)");
     const std::size_t touch = source.find("adapter.touch(viewId);", clear);
     const std::size_t loop = source.find(
         "for (const DrawItem* itemPtr : drawLists.opaque3D)", touch);

@@ -73,9 +73,13 @@ public:
     void shutdown();
     bool isInitialized() const noexcept;
 
+    /// Clear RGB is a finite, clamped scene-linear background on both main
+    /// pipelines; tone mapping and color effects include uncovered pixels.
     void beginFrame(const ClearDesc& clear = {});
     // Full-window clear on view 0; subsequent render() draws 3D on view 1 with CLEAR_NONE.
-    // Use with UIRenderBackend (view 2) so chrome pixels are not left uncleared.
+    // Use with UIRenderBackend so chrome pixels are not left uncleared.
+    // Main scene background uses the same RGB through post-processing; pixels
+    // outside the scene viewport keep the raw window clear and are not styled.
     void beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uint16_t fbHeight);
     void render(const RenderScene& scene);
     /// Submit up to 16 independent Forward views in one frame. Validates the entire batch

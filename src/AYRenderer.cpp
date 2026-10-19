@@ -555,6 +555,7 @@ struct Renderer::Impl {
     float                          colorGradingStrength = 0.75f;
     ColorGradingPreset             colorGradingPreset = ColorGradingPreset::Warm;
 
+    ClearDesc sceneClear{};
     ColorStylizationSettings colorStylization{};
 
     void applyColorStylizationKnobs()
@@ -1322,6 +1323,14 @@ void Renderer::beginFrame(const ClearDesc& clear)
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+    _impl->sceneClear = clear;
+    auto finiteChannel = [](float value) {
+        return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.0f;
+    };
+    _impl->sceneClear.r = finiteChannel(clear.r);
+    _impl->sceneClear.g = finiteChannel(clear.g);
+    _impl->sceneClear.b = finiteChannel(clear.b);
+    _impl->sceneClear.a = finiteChannel(clear.a);
     _impl->cameraViewBatchSubmitted = false; _impl->cameraFrameOpen = true;
     _impl->compositeSceneViewId = -1;
     _impl->pipeline.resetFrameStats();
@@ -1329,7 +1338,7 @@ void Renderer::beginFrame(const ClearDesc& clear)
     _impl->renderTargetPool.beginFrame();
     _impl->resourceBlackboard.beginFrame();
     _impl->adapter.beginFrame();
-    _impl->adapter.setViewClear(detail::ForwardOpaquePass::kMainViewId, clear);
+    _impl->adapter.setViewClear(detail::ForwardOpaquePass::kMainViewId, _impl->sceneClear);
 }
 
 void Renderer::beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uint16_t fbHeight)
@@ -1337,15 +1346,26 @@ void Renderer::beginCompositeFrame(const ClearDesc& clear, uint16_t fbWidth, uin
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+    _impl->sceneClear = clear;
+    auto finiteChannel = [](float value) {
+        return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.0f;
+    };
+    _impl->sceneClear.r = finiteChannel(clear.r);
+    _impl->sceneClear.g = finiteChannel(clear.g);
+    _impl->sceneClear.b = finiteChannel(clear.b);
+    _impl->sceneClear.a = finiteChannel(clear.a);
     _impl->cameraViewBatchSubmitted = false; _impl->cameraFrameOpen = true;
     _impl->pipeline.resetFrameStats();
     _impl->debugOverlay.onBeginFrame();
     _impl->renderTargetPool.beginFrame();
     _impl->resourceBlackboard.beginFrame();
 
+    // View 0 may still target the previous Forward scene FBO after a pipeline
+    // switch. Composite chrome must always clear the full backbuffer.
+    _impl->adapter.setViewFrameBuffer(0, BGFX_INVALID_HANDLE);
     // View 0: full-window clear only (never shrink this rect to the 3D hole).
     _impl->adapter.setViewRect(0, 0, 0, fbWidth, fbHeight);
-    _impl->adapter.setViewClear(0, clear);
+    _impl->adapter.setViewClear(0, _impl->sceneClear);
     _impl->adapter.beginFrame(); // touch(0) so the clear runs
 
     // View 3: 3D into the scene FBO / panel hole (see UIRenderBackend::kViewId map).
@@ -1419,6 +1439,13 @@ void Renderer::render(const RenderScene& scene)
             _impl->viewportW, _impl->viewportH,
             taaPassPtr->historyGeneration(), false,
             detail::ResourceInvalidationReason::AwaitingProducer);
+    }
+
+    if (auto* forward = _impl->pipeline.findPass<detail::ForwardOpaquePass>()) {
+        forward->setSceneClear(_impl->sceneClear);
+    }
+    if (auto* lighting = _impl->pipeline.findPass<detail::LightingPass>()) {
+        lighting->setSceneClear(_impl->sceneClear);
     }
 
     detail::FrameContext frame;

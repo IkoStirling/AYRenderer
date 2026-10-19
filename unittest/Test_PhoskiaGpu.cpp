@@ -15,6 +15,7 @@
 #include "detail/FullscreenPassGeometry.h"
 #include "detail/GpuResources.h"
 #include "AYRenderer/SsrShaderSources.h"
+#include "AYRenderer/PbrShaderSources.h"
 #include "AYRenderer/VolumetricShaderSources.h"
 #include "AYRenderer/DeferredDecalShaderSources.h"
 #include "detail/DeferredDecalPass.h"
@@ -167,6 +168,100 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(forward_deferred_background_and_stylization_share_viewport_and_pbr) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    HWND window=CreateWindowExW(0,L"STATIC",L"Main pipeline color parity",WS_OVERLAPPED,
+        0,0,160,120,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window);if(!window)return;
+    struct WindowCleanup{HWND h;~WindowCleanup(){DestroyWindow(h);}} cleanup{window};
+    ayt::render::Renderer renderer;ayt::render::InitDesc init;
+    init.windowHandle=window;init.width=160;init.height=120;init.msaa=0;init.vsync=false;
+    init.backend=std::string(backend)=="d3d12"?ayt::render::Backend::Direct3D12:ayt::render::Backend::Direct3D11;
+    CHECK(renderer.initialize(init));if(!renderer.isInitialized())return;
+    renderer.setFxaaEnabled(false);renderer.setSmaaEnabled(false);renderer.setTaaEnabled(false);
+    renderer.setPostProcessGamma(1);renderer.setPostProcessExposure(1);
+    renderer.setPostProcessTonemapMode(ayt::render::Renderer::TonemapMode::None);
+    renderer.setDirectionalLight({0,0,1},{1.4f,1.2f,.9f});
+    renderer.setMainCamera(ayt::math::Float4x4::identity(),ayt::math::Float4x4::identity(),{0,0,-2});
+    const float vertices[][12]={
+        {-.3f,-.3f,.5f,0,0,-1,1,0,0,1,0,1},{.3f,-.3f,.5f,0,0,-1,1,0,0,1,1,1},
+        {.3f,.3f,.5f,0,0,-1,1,0,0,1,1,0},{-.3f,.3f,.5f,0,0,-1,1,0,0,1,0,0}};
+    const uint16_t indices[]={0,2,1,0,3,2};
+    using namespace ayt::render;
+    VertexLayoutDesc layout;
+    layout.add({VertexAttribute::Position,3,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::Normal,3,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::Tangent,4,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::TexCoord0,2,VertexComponentType::Float,false});
+    auto mesh=renderer.createMesh(vertices,4,layout,indices,6);CHECK(mesh.isValid());
+    auto material=renderer.createMaterialFromPhoskia(kPbrPhoskiaSource);
+    CHECK(material.isValid());renderer.setMaterialColor(material,"baseColor",.2f,.4f,.6f,1);
+    renderer.setMaterialFloat(material,"metallic",.7f);renderer.setMaterialFloat(material,"roughness",.65f);
+    renderer.setMaterialFloat(material,"ao",1);renderer.setMaterialFloat(material,"opacity",1);
+    renderer.setMaterialFloat(material,"normalYSign",1);renderer.setMaterialVec3(material,"emissive",0,0,0);
+    for(const char* name:{"opacitySource","doubleSided","premultipliedAlpha","castSkinned"})renderer.setMaterialFloat(material,name,0);
+    RenderScene scene;scene.add(mesh,material);
+    const auto directory=std::getenv("AY_COLOR_PARITY_CAPTURE_DIRECTORY");
+    const auto root=directory?std::filesystem::path(directory)/backend:std::filesystem::temp_directory_path()/(std::string("ay-color-parity-")+backend+"-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    std::array<decltype(decodeImageFile(std::string{})),4> forwardImages;
+    const int bayer[16]={0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
+    for(bool deferred:{false,true})for(int mode=0;mode<4;++mode) {
+        renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());
+        renderer.setShadowsEnabled(false);
+        const bool composite=mode>=2,style=mode%2;
+        const int ox=composite?13:0,oy=composite?9:0,w=composite?128:160,h=composite?96:120;
+        renderer.setViewportRect(uint16_t(ox),uint16_t(oy),uint16_t(w),uint16_t(h));
+        ClearDesc clear;clear.r=composite?.41f:.23f;clear.g=composite?.26f:.37f;clear.b=composite?.17f:.61f;
+        auto settings=colorStylizationPreset(ColorStylizationPreset::DitherRetro);
+        settings.enabled=style;settings.pixelationEnabled=false;renderer.setColorStylizationSettings(settings);
+        const auto path=root/((deferred?std::string("deferred-"):std::string("forward-"))+std::to_string(mode)+".png");
+        for(int frame=0;frame<16;++frame) {
+            if(composite)renderer.beginCompositeFrame(clear,160,120);else renderer.beginFrame(clear);
+            renderer.render(scene);
+            CHECK(renderer.getFrameStats().graph.compileSucceeded);
+            if(frame>=9)CHECK(renderer.captureScreenshot(path.string()));
+            renderer.endFrame();
+        }
+        auto image=decodeImageFile(path.string());CHECK(image.width==160 && image.height==120);
+        if(image.rgba8.size()!=160*120*4) {CHECK(false);continue;}
+        const float rgb[4]={clear.r,clear.g,clear.b,clear.a};int badBackground=0,badOutside=0;
+        for(int y=0;y<120;++y)for(int x=0;x<160;++x) {
+            bool inside=x>=ox&&y>=oy&&x<ox+w&&y<oy+h;
+            int lx=x-ox,ly=y-oy;
+            // Exclude the centered surface; this samples every Bayer phase in
+            // empty pixels, plus the untouched chrome around an offset viewport.
+            if(inside && lx>w/4 && lx<3*w/4 && ly>h/4 && ly<3*h/4)continue;
+            for(int channel=0;channel<4;++channel) {
+                float expected=float(uint8_t(rgb[channel]*255))/255;
+                if(inside&&style&&channel<3) {
+                    float offset=(bayer[(ly%4)*4+lx%4]+.5f)/16-.5f;
+                    expected=std::floor(std::clamp(expected*3+offset,0.0f,3.0f)+.5f)/3;
+                }
+                if(std::abs(int(image.rgba8[(y*160+x)*4+channel])-int(std::lround(expected*255)))>1) {
+                    if(inside)++badBackground;else ++badOutside;
+                }
+            }
+        }
+        std::cout<<"[ViewportColorParity] "<<path.string()<<" backgroundErrors="<<badBackground<<" chromeErrors="<<badOutside<<'\n';
+        CHECK(badBackground==0);CHECK(badOutside==0);
+        if(!deferred)forwardImages[mode]=image;
+        else if(!style) {
+            int maxDifference=0;
+            for(int y=oy+h/2-5;y<oy+h/2+5;++y)for(int x=ox+w/2-5;x<ox+w/2+5;++x)for(int c=0;c<3;++c)
+                maxDifference=std::max(maxDifference,std::abs(int(image.rgba8[(y*160+x)*4+c])-int(forwardImages[mode].rgba8[(y*160+x)*4+c])));
+            std::cout<<"[PbrColorParity] mode="<<mode<<" maxCenterByteError="<<maxDifference<<'\n';
+            CHECK(maxDifference<=2);
+        }
+    }
+    renderer.destroyMaterial(material);renderer.destroyMesh(mesh);renderer.shutdown();
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
 
 TEST_CASE(color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle) {
 #ifdef _WIN32

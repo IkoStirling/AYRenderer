@@ -30,6 +30,8 @@ namespace ayt::render::detail
 // `viewId` arg from Renderer::render.
 class ForwardOpaquePass : public RenderPass {
 private:
+    ClearDesc _sceneClear{};
+
     static void flushMaterial(GpuMaterial& material,
                               const std::unordered_map<uint64_t, GpuTexture>& textures,
                               const FrameContext& frame,
@@ -42,6 +44,7 @@ public:
 
     std::string_view name() const override { return "ForwardOpaque"; }
 
+    void setSceneClear(const ClearDesc& value) noexcept { _sceneClear = value; }
     uint32_t execute(PassExecContext& ctx) override;
 };
 

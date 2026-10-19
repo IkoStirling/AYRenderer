@@ -118,6 +118,7 @@ public:
     // initialized). destroyResources() mirrors GBufferPass::destroy
     // (GBufferPass.cpp:240-266) — drops the FBO + fullscreen VB/IB
     // + program handle, resets all state.
+    void setSceneClear(const ClearDesc& value) noexcept { _sceneClear = value; }
     void setOutputSize(uint16_t width, uint16_t height) noexcept;
     // Allocate/rebuild the output before FrameGraph imports SceneColor. This
     // closes the cold-start/resize frame where the graph previously captured
@@ -254,6 +255,7 @@ private:
     // Generated only when the immutable source cube changes.
     IblResources _iblResources;
     bool _iblActiveThisFrame = false;
+    ClearDesc _sceneClear{};
 };
 
 // §P5.5 B (2026-07-23) — Bug fix #3: externalize the cache-key

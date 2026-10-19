@@ -88,7 +88,7 @@ const char* const kLightingBuildStampCStr = kLightingBuildStamp;
 //   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
 //   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v33_ibl_v2_split_sum";
+    "lighting_v34_scene_background_pbr_parity";
 
 // �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -198,6 +198,7 @@ material Lighting {
     uniform vec4 shadowMapTexel
     uniform vec4 shadowPcf
     uniform vec4 skyMix
+    uniform vec4 sceneBackground
     uniform vec4 cubeActive
     uniform vec4 iblV2Active
     uniform vec4 iblMaxLod
@@ -253,7 +254,7 @@ material Lighting {
         // + SkySource::kind=CubeMap, cubeActive=1 and the cube
         // lookup adds normal-driven diffuse term scaled by
         // ambientStrength (default 0.6).
-        let ambientFlat = vec3(0.1, 0.1, 0.1)
+        let ambientFlat = vec3(0.03, 0.03, 0.03)
         let ambientCube = sample(envCube, N).rgb * ambientStrength.x * cubeActive.x
         let legacyAmbient = ambientFlat + ambientCube
         // �P5 B5.5 v16 ??worldPos from GBuffer RT2 (RGBA16F raw xyz).
@@ -903,24 +904,21 @@ material Lighting {
         let iblSpecular = prefilteredSpecular
                         * (ambientF * brdfSample.x + vec3(brdfSample.y))
         let iblAmbient = (iblDiffuse + iblSpecular) * ambientStrength.x
-        let legacyAmbientLit = albedo.rgb * ambientDiffuseWeight * legacyAmbient
+        let legacyAmbientLit = albedo.rgb * legacyAmbient
         let ambientLit = mix(legacyAmbientLit, iblAmbient, iblV2Active.x)
                        * materialAo * ssaoAmbient
         let pbrLit = ambientLit + directLit + surface.rgb
         let unlit = albedo.rgb + surface.rgb
         let isUnlit = step(0.5, materialModel) * (1.0 - step(1.5, materialModel))
         let lit = mix(pbrLit, unlit, isUnlit)
-        // �Skybox0 (2026-07-23) ??backdrop blend: sky only shows
-        // where lit is near zero (so geometry keeps its color;
-        // sky fills gaps in scene coverage). When
-        // `ctx.skyboxPass == nullptr` the gbufferSky sampler stays
-        // unbound and `sample(gbufferSky, baseUv)` returns black;
-        // `mix(black, lit, 1) == lit` collapses to the pre-�Skybox0
-        // dark-frame behavior on a Forward / non-sky host.
-        let skyColor = sample(gbufferSky, baseUv).xyz * skyMix.x
+        // Uncovered pixels are scene background, independent of lighting.
+        // skyMix.y selects a produced sky; otherwise retain clear RGBA.
+        let skyColor = mix(sceneBackground.xyz,
+                           sample(gbufferSky, baseUv).xyz * skyMix.x, skyMix.y)
+        let backgroundAlpha = mix(sceneBackground.w, 1.0, skyMix.y)
         let coverage = step(0.5, surface.a)
         let finalColor = mix(skyColor, lit, coverage)
-        return vec4(finalColor, coverage)
+        return vec4(finalColor, mix(backgroundAlpha, 1.0, coverage))
     }
 }
 )";
@@ -1535,11 +1533,21 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // �3.1) ??scalar in .x, pad .yzw = 0. Bound unconditionally ??
     // Inactive sky uses a defined fallback sampler and zero skyMix; do not
     // assume an unbound sampler is black on every backend.
+    const auto backgroundBinding = _program.getUniformBinding("sceneBackground");
+    if (backgroundBinding == shader::InvalidBinding) return 0;
+    // Match BGFXAdapter::setViewClear's packed RGBA8 conversion exactly.
+    const auto clearChannel = [](float value) {
+        return float(static_cast<uint32_t>(value * 255.0f)) / 255.0f;
+    };
+    const float background[4] = {clearChannel(_sceneClear.r), clearChannel(_sceneClear.g),
+                                  clearChannel(_sceneClear.b), clearChannel(_sceneClear.a)};
+    _program.setUniform(backgroundBinding, background, sizeof(background));
     const shader::BindingId skyMixBinding =
         _program.getUniformBinding("skyMix");
     if (skyMixBinding != shader::InvalidBinding) {
         const float skyMixPad[4] = {
-            skyReady ? ayt::render::kDefaultSkyMix : 0.0f, 0.0f, 0.0f, 0.0f };
+            skyReady ? ayt::render::kDefaultSkyMix : 0.0f,
+            skyReady ? 1.0f : 0.0f, 0.0f, 0.0f };
         _program.setUniform(skyMixBinding, skyMixPad, sizeof(skyMixPad));
     }
 
