@@ -69,7 +69,7 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         vector("fogLightPosition",light.position.x,light.position.y,light.position.z,float(light.type));
         const auto direction=light.spotDirection;
         vector("fogLightDirection",direction.x,direction.y,direction.z,light.range);
-        const float intensity=light.intensity*entry.volumetric*performanceLightFluxScale(entry);
+        const float intensity=performanceLightIntensity(entry)*entry.volumetric;
         vector("fogLightColor",light.color.x*intensity,light.color.y*intensity,light.color.z*intensity,0);
         vector("fogSpot",light.coneCosInner,light.coneCosOuter,std::tan(std::acos(light.coneCosOuter)),entry.apertureRadius);
         const auto axis=std::abs(direction.y)>.99f?math::FVector3(0,0,1):math::FVector3(0,1,0);
@@ -79,6 +79,9 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         const float shadowTexel=ctx.shadowPass?1.f/float(ctx.shadowPass->shadowSampleMapSize()):0.f;
         vector("fogPatternOptics",entry.patternFocus,entry.iris,entry.shadowSoftness,shadowTexel);
         texture("patternGobo",gobo);
+        auto ies=gb.material;
+        if(entry.iesProfile){const auto found=ctx.textures.find(entry.iesTexture.id);if(found==ctx.textures.end()||!BGFXAdapter::isValid(found->second.handle))continue;ies=found->second.handle;}
+        vector("fogIesSettings",entry.iesProfile?1.f:0.f,0,0,0);texture("iesAtlas",ies);
         math::FVector3 center,extent;performanceLightBounds(entry,center,extent);
         vector("fogLightBoundsCenter",center.x,center.y,center.z,0);vector("fogLightBoundsExtent",extent.x,extent.y,extent.z,0);
         float matrix[16];toBgfxColumnMajor(math::Float4x4::identity(),matrix);float sr[4]={0,0,1,1};

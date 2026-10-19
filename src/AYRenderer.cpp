@@ -2793,6 +2793,10 @@ bool Renderer::setPerformanceLights(std::span<const PerformanceLight> lights, Pe
             return false;
         }
     }
+    for(const auto& light:next.lights)if(light.iesProfile){
+        const auto found=_impl->resources.textures().find(light.iesTexture.id);
+        if(found==_impl->resources.textures().end()||!detail::BGFXAdapter::isValid(found->second.handle)){if(error)*error="IES atlas must be a live Renderer-owned texture";return false;}
+    }
     _impl->performance=std::move(next);
     if(error)error->clear();
     return true;

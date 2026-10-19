@@ -73,8 +73,11 @@ bool buildFixtureEmitterBatch(std::span<const PerformanceLight> lights,
         const float energy=float(footprintRatio*footprintRatio);
         const float throughFog=transmission(orthographic?l.position+toEye*distance:eye,l.position,medium);
         // Double keeps small apertures finite before the explicit HDR bound.
-        const double scale=double(l.intensity)*performanceLightFluxScale(entry)*settings.radianceScale
-            *angular/(std::numbers::pi*double(entry.apertureRadius)*entry.apertureRadius);
+        float iesWeight=1;
+        if(entry.iesProfile){const auto d=l.spotDirection,a=std::abs(d.y)>.99f?math::FVector3(0,0,1):math::FVector3(0,1,0);const auto right=a.cross(d).normalize(),up=d.cross(right).normalize();
+            iesWeight=entry.iesProfile->sample(float(std::acos(std::clamp(d.dot(toEye),-1.f,1.f))*180/std::numbers::pi),float(std::atan2(up.dot(toEye),right.dot(toEye))*180/std::numbers::pi))/entry.iesProfile->peakCandela();}
+        const double scale=double(performanceLightIntensity(entry))*settings.radianceScale
+            *angular*iesWeight/(entry.intensityUnit==LightIntensityUnit::Legacy?1.0:std::max(double(facing),1e-6))/(std::numbers::pi*double(entry.apertureRadius)*entry.apertureRadius);
         math::FVector3 color;bool clamped=false;
         for(int i=0;i<3;++i){const double value=scale*l.color[i];clamped|=value>settings.maximumRadiance;color[i]=float(std::min(value,double(settings.maximumRadiance))*throughFog*energy);}
         if(color.x<=0&&color.y<=0&&color.z<=0){++next.culled;continue;}

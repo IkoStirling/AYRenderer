@@ -1,7 +1,7 @@
 #pragma once
 #include "AYRenderer/PerformanceShaderSources.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v10_animated_density";
+inline constexpr char kVolumetricCacheKey[]="volumetric_v11_ies";
 inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
@@ -9,6 +9,7 @@ material Volumetric {
  texture2d geometryCoverage
  texture2d shadowAtlas
  texture2d patternGobo
+ texture2d iesAtlas
  uniform mat4 fogInverseViewProjection
  uniform mat4 fogView
  uniform mat4 fogShadow0
@@ -30,6 +31,7 @@ material Volumetric {
  uniform vec4 fogLightColor
  uniform vec4 fogSpot
  uniform vec4 fogPatternSettings
+ uniform vec4 fogIesSettings
  uniform vec4 fogPatternOptics
  uniform vec4 fogPatternRight
  uniform vec4 fogPatternUp
@@ -143,6 +145,7 @@ material Volumetric {
       }
       textureMask=dot(texel.rgb,vec3(0.2126,0.7152,0.0722))*texel.a*inside
      }
+     if(fogIesSettings.x>0.5){attenuation=attenuation*sampleLod(iesAtlas,performanceIesUv(delta,fogLightDirection.xyz,fogPatternRight.xyz,fogPatternUp.xyz),0.0).r}
      attenuation=attenuation*performancePattern(projected,fogPatternSettings,fogPatternOptics,textureMask)
     }
    }

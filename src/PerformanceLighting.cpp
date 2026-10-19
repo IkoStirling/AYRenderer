@@ -22,6 +22,9 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
             || !finite(entry.patternFocus,0,1) || !finite(entry.iris,.01f,1)
             || !finite(entry.apertureRadius,0,1) || !finite(entry.shadowSoftness,0,4)
             || (l.type==LightType::Point&&(l.castShadow||entry.volumetric!=0||entry.pattern!=LightPattern::Open||entry.constantFlux))
+            || entry.intensityUnit>LightIntensityUnit::Lumen
+            || (bool(entry.iesProfile)!=entry.iesTexture.isValid())
+            || (entry.iesProfile&&(l.type!=LightType::Spot||entry.iesProfile->peakCandela()<=0))
             || entry.pattern>LightPattern::Texture
             || (entry.pattern==LightPattern::Texture&&!entry.goboTexture.isValid()))
             return fail("Invalid performance Spot light");
@@ -58,6 +61,17 @@ float performanceLightFluxScale(const PerformanceLight& light) noexcept {
     constexpr double reference=2.0-0.9993908270190958-0.9986295347545738;
     const double solidAngle=2.0-double(light.light.coneCosInner)-double(light.light.coneCosOuter);
     return float(reference/std::max(solidAngle,1e-9));
+}
+float performanceLightIntensity(const PerformanceLight& entry) noexcept {
+    if(entry.intensityUnit==LightIntensityUnit::Legacy)return entry.light.intensity*performanceLightFluxScale(entry);
+    const auto& l=entry.light;const double luminance=.2126*l.color.x+.7152*l.color.y+.0722*l.color.z;
+    if(luminance<=0)return 0;
+    double scale=1;
+    if(entry.intensityUnit==LightIntensityUnit::Lumen){
+        scale=l.type==LightType::Point?12.566370614359172:entry.iesProfile?entry.iesProfile->coneSolidAngle(l.coneCosInner,l.coneCosOuter):spotSolidAngle(l.coneCosInner,l.coneCosOuter);
+        if(scale<=0)return 0;
+    }
+    return float(std::min(double(l.intensity)/(scale*luminance),1e30));
 }
 void performanceLightBounds(const PerformanceLight& entry,math::FVector3& center,math::FVector3& halfExtent) {
     const auto& light=entry.light;const auto d=light.spotDirection;

@@ -280,3 +280,37 @@ TEST_CASE(surface_shader_uses_production_frontend_and_bounded_procedural_pattern
     for(const auto& e:errors)std::fprintf(stderr,"%s\n",e.c_str());CHECK(success);
 }
 TEST_SUITE_END
+
+TEST_SUITE(PhotometryTests)
+TEST_CASE(lm63_type_c_sampling_symmetry_and_transactional_rejection) {
+    const std::string data="IESNA:LM-63-2002\n[TEST] measured\nTILT=NONE\n1 1000 2 3 2 1 2 .1 .2 .3\n1 1 20\n0 45 90\n0 180\n10 20 0\n30 40 0\n";
+    IesProfile profile;std::string error;CHECK(IesProfile::parse(data,profile,&error));CHECK(error.empty());
+    CHECK(profile.peakCandela()==80);CHECK(profile.sample(0,0)==20);CHECK(profile.sample(0,90)==40);
+    CHECK(profile.sample(0,270)==40);CHECK(profile.sample(0,-90)==40);CHECK(profile.sample(45,180)==80);
+    CHECK(profile.sample(91,0)==0);CHECK(profile.sample(-1,0)==0);
+    auto bad=data;bad.replace(bad.find("TILT=NONE"),9,"TILT=INCLUDE");CHECK(!IesProfile::parse(bad,profile,&error));CHECK(profile.peakCandela()==80);
+    CHECK(!IesProfile::parse(data+"nan",profile));CHECK(!IesProfile::parse(data+"42",profile));
+    bad=data;bad.replace(bad.find("0 45 90"),7,"0 0 90");CHECK(!IesProfile::parse(bad,profile));
+    bad=data;bad.replace(bad.find("3 2 1 2"),7,"3 2 2 2");CHECK(!IesProfile::parse(bad,profile));
+    std::vector<uint8_t> atlas;CHECK(profile.angularTexture(atlas));CHECK(atlas.size()==257*129*4);
+    for(int y=0;y<129;++y)CHECK(atlas[y*257*4]==atlas[(y*257+256)*4]);
+    CHECK(profile.projection(.2f,32,atlas));CHECK(atlas.size()==32*32*4);CHECK(!profile.projection(0,32,atlas));
+}
+TEST_CASE(physical_flux_intensity_distance_color_and_legacy_compatibility) {
+    auto p=light(1);p.light.color={1,1,1};p.light.intensity=100;
+    CHECK(performanceLightIntensity(p)==100);p.constantFlux=true;CHECK(std::abs(performanceLightIntensity(p)-100*performanceLightFluxScale(p))<1e-6);
+    p.intensityUnit=LightIntensityUnit::Candela;CHECK(performanceLightIntensity(p)==100);
+    CHECK(illuminanceLux(100,2)==25);CHECK(illuminanceLux(100,4)==6.25f);CHECK(illuminanceLux(100,2,.5f)==12.5f);CHECK(illuminanceLux(100,0)==0);
+    p.intensityUnit=LightIntensityUnit::Lumen;const auto solid=spotSolidAngle(.95f,.8f);
+    CHECK(std::abs(performanceLightIntensity(p)*solid-100)<1e-4f);
+    p.light.type=LightType::Point;CHECK(std::abs(performanceLightIntensity(p)*12.5663706f-100)<1e-4f);
+    p.light.color={1,0,0};CHECK(std::abs(performanceLightIntensity(p)*12.5663706f*.2126f-100)<1e-4f);
+    p.light.color={0,0,0};CHECK(performanceLightIntensity(p)==0);
+    CHECK(spotSolidAngle(.8f,.95f)==0);
+    IesProfile profile;CHECK(IesProfile::parse("IESNA:LM-63-1995\nTILT=NONE\n1 -1 1 3 1 1 2 0 0 0\n1 1 10\n0 90 180\n0\n100 100 100\n",profile));
+    CHECK(std::abs(profile.coneSolidAngle(.95f,.8f)-solid)<1e-4f);
+    p=light(1);p.light.color={1,1,1};p.intensityUnit=LightIntensityUnit::Lumen;p.iesProfile=std::make_shared<IesProfile>(profile);p.iesTexture={42};
+    CHECK(std::abs(performanceLightIntensity(p)*profile.coneSolidAngle(.95f,.8f)-20)<1e-4f);
+    PerformanceLighting packet;CHECK(packet.assign({&p,1},{}));p.iesTexture={};CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights.size()==1);
+}
+TEST_SUITE_END

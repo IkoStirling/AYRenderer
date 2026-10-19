@@ -1,5 +1,7 @@
 #pragma once
 #include <AYRenderer/RenderScene.h>
+#include <AYRenderer/Photometry.h>
+#include <memory>
 #include <span>
 #include <string>
 
@@ -31,6 +33,15 @@ struct PerformanceLight {
     /// 3deg field Spot at the same intensity. Iris/Gobo still absorb energy.
     /// Finite aperture near-field and shadows remain geometric approximations.
     bool constantFlux = false;
+    /// Physical modes use meters/cd/lm; Legacy retains previous values. Lumen
+    /// normalizes the Spot and peak-normalized IES before iris/Gobo absorption.
+    /// Physical RGB is normalized to unit luminance; black emits zero.
+    LightIntensityUnit intensityUnit=LightIntensityUnit::Legacy;
+    /// Optional immutable Type C distribution and matching live angular atlas.
+    /// Keep both paired; rotating pattern does not rotate the photometric web.
+    std::shared_ptr<const IesProfile> iesProfile;
+    TextureHandle iesTexture;
+
 };
 struct PerformanceLightBudget {
     uint16_t surfaceLights = 64;
@@ -57,6 +68,9 @@ struct PerformanceLighting {
 struct LightScreenRect { uint16_t x=0,y=0,width=0,height=0; bool visible=false; };
 /// Radiant intensity multiplier shared by surface and volume; Point returns1.
 float performanceLightFluxScale(const PerformanceLight& light) noexcept;
+/// Resolve physical/legacy units to the shared scene-linear intensity.
+/// No range fade, inverse square, mask, or exposure is applied here.
+float performanceLightIntensity(const PerformanceLight& light) noexcept;
 void performanceLightBounds(const PerformanceLight& light,math::FVector3& center,math::FVector3& halfExtent);
 /// Conservative projected range bounds. Near-plane intersections use the full
 /// viewport; scissor never clips an in-range surface or scattering sample.

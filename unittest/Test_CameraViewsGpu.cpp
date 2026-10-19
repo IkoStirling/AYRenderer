@@ -192,6 +192,21 @@ struct FixtureEmitterGpuFixture {
         readback=bgfx::createTexture2D(64,64,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
         return bgfx::isValid(readback)&&cube.isValid()&&black.isValid();
     }
+    std::array<uint8_t,64*64*4> sampleIes(const std::shared_ptr<const ayt::render::IesProfile>& profile,bool volume){
+        using namespace ayt::render;renderer.setPostProcessBloomStrength(0);
+        VolumetricSettings fog;fog.enabled=volume;fog.density=.1f;fog.scattering=1;fog.anisotropy=0;fog.steps=64;fog.debugView=2;renderer.setVolumetricSettings(fog);
+        PerformanceLight light;light.id=7;light.light=Light::spot({0,0,-2},{0,0,1},10,1,.98f,.75f,{1,0,0});light.intensityUnit=LightIntensityUnit::Candela;
+        TextureHandle atlas;if(profile){atlas=createIesTexture(renderer,*profile);CHECK(atlas.isValid());light.iesProfile=profile;light.iesTexture=atlas;}
+        CHECK(renderer.setPerformanceLights({&light,1}));RenderScene scene;
+        renderer.setMaterialColor(black,"baseColor",1,1,1,1);scene.add(cube,black,ayt::math::scale(1.f,1.f,.1f));
+        for(int i=0;i<3;++i){renderer.beginFrame({0,0,0,1});renderer.render(scene);renderer.endFrame();}
+        const auto color=bgfx::TextureHandle{ayt::render::detail::CameraViewsTestAccess::finalColor(renderer)};CHECK(bgfx::isValid(color));
+        std::array<uint8_t,64*64*4> pixels{};if(bgfx::isValid(color)){
+            bgfx::blit(112,readback,0,0,color);const auto ready=bgfx::readTexture(readback,pixels.data());auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(renderer);
+            for(int i=0;i<120&&adapter->gpuFrameCounter()<ready;++i)renderer.endFrame();CHECK(adapter->gpuFrameCounter()>=ready);
+        }
+        CHECK(renderer.setPerformanceLights({}));if(atlas.isValid())renderer.destroyTexture(atlas);return pixels;
+    }
     std::array<uint8_t,64*64*4> sample(int mode,bool bloom=false,float density=0){
         renderer.setPostProcessBloomStrength(bloom?1.f:0.f);
         ayt::render::VolumetricSettings fog;fog.enabled=density>0;fog.density=density;renderer.setVolumetricSettings(fog);
@@ -234,6 +249,27 @@ TEST_CASE(real_bloom_spreads_visible_aperture_but_does_not_leak_through_occluder
     const auto clear=f.sample(0,false),bloom=f.sample(0,true),blocked=f.sample(3,true);
     const auto halo=[](const auto& pixels){double sum=0;for(int y=22;y<42;++y)for(int x=41;x<52;++x)sum+=pixels[(y*64+x)*4];return sum;};
     CHECK(halo(bloom)>halo(clear)+20);CHECK(emitterRedEnergy(blocked)<emitterRedEnergy(bloom)*.02);
+#else
+    SKIP_TEST("Windows real-device acceptance required");
+#endif
+}
+TEST_CASE(real_ies_distribution_matches_surface_and_volume_directions){
+#ifdef _WIN32
+    const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Requires isolated real-device IES acceptance");
+    FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+    auto profile=std::make_shared<ayt::render::IesProfile>();
+    CHECK(ayt::render::IesProfile::parse("IESNA:LM-63-2002\nTILT=NONE\n1 -1 1 3 2 1 2 0 0 0\n1 1 1\n0 45 90\n0 180\n100 100 100\n0 0 0\n",*profile));
+    const auto halves=[](const auto& pixels){std::array<double,2> sum{};for(int y=15;y<49;++y)for(int x=14;x<50;++x)sum[x<32?0:1]+=pixels[(y*64+x)*4];return sum;};
+    for(bool volume:{false,true}){
+        const auto baseline=halves(f.sampleIes({},volume)),ies=halves(f.sampleIes(profile,volume));
+        std::fprintf(stderr,"[IES probe] volume=%d uniform=%.0f/%.0f ies=%.0f/%.0f\n",int(volume),baseline[0],baseline[1],ies[0],ies[1]);
+        CHECK(baseline[0]>100);CHECK(baseline[1]>100);CHECK(std::abs(baseline[0]-baseline[1])<baseline[0]*.1);
+        CHECK(std::max(ies[0],ies[1])>std::min(ies[0],ies[1])*1.15);CHECK(ies[0]+ies[1]<baseline[0]+baseline[1]);
+        // Project the measured h=0 (+X) direction through the actual camera.
+        ayt::math::Float4x4 view,projection;CHECK(f.renderer.mainCameraMatrices(view,projection));
+        const auto clip=projection*view*ayt::math::FVector4(.5f,0,0,1);
+        CHECK(ies[clip.x>0?1:0]>ies[clip.x>0?0:1]);
+    }
 #else
     SKIP_TEST("Windows real-device acceptance required");
 #endif

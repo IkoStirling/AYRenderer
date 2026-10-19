@@ -2,6 +2,13 @@
 #include <string>
 namespace ayt::render {
 inline constexpr const char* kPerformancePatternSource=R"(
+fn performanceIesUv(delta:vec3, axis:vec3, right:vec3, up:vec3):vec2 {
+ let d=delta/max(length(delta),0.00001)
+ let theta=acos(clamp(dot(d,axis),-1.0,1.0))*0.318309886
+ let phi=atan2(dot(d,up),dot(d,right))*0.159154943
+ if(phi<0.0){phi=phi+1.0}
+ return vec2((phi*256.0+0.5)/257.0,(theta*128.0+0.5)/129.0)
+}
 // cone = (cos(core half-angle), cos(field half-angle), tan(field), aperture).
 fn performanceBeamProfile(delta:vec3, axis:vec3, cone:vec4, coreSlope:float):float {
  let axial=dot(delta,axis)
@@ -92,6 +99,7 @@ material PerformanceSurface {
  texture2d surfaceCoverage
  texture2d shadowAtlas
  texture2d patternGobo
+ texture2d iesAtlas
  uniform vec4 performancePosition
  uniform vec4 performanceDirection
  uniform vec4 performanceColor
@@ -99,6 +107,7 @@ material PerformanceSurface {
  uniform vec4 performanceRight
  uniform vec4 performanceUp
  uniform vec4 performancePatternSettings
+ uniform vec4 performanceIesSettings
  uniform vec4 performancePatternOptics
  uniform vec4 performanceEye
  uniform mat4 performanceShadow
@@ -139,6 +148,7 @@ material PerformanceSurface {
   pattern=performancePattern(projected,performancePatternSettings,performancePatternOptics,textureMask)
   beam=performanceBeamProfile(delta,performanceDirection.xyz,performanceCone,performanceRight.w)
   }
+  if(performanceIesSettings.x>0.5){pattern=pattern*sampleLod(iesAtlas,performanceIesUv(delta,performanceDirection.xyz,performanceRight.xyz,performanceUp.xyz),0.0).r}
   let falloff=clamp(1.0-distance/performancePosition.w,0.0,1.0)
   let attenuation=falloff*falloff/max(distance*distance,max(0.01,performanceCone.w*performanceCone.w))*beam*pattern
   let visibility=1.0

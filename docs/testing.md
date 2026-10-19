@@ -526,3 +526,9 @@ Windows Debug 的 10 个完整分区全部通过，清单为 909 个用例、无
 透视探针以独立高密度CPU积分比较实际散射像素。
 D3D12单灯空中场景也完成实际渲染与截图。
 性能场景、配置和截图见[灯光演出系统](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
+
+
+2026-10-19: PhotometryTests cover bounded LM-63 Type C parsing, symmetry, physical units,
+color/flux normalization and Legacy preservation. FixtureEmittersGpu (AY_EMITTER_GPU_TEST=d3d11/d3d12)
+adds real main-view IES surface/volume energy and directional readback. Contracts155/1193,
+Sequence105/3871, shaders12/208 and each GPU backend3/93 passed; owned inventory1006/10.

@@ -1712,3 +1712,19 @@ Additive、深度测试、不写深度，服从不透明场景的完整/部分�
 Renderer拥有纹理/材质/quad，借用批次活到下一次append/销毁，保留帧使用OwnedCpu；
 Renderer重启后重建Facade。prepared仅为CPU候选数，GPU裁剪/深度及瞬态缓冲可减少实际像素。
 尚无灯体外壳、Gobo在镜片上的真实像、镜头鬼影、星芒或物理焦面。
+
+
+## 2026-10-19 光度与IES
+
+PerformanceLight.intensityUnit支持Legacy/Candela/Lumen；Legacy保留历史表现，物理模式以米为世界尺度，
+颜色按Rec.709线性亮度归一化（黑色无光），表面/体积/可见灯口共用performanceLightIntensity。
+Lumen以smoothstep光锥与峰值归一化IES的有效立体角换算，iris/Gobo是后续吸收；
+Candela直接指定峰值方向强度。constantFlux只对Legacy生效。有限口径近场、range截断和RGB色谱仍是近似。
+illuminanceLux提供无截断无遮挡的cd×cos/r²诊断，不把显示器像素宣称为测光仪。
+
+IesProfile::parse只接受LM-63-1995/2002/2019、Type C、TILT=NONE、ballast字段均为1；
+最多4MiB/262144测量样本，严格递增角度，支持旋转/90°/180°/360°对称，360°接缝需一致。
+不支持Type A/B、外部/内嵌TILT或非单位ballast；失败保留旧对象。颜色不由IES指定。
+createIesTexture上传257×129线性RGBA8角度图，CPU灯口与GPU表面/体积共享坐标基；
+8bit峰值归一化会量化极弱旁瓣。Host配对不可变profile与存活atlas，Renderer检查句柄后复制灯包。
+有效立体角以128点余弦空间求积，水平角均值由原始采样分段线性积分；极窄IES尖峰需提高采样质量。
