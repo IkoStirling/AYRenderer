@@ -5,6 +5,7 @@
 #include <numbers>
 namespace ayt::render {
 namespace {
+float smooth(float a,float b,float v){const float t=std::clamp((v-a)/(b-a),0.f,1.f);return t*t*(3-2*t);}
 float transmission(const math::FVector3& origin,const math::FVector3& target,VolumetricSettings fog){
     fog=sanitizeVolumetricSettings(fog);if(!fog.enabled||fog.density<=0)return 1;
     const auto delta=target-origin;const float distance=delta.length();if(distance<1e-6f)return 1;
