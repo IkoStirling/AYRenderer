@@ -32,7 +32,7 @@ template<class T> Json encode(const T& value) {
         auto array=Json::array(); for(auto c:value) array.push_back(encodeColor(c)); return array;
     } else return value;
 }
-Json document(const ColorStylizationSettings& s,int version=3) {
+Json document(const ColorStylizationSettings& s,int version=4) {
     Json result{{"type","Aliyat.ColorStylizationLook"},{"schemaVersion",version}};
     const auto field=[&](const char* key,const auto& value){result[key]=encode(value);};
     if(version==1)detail::visitColorStylizationFieldsV1(s,field);
@@ -88,13 +88,15 @@ bool parseColorStylizationLook(std::string_view text,ColorStylizationSettings& o
         const auto root=Json::parse(text.begin(),text.end(),callback);
         if(!root.is_object() || !root.contains("type") || root["type"]!="Aliyat.ColorStylizationLook"
             || !root.contains("schemaVersion") || !root["schemaVersion"].is_number_integer()
-            || (root["schemaVersion"]!=1 && root["schemaVersion"]!=2 && root["schemaVersion"]!=3)) return fail(error,"Unsupported look type or schema version");
+            || (root["schemaVersion"]!=1 && root["schemaVersion"]!=2 && root["schemaVersion"]!=3 && root["schemaVersion"]!=4)) return fail(error,"Unsupported look type or schema version");
         const int version=root["schemaVersion"].get<int>();
         ColorStylizationSettings settings;
         const auto field=[&](const char* key,auto& value){decode(root.at(key),value);};
         if(version==1)detail::visitColorStylizationFieldsV1(settings,field);
         else if(version==2)detail::visitColorStylizationFieldsV2(settings,field);
         else detail::visitColorStylizationFields(settings,field);
+        if(version<4 && static_cast<uint8_t>(settings.colorMapping)>2)
+            return fail(error,"ValueBands mapping requires look schema4");
         settings=sanitizeColorStylization(settings);
         if(document(settings,version)!=root) return fail(error,"Unknown field or value outside the look contract");
         output=settings;return true;

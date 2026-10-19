@@ -1,7 +1,7 @@
 #pragma once
 
 namespace ayt::render {
-inline constexpr char kColorStylizationCacheKey[] = "color_stylization_palette_print_v2";
+inline constexpr char kColorStylizationCacheKey[] = "color_stylization_value_bands_v3";
 inline constexpr char kColorStylizationPhoskiaSource[] = R"PHOSKIA(
 material ColorStylization {
     texture2d inputColor
@@ -56,7 +56,7 @@ material ColorStylization {
             tone=mix(tone,floor(tone*steps+0.5)/steps,styleParams.w)
             result=mix(shadowColor.rgb,highlightColor.rgb,tone)
         }
-        if(mappingParams.x>1.5) {
+        if(mappingParams.x>1.5 && mappingParams.x<2.5) {
             let candidate=vec3(clamp(source.r+offset/8.0,0.0,1.0),clamp(source.g+offset/8.0,0.0,1.0),clamp(source.b+offset/8.0,0.0,1.0))
             let best=1000.0
             for(i in range(int(mappingParams.y),16)) {
@@ -64,6 +64,12 @@ material ColorStylization {
                 let distance=dot(delta*delta,vec3(0.2126,0.7152,0.0722))
                 if(distance<best) {best=distance;result=paletteColors[i].rgb}
             }
+        }
+        if(mappingParams.x>2.5) {
+            let value=max(source.r,max(source.g,source.b))
+            let quantized=floor(clamp(value+offset/steps,0.0,1.0)*steps+0.5)/steps
+            let target=mix(value,quantized,styleParams.w)
+            result=source.rgb*(target/max(value,0.000001))
         }
         // A continuous screen in physical viewport coordinates. Quantization
         // controls the source tone; pattern spacing is independent of pixelation.

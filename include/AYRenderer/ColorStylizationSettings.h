@@ -14,7 +14,8 @@ struct StylizationColor {
     float r = 0, g = 0, b = 0;
 };
 
-enum class StylizationColorMapping : uint8_t { RgbLevels, Duotone, FixedPalette };
+/// ValueBands quantizes max(R,G,B), preserving RGB ratios (HSV hue/saturation).
+enum class StylizationColorMapping : uint8_t { RgbLevels, Duotone, FixedPalette, ValueBands };
 enum class StylizationPrintPattern : uint8_t { None, Dots, Lines, CrossHatch };
 /// DepthNormal uses depth alone on Forward; normals require the Deferred GBuffer.
 enum class StylizationOutlineMode : uint8_t { None, Luminance, Depth, DepthNormal };
@@ -26,7 +27,7 @@ struct ColorStylizationSettings {
     bool pixelationEnabled = true;
     uint16_t pixelSize = 6; // Physical viewport pixels per virtual pixel, 1..64.
     bool posterizationEnabled = true;
-    uint8_t colorLevels = 12; // Levels per RGB channel, 2..32.
+    uint8_t colorLevels = 12; // RGB/value quantizer levels, 2..32.
     float ditherStrength = 0; // 0..1; RGB/duotone quantizer or fixed palette.
     StylizationColorMapping colorMapping = StylizationColorMapping::RgbLevels;
     StylizationColor shadowColor{.035f,.055f,.12f};
@@ -69,7 +70,10 @@ enum class ColorStylizationPreset : uint8_t {
     StopMotion = 13,
     TileRefresh = 14,
     TimeEcho = 15,
+    CelInk = 16,
+    CelPaint = 17,
 };
+inline constexpr uint8_t kColorStylizationPresetCount=18;
 
 /// Construct a reusable runtime/editor look. Neutral and unknown values bypass.
 ColorStylizationSettings colorStylizationPreset(ColorStylizationPreset preset) noexcept;
@@ -80,7 +84,8 @@ ColorStylizationSettings sanitizeColorStylization(ColorStylizationSettings value
 inline bool colorStylizationActive(const ColorStylizationSettings& value) noexcept
 {
     return value.enabled && (value.posterizationEnabled
-        || value.colorMapping != StylizationColorMapping::RgbLevels
+        || value.colorMapping == StylizationColorMapping::Duotone
+        || value.colorMapping == StylizationColorMapping::FixedPalette
         || (value.printPattern != StylizationPrintPattern::None && value.printStrength>0)
         || (value.pixelationEnabled && value.pixelSize > 1));
 }

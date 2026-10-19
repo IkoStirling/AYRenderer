@@ -1,5 +1,13 @@
 # AYRenderer 测试维护
 
+## 保色分层补入（2026-10-19）
+
+PostProcess268例通过；与保留的八组证据合计959例/15763断言。
+颜色真实GPU参考扩充至两后端各150断言，覆盖ValueBands纯色比、Bayer、像素化、关闭量化、黑色和alpha。
+Editor Shell50例/1418断言，验证新枚举/18套起点/偏好恢复；SDK124/53/92/530零错误警告。
+CelInk/CelPaint两管线实际画面在`gallery-cel-*`，`value-bands-overview.png`给出原画与两种起点对照。
+Look schema4明确拒绝旧版本使用新枚举，同时保留v1/v2/v3输入；无新pass/view/FBO/catalog项。
+
 ## 新展示内容与路径审核（2026-10-19）
 
 天文仪/运河街区各两管线十六look导出成功，天文仪另有D3D12同内容导出；构图首轮和最终图都保留。

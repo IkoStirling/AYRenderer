@@ -290,7 +290,7 @@ TEST_CASE(color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle
     std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;std::unordered_map<uint64_t,GpuMaterial> materials;
     PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame,0};ctx.frameGraph=&graph;
     const int bayer[16]={0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
-    for(int variant=0;variant<13;++variant) {
+    for(int variant=0;variant<17;++variant) {
         auto variantSource=sourceFbo;
         FboCleanup variantCleanup{BGFX_INVALID_HANDLE};
         ayt::render::ColorStylizationSettings settings;
@@ -311,11 +311,22 @@ TEST_CASE(color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle
             settings.colorMapping=ayt::render::StylizationColorMapping::Duotone;
             settings.ditherStrength=0;settings.shadowColor={.1f,.2f,.3f};settings.highlightColor={.8f,.9f,1};
         }
-        if(variant>=7) {
+        if(variant>=7 && variant<13) {
             settings.pixelationEnabled=false;settings.posterizationEnabled=false;
             settings.printPattern=static_cast<ayt::render::StylizationPrintPattern>(1+(variant-7)/2);
             const uint8_t tone=variant%2?0:255;
             for(auto& pixel:data)pixel={tone,tone,tone,93};
+        }
+        if(variant>=13) {
+            settings.colorMapping=ayt::render::StylizationColorMapping::ValueBands;
+            settings.pixelationEnabled=variant==14 || variant==15;settings.pixelSize=2;
+            settings.posterizationEnabled=variant!=15;settings.colorLevels=variant==14?5:4;
+            settings.ditherStrength=variant==14?.65f:0;
+            for(int i=0;i<16;++i)data[i]={uint8_t(i*13),uint8_t(30+i*9),uint8_t(80+i*7),uint8_t(50+i*11)};
+            data[0]={0,0,0,23};data[15]={255,255,255,197};
+            if(variant==16)for(auto& pixel:data)pixel={0,0,0,73};
+        }
+        if(variant>=7) {
             // Immutable initialized inputs: updating an RT texture in place is
             // not a portable way to upload the next reference image.
             auto input=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA8,
@@ -363,13 +374,19 @@ TEST_CASE(color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle
                 float luminance=reference[0]*.2126f+reference[1]*.7152f+reference[2]*.0722f;
                 reference[0]=.1f+.7f*luminance;reference[1]=.2f+.7f*luminance;reference[2]=.3f+.7f*luminance;
             }
-            if(variant>=7) {
+            if(variant>=7 && variant<13) {
                 const auto color=variant%2?settings.inkColor:settings.paperColor;
                 reference[0]=color.r;reference[1]=color.g;reference[2]=color.b;
             }
+            if(variant>=13 && settings.posterizationEnabled) {
+                const float value=std::max(reference[0],std::max(reference[1],reference[2]));
+                const float offset=((bayer[(by%4)*4+bx%4]+.5f)/16-.5f)*settings.ditherStrength;
+                const float target=std::floor(std::clamp(value*(settings.colorLevels-1)+offset,0.f,float(settings.colorLevels-1))+.5f)/(settings.colorLevels-1);
+                for(auto& channel:reference)channel=value>0?channel*target/value:0;
+            }
             for(int c=0;c<4;++c) {
                 float expected=c<3?reference[c]:original[3]/255.f;
-                if(c<3 && settings.posterizationEnabled) {
+                if(c<3 && settings.posterizationEnabled && variant<13) {
                     float offset=((bayer[(by%4)*4+bx%4]+.5f)/16-.5f)*settings.ditherStrength;
                     expected=std::floor(std::clamp(expected*(settings.colorLevels-1)+offset,0.0f,float(settings.colorLevels-1))+.5f)/(settings.colorLevels-1);
                 }

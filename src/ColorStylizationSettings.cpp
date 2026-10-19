@@ -88,6 +88,16 @@ ColorStylizationSettings colorStylizationPreset(ColorStylizationPreset preset) n
             result.temporal.historyOffsetY=.5f;
         }
         break;
+    case ColorStylizationPreset::CelInk:
+    case ColorStylizationPreset::CelPaint:
+        result.enabled=true;result.pixelationEnabled=false;
+        result.colorMapping=StylizationColorMapping::ValueBands;
+        result.colorLevels=preset==ColorStylizationPreset::CelInk?4:6;
+        result.outlineMode=StylizationOutlineMode::Depth;
+        result.outlineWidth=preset==ColorStylizationPreset::CelInk?2.f:1.f;
+        result.outlineStrength=preset==ColorStylizationPreset::CelInk?1.f:.65f;
+        result.ditherStrength=preset==ColorStylizationPreset::CelPaint?.2f:0.f;
+        break;
     default: break;
     }
     return result;
@@ -105,7 +115,7 @@ ColorStylizationSettings sanitizeColorStylization(ColorStylizationSettings value
     const auto color = [&](StylizationColor c) {
         return StylizationColor{finiteClamp(c.r,0,1,0),finiteClamp(c.g,0,1,0),finiteClamp(c.b,0,1,0)};
     };
-    if (static_cast<uint8_t>(value.colorMapping)>2) value.colorMapping=StylizationColorMapping::RgbLevels;
+    if (static_cast<uint8_t>(value.colorMapping)>3) value.colorMapping=StylizationColorMapping::RgbLevels;
     if (static_cast<uint8_t>(value.printPattern)>3) value.printPattern=StylizationPrintPattern::None;
     value.shadowColor=color(value.shadowColor); value.highlightColor=color(value.highlightColor);
     value.inkColor=color(value.inkColor); value.paperColor=color(value.paperColor);

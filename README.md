@@ -1,5 +1,13 @@
 # AYRenderer
 
+## 保色明暗分层（2026-10-19）
+
+ValueBands对max(R,G,B)作2..32阶量化，按统一增益缩放RGB，保留非黑色的通道比例；
+支持既有像素采样/Bayer/印刷组合，alpha保留，无新增Pass或目标。关闭量化和其他颜色组时旁路。
+CelInk/CelPaint分别提供硬朗轮廓和较柔和绘画起点，默认展示曲面材质；共18套预设。
+这是显示颜色处理，不是替换PBR光照。RSL写schema4并读完整1..4；旧版本的映射枚举仍限定0..2。
+原有v1/v2/v3样例保留兼容输入，新Cel样例为v4；preset count由公开常量统一，Editor布局ABI37不变。
+
 ## 曲面与建筑展示内容（2026-10-19）
 
 画廊追加天文仪和运河街区，含球体、圆柱、圆环、坡屋顶、程序纹理地球、金属/非金属粗糙度排布。
@@ -22,7 +30,7 @@ Windows画廊/离线工具从wmain接收UTF-16并转换UTF-8，支持参考图�
 
 ## 时间风格与动态内容（2026-10-19）
 
-新增Afterimage、StopMotion、TileRefresh和TimeEcho起点，左右箭头遍历十六个look。
+新增Afterimage、StopMotion、TileRefresh和TimeEcho起点，左右箭头遍历十八个look。
 TemporalFeedback独立处理残影混合、整帧停格和有界分块刷新，可与色板、印刷和显示效果组合。
 保持周期按成功主视图提交计数，1..120帧；分块4..128物理像素，每块每周期更新一次。
 两个RGBA8历史按视口尺寸独占；切镜、尺寸/原点变化、失败输入后从当前帧重启；禁用释放。
@@ -76,15 +84,15 @@ std::string error;
 ayt::render::saveColorStylizationLook("sunset.rsl", look, &error);
 ```
 
-包含 `AYRenderer/ColorStylizationLook.h` 使用版本3 `.rsl`配置（兼容完整1/2，旧组默认关闭）：64 KiB上限，完整字段、严格类型/
+包含 `AYRenderer/ColorStylizationLook.h` 使用版本4 `.rsl`配置（兼容完整1/2/3，旧组默认关闭）：64 KiB上限，完整字段、严格类型/
 范围/版本检查，失败不替换输出；保存使用AYIO原子替换。没有路径引用或GPU对象，不自动接入
 ResourceManager/Cook/Pak。Editor Render面板可编辑参数与hex色板、保存/加载项目内look、重置；
 用户偏好schema8保留完整控制，作品文件可独立共享，不改变Scene序列化。
 
 Windows `AYRenderer_ColorStylizationDemo` 含彩色展台、Noir城市、动作角色和机械工坊，无外部素材。
 0..9切换look，F切换管线，Space冻结，G切换分级，F9截图。
-`--gallery --hidden --output <directory>` 导出两管线各十六张；`--d3d12`切换后端；
-`--write-presets`写出十六个`.rsl`，`--look <file.rsl>`加载自定义配置。
+`--gallery --hidden --output <directory>` 导出两管线各十八张；`--d3d12`切换后端；
+`--write-presets`写出十八个`.rsl`，`--look <file.rsl>`加载自定义配置。
 离线catalog包括实际四个阶段的shader。验证入口见[测试说明](docs/testing.md)。
 
 ## 相机视口与输出（2026-10-14）

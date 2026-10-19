@@ -1,5 +1,12 @@
 # AYRenderer Design
 
+## 2026-10-19 — 保色分层复用颜色阶段
+
+ValueBands追加mapping enum3，在同一个ColorStylization shader中对最大RGB分量量化，再统一缩放RGB。
+零值用安全分母且输出黑色；Bayer仍按虚拟像素，后续纸墨次序不变。关闭posterization时该映射本身为identity。
+cache key升级到value_bands_v3，catalog仍70项；没有额外view、FBO或历史。
+新枚举用look schema4表示；读1/2/3时显式保留原枚举域，避免旧格式被默默扩展。
+
 ## 2026-10-19 — 作者路径与展示几何
 
 RSL读写采用明确UTF-8契约，File::atomicWriteUtf8复用AYIO原子写流程；领域约束与路径包含预检
@@ -14,7 +21,7 @@ StylizationPalette只持有值，输入RGBA8/尺寸/请求色数；不引入Rend
 根据bin均值的加权方差选择盒/轴，weighted median拆分至目标数量或无可拆分bin；
 box均值使用原始RGB和，最终亮度排序，稳定ID处理并列。显示RGB metric与FixedPalette一致。
 直方图是近似压缩，同bin的细微色差不会产生独立条目；不是全局最优或bitwise跨平台协议。
-工具生成的look不保存源图路径，仍用schema3，无新文件类型或隐藏依赖。
+工具生成的look不保存源图路径，当前写schema4，无新文件类型或隐藏依赖。
 
 ## 2026-10-19 — 独立艺术历史与截图完成队列
 

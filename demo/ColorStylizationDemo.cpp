@@ -64,8 +64,9 @@ ayt::render::MeshHandle createGalleryCube(ayt::render::Renderer& renderer)
     return renderer.createMesh(vertices.data(),uint32_t(vertices.size()),
         layout,indices.data(),uint32_t(indices.size()));
 }
-const char* names[]={"Neutral","Pixel Retro","Low Color","Dither Retro","Pocket","Sunset","Noir","Comic","Engraving","Blueprint","Arcade","Broadcast","Afterimage","Stop Motion","Tile Refresh","Time Echo"};
-constexpr int lookCount=16;
+const char* names[]={"Neutral","Pixel Retro","Low Color","Dither Retro","Pocket","Sunset","Noir","Comic","Engraving","Blueprint","Arcade","Broadcast","Afterimage","Stop Motion","Tile Refresh","Time Echo","Cel Ink","Cel Paint"};
+constexpr int lookCount=ayt::render::kColorStylizationPresetCount;
+static_assert(std::size(names)==lookCount);
 const char* sceneNames[]={"gallery","city","character","workshop","observatory","canal"};
 }
 
@@ -234,7 +235,7 @@ int runGallery(int argc,char** argv)
         else if(!paused)time=std::chrono::duration<float>(std::chrono::steady_clock::now()-start).count();
         RenderScene scene;
         scene.add(cube,floorMaterial,translate(0,-.2f,1)*scale(12,.25f,9));
-        const int exhibit=sceneOverride>=0?sceneOverride:motionGallery?2:preset>=12?2:preset==10?2:preset==11?1:preset<6?0:preset==6?1:preset==7?2:3;
+        const int exhibit=sceneOverride>=0?sceneOverride:motionGallery?2:preset>=16?4:preset>=12?2:preset==10?2:preset==11?1:preset<6?0:preset==6?1:preset==7?2:3;
         if(exhibit==5)renderer.setMainCameraLookAtPerspective({8,10,-10},{0,.9f,1},{0,1,0},45,float(width)/height,.1f,100);
         else renderer.setMainCameraLookAtPerspective({8,6,-11},{0,1.1f,1},{0,1,0},48,float(width)/height,.1f,100);
         if(exhibit==0) {

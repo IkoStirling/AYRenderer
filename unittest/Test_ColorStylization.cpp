@@ -208,7 +208,7 @@ TEST_CASE(look_document_round_trip_rejects_unknown_and_preserves_output)
         CHECK(serializeColorStylizationLook(output)==text);
     }
     for(const auto& pair:std::array<std::pair<std::string,std::string>,5>{{
-        {"\"schemaVersion\": 3","\"schemaVersion\": 4"},
+        {"\"schemaVersion\": 4","\"schemaVersion\": 5"},
         {"\"outlineWidth\": 3.0","\"outlineWidth\": 99"},
         {"\"pixelSize\": 6","\"pixelSize\": 1.5"},
         {"\"enabled\": true","\"enabled\": 1"},
@@ -348,5 +348,23 @@ TEST_CASE(palette_extraction_rejects_invalid_input_without_replacing_output)
     CHECK_FALSE(extractStylizationPalette({},std::numeric_limits<uint32_t>::max(),std::numeric_limits<uint32_t>::max(),4,palette,&error));
     CHECK(palette.size==7);CHECK(palette.contributingPixels==91);
     CHECK(palette.colors[0].r==.2f && palette.colors[0].g==.4f && palette.colors[0].b==.6f);
+}
+TEST_CASE(value_bands_bypass_identity_and_require_the_new_look_enum_domain)
+{
+    ColorStylizationSettings look;look.enabled=true;look.pixelationEnabled=false;look.posterizationEnabled=false;
+    look.colorMapping=StylizationColorMapping::ValueBands;CHECK_FALSE(colorStylizationActive(look));
+    look.posterizationEnabled=true;CHECK(colorStylizationActive(look));
+    CHECK(sanitizeColorStylization(look).colorMapping==StylizationColorMapping::ValueBands);
+    auto text=serializeColorStylizationLook(look);ColorStylizationSettings loaded;std::string error;
+    CHECK(parseColorStylizationLook(text,loaded,&error));CHECK(loaded.colorMapping==StylizationColorMapping::ValueBands);
+    const auto saved=text;const auto version=text.find("\"schemaVersion\": 4");CHECK(version!=std::string::npos);
+    if(version!=std::string::npos)text.replace(version,std::string("\"schemaVersion\": 4").size(),"\"schemaVersion\": 3");
+    CHECK_FALSE(parseColorStylizationLook(text,loaded,&error));CHECK(serializeColorStylizationLook(loaded)==saved);
+    CHECK(loadColorStylizationLook(std::string(AY_RENDERER_SOURCE_DIR)+"/demo/looks/reference-palette.rsl",loaded,&error));
+    CHECK(loaded.colorMapping==StylizationColorMapping::FixedPalette);
+    for(auto preset:{ColorStylizationPreset::CelInk,ColorStylizationPreset::CelPaint}) {
+        const auto value=colorStylizationPreset(preset);CHECK(colorStylizationActive(value));
+        CHECK(value.colorMapping==StylizationColorMapping::ValueBands);CHECK(value.outlineMode==StylizationOutlineMode::Depth);
+    }
 }
 TEST_SUITE_END
