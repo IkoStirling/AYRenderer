@@ -1,5 +1,24 @@
 # AYRenderer 测试维护
 
+## 2026-10-19 风格工具箱主阶段
+
+- CPU九分组948例/15354断言通过。新增slot26/view51后首轮旧表位置断言失败；更新对应
+  Canonical表后，仅SceneMaterial/Geometry/LightingShadow/PostProcess四组复测并通过。
+  成功的另外五组未重复；首轮失败日志与最终分区JSON均保留。
+- `AYRenderer_ColorStylization`增加独立轮廓gate/图依赖、settings与严格look格式、两阶段GLSL/D3D编译。
+- 真实`color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle`：D3D11/D3D12各114断言；
+  原像素/alpha/Bayer不回归，自定义色板最近项、双色插值与三种纸墨端点通过。
+  首轮新增端点夹具尝试更新RT输入未生效，修正为每项独立初始化输入后通过；不改动待测效果来迎合夹具。
+- `stylized_outline_real_pass_depth_normal_and_luminance_edges`：两后端各26断言通过，独立输入
+  检查列边缘、alpha与生产失效。无效FBO附件访问在adapter入口返回invalid，不进入bgfx断言。
+- Editor Shell47例/1372断言、ABI35的1例/2断言通过。完整编辑器可执行目标构建，
+  不把MockRenderer控件测试写成原生UI人工验收。
+- 988例/10分区清单无遗漏/重复；离线catalog68项。禁止运行时编译的两后端各20张首轮成品图
+  对应差异最大1/255；含法线折痕的两条管线不宣称逐像素相等。
+- 证据位于主仓`out/render-style-toolbox-20261019/`。预设最后的配色调整/实现出头文件
+  另用定向回归和新画廊记录；其余已成功CPU组不为凑时长重跑。
+
+
 ## 2026-10-19 前向/延迟背景及 PBR 一致性修正
 
 原 ColorStylization 画廊的前向/延迟差异不符合对照目的：ForwardOpaque 覆盖 host clear 为

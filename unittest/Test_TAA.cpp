@@ -79,7 +79,7 @@ TEST_CASE(taa_append_only_abi_resource_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::TAA) == 19u);
     CHECK(static_cast<uint8_t>(FgResourceId::TaaColor) == 12u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 31u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 33u);
     CHECK(ayt::render::detail::TAAPass::kTaaViewId == 5u);
     CHECK(std::is_final_v<ayt::render::detail::TAAPass>);
 }
@@ -102,7 +102,7 @@ TEST_CASE(taa_is_deferred_only_and_sits_between_postprocess_and_spatial_aa)
         CHECK(taa == post + 1u);
         CHECK(fxaa == taa + 1u);
         CHECK(smaa == fxaa + 1u);
-        CHECK(grading == smaa + 1u);
+        CHECK(grading == smaa + 2u);
         CHECK(present == grading + 2u);
     }
 }

@@ -1,0 +1,23 @@
+#pragma once
+
+#include "AYRenderer/ColorStylizationSettings.h"
+#include <string>
+#include <string_view>
+
+namespace ayt::render {
+
+/// Experimental .rsl look document v1. Self-contained settings; no referenced
+/// assets, Scene mutation or automatic ResourceManager/Cook/Pak integration.
+/// Serialization sanitizes runtime values. Parsing rejects malformed, unknown,
+/// incomplete or out-of-range documents (64 KiB limit), preserving output on failure.
+std::string serializeColorStylizationLook(const ColorStylizationSettings& settings);
+bool parseColorStylizationLook(std::string_view text, ColorStylizationSettings& output,
+                              std::string* error = nullptr);
+/// Explicit native-host file access. Save requires .rsl and an existing parent;
+/// uses AYIO atomic replacement. Editor callers additionally constrain project paths.
+bool loadColorStylizationLook(const std::string& path, ColorStylizationSettings& output,
+                             std::string* error = nullptr);
+bool saveColorStylizationLook(const std::string& path, const ColorStylizationSettings& settings,
+                             std::string* error = nullptr);
+
+} // namespace ayt::render

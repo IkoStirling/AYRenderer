@@ -268,7 +268,7 @@ TEST_CASE(s1a_make_default_includes_bloomextract_after_transparent) {
     // PostProcess — slot index shifts PostProcess/UI by another +1.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 15);
+    CHECK(desc.passes.size() == 16);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
@@ -279,9 +279,9 @@ TEST_CASE(s1a_make_default_includes_bloomextract_after_transparent) {
     CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[9] == RenderPassSlot::FXAA);
     CHECK(desc.passes[10] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[11] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[13] == RenderPassSlot::Present);
-    CHECK(desc.passes[14] == RenderPassSlot::UI);
+    CHECK(desc.passes[12] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[14] == RenderPassSlot::Present);
+    CHECK(desc.passes[15] == RenderPassSlot::UI);
     // contains() helper round-trip
     CHECK(desc.contains(RenderPassSlot::BloomExtract));
     CHECK(desc.contains(RenderPassSlot::BloomBlur));          // S1b (2026-07-23)
@@ -299,7 +299,7 @@ TEST_CASE(s1a_make_deferred_includes_bloomextract_after_transparent) {
     // and PostProcess — PostProcess/UI shift by another +1.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 24);
+    CHECK(desc.passes.size() == 25);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
@@ -315,9 +315,9 @@ TEST_CASE(s1a_make_deferred_includes_bloomextract_after_transparent) {
     CHECK(desc.passes[16] == RenderPassSlot::TAA);
     CHECK(desc.passes[17] == RenderPassSlot::FXAA);
     CHECK(desc.passes[18] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[19] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[21] == RenderPassSlot::Present);
-    CHECK(desc.passes[22] == RenderPassSlot::UI);
+    CHECK(desc.passes[20] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[22] == RenderPassSlot::Present);
+    CHECK(desc.passes[23] == RenderPassSlot::UI);
 }
 
 // === C. Half-resolution size math =====================================

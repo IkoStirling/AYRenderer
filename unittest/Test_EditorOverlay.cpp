@@ -251,7 +251,7 @@ TEST_CASE(make_default_omits_editoroverlay) {
 TEST_CASE(make_editor_forward_inserts_overlay_after_present) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeEditorForward();
     CHECK(desc.contains(RenderPassSlot::EditorOverlay));
-    CHECK(desc.passes.size() == 16u);
+    CHECK(desc.passes.size() == 17u);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
     CHECK(desc.passes[3] == RenderPassSlot::Transparent);
     CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
@@ -259,10 +259,10 @@ TEST_CASE(make_editor_forward_inserts_overlay_after_present) {
     CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[9] == RenderPassSlot::FXAA);
     CHECK(desc.passes[10] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[11] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[13] == RenderPassSlot::Present);
-    CHECK(desc.passes[14] == RenderPassSlot::EditorOverlay);
-    CHECK(desc.passes[15] == RenderPassSlot::UI);
+    CHECK(desc.passes[12] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[14] == RenderPassSlot::Present);
+    CHECK(desc.passes[15] == RenderPassSlot::EditorOverlay);
+    CHECK(desc.passes[16] == RenderPassSlot::UI);
 }
 
 TEST_CASE(make_editor_deferred_inserts_overlay_after_present) {
@@ -277,14 +277,14 @@ TEST_CASE(make_editor_deferred_inserts_overlay_after_present) {
     CHECK(*(ppIt + 2) == RenderPassSlot::FXAA);
     CHECK(ppIt + 3 != desc.passes.end());
     CHECK(*(ppIt + 3) == RenderPassSlot::SMAA);
-    CHECK(ppIt + 4 != desc.passes.end());
-    CHECK(*(ppIt + 4) == RenderPassSlot::ColorGrading);
     CHECK(ppIt + 5 != desc.passes.end());
-    CHECK(*(ppIt + 5) == RenderPassSlot::ColorStylization);
+    CHECK(*(ppIt + 5) == RenderPassSlot::ColorGrading);
     CHECK(ppIt + 6 != desc.passes.end());
-    CHECK(*(ppIt + 6) == RenderPassSlot::Present);
+    CHECK(*(ppIt + 6) == RenderPassSlot::ColorStylization);
     CHECK(ppIt + 7 != desc.passes.end());
-    CHECK(*(ppIt + 7) == RenderPassSlot::EditorOverlay);
+    CHECK(*(ppIt + 7) == RenderPassSlot::Present);
+    CHECK(ppIt + 8 != desc.passes.end());
+    CHECK(*(ppIt + 8) == RenderPassSlot::EditorOverlay);
     CHECK(desc.contains(RenderPassSlot::GBufferDebug));
 }
 

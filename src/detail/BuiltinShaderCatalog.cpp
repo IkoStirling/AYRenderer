@@ -12,6 +12,7 @@
 #include "AYRenderer/VolumetricShaderSources.h"
 #include "AYRenderer/DeferredDecalShaderSources.h"
 #include "AYRenderer/ColorStylizationShaderSources.h"
+#include "AYRenderer/StylizedOutlineShaderSources.h"
 #include "AYRenderer/ParticleDraw.h"
 #include "AYRenderer/FallbackMeshShaderSources.h"
 #include "AYRenderer/TilemapShaderSources.h"
@@ -34,6 +35,7 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
         std::pair{"volumetric",kVolumetricPhoskiaSource},
         std::pair{"deferred_decal",kDeferredDecalPhoskiaSource},
         std::pair{"color_stylization",kColorStylizationPhoskiaSource},
+        std::pair{"stylized_outline",kStylizedOutlinePhoskiaSource},
         std::pair{"particle_unlit",kParticlePhoskiaSource},
         std::pair{"bloom_extract",kBloomExtractPhoskiaSource},
         std::pair{"bloom_down",kBloomPyramidDownsamplePhoskiaSource},

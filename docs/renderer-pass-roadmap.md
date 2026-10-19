@@ -25,11 +25,11 @@ R6-4 与 D3D11 capture 基线已完成；新增画质 Pass 可按后续路线恢
 ```
 Forward:  Shadow → ForwardOpaque → DepthHaze(no-op) → Transparent
           → CameraOverlay2D → Bloom → PostProcess → FXAA/SMAA
-          → ColorGrading → Present → UI
+          → StylizedOutline → ColorGrading → ColorStylization → Present → UI
 
 Deferred: Shadow → Skybox → GBuffer → MotionVector(on demand) → SSAO
           → Lighting → DepthHaze → Transparent → CameraOverlay2D → Bloom
-          → PostProcess → TAA/FXAA/SMAA → ColorGrading → Present → UI
+          → PostProcess → TAA/FXAA/SMAA → StylizedOutline → ColorGrading → ColorStylization → Present → UI
           → optional GBufferDebug
 ```
 

@@ -58,7 +58,7 @@ TEST_CASE(fxaa_append_only_abi_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::FXAA) == 16u);
     CHECK(static_cast<uint8_t>(FgResourceId::FxaaColor) == 7u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 31u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 33u);
     CHECK(ayt::render::detail::FXAAPass::kFxaaViewId == 17u);
     CHECK(std::is_final_v<ayt::render::detail::FXAAPass>);
 }
@@ -78,7 +78,7 @@ TEST_CASE(default_deferred_and_editor_pipelines_order_fxaa_before_present)
         const bool deferred = desc.contains(RenderPassSlot::TAA);
         CHECK(fxaa == post + (deferred ? 2u : 1u));
         CHECK(smaa == fxaa + 1u);
-        CHECK(grading == smaa + 1u);
+        CHECK(grading == smaa + 2u);
         CHECK(present == grading + 2u);
     }
 }
@@ -99,7 +99,7 @@ TEST_CASE(fxaa_view_executes_after_postprocess_and_before_present)
     CHECK(pp != order.end());
     CHECK(fxaa == pp + 2);
     CHECK(smaa == fxaa + 1);
-    CHECK(grading == smaa + 3);
+    CHECK(grading == smaa + 4);
     CHECK(present == grading + 2);
 }
 

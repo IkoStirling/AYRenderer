@@ -7,6 +7,7 @@ project(AYRenderer
 
 set(AY_SHADER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../AYShader")
 include("${AY_SHADER_ROOT}/cmake/AYBgfx.cmake")
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # C++ standard follows the root CMakeLists (currently C++23; may move to C++26).
 # Do not pin a standard here.
@@ -53,6 +54,7 @@ target_link_libraries(AYRenderer PUBLIC
 )
 
 target_link_libraries(AYRenderer PRIVATE
+    nlohmann_json::nlohmann_json
     AYResource
     AYFont
     bgfx::bgfx

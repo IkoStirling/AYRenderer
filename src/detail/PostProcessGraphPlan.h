@@ -41,6 +41,9 @@ struct PostProcessGraphPlanInput {
     bool decals = false;
     bgfx::FrameBufferHandle baseGBuffer = BGFX_INVALID_HANDLE;
     bool colorStylization = false;
+    bool stylizedOutline = false;
+    bool stylizationDepth = false;
+    bool stylizationNormals = false;
 };
 
 struct PostProcessGraphPlanResult {

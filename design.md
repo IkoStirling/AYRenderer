@@ -31,7 +31,7 @@ GPU view64..111分配三Pass连续区间，原主管线/编辑器/粒子view保�
 RendererSubSystem在每视图自己的相机/aspect下提取OwnedCpu packet后恢复主视口；
 主镜头3D mask在presentation副本过滤，原Scene完整保留。该路径明确为Forward，
 完整Deferred多视图仍需独立的Pass/FrameGraph/blackboard/历史与view命名空间设计。
-UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，最大单Pass预算144；
+UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，最大单Pass预算143；
 constexpr容量与公开上限静态交叉检查，防止布局变更后重用同帧GPU view。
 范围、使用方式与实际验收见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
 
@@ -1033,17 +1033,20 @@ group/nested opacity、Additive/Multiply/Screen 隔离组、resize、动态 DPI�
 
 ### 8.6 可选高级效果的配置与执行边界（2026-09-12）
 
-2026-10-19 实现 ColorStylization v1：Renderer-owned settings sidecar（不扩展 FrameContext），
-ColorStylizationPass 使用 slot25/view50 和 RGBA8 FgResourceId::StylizedColor=30。
-AA/ColorGrading 后读取本帧 PresentSource，一次 draw 后才提升 semantic；失败沿用上一生产者。
-FG 仅在 enabled 且量化开启或有效像素块>1时声明此节点/输出，输出 point sampling。
-View50 纳入全量 remap 与 UI 分配排除表，单Pass离屏预算144；既有camera64..111不变。
-内置 catalog 添加一个 shader，不随开关组合生成 variant，生产包缺失该条目时拒绝旧包。
-像素块使用视口左上原点，中心 texel 偶数向左/上取整，截短边缘块重新选中心；
-Bayer4 由虚拟像素坐标的两位解析生成，不需要 noise texture。Dither 偏移在 ±半阶内，
-RGB量化不改alpha，量化关闭时 dither 无效。没有 temporal/history 或新的 look 资产。
-此实现落实下述颜色组中的三项；其余候选及共享 NoiseSequenceProvider 仍为设计方向。
+2026-10-19 工具箱：Renderer-owned settings sidecar，不扩展FrameContext/PassExecContext。
+颜色/印刷使用slot25/view50、RGBA8 StylizedColor=30；轮廓独立slot26/view51、OutlinedColor=32。
+StylizationDepth=31仅为借用依赖，实际Forward scene depth与Deferred原子GBuffer分别提供输入。
+独立gate与提交后semantic提升；失败保留上游。AA → Outline → Grading → Color/Print → Present。
+Color/Print不引入GBuffer sampler；Outline按设置引入depth/normal，使用相对view-space depth
+阈值而非直接比较非线性device depth。GBuffer必须当帧、同尺寸、同generation；缺失几何输入旁路。
+默认两个阶段都关闭，无目标、无draw。全量view remap64项，UI排除50/51，单Pass离屏预算143。
+离线catalog68个job；颜色与轮廓各一个shader，轻量开关用uniform，不产生布尔组合排列。
 
+颜色：物理块的真实中心texel（偶数向左/上，截短块重算）；Bayer4按虚拟像素排列；RGB量化或
+亮度双色或固定2..16色映射，再合成印刷图案。固定色板采用显示RGB加权平方距离，稳定首项平局。
+网点面积按目标ink coverage计算；tone gamma只改变图案亮度，端点固定全纸/全墨。Alpha只跟随输入。
+样式配置只有值，不持借用指针；版本化serializer使用唯一字段清单，Editor复用同一serializer。
+`.rsl`类型/版本、64 KiB、严格字段与原子保存规则见公共Look头与格式登记；没有自动Cook/Pak/Scene接入。
 
 高级效果采用“统一配置入口、按数据依赖分组执行”的设计，不建立包含全部算法的单一
 `AdvancedEffectPass`。配置层可以向 Editor 和游戏暴露同一组开关与参数，但配置分组不等于 GPU Pass：

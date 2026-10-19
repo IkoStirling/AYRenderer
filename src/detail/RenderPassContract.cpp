@@ -193,29 +193,39 @@ constexpr std::array<RenderPassResourceWrite, 3> kSmaaWrites = {{
     output(Id::SmaaBlendWeights, Life::Transient, Format::RGBA8),
     output(Id::SmaaColor, Life::Transient, Format::RGBA8),
 }};
-constexpr std::array<RenderPassResourceRead, 4> kGradingReads = {{
+constexpr std::array<RenderPassResourceRead, 5> kGradingReads = {{
     required(Id::FinalLdrColor),
     optional(Id::TaaColor),
     optional(Id::FxaaColor),
     optional(Id::SmaaColor),
+    optional(Id::OutlinedColor),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kGradingWrites = {{
     output(Id::ColorGradedColor, Life::Transient, Format::RGBA8),
 }};
-constexpr std::array<RenderPassResourceRead, 5> kStyleReads = {{
+constexpr std::array<RenderPassResourceRead, 6> kStyleReads = {{
     required(Id::FinalLdrColor), optional(Id::TaaColor), optional(Id::FxaaColor),
     optional(Id::SmaaColor), optional(Id::ColorGradedColor),
+    optional(Id::OutlinedColor),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kStyleWrites = {{
     output(Id::StylizedColor,Life::Transient,Format::RGBA8),
 }};
-constexpr std::array<RenderPassResourceRead, 6> kPresentReads = {{
+constexpr std::array<RenderPassResourceRead, 7> kPresentReads = {{
     required(Id::FinalLdrColor),
     optional(Id::TaaColor),
     optional(Id::FxaaColor),
     optional(Id::SmaaColor),
     optional(Id::ColorGradedColor),
     optional(Id::StylizedColor),
+    optional(Id::OutlinedColor),
+}};
+constexpr std::array<RenderPassResourceRead, 7> kOutlineReads = {{
+    required(Id::FinalLdrColor),optional(Id::TaaColor),optional(Id::FxaaColor),optional(Id::SmaaColor),
+    optional(Id::SceneDepth),optional(Id::GBufferDepth),optional(Id::GBufferNormal),
+}};
+constexpr std::array<RenderPassResourceWrite, 1> kOutlineWrites = {{
+    output(Id::OutlinedColor,Life::Transient,Format::RGBA8),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kPresentWrites = {{
     output(Id::PresentedColor, Life::External, Format::RGBA8,
@@ -267,9 +277,9 @@ constexpr std::array<RenderPassResourceWrite, 1> kVolumetricWrites = {{
     output(Id::VolumetricColor, Life::Transient, Format::RGBA16F),
 }};
 
-const std::array<RenderPassContract, 26>& contracts() noexcept
+const std::array<RenderPassContract, 27>& contracts() noexcept
 {
-    static const std::array<RenderPassContract, 26> table = {{
+    static const std::array<RenderPassContract, 27> table = {{
         {RenderPassSlot::Shadow, "Shadow", noReads, kShadowWrites, false},
         {RenderPassSlot::Skybox, "Skybox", noReads, kSkyboxWrites, false},
         {RenderPassSlot::ForwardOpaque, "ForwardOpaque", kForwardReads,
@@ -312,6 +322,7 @@ const std::array<RenderPassContract, 26>& contracts() noexcept
         {RenderPassSlot::Volumetric, "Volumetric", kVolumetricReads, kVolumetricWrites, false},
         {RenderPassSlot::DeferredDecal, "DeferredDecal", kDecalReads, kDecalWrites, true},
         {RenderPassSlot::ColorStylization, "ColorStylization", kStyleReads, kStyleWrites, false},
+        {RenderPassSlot::StylizedOutline, "StylizedOutline", kOutlineReads, kOutlineWrites, false},
     }};
     return table;
 }

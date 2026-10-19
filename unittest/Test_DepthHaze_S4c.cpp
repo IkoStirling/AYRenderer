@@ -154,7 +154,7 @@ TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {
 
 TEST_CASE(deferred_pipeline_matches_data_dependencies) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
-    CHECK(desc.passes.size() == 24u);
+    CHECK(desc.passes.size() == 25u);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
     CHECK(desc.passes[4] == RenderPassSlot::MotionVector);
     CHECK(desc.passes[5] == RenderPassSlot::SSAO);
@@ -170,7 +170,7 @@ TEST_CASE(deferred_pipeline_matches_data_dependencies) {
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 63u);
+    CHECK(order.size() == 64u);
     const auto rank = [&order](bgfx::ViewId view) {
         return std::find(order.begin(), order.end(), view);
     };
@@ -187,7 +187,7 @@ TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
         244, 253, 246, // Selection masks, camera-overlay 2D
         10, 11, 26, 27, 28, 29, 30, 12, // Bloom pyramid and resolve
         31, 15,        // Exposure before tone mapping
-        5, 17, 247, 248, 249, 4, 50, 16, // AA, grading, stylization, present
+        5, 17, 247, 248, 249, 51, 4, 50, 16, // AA, grading, stylization, present
         245, 250, 254, 251, 252 // Diagnostics and editor overlays
     };
     for (std::size_t index = 0; index < std::size(dependencyChain); ++index) {
@@ -200,7 +200,7 @@ TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
 
 TEST_CASE(forward_pipeline_keeps_haze_as_safe_noop_before_transparent) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
-    CHECK(desc.passes.size() == 15u);
+    CHECK(desc.passes.size() == 16u);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
     CHECK(desc.passes[3] == RenderPassSlot::Transparent);
     CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);

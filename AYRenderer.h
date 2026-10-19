@@ -443,7 +443,8 @@ public:
     void setColorGradingPreset(ColorGradingPreset preset);
     ColorGradingPreset colorGradingPreset() const noexcept;
 
-    /// Main Forward/Deferred display color, after AA/grading and before UI.
+    /// Main Forward/Deferred looks: independent outline after AA, then grading,
+    /// color mapping and print. UI remains outside these image transformations.
     /// Owner-thread copied settings are sanitized and survive pipeline rebuilds.
     /// Disabled/identity settings omit the graph target and draw. Explicit renderViews
     /// do not run this post chain. Alpha is preserved; Bayer uses virtual pixel cells.

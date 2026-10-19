@@ -1190,11 +1190,11 @@ bgfx::TextureHandle BGFXAdapter::getFboAttachment(bgfx::FrameBufferHandle fb,
 {
     // R5+ (Pass-side backfill) — borrowed accessor, matching the
     // bgfx contract that the returned TextureHandle is owned by the
-    // FBO and does NOT need destroy(). We gate on isInitialized so
-    // uninitialized adapters return an invalid handle (callers are
+    // FBO and does NOT need destroy(). Reject an invalid FBO before bgfx;
+    // uninitialized adapters also return an invalid handle (callers are
     // trained to check before sampling, so the headless test path
     // degrades to "skip the sampler bind").
-    if (!_initialized) {
+    if (!_initialized || !bgfx::isValid(fb)) {
         return BGFX_INVALID_HANDLE;
     }
     return bgfx::getTexture(fb, attachment);

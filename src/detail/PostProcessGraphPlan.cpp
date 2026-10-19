@@ -1,5 +1,6 @@
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/RenderPassContract.h"
+#include "detail/BGFXAdapter.h"
 
 #include <cassert>
 #include <utility>
@@ -126,8 +127,9 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
                                   input.colorGrading);
     graph.setExecutionEligibility(RenderPassSlot::Present, input.finalLdr);
     graph.setExecutionEligibility(RenderPassSlot::ColorStylization, input.colorStylization);
+    graph.setExecutionEligibility(RenderPassSlot::StylizedOutline, input.stylizedOutline);
 
-    if (input.ssao || input.taa || input.ssr || input.volumetric || input.decals) {
+    if (input.ssao || input.taa || input.ssr || input.volumetric || input.decals || input.stylizationNormals) {
         // These are multiple logical views of one pass-owned MRT. FrameGraph
         // borrows the FBO only for dependency/lifetime description; concrete
         // passes continue binding the individual attachments directly.
@@ -383,13 +385,28 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     }
 
     result.presentationSource = result.antialiasingSource;
+    if(input.stylizedOutline) {
+        std::vector<FgResourceId> styleReads{result.presentationSource};
+        if(input.stylizationDepth) {
+            graph.importExternal(FgResourceId::StylizationDepth,
+                BGFXAdapter::isValid(input.gbuffer) ? input.gbuffer : input.sceneColor);
+            styleReads.push_back(FgResourceId::StylizationDepth);
+        }
+        if(input.stylizationNormals) styleReads.push_back(FgResourceId::GBufferNormal);
+        graph.addResource(FgResourceId::OutlinedColor,
+            graphTextureDesc(RenderPassSlot::StylizedOutline,RenderPassResourceId::OutlinedColor));
+        graph.addPass({contractName(RenderPassSlot::StylizedOutline),std::move(styleReads),
+            {FgResourceId::OutlinedColor},true,false,executionSlot(RenderPassSlot::StylizedOutline)});
+        result.presentationSource=FgResourceId::OutlinedColor;
+    }
+
     if (input.colorGrading) {
         graph.addResource(FgResourceId::ColorGradedColor,
                           graphTextureDesc(
                               RenderPassSlot::ColorGrading,
                               RenderPassResourceId::ColorGradedColor));
         graph.addPass({contractName(RenderPassSlot::ColorGrading),
-                       {result.antialiasingSource},
+                       {result.presentationSource},
                        {FgResourceId::ColorGradedColor},
                        true, false,
                        executionSlot(RenderPassSlot::ColorGrading)});

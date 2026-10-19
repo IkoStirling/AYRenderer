@@ -1,9 +1,12 @@
 #include "AYTest.h"
 #include "AYRenderer.h"
 #include "AYRenderer/ColorStylizationShaderSources.h"
+#include "AYRenderer/ColorStylizationLook.h"
 #include "AYShader/Phoskia.h"
 #include "AYShader/BGFXConverter.h"
 #include "detail/ColorStylizationPass.h"
+#include "detail/StylizedOutlinePass.h"
+#include "AYRenderer/StylizedOutlineShaderSources.h"
 #include "detail/FgResource.h"
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/RenderPassContract.h"
@@ -62,12 +65,39 @@ TEST_CASE(canonical_order_and_reserved_view)
     }
     auto view=std::find(kRenderViewOrder.begin(),kRenderViewOrder.end(),ColorStylizationPass::kViewId);
     CHECK(view!=kRenderViewOrder.end()); CHECK(*(view-1)==4); CHECK(*(view+1)==16);
-    CHECK(nextUiViewRange(50,1)==51);
+    CHECK(nextUiViewRange(50,1)==52);
+    CHECK(static_cast<uint8_t>(RenderPassSlot::StylizedOutline)==26);
     Renderer renderer;
     renderer.configurePipeline({{RenderPassSlot::PostProcess,RenderPassSlot::ColorStylization,RenderPassSlot::UI}});
     CHECK(renderer.pipelineDesc().passes[2]==RenderPassSlot::Present);
     const std::array wrong={RenderPassSlot::PostProcess,RenderPassSlot::Present,RenderPassSlot::ColorStylization};
     CHECK_FALSE(validateRenderPipelineContracts(wrong).valid());
+}
+
+TEST_CASE(palette_duotone_and_print_are_independent_and_bounded)
+{
+    ColorStylizationSettings s;
+    s.enabled=true;s.pixelationEnabled=false;s.posterizationEnabled=false;
+    CHECK_FALSE(colorStylizationActive(s));
+    s.colorMapping=StylizationColorMapping::FixedPalette;
+    CHECK(colorStylizationActive(s));
+    s.paletteSize=255;s.palette[15]={-1,std::numeric_limits<float>::infinity(),2};
+    s.printSpacing=std::numeric_limits<float>::quiet_NaN();s.printAngle=-405;
+    s.printStrength=2;s=sanitizeColorStylization(s);
+    CHECK(s.paletteSize==16);CHECK(s.palette[15].r==0);
+    CHECK(s.palette[15].g==0);CHECK(s.palette[15].b==1);
+    CHECK(s.printSpacing==7);CHECK(s.printAngle==135);CHECK(s.printStrength==1);
+    s.paletteSize=0;s.colorMapping=static_cast<StylizationColorMapping>(255);
+    s.printPattern=static_cast<StylizationPrintPattern>(255);
+    s=sanitizeColorStylization(s);
+    CHECK(s.paletteSize==2);CHECK_FALSE(colorStylizationActive(s));
+    s.printPattern=StylizationPrintPattern::Dots;CHECK(colorStylizationActive(s));
+    s.printStrength=0;CHECK_FALSE(colorStylizationActive(s));
+    for(auto preset:{ColorStylizationPreset::Pocket,ColorStylizationPreset::Sunset,
+        ColorStylizationPreset::Noir,ColorStylizationPreset::Comic,ColorStylizationPreset::Engraving}) {
+        auto look=sanitizeColorStylization(colorStylizationPreset(preset));
+        CHECK(colorStylizationActive(look));CHECK(look.paletteSize<=16);
+    }
 }
 
 TEST_CASE(graph_splices_after_each_aa_and_grading_and_has_no_disabled_target)
@@ -136,6 +166,68 @@ TEST_CASE(shader_compiles_portable_and_d3d_with_complete_bindings)
         CHECK(std::any_of(program.textures.begin(),program.textures.end(),[](auto& t){return t.name=="inputColor";}));
         CHECK(std::any_of(program.uniforms.begin(),program.uniforms.end(),[](auto& u){return u.name=="styleParams";}));
         CHECK(std::any_of(program.uniforms.begin(),program.uniforms.end(),[](auto& u){return u.name=="styleViewport";}));
+        ayt::shader::CompiledShaderProgram outline;
+        compiler.compileToProgram(kStylizedOutlinePhoskiaSource,{},backend,outline);
+        for(auto& error:outline.errors)std::cerr<<error<<'\n';
+        CHECK(outline.success);
+        CHECK(std::any_of(outline.textures.begin(),outline.textures.end(),[](auto& t){return t.name=="outlineDepth";}));
+        CHECK(std::any_of(outline.uniforms.begin(),outline.uniforms.end(),[](auto& u){return u.name=="outlineInverseProjection";}));
     }
+}
+
+TEST_CASE(look_document_round_trip_rejects_unknown_and_preserves_output)
+{
+    auto original=colorStylizationPreset(ColorStylizationPreset::Blueprint);
+    original.palette[15]={.25f,.5f,.75f};original.outlineWidth=3;
+    const auto text=serializeColorStylizationLook(original);
+    ColorStylizationSettings output;
+    std::string error;
+    CHECK(parseColorStylizationLook(text,output,&error));CHECK(error.empty());
+    CHECK(serializeColorStylizationLook(output)==text);
+    for(const auto& bad:{std::string{},std::string("{}"),std::string(65537,' '),
+        std::string("{\"schemaVersion\":1,\"schemaVersion\":1}"),
+        text.substr(0,text.size()/2)}) {
+        CHECK_FALSE(parseColorStylizationLook(bad,output,&error));CHECK_FALSE(error.empty());
+        CHECK(serializeColorStylizationLook(output)==text);
+    }
+    for(const auto& pair:std::array<std::pair<std::string,std::string>,5>{{
+        {"\"schemaVersion\": 1","\"schemaVersion\": 2"},
+        {"\"outlineWidth\": 3.0","\"outlineWidth\": 99"},
+        {"\"pixelSize\": 6","\"pixelSize\": 1.5"},
+        {"\"enabled\": true","\"enabled\": 1"},
+        {"\"colorMapping\": 1","\"colorMapping\": 255"}}}) {
+        auto invalid=text;const auto pos=invalid.find(pair.first);CHECK(pos!=std::string::npos);
+        if(pos==std::string::npos)continue;
+        invalid.replace(pos,pair.first.size(),pair.second);
+        CHECK_FALSE(parseColorStylizationLook(invalid,output,&error));
+        CHECK(serializeColorStylizationLook(output)==text);
+    }
+    auto extra=text;extra.insert(extra.find('{')+1,"\"typo\":true,");
+    CHECK_FALSE(parseColorStylizationLook(extra,output,&error));
+    auto duplicate=text;duplicate.insert(duplicate.find('{')+1,"\"enabled\":true,");
+    CHECK_FALSE(parseColorStylizationLook(duplicate,output,&error));
+}
+
+TEST_CASE(outline_has_independent_gate_and_graph_dependency)
+{
+    ColorStylizationSettings s;s.enabled=true;s.pixelationEnabled=false;s.posterizationEnabled=false;
+    s.outlineMode=StylizationOutlineMode::DepthNormal;
+    CHECK_FALSE(colorStylizationActive(s));CHECK(stylizationOutlineActive(s));
+    s.outlineStrength=0;CHECK_FALSE(stylizationOutlineActive(s));
+    BGFXAdapter adapter;FrameGraph graph(adapter);
+    PostProcessGraphPlanInput in;in.width=320;in.height=180;in.sceneColor={17};in.gbuffer={18};
+    in.finalLdr=true;in.stylizedOutline=true;in.stylizationDepth=true;in.stylizationNormals=true;
+    auto plan=buildPostProcessGraphPlan(graph,in);CHECK(plan.compileSucceeded);
+    CHECK(plan.presentationSource==FgResourceId::OutlinedColor);
+    CHECK(graph.shouldExecute(RenderPassSlot::StylizedOutline));
+    CHECK_FALSE(graph.shouldExecute(RenderPassSlot::ColorStylization));
+    in.colorGrading=true;in.colorStylization=true;
+    CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);
+    CHECK(graph.shouldExecute(RenderPassSlot::StylizedOutline));
+    CHECK(graph.shouldExecute(RenderPassSlot::ColorGrading));
+    CHECK(graph.shouldExecute(RenderPassSlot::ColorStylization));
+    in.stylizedOutline=false;in.stylizationDepth=false;in.stylizationNormals=false;
+    CHECK(buildPostProcessGraphPlan(graph,in).compileSucceeded);
+    CHECK_FALSE(graph.shouldExecute(RenderPassSlot::StylizedOutline));
 }
 TEST_SUITE_END

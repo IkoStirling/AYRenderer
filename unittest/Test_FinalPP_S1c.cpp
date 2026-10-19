@@ -378,7 +378,7 @@ TEST_CASE(s1c_make_default_slot_table_postprocess_after_bloomblur) {
     // RenderPassSlot enum unchanged).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 15);
+    CHECK(desc.passes.size() == 16);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
     CHECK(desc.passes[3] == RenderPassSlot::Transparent);
     CHECK(desc.passes[4] == RenderPassSlot::Forward2DOpaque);
@@ -387,9 +387,9 @@ TEST_CASE(s1c_make_default_slot_table_postprocess_after_bloomblur) {
     CHECK(desc.passes[8] == RenderPassSlot::PostProcess);
     CHECK(desc.passes[9] == RenderPassSlot::FXAA);
     CHECK(desc.passes[10] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[11] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[13] == RenderPassSlot::Present);
-    CHECK(desc.passes[14] == RenderPassSlot::UI);
+    CHECK(desc.passes[12] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[14] == RenderPassSlot::Present);
+    CHECK(desc.passes[15] == RenderPassSlot::UI);
     // S1c does NOT add a RenderPassSlot enum value (no slot in the
     // table for "FinalPP" — the composite lives in PostProcessPass
     // and reads ctx.bloomBlurPass via borrowed pointer). Future
@@ -403,7 +403,7 @@ TEST_CASE(s1c_make_deferred_slot_table_postprocess_after_bloomblur) {
     // DepthHaze and PostProcess), PostProcess at index 9.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 24);
+    CHECK(desc.passes.size() == 25);
     CHECK(desc.passes[4] == RenderPassSlot::MotionVector);
     CHECK(desc.passes[5] == RenderPassSlot::SSAO);
     CHECK(desc.passes[6] == RenderPassSlot::Lighting);
@@ -416,9 +416,9 @@ TEST_CASE(s1c_make_deferred_slot_table_postprocess_after_bloomblur) {
     CHECK(desc.passes[16] == RenderPassSlot::TAA);
     CHECK(desc.passes[17] == RenderPassSlot::FXAA);
     CHECK(desc.passes[18] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[19] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[21] == RenderPassSlot::Present);
-    CHECK(desc.passes[22] == RenderPassSlot::UI);
+    CHECK(desc.passes[20] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[22] == RenderPassSlot::Present);
+    CHECK(desc.passes[23] == RenderPassSlot::UI);
 }
 
 // === H. setEnabled(false) on PostProcessPass skips dispatch =========

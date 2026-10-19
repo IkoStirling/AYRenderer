@@ -5,6 +5,7 @@
 #include <Windows.h>
 #include "AYRenderer.h"
 #include "AYRenderer/PbrShaderSources.h"
+#include "AYRenderer/ColorStylizationLook.h"
 #include "AYMath/MathUtils.h"
 
 #include <array>
@@ -61,25 +62,48 @@ ayt::render::MeshHandle createGalleryCube(ayt::render::Renderer& renderer)
     return renderer.createMesh(vertices.data(),uint32_t(vertices.size()),
         layout,indices.data(),uint32_t(indices.size()));
 }
-const char* names[]={"Neutral","Pixel Retro","Low Color","Dither Retro"};
+const char* names[]={"Neutral","Pixel Retro","Low Color","Dither Retro","Pocket","Sunset","Noir","Comic","Engraving","Blueprint"};
+constexpr int lookCount=10;
 }
 
 int main(int argc,char** argv)
 {
     using namespace ayt::render;
     using namespace ayt::math;
-    bool gallery=false,hidden=false;
+    bool gallery=false,hidden=false,writePresets=false;
+    std::string lookPath;
     Backend backend=Backend::Direct3D11;
     std::filesystem::path output="color-stylization-captures";
     for(int i=1;i<argc;++i) {
         const std::string arg=argv[i];
         if(arg=="--gallery")gallery=true;
+        else if(arg=="--look" && i+1<argc)lookPath=argv[++i];
+        else if(arg=="--write-presets")writePresets=true;
         else if(arg=="--hidden")hidden=true;
         else if(arg=="--d3d12")backend=Backend::Direct3D12;
         else if(arg=="--output" && i+1<argc)output=argv[++i];
-        else {std::fprintf(stderr,"Usage: AYRenderer_ColorStylizationDemo [--gallery] [--hidden] [--d3d12] [--output directory]\n");return 2;}
+        else {std::fprintf(stderr,"Usage: AYRenderer_ColorStylizationDemo [--gallery] [--hidden] [--d3d12] [--output directory] [--look file.rsl] [--write-presets]\n");return 2;}
+    }
+    if(gallery && !lookPath.empty()) {
+        std::fprintf(stderr,"--look selects an interactive look; --gallery exports the built-in presets\n");return 2;
     }
     std::filesystem::create_directories(output);
+    if(writePresets) {
+        for(int i=0;i<lookCount;++i) {
+            std::string error;
+            if(!saveColorStylizationLook((output/(std::to_string(i)+".rsl")).string(),
+                colorStylizationPreset(static_cast<ColorStylizationPreset>(i)),&error)) {
+                std::fprintf(stderr,"%s\n",error.c_str());return 1;
+            }
+        }
+        if(!gallery)return 0;
+    }
+    ColorStylizationSettings customLook;
+    if(!lookPath.empty()) {
+        std::string error;if(!loadColorStylizationLook(lookPath,customLook,&error)) {
+            std::fprintf(stderr,"%s\n",error.c_str());return 1;
+        }
+    }
     constexpr uint16_t width=960,height=540;
     State state;
     WNDCLASSW wc{};wc.lpfnWndProc=windowProc;wc.hInstance=GetModuleHandleW(nullptr);
@@ -137,13 +161,13 @@ int main(int argc,char** argv)
     for(auto value:materials)valid=valid && value.isValid();
     if(!valid){renderer.shutdown();DestroyWindow(window);return 1;}
     int preset=1;bool deferred=false,paused=false;uint32_t tick=0;int previousGallery=-1;int captureFrames=0;
-    renderer.setColorStylizationSettings(colorStylizationPreset(ColorStylizationPreset::PixelRetro));
+    renderer.setColorStylizationSettings(lookPath.empty()?colorStylizationPreset(ColorStylizationPreset::PixelRetro):customLook);
     const auto start=std::chrono::steady_clock::now();float time=0;
     std::array<bool,256> wasDown{};
     auto pressed=[&](int key) {bool down=(GetAsyncKeyState(key)&0x8000)!=0;bool edge=down&&!wasDown[key];wasDown[key]=down;return edge;};
-    std::puts("0..3 preset | F Forward/Deferred | Space freeze | G color grading | F9 capture | Esc quit");
+    std::puts("0..9 preset | F Forward/Deferred | Space freeze | G color grading | F9 capture | Esc quit");
     int failures=0;
-    while(state.running && (!gallery || tick<8*24)) {
+    while(state.running && (!gallery || tick<2*lookCount*24)) {
         MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) {
             if(message.message==WM_QUIT)state.running=false;
             TranslateMessage(&message);DispatchMessageW(&message);
@@ -151,13 +175,13 @@ int main(int argc,char** argv)
         if(!state.running)break;
         const int galleryIndex=int(tick/24);
         if(gallery && galleryIndex!=previousGallery) {
-            previousGallery=galleryIndex;deferred=galleryIndex>=4;preset=galleryIndex%4;
+            previousGallery=galleryIndex;deferred=galleryIndex>=lookCount;preset=galleryIndex%lookCount;
             renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());
             renderer.setShadowsEnabled(false);
             renderer.setColorStylizationSettings(colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)));
         }
         if(!gallery && GetForegroundWindow()==window) {
-            for(int i=0;i<4;++i)if(pressed('0'+i)) {
+            for(int i=0;i<lookCount;++i)if(pressed('0'+i)) {
                 preset=i;renderer.setColorStylizationSettings(colorStylizationPreset(static_cast<ColorStylizationPreset>(i)));
             }
             if(pressed('F')){deferred=!deferred;renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());}
@@ -168,12 +192,53 @@ int main(int argc,char** argv)
         else if(!paused)time=std::chrono::duration<float>(std::chrono::steady_clock::now()-start).count();
         RenderScene scene;
         scene.add(cube,floorMaterial,translate(0,-.2f,1)*scale(12,.25f,9));
+        const int exhibit=preset<6?0:preset==6?1:preset==7?2:3;
+        if(exhibit==0) {
         scene.add(cube,rampMaterial,translate(0,2.3f,4)*scale(10,3,.2f));
         for(int i=0;i<6;++i) {
             const float x=(i-2.5f)*1.65f;
             scene.add(cube,colors[i],translate(x,.35f,1)*scale(1.35f,.65f,1.35f));
             scene.add(cube,colors[i],translate(x,1.4f,1)*rotate(FVector3(0,1,0),time*.35f+i*.2f)*scale(.85f,1.1f,.85f));
             for(int j=0;j<4;++j)scene.add(cube,colors[i],translate(x,.15f+j*.2f,-1.7f+j*.28f)*scale(.9f,.15f,.22f));
+        }
+        } else if(exhibit==1) {
+            // Noir city: layered silhouettes, lit windows and a bridge.
+            for(int i=0;i<13;++i) {
+                float x=(i-6)*.8f,h=1.4f+float((i*7)%9)*.35f;
+                scene.add(cube,colors[(i+4)%6],translate(x,h*.5f,3)*scale(.65f,h,1));
+                for(int y=0;y<int(h*2);++y)for(int column=0;column<2;++column)
+                    scene.add(cube,colors[(i+y)%6],translate(x-.16f+column*.32f,.3f+y*.45f,2.48f)*scale(.12f,.19f,.035f));
+            }
+            for(int i=0;i<10;++i) {
+                scene.add(cube,floorMaterial,translate((i-4.5f)*.85f,1.1f,-1)*scale(.7f,.15f,1));
+                scene.add(cube,colors[0],translate((i-4.5f)*.85f,.5f,-1)*scale(.12f,1,.12f));
+            }
+        } else if(exhibit==2) {
+            // A block-built action character and props, with moving limbs.
+            auto part=[&](MaterialHandle m,float x,float y,float z,float sx,float sy,float sz,float angle=0.f) {
+                scene.add(cube,m,translate(x,y,z)*rotate(FVector3(0,0,1),angle)*scale(sx,sy,sz));
+            };
+            part(colors[0],0,2.3f,1,1.5f,1.5f,.8f);
+            part(colors[2],0,3.6f,1,.9f,.9f,.8f);
+            part(floorMaterial,0,3.65f,.57f,.7f,.22f,.06f);
+            part(colors[4],-.6f,.8f,1,.6f,1.5f,.65f,-.15f);
+            part(colors[4],.6f,.8f,1,.6f,1.5f,.65f,.15f);
+            part(colors[1],-1.25f,2.4f,1,.55f,1.7f,.55f,.55f+std::sin(time)*.15f);
+            part(colors[1],1.25f,2.4f,1,.55f,1.7f,.55f,-.55f-std::sin(time)*.15f);
+            for(int i=0;i<6;++i) {
+                float a=i*1.0472f;
+                part(colors[i],std::cos(a)*3.4f,.5f+float(i%3)*.3f,1+std::sin(a)*2, .7f,.7f,.7f,a+time*.2f);
+            }
+        } else {
+            // Technical workshop: gantry, stacked plates and radial machine.
+            for(float x:{-3.f,3.f})scene.add(cube,colors[4],translate(x,1.8f,2)*scale(.5f,3.6f,.6f));
+            scene.add(cube,colors[4],translate(0,3.5f,2)*scale(6.5f,.45f,.65f));
+            for(int i=0;i<12;++i) {
+                float a=i*.523599f+time*.2f;
+                scene.add(cube,colors[i%6],translate(std::cos(a)*1.6f,1.8f+std::sin(a)*1.6f,1)*rotate(FVector3(0,0,1),a)*scale(.7f,.3f,.5f));
+            }
+            for(int i=0;i<6;++i)scene.add(cube,colors[(i+2)%6],translate(3.8f,.3f+i*.27f,-1)*rotate(FVector3(0,1,0),i*.14f)*scale(1.5f,.12f,1.5f));
+            scene.add(cube,colors[2],translate(-3.8f,.65f,-1)*scale(1.5f,1.3f,1.5f));
         }
         ClearDesc clear;clear.r=.025f;clear.g=.04f;clear.b=.08f;
         renderer.beginFrame(clear);renderer.render(scene);
@@ -194,10 +259,10 @@ int main(int argc,char** argv)
         renderer.endFrame();++tick;
         std::wstring title=L"Retro Color Gallery | ";title+=deferred?L"Deferred | ":L"Forward | ";
         for(const char* p=names[preset];*p;++p)title+=wchar_t(*p);
-        title+=L" | 0..3 look, F pipeline, Space freeze, G grade, F9 save";
+        title+=L" | 0..9 look, F pipeline, Space freeze, G grade, F9 save";
         SetWindowTextW(window,title.c_str());
     }
-    if(gallery)for(const char* path:{"forward","deferred"})for(int i=0;i<4;++i)
+    if(gallery)for(const char* path:{"forward","deferred"})for(int i=0;i<lookCount;++i)
         if(!std::filesystem::exists(output/(std::string(path)+"-"+std::to_string(i)+".png")))++failures;
     for(auto value:materials)renderer.destroyMaterial(value);
     for(auto value:textures)renderer.destroyTexture(value);

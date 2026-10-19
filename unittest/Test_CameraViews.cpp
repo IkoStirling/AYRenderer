@@ -10,8 +10,8 @@ namespace {
 TEST_SUITE(CameraViews)
 TEST_CASE(ui_and_preview_ranges_never_overlap_fixed_scene_or_runtime_camera_views) {
     using namespace ayt::render::detail;
-    CHECK(uiViewCapacity()==144);
-    CHECK(nextUiViewRange(32,1)==51); CHECK(nextUiViewRange(62,4)==112);
+    CHECK(uiViewCapacity()==143);
+    CHECK(nextUiViewRange(32,1)==52); CHECK(nextUiViewRange(62,4)==112);
     CHECK(nextUiViewRange(64,1)==112); CHECK(nextUiViewRange(242,2)==UINT16_MAX);
     for(uint16_t next=32; next<=242;) {
         next=nextUiViewRange(next,1); if(next==UINT16_MAX) break;

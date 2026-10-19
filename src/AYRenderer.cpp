@@ -7,6 +7,7 @@
 #include "detail/CameraViewsTestAccess.h"
 #include "detail/ColorGradingPass.h"
 #include "detail/ColorStylizationPass.h"
+#include "detail/StylizedOutlinePass.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
 #include "detail/BloomPipeline.h"
@@ -108,6 +109,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::PostProcess,
         RenderPassSlot::FXAA,
         RenderPassSlot::SMAA,
+        RenderPassSlot::StylizedOutline,
         RenderPassSlot::ColorGrading,
         RenderPassSlot::ColorStylization,
         RenderPassSlot::Present,
@@ -139,6 +141,8 @@ void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
         if (fxaaIt != desc.passes.end() && fxaaIt > insertAfter) {
             insertAfter = fxaaIt;
         }
+        const auto outlineIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::StylizedOutline);
+        if(outlineIt!=desc.passes.end() && outlineIt>insertAfter)insertAfter=outlineIt;
         const auto gradingIt = std::find(desc.passes.begin(), desc.passes.end(),
                                          RenderPassSlot::ColorGrading);
         if (gradingIt != desc.passes.end() && gradingIt > insertAfter) {
@@ -232,6 +236,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::TAA,
         RenderPassSlot::FXAA,
         RenderPassSlot::SMAA,
+        RenderPassSlot::StylizedOutline,
         RenderPassSlot::ColorGrading,
         RenderPassSlot::ColorStylization,
         RenderPassSlot::Present,
@@ -277,6 +282,8 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::AutoExposurePass>();
     case RenderPassSlot::ColorStylization:
         return std::make_unique<detail::ColorStylizationPass>();
+    case RenderPassSlot::StylizedOutline:
+        return std::make_unique<detail::StylizedOutlinePass>();
     case RenderPassSlot::ColorGrading:
         return std::make_unique<detail::ColorGradingPass>();
     case RenderPassSlot::Present:
@@ -561,6 +568,9 @@ struct Renderer::Impl {
     void applyColorStylizationKnobs()
     {
         if (auto* pass = pipeline.findPass<detail::ColorStylizationPass>()) {
+            pass->setSettings(colorStylization);
+        }
+        if (auto* pass = pipeline.findPass<detail::StylizedOutlinePass>()) {
             pass->setSettings(colorStylization);
         }
     }
@@ -939,6 +949,9 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
+    if (auto* outline=pipeline.findPass<detail::StylizedOutlinePass>()) {
+        if(adapter.isInitialized())outline->destroyResources(adapter);
+    }
     if (auto* style = pipeline.findPass<detail::ColorStylizationPass>()) {
         if (adapter.isInitialized()) {
             style->destroyResources(adapter);
@@ -1252,6 +1265,9 @@ void Renderer::shutdown()
         }
     }
 
+    if (auto* outline=_impl->pipeline.findPass<detail::StylizedOutlinePass>()) {
+        if(_impl->adapter.isInitialized())outline->destroyResources(_impl->adapter);
+    }
     if (auto* style = _impl->pipeline.findPass<detail::ColorStylizationPass>()) {
         if (_impl->adapter.isInitialized()) {
             style->destroyResources(_impl->adapter);
@@ -1962,6 +1978,18 @@ void Renderer::render(const RenderScene& scene)
     graphInput.colorGrading = colorGradingStageEnabled;
     graphInput.colorStylization = finalLdrStageEnabled && colorStylizationPassPtr
         && colorStylizationPassPtr->isEnabled() && colorStylizationPassPtr->active();
+    auto* outlinePassPtr=_impl->pipeline.findPass<detail::StylizedOutlinePass>();
+    graphInput.stylizedOutline=finalLdrStageEnabled && outlinePassPtr
+        && outlinePassPtr->isEnabled() && outlinePassPtr->active();
+    graphInput.stylizationDepth = graphInput.stylizedOutline
+        && _impl->colorStylization.outlineMode >= StylizationOutlineMode::Depth
+        && _impl->colorStylization.outlineStrength>0;
+    graphInput.stylizationNormals = graphInput.stylizationDepth
+        && _impl->colorStylization.outlineMode == StylizationOutlineMode::DepthNormal
+        && gbufferPassPtr && gbufferPassPtr->isEnabled();
+    if(graphInput.stylizationDepth && gbufferPassPtr && gbufferPassPtr->isEnabled()
+        && !detail::BGFXAdapter::isValid(graphInput.gbuffer))
+        graphInput.gbuffer=gbufferPassPtr->gbufferFbo();
     graphInput.smaaIntermediatePointSampled =
         detail::SMAAPass::kIntermediatePointSampled;
 

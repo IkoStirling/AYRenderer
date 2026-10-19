@@ -1,0 +1,24 @@
+#pragma once
+
+namespace ayt::render::detail {
+
+// Persistence has a single field inventory. Keep runtime implementation and UI
+// independent of JSON, and add every new look field here in the same change.
+template<class Settings,class Visitor>
+void visitColorStylizationFields(Settings& s, Visitor&& v)
+{
+#define AY_STYLE_FIELD(name) v(#name,s.name)
+    AY_STYLE_FIELD(enabled); AY_STYLE_FIELD(pixelationEnabled); AY_STYLE_FIELD(pixelSize);
+    AY_STYLE_FIELD(posterizationEnabled); AY_STYLE_FIELD(colorLevels); AY_STYLE_FIELD(ditherStrength);
+    AY_STYLE_FIELD(colorMapping); AY_STYLE_FIELD(shadowColor); AY_STYLE_FIELD(highlightColor);
+    AY_STYLE_FIELD(paletteSize); AY_STYLE_FIELD(palette); AY_STYLE_FIELD(printPattern);
+    AY_STYLE_FIELD(printSpacing); AY_STYLE_FIELD(printAngle); AY_STYLE_FIELD(printStrength);
+    AY_STYLE_FIELD(printGamma);
+    AY_STYLE_FIELD(inkColor); AY_STYLE_FIELD(paperColor); AY_STYLE_FIELD(outlineMode);
+    AY_STYLE_FIELD(outlineWidth); AY_STYLE_FIELD(outlineDepthThreshold);
+    AY_STYLE_FIELD(outlineNormalThreshold); AY_STYLE_FIELD(outlineLuminanceThreshold);
+    AY_STYLE_FIELD(outlineStrength); AY_STYLE_FIELD(outlineColor);
+#undef AY_STYLE_FIELD
+}
+
+} // namespace ayt::render::detail

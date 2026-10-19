@@ -462,6 +462,8 @@ enum class RenderPassSlot : uint8_t {
     DeferredDecal = 24,
     /// Optional viewport-local pixelation/quantization after grading, before Present.
     ColorStylization = 25,
+    /// Optional image/depth/normal contours after AA and before grading.
+    StylizedOutline = 26,
 };
 
 enum class ColorGradingPreset : uint8_t {

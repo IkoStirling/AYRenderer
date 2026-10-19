@@ -1,12 +1,20 @@
 #pragma once
 
 namespace ayt::render {
-inline constexpr char kColorStylizationCacheKey[] = "color_stylization_bayer4_pixel_center_v1";
+inline constexpr char kColorStylizationCacheKey[] = "color_stylization_palette_print_v2";
 inline constexpr char kColorStylizationPhoskiaSource[] = R"PHOSKIA(
 material ColorStylization {
     texture2d inputColor
     uniform vec4 styleParams
     uniform vec4 styleViewport
+    uniform vec4 mappingParams
+    uniform vec4 shadowColor
+    uniform vec4 highlightColor
+    uniform vec4 paletteColors[16]
+    uniform vec4 printParams
+    uniform vec4 printRotation
+    uniform vec4 inkColor
+    uniform vec4 paperColor
     vertex {
         in pos : position
         out vUv : texcoord = pos.xy * vec2(0.5) + vec2(0.5)
@@ -41,7 +49,50 @@ material ColorStylization {
         let r = floor(clamp(source.r+offset/steps,0.0,1.0)*steps+0.5)/steps
         let g = floor(clamp(source.g+offset/steps,0.0,1.0)*steps+0.5)/steps
         let b = floor(clamp(source.b+offset/steps,0.0,1.0)*steps+0.5)/steps
-        return vec4(mix(source.rgb,vec3(r,g,b),styleParams.w),source.a)
+        let result = mix(source.rgb,vec3(r,g,b),styleParams.w)
+        if(mappingParams.x>0.5 && mappingParams.x<1.5) {
+            let luminance=dot(source.rgb,vec3(0.2126,0.7152,0.0722))
+            let tone=clamp(luminance+offset/steps,0.0,1.0)
+            tone=mix(tone,floor(tone*steps+0.5)/steps,styleParams.w)
+            result=mix(shadowColor.rgb,highlightColor.rgb,tone)
+        }
+        if(mappingParams.x>1.5) {
+            let candidate=vec3(clamp(source.r+offset/8.0,0.0,1.0),clamp(source.g+offset/8.0,0.0,1.0),clamp(source.b+offset/8.0,0.0,1.0))
+            let best=1000.0
+            for(i in range(int(mappingParams.y),16)) {
+                let delta=candidate-paletteColors[i].rgb
+                let distance=dot(delta*delta,vec3(0.2126,0.7152,0.0722))
+                if(distance<best) {best=distance;result=paletteColors[i].rgb}
+            }
+        }
+        // A continuous screen in physical viewport coordinates. Quantization
+        // controls the source tone; pattern spacing is independent of pixelation.
+        if(printParams.x>0.5 && printParams.w>0.0) {
+            let tone=pow(clamp(dot(result,vec3(0.2126,0.7152,0.0722)),0.0,1.0),printParams.z)
+            let printPoint=vec2(px+0.5,py+0.5)
+            let rotated=vec2(dot(printPoint,printRotation.xy),dot(printPoint,printRotation.zw))/printParams.y
+            let cell=rotated-floor(rotated)-vec2(0.5)
+            let aa=0.7/printParams.y
+            let ink=0.0
+            if(printParams.x<1.5) {
+                // Circle radius grows with darkness; full black fills the cell.
+                let radius=sqrt((1.0-tone)*0.318309886)
+                ink=(1.0-smoothstep(radius-aa,radius+aa,length(cell)))*(1.0-step(0.9999,tone))
+            } else {
+                let coverage=1.0-tone
+                let width=coverage*0.5
+                ink=1.0-smoothstep(width-aa,width+aa,abs(cell.y))
+                if(printParams.x>2.5) {
+                    let crossWidth=clamp((coverage-0.45)/0.55,0.0,1.0)*0.5
+                    let cross=(1.0-smoothstep(crossWidth-aa,crossWidth+aa,abs(cell.x)))*step(0.45001,coverage)
+                    ink=max(ink,cross)
+                }
+                ink=ink*(1.0-step(0.9999,tone))
+            }
+            ink=max(ink,1.0-step(0.0001,tone))
+            result=mix(result,mix(paperColor.rgb,inkColor.rgb,ink),printParams.w)
+        }
+        return vec4(result,source.a)
     }
 }
 )PHOSKIA";

@@ -20,6 +20,7 @@
 #include "AYRenderer/DeferredDecalShaderSources.h"
 #include "detail/DeferredDecalPass.h"
 #include "detail/ColorStylizationPass.h"
+#include "detail/StylizedOutlinePass.h"
 #include "detail/RenderViewOrder.h"
 #include "detail/DeferredDecalVisibility.h"
 #include "detail/PostProcessGraphPlan.h"
@@ -287,15 +288,41 @@ TEST_CASE(color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle
     std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;std::unordered_map<uint64_t,GpuMaterial> materials;
     PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame,0};ctx.frameGraph=&graph;
     const int bayer[16]={0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
-    for(int variant=0;variant<5;++variant) {
+    for(int variant=0;variant<13;++variant) {
+        auto variantSource=sourceFbo;
+        FboCleanup variantCleanup{BGFX_INVALID_HANDLE};
         ayt::render::ColorStylizationSettings settings;
         settings.enabled=true;settings.pixelationEnabled=variant>=2;
         settings.pixelSize=variant==2 ? 3 : variant==3 ? 2 : 64;
         settings.posterizationEnabled=variant!=2 && variant!=4;
         settings.colorLevels=variant==3 ? 3 : 4;
         settings.ditherStrength=variant==0 ? 0 : variant==3 ? .35f : 1;
+        if(variant==5) {
+            settings.pixelationEnabled=false;settings.posterizationEnabled=false;
+            settings.colorMapping=ayt::render::StylizationColorMapping::FixedPalette;
+            settings.ditherStrength=0;settings.paletteSize=4;
+            settings.palette[0]={.05f,.1f,.15f};settings.palette[1]={.2f,.4f,.6f};
+            settings.palette[2]={.8f,.2f,.4f};settings.palette[3]={.9f,.8f,.3f};
+        }
+        if(variant==6) {
+            settings.pixelationEnabled=false;settings.posterizationEnabled=false;
+            settings.colorMapping=ayt::render::StylizationColorMapping::Duotone;
+            settings.ditherStrength=0;settings.shadowColor={.1f,.2f,.3f};settings.highlightColor={.8f,.9f,1};
+        }
+        if(variant>=7) {
+            settings.pixelationEnabled=false;settings.posterizationEnabled=false;
+            settings.printPattern=static_cast<ayt::render::StylizationPrintPattern>(1+(variant-7)/2);
+            const uint8_t tone=variant%2?0:255;
+            for(auto& pixel:data)pixel={tone,tone,tone,93};
+            // Immutable initialized inputs: updating an RT texture in place is
+            // not a portable way to upload the next reference image.
+            auto input=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA8,
+                BGFX_TEXTURE_RT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(data.data(),sizeof(data)));
+            f.textures.push_back(input);variantSource=bgfx::createFrameBuffer(1,&input,false);
+            variantCleanup.h=variantSource;CHECK(bgfx::isValid(variantSource));
+        }
         pass.setSettings(settings);
-        graph.beginFrame(4,4);graph.importExternal(FgResourceId::FinalLdrColor,sourceFbo);
+        graph.beginFrame(4,4);graph.importExternal(FgResourceId::FinalLdrColor,variantSource);
         graph.addResource(FgResourceId::StylizedColor,{bgfx::TextureFormat::RGBA8,FgTextureScale::Full,true,false,true});
         graph.addPass({"ColorStylization",{FgResourceId::FinalLdrColor},{FgResourceId::StylizedColor},true});
         graph.addPass({"Present",{FgResourceId::StylizedColor},{},true,true});
@@ -319,8 +346,27 @@ TEST_CASE(color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle
             int bx=x/block,by=y/block;
             int sx=bx*block+(std::min(block,4-bx*block)-1)/2;
             int sy=by*block+(std::min(block,4-by*block)-1)/2;
+            const auto original=data[sy*4+sx];
+            float reference[3]={original[0]/255.f,original[1]/255.f,original[2]/255.f};
+            if(variant==5) {
+                const float weights[3]={.2126f,.7152f,.0722f};float best=1000;int nearest=0;
+                for(int index=0;index<settings.paletteSize;++index) {
+                    const auto entry=settings.palette[index];const float rgb[3]={entry.r,entry.g,entry.b};
+                    float distance=0;for(int c=0;c<3;++c)distance+=weights[c]*(rgb[c]-reference[c])*(rgb[c]-reference[c]);
+                    if(distance<best){best=distance;nearest=index;}
+                }
+                const auto chosen=settings.palette[nearest];reference[0]=chosen.r;reference[1]=chosen.g;reference[2]=chosen.b;
+            }
+            if(variant==6) {
+                float luminance=reference[0]*.2126f+reference[1]*.7152f+reference[2]*.0722f;
+                reference[0]=.1f+.7f*luminance;reference[1]=.2f+.7f*luminance;reference[2]=.3f+.7f*luminance;
+            }
+            if(variant>=7) {
+                const auto color=variant%2?settings.inkColor:settings.paperColor;
+                reference[0]=color.r;reference[1]=color.g;reference[2]=color.b;
+            }
             for(int c=0;c<4;++c) {
-                float expected=data[sy*4+sx][c]/255.0f;
+                float expected=c<3?reference[c]:original[3]/255.f;
                 if(c<3 && settings.posterizationEnabled) {
                     float offset=((bayer[(by%4)*4+bx%4]+.5f)/16-.5f)*settings.ditherStrength;
                     expected=std::floor(std::clamp(expected*(settings.colorLevels-1)+offset,0.0f,float(settings.colorLevels-1))+.5f)/(settings.colorLevels-1);
@@ -334,6 +380,71 @@ TEST_CASE(color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle
     auto disabled=ayt::render::colorStylizationPreset(ayt::render::ColorStylizationPreset::Neutral);
     pass.setSettings(disabled);CHECK(pass.execute(ctx)==0);
     pass.destroyResources(f.adapter);pass.destroyResources(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(stylized_outline_real_pass_depth_normal_and_luminance_edges) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0])SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    configureRenderViewOrder(f.adapter);
+    CHECK_FALSE(bgfx::isValid(f.adapter.getFboAttachment(BGFX_INVALID_HANDLE,1)));
+    FrameGraph graph(f.adapter);RenderResourceBlackboard bb;StylizedOutlinePass pass;
+    struct Cleanup{StylizedOutlinePass& p;BGFXAdapter& a;~Cleanup(){p.destroyResources(a);}} cleanup{pass,f.adapter};
+    FrameContext frame;ayt::render::RenderScene scene;
+    std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;
+    std::unordered_map<uint64_t,GpuMaterial> materials;
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame,0};
+    ctx.frameGraph=&graph;ctx.resourceBlackboard=&bb;
+    auto readback=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
+    f.textures.push_back(readback);CHECK(bgfx::isValid(readback));
+    for(int mode=1;mode<=3;++mode) {
+        std::array<Pixel,16> colors,normals,depths;
+        for(int y=0;y<4;++y)for(int x=0;x<4;++x) {
+            const float tone=mode==1?(x<2?.25f:.75f):1.f;
+            colors[y*4+x]={tone,tone,tone,.4f};
+            depths[y*4+x]={mode==2?(x<2?.2f:.8f):.3f,0,0,1};
+            normals[y*4+x]=mode==3 && x>=2?Pixel{.5f,1,.5f,1}:Pixel{.5f,.5f,1,1};
+        }
+        const auto texture=[&](const auto& data){
+            auto h=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA32F,
+                BGFX_TEXTURE_RT|BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,
+                bgfx::copy(data.data(),sizeof(data)));f.textures.push_back(h);return h;
+        };
+        const auto color=texture(colors),normal=texture(normals),depth=texture(depths);
+        auto source=bgfx::createFrameBuffer(1,&color,false);CHECK(bgfx::isValid(source));
+        struct FboCleanup{bgfx::FrameBufferHandle h;~FboCleanup(){if(bgfx::isValid(h))bgfx::destroy(h);}} sourceCleanup{source};
+        bb.beginFrame();bb.publishGBuffer(source,color,normal,color,color,depth,4,4,1,true);
+        ayt::render::ColorStylizationSettings s;s.enabled=true;s.pixelationEnabled=false;s.posterizationEnabled=false;
+        s.outlineMode=static_cast<ayt::render::StylizationOutlineMode>(mode);s.outlineColor={0,0,0};
+        pass.setSettings(s);
+        graph.beginFrame(4,4);graph.importExternal(FgResourceId::FinalLdrColor,source);
+        graph.addResource(FgResourceId::OutlinedColor,{bgfx::TextureFormat::RGBA8,FgTextureScale::Full,true,false,true});
+        graph.addPass({"Outline",{FgResourceId::FinalLdrColor},{FgResourceId::OutlinedColor},true});
+        graph.addPass({"Present",{FgResourceId::OutlinedColor},{},true,true});
+        graph.setResolvedSemantic(FgSemantic::PresentSource,FgResourceId::FinalLdrColor);
+        CHECK(graph.compile());CHECK(pass.execute(ctx)==0);graph.markProduced(FgResourceId::FinalLdrColor);
+        if(mode>1){bb.invalidateFrameOutputs(ResourceInvalidationReason::ProducerFailure);CHECK(pass.execute(ctx)==0);
+            bb.publishGBuffer(source,color,normal,color,color,depth,4,4,2,true);}
+        CHECK(pass.execute(ctx)==1);
+        const auto output=graph.resolveSemantic(FgSemantic::PresentSource);
+        CHECK(output.idx==graph.resolve(FgResourceId::OutlinedColor).idx);
+        bgfx::blit(55,readback,0,0,f.adapter.getFboAttachment(output,0));
+        std::array<std::array<uint8_t,4>,16> actual{};const auto ready=bgfx::readTexture(readback,actual.data());
+        for(int i=0;i<120 && f.adapter.gpuFrameCounter()<ready;++i)f.adapter.endFrame();
+        CHECK(f.adapter.gpuFrameCounter()>=ready);
+        int differences=0;
+        for(int y=0;y<4;++y)for(int x=0;x<4;++x)for(int c=0;c<4;++c) {
+            const int expected=c==3?102:(x==1 || x==2)?0:int(std::lround(colors[y*4+x][c]*255));
+            if(std::abs(int(actual[y*4+x][c])-expected)>1)++differences;
+        }
+        if(differences)std::cerr<<"Outline mode="<<mode<<" mismatches="<<differences<<'\n';
+        CHECK(differences==0);
+        for(int i=0;i<3;++i)f.adapter.endFrame();
+    }
 #else
     SKIP_TEST("Windows device fixture required");
 #endif
