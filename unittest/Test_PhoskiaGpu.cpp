@@ -18,6 +18,8 @@
 #include "AYRenderer/VolumetricShaderSources.h"
 #include "AYRenderer/DeferredDecalShaderSources.h"
 #include "detail/DeferredDecalPass.h"
+#include "detail/ColorStylizationPass.h"
+#include "detail/RenderViewOrder.h"
 #include "detail/DeferredDecalVisibility.h"
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/RenderResourceBlackboard.h"
@@ -165,6 +167,82 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f; const bool initialized=f.initialize(backend);
+    CHECK(initialized); if(!initialized) return;
+    configureRenderViewOrder(f.adapter);
+    std::array<std::array<uint8_t,4>,16> data;
+    for(int y=0;y<4;++y) for(int x=0;x<4;++x)
+        data[y*4+x]={uint8_t(37+x*41+y*9),uint8_t(54+y*39+x*7),uint8_t(173-x*17-y*5),uint8_t(53+x*7+y*11)};
+    auto source=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA8,
+        BGFX_TEXTURE_RT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP,bgfx::copy(data.data(),sizeof(data)));
+    f.textures.push_back(source);
+    auto sourceFbo=bgfx::createFrameBuffer(1,&source,false);
+    auto readback=bgfx::createTexture2D(4,4,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);
+    f.textures.push_back(readback);
+    CHECK(bgfx::isValid(sourceFbo)); CHECK(bgfx::isValid(readback));
+    struct FboCleanup {bgfx::FrameBufferHandle h;~FboCleanup(){if(bgfx::isValid(h))bgfx::destroy(h);}} cleanup{sourceFbo};
+    FrameGraph graph(f.adapter); ColorStylizationPass pass;
+    struct PassCleanup {ColorStylizationPass& p;BGFXAdapter& a;~PassCleanup(){p.destroyResources(a);}} cleanupPass{pass,f.adapter};
+    FrameContext frame;ayt::render::RenderScene scene;
+    std::unordered_map<uint64_t,GpuMesh> meshes;std::unordered_map<uint64_t,GpuTexture> textures;std::unordered_map<uint64_t,GpuMaterial> materials;
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame,0};ctx.frameGraph=&graph;
+    const int bayer[16]={0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5};
+    for(int variant=0;variant<5;++variant) {
+        ayt::render::ColorStylizationSettings settings;
+        settings.enabled=true;settings.pixelationEnabled=variant>=2;
+        settings.pixelSize=variant==2 ? 3 : variant==3 ? 2 : 64;
+        settings.posterizationEnabled=variant!=2 && variant!=4;
+        settings.colorLevels=variant==3 ? 3 : 4;
+        settings.ditherStrength=variant==0 ? 0 : variant==3 ? .35f : 1;
+        pass.setSettings(settings);
+        graph.beginFrame(4,4);graph.importExternal(FgResourceId::FinalLdrColor,sourceFbo);
+        graph.addResource(FgResourceId::StylizedColor,{bgfx::TextureFormat::RGBA8,FgTextureScale::Full,true,false,true});
+        graph.addPass({"ColorStylization",{FgResourceId::FinalLdrColor},{FgResourceId::StylizedColor},true});
+        graph.addPass({"Present",{FgResourceId::StylizedColor},{},true,true});
+        graph.setResolvedSemantic(FgSemantic::PresentSource,FgResourceId::FinalLdrColor);
+        CHECK(graph.compile());
+        CHECK(pass.execute(ctx)==0); // A retained valid handle is not current production.
+        CHECK_FALSE(graph.producedThisFrame(FgResourceId::StylizedColor));
+        graph.markProduced(FgResourceId::FinalLdrColor);
+        CHECK(pass.execute(ctx)==1);
+        CHECK(graph.producedThisFrame(FgResourceId::StylizedColor));
+        auto result=graph.resolveSemantic(FgSemantic::PresentSource);
+        CHECK(result.idx==graph.resolve(FgResourceId::StylizedColor).idx);
+        bgfx::blit(55,readback,0,0,f.adapter.getFboAttachment(result,0));
+        std::array<std::array<uint8_t,4>,16> actual{};
+        const auto ready=bgfx::readTexture(readback,actual.data());
+        for(int i=0;i<120 && f.adapter.gpuFrameCounter()<ready;++i)f.adapter.endFrame();
+        CHECK(f.adapter.gpuFrameCounter()>=ready);
+        int mismatch=0;
+        for(int y=0;y<4;++y)for(int x=0;x<4;++x) {
+            int block=settings.pixelationEnabled ? settings.pixelSize : 1;
+            int bx=x/block,by=y/block;
+            int sx=bx*block+(std::min(block,4-bx*block)-1)/2;
+            int sy=by*block+(std::min(block,4-by*block)-1)/2;
+            for(int c=0;c<4;++c) {
+                float expected=data[sy*4+sx][c]/255.0f;
+                if(c<3 && settings.posterizationEnabled) {
+                    float offset=((bayer[(by%4)*4+bx%4]+.5f)/16-.5f)*settings.ditherStrength;
+                    expected=std::floor(std::clamp(expected*(settings.colorLevels-1)+offset,0.0f,float(settings.colorLevels-1))+.5f)/(settings.colorLevels-1);
+                }
+                if(std::abs(int(actual[y*4+x][c])-int(std::lround(expected*255)))>1) ++mismatch;
+            }
+        }
+        if(mismatch)std::cerr<<"[Stylization] variant="<<variant<<" mismatches="<<mismatch<<" first="<<int(actual[0][0])<<','<<int(actual[0][1])<<','<<int(actual[0][2])<<','<<int(actual[0][3])<<'\n';
+        CHECK(mismatch==0);
+    }
+    auto disabled=ayt::render::colorStylizationPreset(ayt::render::ColorStylizationPreset::Neutral);
+    pass.setSettings(disabled);CHECK(pass.execute(ctx)==0);
+    pass.destroyResources(f.adapter);pass.destroyResources(f.adapter);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
 
 TEST_CASE(deferred_decal_real_pass_ping_pong_resize_and_borrowed_depth_lifetime) {
 #ifdef _WIN32

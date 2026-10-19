@@ -36,7 +36,7 @@ TEST_SUITE(AYRenderer_RenderPassContracts_R6)
 TEST_CASE(every_public_slot_has_one_static_contract)
 {
     for (uint8_t raw = 0; raw <= static_cast<uint8_t>(
-             RenderPassSlot::MotionVector); ++raw) {
+             RenderPassSlot::ColorStylization); ++raw) {
         const auto slot = static_cast<RenderPassSlot>(raw);
         const auto* contract = renderPassContract(slot);
         CHECK(contract != nullptr);

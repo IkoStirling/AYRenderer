@@ -73,7 +73,7 @@ TEST_CASE(color_grading_append_only_abi_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::ColorGrading) == 17u);
     CHECK(static_cast<uint8_t>(FgResourceId::ColorGradedColor) == 8u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 30u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 31u);
     CHECK(ayt::render::detail::ColorGradingPass::kColorGradingViewId == 4u);
     CHECK(std::is_final_v<ayt::render::detail::ColorGradingPass>);
 }
@@ -93,7 +93,7 @@ TEST_CASE(product_pipelines_order_grading_between_smaa_and_present)
             gradingPassIndex(desc, RenderPassSlot::Present);
         CHECK(smaa == fxaa + 1u);
         CHECK(grading == smaa + 1u);
-        CHECK(present == grading + 1u);
+        CHECK(present == grading + 2u);
     }
 }
 
@@ -114,7 +114,7 @@ TEST_CASE(color_grading_view_executes_after_smaa_and_before_present)
     CHECK(fxaa != order.end());
     CHECK(smaa == fxaa + 3);
     CHECK(grading == smaa + 1);
-    CHECK(present == grading + 1);
+    CHECK(present == grading + 2);
 }
 
 TEST_CASE(color_grading_defaults_off_and_knobs_survive_pipeline_rebuild)

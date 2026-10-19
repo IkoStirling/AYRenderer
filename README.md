@@ -1,5 +1,29 @@
 # AYRenderer
 
+## 复古色彩风格化 v1（2026-10-19）
+
+`setColorStylizationSettings(ColorStylizationSettings)` 在主 Forward/Deferred 的 AA、颜色分级之后、
+Present 之前融合像素化、RGB posterization 和 Bayer4 有序抖动；Editor/UI/Gizmo 保持清晰。
+默认关闭；关闭或仅像素大小1且量化关闭时不声明输出、不绘制 identity pass。
+参数由 Renderer 复制清洗并跨重建/resize 保留：pixelSize 1..64，colorLevels 每通道2..32，
+ditherStrength 0..1（非有限归零）。Alpha 跟随采样 texel，不参与量化。独立 renderViews 不运行此链。
+
+```cpp
+auto look = ayt::render::colorStylizationPreset(
+    ayt::render::ColorStylizationPreset::DitherRetro);
+look.pixelSize = 4;
+renderer.setColorStylizationSettings(look);
+```
+
+预设：Neutral 关闭；PixelRetro=6像素/12阶，LowColor=无像素化/4阶，DitherRetro=3像素/4阶/强度1。
+Editor 的 Render 面板保存用户偏好，并允许按预设起步后独立调参；无 Scene/Project look 资产。
+
+Windows 展示目标 `AYRenderer_ColorStylizationDemo` 使用程序化彩色立柱、阶梯和渐变墙，无外部素材。
+0..3切换预设，F切换 Forward/Deferred，空格冻结旋转，G切换分级，F9截图。
+`--gallery --hidden --output <directory>` 自动导出两种管线各四张图；`--d3d12` 选择 D3D12。
+该目标随构建分发包含新效果的离线 shader 包；素材 shader 也来自已有 builtin catalog。
+验证入口见 [测试说明](docs/testing.md)。
+
 ## 相机视口与输出（2026-10-14）
 
 RendererSubSystem::setCameraViewports 配置最多16个独立 Forward 视图，按 viewportId
@@ -9,7 +33,7 @@ createCameraOutput/cameraOutputTexture/destroyCameraOutput 管理可采样颜色
 独立视图不使用主视图的 Deferred、TAA/Motion/曝光历史或编辑器选中视图；WorldLit2D
 在显式 Forward batch 中拒绝。详见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
 CPU/Noop 用例 CameraViews；独立 D3D11 读回用例 CameraViewsGpu。
-离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为145。
+离屏 UI/场景预览跳过固定场景和相机 GPU view，单Pass离屏预算为144。
 
 ## Deferred Decal v1（2026-10-06）
 

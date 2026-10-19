@@ -78,7 +78,7 @@ namespace {
 // shifts for PostProcess/UI only.
 void checkCanonicalDefaultDesc(const RenderPipelineDesc& desc)
 {
-    CHECK(desc.passes.size() == 14u);
+    CHECK(desc.passes.size() == 15u);
     CHECK(desc.contains(RenderPassSlot::Shadow));
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     // Pre-E4 ordering of the remaining 8 preserved (CM-1 2026-08-11:
@@ -96,8 +96,8 @@ void checkCanonicalDefaultDesc(const RenderPipelineDesc& desc)
     CHECK(desc.passes[9] == RenderPassSlot::FXAA);
     CHECK(desc.passes[10] == RenderPassSlot::SMAA);
     CHECK(desc.passes[11] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[12] == RenderPassSlot::Present);
-    CHECK(desc.passes[13] == RenderPassSlot::UI);
+    CHECK(desc.passes[13] == RenderPassSlot::Present);
+    CHECK(desc.passes[14] == RenderPassSlot::UI);
 }
 
 } // namespace

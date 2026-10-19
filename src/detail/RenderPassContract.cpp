@@ -202,12 +202,20 @@ constexpr std::array<RenderPassResourceRead, 4> kGradingReads = {{
 constexpr std::array<RenderPassResourceWrite, 1> kGradingWrites = {{
     output(Id::ColorGradedColor, Life::Transient, Format::RGBA8),
 }};
-constexpr std::array<RenderPassResourceRead, 5> kPresentReads = {{
+constexpr std::array<RenderPassResourceRead, 5> kStyleReads = {{
+    required(Id::FinalLdrColor), optional(Id::TaaColor), optional(Id::FxaaColor),
+    optional(Id::SmaaColor), optional(Id::ColorGradedColor),
+}};
+constexpr std::array<RenderPassResourceWrite, 1> kStyleWrites = {{
+    output(Id::StylizedColor,Life::Transient,Format::RGBA8),
+}};
+constexpr std::array<RenderPassResourceRead, 6> kPresentReads = {{
     required(Id::FinalLdrColor),
     optional(Id::TaaColor),
     optional(Id::FxaaColor),
     optional(Id::SmaaColor),
     optional(Id::ColorGradedColor),
+    optional(Id::StylizedColor),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kPresentWrites = {{
     output(Id::PresentedColor, Life::External, Format::RGBA8,
@@ -259,9 +267,9 @@ constexpr std::array<RenderPassResourceWrite, 1> kVolumetricWrites = {{
     output(Id::VolumetricColor, Life::Transient, Format::RGBA16F),
 }};
 
-const std::array<RenderPassContract, 25>& contracts() noexcept
+const std::array<RenderPassContract, 26>& contracts() noexcept
 {
-    static const std::array<RenderPassContract, 25> table = {{
+    static const std::array<RenderPassContract, 26> table = {{
         {RenderPassSlot::Shadow, "Shadow", noReads, kShadowWrites, false},
         {RenderPassSlot::Skybox, "Skybox", noReads, kSkyboxWrites, false},
         {RenderPassSlot::ForwardOpaque, "ForwardOpaque", kForwardReads,
@@ -303,6 +311,7 @@ const std::array<RenderPassContract, 25>& contracts() noexcept
         {RenderPassSlot::SSR, "SSR", kSsrReads, kSsrWrites, false},
         {RenderPassSlot::Volumetric, "Volumetric", kVolumetricReads, kVolumetricWrites, false},
         {RenderPassSlot::DeferredDecal, "DeferredDecal", kDecalReads, kDecalWrites, true},
+        {RenderPassSlot::ColorStylization, "ColorStylization", kStyleReads, kStyleWrites, false},
     }};
     return table;
 }
@@ -413,6 +422,7 @@ const char* renderPassResourceName(RenderPassResourceId resource) noexcept
         "AutoExposureHistory", "AutoExposure", "SsrColor", "OpaqueLightingColor",
         "VolumetricColor",
         "DecalGBuffer",
+        "StylizedColor",
     }};
     const auto index = static_cast<std::size_t>(resource);
     return index < names.size() ? names[index] : "UnknownResource";

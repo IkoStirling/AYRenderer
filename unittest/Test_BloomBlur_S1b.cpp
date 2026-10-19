@@ -194,7 +194,7 @@ TEST_CASE(s1b_make_default_includes_bloomblur_after_bloomextract) {
     // Transparent).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDefault();
     CHECK(desc.path == RenderPath::Forward);
-    CHECK(desc.passes.size() == 14);
+    CHECK(desc.passes.size() == 15);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::ForwardOpaque);
     CHECK(desc.passes[2] == RenderPassSlot::DepthHaze);
@@ -207,8 +207,8 @@ TEST_CASE(s1b_make_default_includes_bloomblur_after_bloomextract) {
     CHECK(desc.passes[9] == RenderPassSlot::FXAA);
     CHECK(desc.passes[10] == RenderPassSlot::SMAA);
     CHECK(desc.passes[11] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[12] == RenderPassSlot::Present);
-    CHECK(desc.passes[13] == RenderPassSlot::UI);
+    CHECK(desc.passes[13] == RenderPassSlot::Present);
+    CHECK(desc.passes[14] == RenderPassSlot::UI);
     CHECK(desc.contains(RenderPassSlot::BloomBlur));
     CHECK(desc.contains(RenderPassSlot::Forward2DOpaque));
 }
@@ -220,7 +220,7 @@ TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
     // from S4b; +1 SSAO from §A2).
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 23);
+    CHECK(desc.passes.size() == 24);
     CHECK(desc.passes[0] == RenderPassSlot::Shadow);
     CHECK(desc.passes[1] == RenderPassSlot::Skybox);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
@@ -238,9 +238,9 @@ TEST_CASE(s1b_make_deferred_includes_bloomblur_after_bloomextract) {
     CHECK(desc.passes[17] == RenderPassSlot::FXAA);
     CHECK(desc.passes[18] == RenderPassSlot::SMAA);
     CHECK(desc.passes[19] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[20] == RenderPassSlot::Present);
-    CHECK(desc.passes[21] == RenderPassSlot::UI);
-    CHECK(desc.passes[22] == RenderPassSlot::GBufferDebug);
+    CHECK(desc.passes[21] == RenderPassSlot::Present);
+    CHECK(desc.passes[22] == RenderPassSlot::UI);
+    CHECK(desc.passes[23] == RenderPassSlot::GBufferDebug);
 }
 
 // === C. View id constants ===========================================

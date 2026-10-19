@@ -73,7 +73,7 @@ public:
     static constexpr uint8_t kLastLayerViewId = 242;
     /// Maximum single-view offscreen paints after fixed scene and camera-view reservations.
     /// The allocator skips reserved ranges; four-view scene previews may leave small gaps.
-    static constexpr uint16_t kMaxOffscreenPaintsPerFrame = 145;
+    static constexpr uint16_t kMaxOffscreenPaintsPerFrame = 144;
 
     UIRenderBackend();
     ~UIRenderBackend() override;

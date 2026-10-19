@@ -460,6 +460,8 @@ enum class RenderPassSlot : uint8_t {
     SSR = 22,
     Volumetric = 23,
     DeferredDecal = 24,
+    /// Optional viewport-local pixelation/quantization after grading, before Present.
+    ColorStylization = 25,
 };
 
 enum class ColorGradingPreset : uint8_t {

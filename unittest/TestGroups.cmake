@@ -82,6 +82,7 @@ set(AYRENDERER_TEST_PostProcess_SOURCES
     Test_BloomExtract_F2.cpp
     Test_BloomExtract_S1a.cpp
     Test_ColorGrading.cpp
+    Test_ColorStylization.cpp
     Test_DepthHaze_F4.cpp
     Test_DepthHaze_S4a.cpp
     Test_DepthHaze_S4b.cpp

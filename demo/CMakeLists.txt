@@ -2,6 +2,12 @@ set(AY_SHADER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../AYShader")
 set(AY_RESOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource")
 include("${AY_SHADER_ROOT}/cmake/AYBgfx.cmake")
 
+if(WIN32)
+    add_executable(AYRenderer_ColorStylizationDemo ColorStylizationDemo.cpp)
+    target_link_libraries(AYRenderer_ColorStylizationDemo PRIVATE AYRenderer user32 gdi32)
+    ay_stage_production_shaders(AYRenderer_ColorStylizationDemo)
+endif()
+
 add_executable(AYRenderer_Demo RotatingCubeDemo.cpp)
 ay_stage_production_shaders(AYRenderer_Demo)
 

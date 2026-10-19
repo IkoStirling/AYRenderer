@@ -1,5 +1,38 @@
 # AYRenderer 测试维护
 
+## 2026-10-19 ColorStylization v1 内容扩展
+
+新增主 Forward/Deferred 的像素化、RGB 色阶量化、Bayer4 有序抖动，三组可编辑预设与
+Editor schema7 用户偏好；颜色效果在 AA/ColorGrading 后、Present/Editor/UI 前。
+默认及 identity 设置不声明节点/输出，无 identity draw。一个可选 RGBA8 输出、一次采样/绘制；
+不含 history、固定艺术色板、蓝噪声、CRT 或时间反馈，独立 renderViews 不执行此链。
+
+本机 Windows/MSVC Debug（同上 RTX3060/D3D11/D3D12），最终构建包括10个 Renderer
+测试程序、AYRenderer_ColorStylizationDemo、AYEditorShell_Demo 和 AYEditor_UnitTests。
+离线 catalog 增至67个变体；Shader组验证没有运行时 compiler 的全清单装载。
+清单审计983例/10分区，无遗漏或重复；CPU最终合计945例/15190断言，零失败/skip。
+首轮9组中8组通过；新增 view50 后旧的固定数组长度断言仍为62，修为63并把 style 纳入
+依赖链，单独复测完整 PostProcess 分区257例全部通过，未重复成功的其他8组。
+
+- `AYRenderer_ColorStylization`：5例/120断言，参数清洗/预设、identity gate、状态跨重建、
+  AA/分级组合、资源数量、custom pipeline 和静态/view顺序，GLSL430与D3D s_5_0 编译/反射。
+- `AYRenderer_PhoskiaGpu.color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle`：
+  D3D11/D3D12 各1例/44断言，独立 Bayer16 表和CPU量化公式核对真实 Pass 输出；
+  RGB、alpha、仅像素化、无抖动量化、组合、截短块、整视口块、本帧生产与失败旁路。
+- 展示程序 `--gallery --hidden --output <directory>`，另一轮加 `--d3d12`，均设置
+  `AY_SHADER_RUNTIME_COMPILE=0`：各导出两种管线四组预设，预热后逐帧核对图编译及0/1次绘制。
+  最终新目录16张960×540 PNG，8组对应图的后端最大字节差均为0；视觉检查及对照总览已保留。
+  这只代表该固定场景，不是所有内容的跨后端图像等价证明。
+- Editor Shell 最终46例/1354断言全部通过，含预设真实选择通知、手调值、两会话恢复及
+  整数标签与生效参数一致；源码 ABI34 的独立1例/2断言通过。未运行全部 Editor 分区。
+- `ayapi doctor`：124能力/53模块/85检索用例/523入口，0错误、0警告。
+
+复现：构建目录 `out/build/render-phoskia-20261004`；原始失败与最终分区报告、构建日志、
+GPU oracle JSON、最终画廊、逐字节对照和汇总位于 `out/render-color-stylization-20261019/`。
+截图异步回调采用同一静止场景连续请求7帧等待 PNG sidecar，避免只请求一帧时仅TGA到达。
+Editor测试初次受沙箱临时报告替换限制，改用正常进程运行；没有据此放宽功能断言。
+
+
 ## 2026-10-19 Deferred 贴花保守视锥剔除
 
 主路径在 FrameGraph 规划前计算一次投影盒可见索引，Pass 复用该结果；独立 Pass

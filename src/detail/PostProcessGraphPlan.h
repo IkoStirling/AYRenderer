@@ -40,6 +40,7 @@ struct PostProcessGraphPlanInput {
     bool volumetric = false;
     bool decals = false;
     bgfx::FrameBufferHandle baseGBuffer = BGFX_INVALID_HANDLE;
+    bool colorStylization = false;
 };
 
 struct PostProcessGraphPlanResult {

@@ -1,6 +1,7 @@
 #pragma once
 // AYRenderer.h — engine renderer entry (pimpl; no bgfx in this header)
 
+#include "AYRenderer/ColorStylizationSettings.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
 #include "AYRenderer/SsrSettings.h"
@@ -437,6 +438,14 @@ public:
     float colorGradingStrength() const noexcept;
     void setColorGradingPreset(ColorGradingPreset preset);
     ColorGradingPreset colorGradingPreset() const noexcept;
+
+    /// Main Forward/Deferred display color, after AA/grading and before UI.
+    /// Owner-thread copied settings are sanitized and survive pipeline rebuilds.
+    /// Disabled/identity settings omit the graph target and draw. Explicit renderViews
+    /// do not run this post chain. Alpha is preserved; Bayer uses virtual pixel cells.
+    void setColorStylizationSettings(const ColorStylizationSettings& settings);
+    /// Returns the copied, sanitized settings, including when the stage is bypassed.
+    ColorStylizationSettings colorStylizationSettings() const noexcept;
 
     // §S4d — Depth-aware haze knobs → FrameContext each frame.
     // Renderer defaults: enabled=false, strength=0 (K3 zero-behavior).

@@ -50,6 +50,7 @@ enum class RenderPassResourceId : uint8_t {
     OpaqueLightingColor,
     VolumetricColor,
     DecalGBuffer,
+    StylizedColor,
     Count,
 };
 

@@ -58,7 +58,7 @@ TEST_CASE(fxaa_append_only_abi_and_view_are_locked)
 {
     CHECK(static_cast<uint8_t>(RenderPassSlot::FXAA) == 16u);
     CHECK(static_cast<uint8_t>(FgResourceId::FxaaColor) == 7u);
-    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 30u);
+    CHECK(static_cast<uint8_t>(FgResourceId::Count) == 31u);
     CHECK(ayt::render::detail::FXAAPass::kFxaaViewId == 17u);
     CHECK(std::is_final_v<ayt::render::detail::FXAAPass>);
 }
@@ -79,7 +79,7 @@ TEST_CASE(default_deferred_and_editor_pipelines_order_fxaa_before_present)
         CHECK(fxaa == post + (deferred ? 2u : 1u));
         CHECK(smaa == fxaa + 1u);
         CHECK(grading == smaa + 1u);
-        CHECK(present == grading + 1u);
+        CHECK(present == grading + 2u);
     }
 }
 
@@ -100,7 +100,7 @@ TEST_CASE(fxaa_view_executes_after_postprocess_and_before_present)
     CHECK(fxaa == pp + 2);
     CHECK(smaa == fxaa + 1);
     CHECK(grading == smaa + 3);
-    CHECK(present == grading + 1);
+    CHECK(present == grading + 2);
 }
 
 TEST_CASE(runtime_toggle_defaults_on_and_survives_pipeline_rebuild)

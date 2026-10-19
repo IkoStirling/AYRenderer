@@ -6,6 +6,7 @@
 #include "detail/CameraMath.h"
 #include "detail/CameraViewsTestAccess.h"
 #include "detail/ColorGradingPass.h"
+#include "detail/ColorStylizationPass.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
 #include "detail/BloomPipeline.h"
@@ -108,6 +109,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::FXAA,
         RenderPassSlot::SMAA,
         RenderPassSlot::ColorGrading,
+        RenderPassSlot::ColorStylization,
         RenderPassSlot::Present,
         RenderPassSlot::UI,
     }};
@@ -141,6 +143,11 @@ void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
                                          RenderPassSlot::ColorGrading);
         if (gradingIt != desc.passes.end() && gradingIt > insertAfter) {
             insertAfter = gradingIt;
+        }
+        const auto styleIt = std::find(desc.passes.begin(), desc.passes.end(),
+                                        RenderPassSlot::ColorStylization);
+        if (styleIt != desc.passes.end() && styleIt > insertAfter) {
+            insertAfter = styleIt;
         }
         const auto smaaIt = std::find(desc.passes.begin(), desc.passes.end(),
                                       RenderPassSlot::SMAA);
@@ -226,6 +233,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::FXAA,
         RenderPassSlot::SMAA,
         RenderPassSlot::ColorGrading,
+        RenderPassSlot::ColorStylization,
         RenderPassSlot::Present,
         RenderPassSlot::UI,
         // Fullscreen attachment overlay on view 250. It is mounted only in
@@ -267,6 +275,8 @@ std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
         return std::make_unique<detail::MotionVectorPass>();
     case RenderPassSlot::AutoExposure:
         return std::make_unique<detail::AutoExposurePass>();
+    case RenderPassSlot::ColorStylization:
+        return std::make_unique<detail::ColorStylizationPass>();
     case RenderPassSlot::ColorGrading:
         return std::make_unique<detail::ColorGradingPass>();
     case RenderPassSlot::Present:
@@ -544,6 +554,15 @@ struct Renderer::Impl {
     bool                           colorGradingEnabled = false;
     float                          colorGradingStrength = 0.75f;
     ColorGradingPreset             colorGradingPreset = ColorGradingPreset::Warm;
+
+    ColorStylizationSettings colorStylization{};
+
+    void applyColorStylizationKnobs()
+    {
+        if (auto* pass = pipeline.findPass<detail::ColorStylizationPass>()) {
+            pass->setSettings(colorStylization);
+        }
+    }
 
     void applyEditorOverlayKnobs()
     {
@@ -919,6 +938,12 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         }
     }
 
+    if (auto* style = pipeline.findPass<detail::ColorStylizationPass>()) {
+        if (adapter.isInitialized()) {
+            style->destroyResources(adapter);
+        }
+    }
+
     if (detail::PresentPass* presentPass =
             pipeline.findPass<detail::PresentPass>()) {
         if (adapter.isInitialized()) {
@@ -959,6 +984,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     applyShadowQualityKnobs();
     applyAntiAliasingKnobs();
     applyColorGradingKnobs();
+    applyColorStylizationKnobs();
     applyEditorOverlayKnobs();
 }
 
@@ -1222,6 +1248,12 @@ void Renderer::shutdown()
             _impl->pipeline.findPass<detail::ColorGradingPass>()) {
         if (_impl->adapter.isInitialized()) {
             gradingPass->destroyResources(_impl->adapter);
+        }
+    }
+
+    if (auto* style = _impl->pipeline.findPass<detail::ColorStylizationPass>()) {
+        if (_impl->adapter.isInitialized()) {
+            style->destroyResources(_impl->adapter);
         }
     }
 
@@ -1712,6 +1744,8 @@ void Renderer::render(const RenderScene& scene)
         _impl->pipeline.findPass<detail::SMAAPass>();
     detail::ColorGradingPass* colorGradingPassPtr =
         _impl->pipeline.findPass<detail::ColorGradingPass>();
+    auto* colorStylizationPassPtr =
+        _impl->pipeline.findPass<detail::ColorStylizationPass>();
     detail::PresentPass* presentPassPtr =
         _impl->pipeline.findPass<detail::PresentPass>();
 
@@ -1899,6 +1933,8 @@ void Renderer::render(const RenderScene& scene)
     graphInput.fxaa = fxaaStageEnabled;
     graphInput.smaa = smaaStageEnabled;
     graphInput.colorGrading = colorGradingStageEnabled;
+    graphInput.colorStylization = finalLdrStageEnabled && colorStylizationPassPtr
+        && colorStylizationPassPtr->isEnabled() && colorStylizationPassPtr->active();
     graphInput.smaaIntermediatePointSampled =
         detail::SMAAPass::kIntermediatePointSampled;
 
@@ -3826,4 +3862,14 @@ void Renderer::setUiBackend(UIRenderBackend* backend)
     }
 }
 
+void Renderer::setColorStylizationSettings(const ColorStylizationSettings& settings)
+{
+    if (!_impl) return;
+    _impl->colorStylization = sanitizeColorStylization(settings);
+    _impl->applyColorStylizationKnobs();
+}
+ColorStylizationSettings Renderer::colorStylizationSettings() const noexcept
+{
+    return _impl ? _impl->colorStylization : ColorStylizationSettings{};
+}
 } // namespace ayt::render
