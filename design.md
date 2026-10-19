@@ -1,5 +1,12 @@
 # AYRenderer Design
 
+## 2026-10-19 — 作者路径与展示几何
+
+RSL读写采用明确UTF-8契约，File::atomicWriteUtf8复用AYIO原子写流程；领域约束与路径包含预检
+继续由Editor持有。TextureImageLoader使用native filesystem读取UTF-8输入，并核对RGBA8 payload容量。
+原生演示构建有独立normal/tangent/UV流的球、柱、环和屋顶，全部Renderer-owned句柄显式释放。
+场景切换通知camera cut，避免把上一组展示内容带入艺术历史；预览不建立新的运行时资产类型。
+
 ## 2026-10-19 — 有界CPU色板提取
 
 StylizationPalette只持有值，输入RGBA8/尺寸/请求色数；不引入Renderer状态、纹理或资源路径。

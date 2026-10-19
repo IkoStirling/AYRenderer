@@ -4,6 +4,8 @@
 #include "AYTest.h"
 #include "detail/ScreenshotSidecar.h"
 #include "detail/TextureImageLoader.h"
+#include "AYRenderer/ColorStylizationLook.h"
+#include <AYIO/File.h>
 
 #include <sys/stat.h>
 
@@ -104,6 +106,26 @@ TEST_CASE(capture_screenshot_rejects_invalid_requests)
     CHECK(!renderer.captureScreenshot("shot.png"));
 
     renderer.shutdown();
+}
+
+TEST_CASE(utf8_raster_decode_and_look_publication_use_native_paths)
+{
+    namespace fs=std::filesystem;
+    const auto root=fs::temp_directory_path()/("ay-look-utf8-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup{fs::path path;~Cleanup(){std::error_code e;fs::remove_all(path,e);}} cleanup{root};
+    const auto asUtf8=[](const fs::path& p){const auto s=p.u8string();return std::string(s.begin(),s.end());};
+    const auto imagePath=root/fs::u8path("参考图-🌙.tga");
+    const uint8_t bytes[]={0,0,2,0,0,0,0,0,0,0,0,0,1,0,1,0,32,32,0,0,255,255};
+    CHECK(ayt::io::File::atomicWriteUtf8(asUtf8(imagePath),bytes,sizeof(bytes)));
+    const auto image=ayt::render::detail::decodeImageFile(asUtf8(imagePath));
+    CHECK(image.width==1 && image.height==1);CHECK(image.rgba8.size()==4);
+    if(image.rgba8.size()==4)CHECK(image.rgba8[0]==255 && image.rgba8[1]==0 && image.rgba8[2]==0 && image.rgba8[3]==255);
+    const auto look=ayt::render::colorStylizationPreset(ayt::render::ColorStylizationPreset::TimeEcho);
+    const auto path=asUtf8(root/fs::u8path("作品/嵌套/色板-🌙.rsl"));std::string error;
+    CHECK(ayt::render::saveColorStylizationLook(path,look,&error));CHECK(error.empty());
+    ayt::render::ColorStylizationSettings loaded;
+    CHECK(ayt::render::loadColorStylizationLook(path,loaded,&error));
+    CHECK(ayt::render::serializeColorStylizationLook(loaded)==ayt::render::serializeColorStylizationLook(look));
 }
 
 TEST_CASE(capture_screenshot_queues_without_crash_on_noop_frame)

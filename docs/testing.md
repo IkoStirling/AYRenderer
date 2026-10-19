@@ -1,5 +1,14 @@
 # AYRenderer 测试维护
 
+## 新展示内容与路径审核（2026-10-19）
+
+天文仪/运河街区各两管线十六look导出成功，天文仪另有D3D12同内容导出；构图首轮和最终图都保留。
+新增UTF-8图片/嵌套RSL往返用例。隔离环境首次临时目录写入失败，原生权限下定向与整组均通过；
+SceneMaterial81例/10148断言，保留其他八组有效证据后CPU合计958例/15747断言。
+Editor颜色/色板失焦精度先复现两处失败，修复后Shell49例/1407断言通过；ProjectWorkflow35例通过。
+SDK124能力/53模块/91检索/530入口，0错误警告。证据前缀`native-content-*`、`io-utf8-*`、
+`editor-float-focus-repro`、`editor-content-final-shell`、`gallery-observatory`、`gallery-canal-final`。
+
 ## 参考图取色（2026-10-19）
 
 定向PostProcess整组通过；与已保存的其他八组证据合计957例/15739断言，inventory1000例/10分区。

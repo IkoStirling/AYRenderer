@@ -1,11 +1,12 @@
 #include "AYRenderer/ColorStylizationLook.h"
 #include "AYRenderer/StylizationPalette.h"
 #include "detail/TextureImageLoader.h"
+#include "DemoUtf8Arguments.h"
 #include <charconv>
 #include <cstdio>
 #include <string_view>
 
-int main(int argc,char** argv) {
+int runRenderStyleTool(int argc,char** argv) {
     using namespace ayt::render;
     if(argc==3 && std::string_view(argv[1])=="inspect") {
         ColorStylizationSettings look;std::string error;
@@ -34,3 +35,12 @@ int main(int argc,char** argv) {
     std::fprintf(stderr,"Usage: AYRenderer_RenderStyleTool palette <image> <output.rsl> [colors 2..16]\n"
                         "       AYRenderer_RenderStyleTool inspect <look.rsl>\n");return 2;
 }
+
+#ifdef _WIN32
+int wmain(int argc,wchar_t** argv) {
+    ayt::render::demo::Utf8Arguments arguments(argc,argv);
+    return runRenderStyleTool(argc,arguments.pointers.data());
+}
+#else
+int main(int argc,char** argv){return runRenderStyleTool(argc,argv);}
+#endif

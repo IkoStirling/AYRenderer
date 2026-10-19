@@ -7,6 +7,8 @@
 #include "AYRenderer/PbrShaderSources.h"
 #include "AYRenderer/ColorStylizationLook.h"
 #include "AYMath/MathUtils.h"
+#include "ProceduralGalleryGeometry.h"
+#include "DemoUtf8Arguments.h"
 
 #include <array>
 #include <chrono>
@@ -64,13 +66,15 @@ ayt::render::MeshHandle createGalleryCube(ayt::render::Renderer& renderer)
 }
 const char* names[]={"Neutral","Pixel Retro","Low Color","Dither Retro","Pocket","Sunset","Noir","Comic","Engraving","Blueprint","Arcade","Broadcast","Afterimage","Stop Motion","Tile Refresh","Time Echo"};
 constexpr int lookCount=16;
+const char* sceneNames[]={"gallery","city","character","workshop","observatory","canal"};
 }
 
-int main(int argc,char** argv)
+int runGallery(int argc,char** argv)
 {
     using namespace ayt::render;
     using namespace ayt::math;
     bool gallery=false,motionGallery=false,hidden=false,writePresets=false;
+    int sceneOverride=-1;
     std::string lookPath;
     Backend backend=Backend::Direct3D11;
     std::filesystem::path output="color-stylization-captures";
@@ -78,12 +82,19 @@ int main(int argc,char** argv)
         const std::string arg=argv[i];
         if(arg=="--gallery")gallery=true;
         else if(arg=="--motion-gallery"){gallery=true;motionGallery=true;}
+        else if(arg=="--scene" && i+1<argc) {
+            const std::string value=argv[++i];sceneOverride=-1;
+            if(value!="auto") {
+                for(int j=0;j<6;++j)if(value==sceneNames[j])sceneOverride=j;
+                if(sceneOverride<0){std::fprintf(stderr,"Unknown scene: %s\n",value.c_str());return 2;}
+            }
+        }
         else if(arg=="--look" && i+1<argc)lookPath=argv[++i];
         else if(arg=="--write-presets")writePresets=true;
         else if(arg=="--hidden")hidden=true;
         else if(arg=="--d3d12")backend=Backend::Direct3D12;
         else if(arg=="--output" && i+1<argc)output=argv[++i];
-        else {std::fprintf(stderr,"Usage: AYRenderer_ColorStylizationDemo [--gallery | --motion-gallery] [--hidden] [--d3d12] [--output directory] [--look file.rsl] [--write-presets]\n");return 2;}
+        else {std::fprintf(stderr,"Usage: AYRenderer_ColorStylizationDemo [--gallery | --motion-gallery] [--hidden] [--d3d12] [--output directory] [--look file.rsl] [--write-presets] [--scene auto|gallery|city|character|workshop|observatory|canal]\n");return 2;}
     }
     std::filesystem::create_directories(output);
     if(writePresets) {
@@ -124,6 +135,10 @@ int main(int argc,char** argv)
     renderer.setDirectionalLight(FVector3(-.3f,-.8f,.5f),FVector3(1.2f,1.1f,1));
     renderer.setMainCameraLookAtPerspective({8,6,-11},{0,1.1f,1},{0,1,0},48,float(width)/height,.1f,100);
     auto cube=createGalleryCube(renderer);
+    const auto sphere=demo::uploadGalleryGeometry(renderer,demo::gallerySphere());
+    const auto cylinder=demo::uploadGalleryGeometry(renderer,demo::galleryCylinder());
+    const auto torus=demo::uploadGalleryGeometry(renderer,demo::galleryTorus());
+    const auto roof=demo::uploadGalleryGeometry(renderer,demo::galleryRoof());
     const uint8_t white[4]={255,255,255,255};
     auto whiteTexture=renderer.createTextureFromRgba8(1,1,white,"retro_gallery_white");
     std::vector<TextureHandle> textures{whiteTexture};
@@ -155,16 +170,36 @@ int main(int argc,char** argv)
     }
     auto ramp=renderer.createTextureFromRgba8(256,64,gradient.data(),"retro_gallery_ramp");
     textures.push_back(ramp);auto rampMaterial=material(1,1,1,ramp);
-    bool valid=cube.isValid() && whiteTexture.isValid() && ramp.isValid();
+    std::vector<uint8_t> planetPixels(256*128*4);
+    for(int y=0;y<128;++y)for(int x=0;x<256;++x) {
+        const float u=float(x)/256,v=float(y)/128;
+        const float terrain=std::sin(u*19.f+std::sin(v*13.f)*2.f)*std::cos(v*11.f)+std::sin(u*31.f-v*17.f)*.3f;
+        const std::array<uint8_t,3> color=std::abs(v-.5f)>.42f?std::array<uint8_t,3>{232,230,207}
+            :terrain>.25f?std::array<uint8_t,3>{114,157,87}:terrain>.08f?std::array<uint8_t,3>{208,177,102}
+            :std::array<uint8_t,3>{32,102,161};
+        for(int c=0;c<3;++c)planetPixels[(y*256+x)*4+c]=color[c];planetPixels[(y*256+x)*4+3]=255;
+    }
+    const auto planetTexture=renderer.createTextureFromRgba8(256,128,planetPixels.data(),"gallery_planet");textures.push_back(planetTexture);
+    const auto planetMaterial=material(1,1,1,planetTexture),brass=material(.82f,.55f,.19f,whiteTexture),water=material(.06f,.34f,.48f,whiteTexture);
+    renderer.setMaterialFloat(brass,"metallic",.9f);renderer.setMaterialFloat(brass,"roughness",.18f);
+    renderer.setMaterialFloat(water,"metallic",.2f);renderer.setMaterialFloat(water,"roughness",.16f);
+    std::array<MaterialHandle,8> surfaces{};
+    for(int i=0;i<8;++i) {
+        surfaces[i]=material(i<4?.72f:palette[i%6][0],i<4?.78f:palette[i%6][1],i<4?.82f:palette[i%6][2],whiteTexture);
+        renderer.setMaterialFloat(surfaces[i],"metallic",i<4?1.f:0.f);
+        renderer.setMaterialFloat(surfaces[i],"roughness",.1f+float(i%4)*.27f);
+    }
+    bool valid=cube.isValid() && sphere.isValid() && cylinder.isValid() && torus.isValid() && roof.isValid()
+        && whiteTexture.isValid() && ramp.isValid() && planetTexture.isValid();
     for(auto value:materials)valid=valid && value.isValid();
     if(!valid){renderer.shutdown();DestroyWindow(window);return 1;}
-    int preset=1;bool deferred=false,paused=false;uint32_t tick=0;int previousGallery=-1;
+    int preset=1;bool deferred=false,paused=false,customSelected=!lookPath.empty();uint32_t tick=0;int previousGallery=-1;
     const int batchLookCount=!lookPath.empty()?1:motionGallery?5:lookCount,framesPerLook=motionGallery?100:24;
     renderer.setColorStylizationSettings(lookPath.empty()?colorStylizationPreset(ColorStylizationPreset::PixelRetro):customLook);
     const auto start=std::chrono::steady_clock::now();float time=0;
     std::array<bool,256> wasDown{};
     auto pressed=[&](int key) {bool down=(GetAsyncKeyState(key)&0x8000)!=0;bool edge=down&&!wasDown[key];wasDown[key]=down;return edge;};
-    std::puts("0..9 / arrows preset | F Forward/Deferred | Space freeze | G color grading | F9 capture | Esc quit");
+    std::puts("0..9 / arrows preset | Tab scene | F Forward/Deferred | Space freeze | G color grading | F9 capture | Esc quit");
     int failures=0;
     while(state.running && (!gallery || tick<2*batchLookCount*framesPerLook)) {
         MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) {
@@ -182,12 +217,15 @@ int main(int argc,char** argv)
         }
         if(!gallery && GetForegroundWindow()==window) {
             for(int i=0;i<10;++i)if(pressed('0'+i)) {
+                customSelected=false;
                 preset=i;renderer.setColorStylizationSettings(colorStylizationPreset(static_cast<ColorStylizationPreset>(i)));
             }
             const bool previousLook=pressed(VK_LEFT),nextLook=pressed(VK_RIGHT);
             if(previousLook || nextLook) {
+                customSelected=false;
                 preset=(preset+(previousLook?lookCount-1:1))%lookCount;renderer.setColorStylizationSettings(colorStylizationPreset(static_cast<ColorStylizationPreset>(preset)));
             }
+            if(pressed(VK_TAB)){sceneOverride=(sceneOverride+1)%6;renderer.notifyCameraCut();}
             if(pressed('F')){deferred=!deferred;renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());}
             if(pressed(VK_SPACE))paused=!paused;
             if(pressed('G')){renderer.setColorGradingPreset(ColorGradingPreset::Warm);renderer.setColorGradingEnabled(!renderer.colorGradingEnabled());}
@@ -196,7 +234,9 @@ int main(int argc,char** argv)
         else if(!paused)time=std::chrono::duration<float>(std::chrono::steady_clock::now()-start).count();
         RenderScene scene;
         scene.add(cube,floorMaterial,translate(0,-.2f,1)*scale(12,.25f,9));
-        const int exhibit=motionGallery?2:preset>=12?2:preset==10?2:preset==11?1:preset<6?0:preset==6?1:preset==7?2:3;
+        const int exhibit=sceneOverride>=0?sceneOverride:motionGallery?2:preset>=12?2:preset==10?2:preset==11?1:preset<6?0:preset==6?1:preset==7?2:3;
+        if(exhibit==5)renderer.setMainCameraLookAtPerspective({8,10,-10},{0,.9f,1},{0,1,0},45,float(width)/height,.1f,100);
+        else renderer.setMainCameraLookAtPerspective({8,6,-11},{0,1.1f,1},{0,1,0},48,float(width)/height,.1f,100);
         if(exhibit==0) {
         scene.add(cube,rampMaterial,translate(0,2.3f,4)*scale(10,3,.2f));
         for(int i=0;i<6;++i) {
@@ -234,7 +274,7 @@ int main(int argc,char** argv)
                 float a=i*1.0472f;
                 scene.add(cube,colors[i],translate(std::cos(a)*3.4f,.5f+float(i%3)*.3f,1+std::sin(a)*2)*rotate(FVector3(0,0,1),a+time*.2f)*scale(.7f,.7f,.7f));
             }
-        } else {
+        } else if(exhibit==3) {
             // Technical workshop: gantry, stacked plates and radial machine.
             for(float x:{-3.f,3.f})scene.add(cube,colors[4],translate(x,1.8f,2)*scale(.5f,3.6f,.6f));
             scene.add(cube,colors[4],translate(0,3.5f,2)*scale(6.5f,.45f,.65f));
@@ -244,6 +284,47 @@ int main(int argc,char** argv)
             }
             for(int i=0;i<6;++i)scene.add(cube,colors[(i+2)%6],translate(3.8f,.3f+i*.27f,-1)*rotate(FVector3(0,1,0),i*.14f)*scale(1.5f,.12f,1.5f));
             scene.add(cube,colors[2],translate(-3.8f,.65f,-1)*scale(1.5f,1.3f,1.5f));
+        } else if(exhibit==4) {
+            // An orrery: curved normals, a generated globe, brass rings and a roughness row.
+            scene.add(cylinder,floorMaterial,translate(0,.25f,1)*scale(3.3f,.55f,3.3f));
+            scene.add(cylinder,brass,translate(0,.8f,1)*scale(.45f,1.1f,.45f));
+            scene.add(sphere,planetMaterial,translate(0,2.3f,1)*rotate(FVector3(0,1,0),time*.25f)*scale(2.3f,2.3f,2.3f));
+            scene.add(torus,brass,translate(0,2.3f,1)*rotate(FVector3(0,0,1),.4f)*scale(3.2f,3.2f,3.2f));
+            scene.add(torus,colors[4],translate(0,2.3f,1)*rotate(FVector3(1,0,0),1.1f)*scale(3.5f,3.5f,3.5f));
+            for(int i=0;i<5;++i) {
+                const float a=time*.5f+i*1.256637f;
+                scene.add(sphere,colors[i],translate(std::cos(a)*3.1f,2.1f+std::sin(a*2)*.55f,1+std::sin(a)*2.5f)*scale(.55f,.55f,.55f));
+            }
+            for(int i=0;i<8;++i) {
+                const float x=(i-3.5f)*1.1f;
+                scene.add(cylinder,brass,translate(x,.18f,-2)*scale(.75f,.35f,.75f));
+                scene.add(sphere,surfaces[i],translate(x,.73f,-2)*scale(.8f,.8f,.8f));
+            }
+        } else {
+            // A small canal district: pitched roofs, windows, bridge arches and boats.
+            scene.add(cube,water,translate(0,.01f,1)*scale(11,.13f,3));
+            for(int bank=0;bank<2;++bank)for(int i=0;i<4;++i) {
+                if(bank==0 && (i==1 || i==2))continue;
+                const float x=(i-1.5f)*2.4f,z=bank?3.6f:-1.6f,h=bank?1.4f+float((i+bank)%3)*.4f:1.f;
+                scene.add(cube,colors[(i+bank*2)%6],translate(x,h*.5f,z)*scale(1.75f,h,1.6f));
+                scene.add(roof,colors[(i+bank+1)%6],translate(x,h,z)*scale(2.05f,1.3f,1.95f));
+                for(int row=0;row<2;++row)for(float offset:{-.45f,.45f})
+                    scene.add(cube,brass,translate(x+offset,.45f+row*.6f,z+(bank?-.815f:.815f))*scale(.3f,.35f,.045f));
+                scene.add(cylinder,brass,translate(x-.7f,.45f,bank?2.5f:-.5f)*scale(.1f,.9f,.1f));
+            }
+            scene.add(cube,floorMaterial,translate(0,1.05f,1)*scale(1.8f,.18f,3.5f));
+            for(float x:{-.85f,.85f})
+                scene.add(torus,brass,translate(x,.6f,1)*rotate(FVector3(0,0,1),1.5707963f)*scale(3.f,3.f,3.f));
+            for(float x:{-.65f,.65f})for(float z:{-.65f,2.65f})
+                scene.add(cylinder,brass,translate(x,.5f,z)*scale(.16f,1,.16f));
+            for(int i=0;i<5;++i)
+                scene.add(cube,floorMaterial,translate(0,.94f-i*.18f,-1.f-i*.28f)*scale(1.4f,.18f,.35f));
+            for(int i=0;i<3;++i) {
+                const float x=(i-1.f)*3.3f+std::sin(time*.7f+i)*.35f,z=.3f+i*.45f;
+                scene.add(cylinder,colors[(i+1)%6],translate(x,.28f,z)*rotate(FVector3(0,0,1),1.5707963f)*scale(.55f,1.8f,.55f));
+                scene.add(cube,colors[(i+3)%6],translate(x,.59f,z)*scale(.7f,.35f,.4f));
+                scene.add(cylinder,brass,translate(x+.2f,1.03f,z)*scale(.06f,.9f,.06f));
+            }
         }
         ClearDesc clear;clear.r=.025f;clear.g=.04f;clear.b=.08f;
         renderer.beginFrame(clear);renderer.render(scene);
@@ -266,13 +347,15 @@ int main(int argc,char** argv)
         }
         ++tick;
         std::wstring title=L"Retro Color Gallery | ";title+=deferred?L"Deferred | ":L"Forward | ";
-        for(const char* p=lookPath.empty()?names[preset]:"Custom Look";*p;++p)title+=wchar_t(*p);
-        title+=L" | 0..9 / arrows look, F pipeline, Space freeze, G grade, F9 save";
+        for(const char* p=customSelected?"Custom Look":names[preset];*p;++p)title+=wchar_t(*p);
+        title+=L" | ";for(const char* p=sceneNames[exhibit];*p;++p)title+=wchar_t(*p);
+        title+=L" | arrows look, Tab scene, F pipeline, Space freeze, F9 save";
         SetWindowTextW(window,title.c_str());
     }
     for(auto value:materials)renderer.destroyMaterial(value);
     for(auto value:textures)renderer.destroyTexture(value);
-    renderer.destroyMesh(cube);renderer.shutdown();DestroyWindow(window);
+    for(auto mesh:{cube,sphere,cylinder,torus,roof})renderer.destroyMesh(mesh);
+    renderer.shutdown();DestroyWindow(window);
     if(gallery)for(const char* path:{"forward","deferred"})for(int i=0;i<batchLookCount;++i) {
         const int look=motionGallery && i>0?i+11:i;
         if(motionGallery)for(int frame=4;frame<framesPerLook;frame+=3) {
@@ -281,4 +364,9 @@ int main(int argc,char** argv)
     }
     std::printf("Gallery completed, failures=%d\n",failures);
     return failures?1:0;
+}
+
+int wmain(int argc,wchar_t** argv) {
+    ayt::render::demo::Utf8Arguments arguments(argc,argv);
+    return runGallery(argc,arguments.pointers.data());
 }

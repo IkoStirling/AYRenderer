@@ -1,5 +1,13 @@
 # AYRenderer
 
+## 曲面与建筑展示内容（2026-10-19）
+
+画廊追加天文仪和运河街区，含球体、圆柱、圆环、坡屋顶、程序纹理地球、金属/非金属粗糙度排布。
+`--scene observatory`或`--scene canal`固定场景；Tab在六种内容间切换，切换清除相机/艺术历史。
+同样支持静态/动态导出、任意look和两条管线；原有auto场景选择保留。
+所有几何由该高级Host演示持有，显式创建和销毁，不增加玩法API或自动Scene导入格式。
+Windows画廊/离线工具从wmain接收UTF-16并转换UTF-8，支持参考图与作品路径中的中文/emoji。
+
 ## 参考图色板创作（2026-10-19）
 
 `StylizationPalette.h`提供无GPU的RGBA8取色，alpha加权、5-bit直方图和weighted median cut，
@@ -44,6 +52,7 @@ Forward 自定义光照算法和 Deferred 统一 PBR 并不等价；画廊统一
 主视图顺序为 AA → StylizedOutline → ColorGrading → ColorStylization → TemporalFeedback → AnalogDisplay → Present → Editor/UI。
 轮廓与颜色有独立gate和输出，关闭时不声明节点/目标，不做identity draw。
 独立renderViews/preview不运行该链；所有颜色处理包含已合成的主视口背景，窗口外部与UI不参与。
+作品读写与参考图输入接受UTF-8路径；保存使用AYIO明确的UTF-8原子入口并创建父目录。
 
 | 组 | 能力与边界 |
 |---|---|

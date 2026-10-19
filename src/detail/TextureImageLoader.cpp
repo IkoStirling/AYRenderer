@@ -10,9 +10,10 @@
 #include <bx/allocator.h>
 #include <bimg/decode.h>
 
-#include <AYIO/File.h>
-
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <limits>
 
 namespace ayt::render::detail
 {
@@ -30,14 +31,16 @@ bx::DefaultAllocator& bimgAllocator()
 DecodedImage decodeImageFile(const std::string& path)
 {
     DecodedImage out;
-    if (path.empty() || !ayt::io::File::exists(path)) {
-        return out;
-    }
-
-    const std::vector<uint8_t> fileBytes = ayt::io::File::readAllBytes(path);
-    if (fileBytes.empty()) {
-        return out;
-    }
+    if(path.empty())return out;
+    // This host-facing decoder accepts UTF-8 paths. AYIO's general File API
+    // retains a narrow Windows path contract, so open the native filesystem path.
+    std::ifstream file(std::filesystem::u8path(path),std::ios::binary|std::ios::ate);
+    if(!file)return out;
+    const auto size=file.tellg();
+    if(size<=0 || uint64_t(size)>std::numeric_limits<uint32_t>::max())return out;
+    std::vector<uint8_t> fileBytes(size_t(size),uint8_t{});file.seekg(0);
+    file.read(reinterpret_cast<char*>(fileBytes.data()),std::streamsize(fileBytes.size()));
+    if(!file)return out;
 
     bimg::ImageContainer* image = bimg::imageParse(
         &bimgAllocator(),
@@ -54,6 +57,9 @@ DecodedImage decodeImageFile(const std::string& path)
     out.width  = image->m_width;
     out.height = image->m_height;
     const size_t byteCount = static_cast<size_t>(out.width) * out.height * 4u;
+    if(image->m_format!=bimg::TextureFormat::RGBA8 || byteCount>image->m_size) {
+        bimg::imageFree(image);return {};
+    }
     out.rgba8.resize(byteCount);
     std::memcpy(out.rgba8.data(), image->m_data, byteCount);
     bimg::imageFree(image);

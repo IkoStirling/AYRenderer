@@ -118,7 +118,7 @@ bool saveColorStylizationLook(const std::string& path,const ColorStylizationSett
         for(auto& c:extension)c=static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if(extension!=".rsl")return fail(error,"Look documents must use the .rsl suffix");
         const auto text=serializeColorStylizationLook(settings);
-        if(!io::File::atomicWrite(path,text.data(),text.size()))return fail(error,"Cannot atomically save look document");
+        if(!io::File::atomicWriteUtf8(path,text.data(),text.size()))return fail(error,"Cannot atomically save look document");
         return true;
     } catch(const std::exception& e) {return fail(error,e.what());}
 }

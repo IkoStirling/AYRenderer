@@ -14,8 +14,8 @@ namespace ayt::render {
 std::string serializeColorStylizationLook(const ColorStylizationSettings& settings);
 bool parseColorStylizationLook(std::string_view text, ColorStylizationSettings& output,
                               std::string* error = nullptr);
-/// Explicit native-host file access. Save requires .rsl and an existing parent;
-/// uses AYIO atomic replacement. Editor callers additionally constrain project paths.
+/// Explicit native-host UTF-8 file access. Save requires .rsl and creates parents;
+/// uses AYIO UTF-8 atomic replacement. Editor callers additionally constrain project paths.
 bool loadColorStylizationLook(const std::string& path, ColorStylizationSettings& output,
                              std::string* error = nullptr);
 bool saveColorStylizationLook(const std::string& path, const ColorStylizationSettings& settings,
