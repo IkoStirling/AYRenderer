@@ -207,6 +207,20 @@ struct FixtureEmitterGpuFixture {
         }
         CHECK(renderer.setPerformanceLights({}));return pixels;
     }
+    std::array<uint8_t,64*64*4> sampleShadow(float blockerT,float radius,bool area,bool shadows,bool volume=false,bool zero=false){
+        using namespace ayt::render;renderer.setPostProcessBloomStrength(0);renderer.setPostProcessGamma(1);renderer.setPostProcessExposure(2);
+        VolumetricSettings fog;fog.enabled=volume;fog.density=.08f;fog.scattering=1;fog.anisotropy=0;fog.steps=32;fog.debugView=2;renderer.setVolumetricSettings(fog);
+        PerformanceLight light;light.id=7;light.light=Light::spot({-1,0,-2},ayt::math::FVector3(1,0,1.95f).normalize(),10,zero?0.f:2.f,.9f,.7f,{1,1,1});
+        light.light.castShadow=shadows;light.light.shadowBias=.0001f;light.apertureRadius=radius;light.areaShadow=area;light.areaShadowBias=.001f;light.intensityUnit=LightIntensityUnit::Candela;
+        CHECK(renderer.setPerformanceLights({&light,1}));RenderScene scene;renderer.setMaterialColor(black,"baseColor",1,1,1,1);
+        DrawItem receiver;receiver.mesh=cube;receiver.material=black;receiver.world=ayt::math::scale(1.2f,1.2f,.05f);receiver.shadowFlags=ShadowFlags::Receive;scene.add(receiver);
+        scene.add(cube,black,ayt::math::translate(-1+blockerT,0.f,-2+1.95f*blockerT)*ayt::math::scale(.12f,.12f,.04f));
+        for(int i=0;i<3;++i){renderer.beginFrame({0,0,0,1});renderer.render(scene);renderer.endFrame();}
+        if(shadows&&!zero)CHECK(renderer.performanceLightStats().shadowLights==1);
+        const auto color=bgfx::TextureHandle{ayt::render::detail::CameraViewsTestAccess::finalColor(renderer)};CHECK(bgfx::isValid(color));std::array<uint8_t,64*64*4> pixels{};
+        if(bgfx::isValid(color)){bgfx::blit(112,readback,0,0,color);const auto ready=bgfx::readTexture(readback,pixels.data());auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(renderer);for(int i=0;i<120&&adapter->gpuFrameCounter()<ready;++i)renderer.endFrame();CHECK(adapter->gpuFrameCounter()>=ready);}
+        CHECK(renderer.setPerformanceLights({}));return pixels;
+    }
     std::array<uint8_t,64*64*4> sampleIes(const std::shared_ptr<const ayt::render::IesProfile>& profile,bool volume){
         using namespace ayt::render;
         PerformanceLight light;light.id=7;light.light=Light::spot({0,0,-2},{0,0,1},10,1,.98f,.75f,{1,0,0});light.intensityUnit=LightIntensityUnit::Candela;
@@ -348,6 +362,34 @@ TEST_CASE(opaque_fixture_hood_and_hinged_leaves_occlude_the_real_exit){
     const double shadedExcess=emitterRedEnergy(shaded)-emitterRedEnergy(dark);
     std::fprintf(stderr,"[Housing probe] front=%.0f hood=%.0f oblique=%.0f/%.0f leaves=%.0f\n",direct,frontExcess,emitterRedEnergy(side),sideExcess,shadedExcess);
     CHECK(shadedExcess<frontExcess*.99);CHECK(shadedExcess>frontExcess*.1);CHECK(f.housings.stats().parts==6);
+#else
+    SKIP_TEST("Windows real-device acceptance required");
+#endif
+}
+TEST_CASE(area_shadow_penumbra_grows_away_from_contact_and_softens_volume){
+#ifdef _WIN32
+    const auto* backend=std::getenv("AY_EMITTER_GPU_TEST");if(!backend||!*backend)SKIP_TEST("Requires isolated real-device PCSS acceptance");
+    FixtureEmitterGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+    const auto partial=[&](const auto& pixels,const auto& lit,const auto& dark,float t){
+        ayt::math::Float4x4 view,projection;CHECK(f.renderer.mainCameraMatrices(view,projection));
+        const auto p=projection*view*ayt::math::FVector4(-1+t,0,-2+1.95f*t,1);const float cx=(p.x/p.w*.5f+.5f)*64,cy=(.5f-p.y/p.w*.5f)*64;
+        const float half=std::abs(projection(0,0))*.14f/p.w*32+2;int count=0;
+        for(int y=12;y<52;++y)for(int x=12;x<52;++x){if(std::abs(x-cx)<=half&&std::abs(y-cy)<=half)continue;
+            const auto i=(y*64+x)*4;const float signal=float(lit[i])-dark[i];if(signal<15)continue;
+            const float fraction=(float(pixels[i])-dark[i])/signal;if(fraction>.08f&&fraction<.92f)++count;
+        }return count;
+    };
+    const auto nearLit=f.sampleShadow(.95f,.2f,false,false),nearDark=f.sampleShadow(.95f,.2f,false,false,false,true),nearSoft=f.sampleShadow(.95f,.2f,true,true);
+    const auto farLit=f.sampleShadow(.5f,.2f,false,false),farDark=f.sampleShadow(.5f,.2f,false,false,false,true),farHard=f.sampleShadow(.5f,.2f,false,true),farSoft=f.sampleShadow(.5f,.2f,true,true);
+    const int contact=partial(nearSoft,nearLit,nearDark,.95f),hard=partial(farHard,farLit,farDark,.5f),soft=partial(farSoft,farLit,farDark,.5f);
+    std::fprintf(stderr,"[PCSS probe] contact=%d hard=%d separated=%d\n",contact,hard,soft);
+    CHECK(soft>hard+5);CHECK(soft>contact+5);
+    const auto smallLit=f.sampleShadow(.5f,.05f,false,false),smallDark=f.sampleShadow(.5f,.05f,false,false,false,true),smallSoft=f.sampleShadow(.5f,.05f,true,true);
+    const int smallPenumbraPixels=partial(smallSoft,smallLit,smallDark,.5f);std::fprintf(stderr,"[PCSS aperture] small=%d large=%d\n",smallPenumbraPixels,soft);CHECK(soft>smallPenumbraPixels+5);
+    const auto clearFog=f.sampleShadow(.5f,.2f,false,false,true),hardFog=f.sampleShadow(.5f,.2f,false,true,true),softFog=f.sampleShadow(.5f,.2f,true,true,true);
+    double difference=0;for(size_t i=0;i<softFog.size();i+=4)difference+=std::abs(int(softFog[i])-int(hardFog[i]));
+    std::fprintf(stderr,"[PCSS fog] clear=%.0f hard=%.0f soft=%.0f difference=%.0f\n",emitterRedEnergy(clearFog),emitterRedEnergy(hardFog),emitterRedEnergy(softFog),difference);
+    CHECK(difference>10);CHECK(emitterRedEnergy(softFog)<=emitterRedEnergy(clearFog)+100);
 #else
     SKIP_TEST("Windows real-device acceptance required");
 #endif

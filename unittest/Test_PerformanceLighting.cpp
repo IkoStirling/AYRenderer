@@ -7,6 +7,7 @@
 #include <AYShader/Phoskia.h>
 #include <AYShader/IR.h>
 #include <AYTest.h>
+#include "detail/SpotShadowProjection.h"
 #include <limits>
 #include <cmath>
 
@@ -373,5 +374,23 @@ TEST_CASE(invalid_settings_preserve_output_and_point_or_zero_exit_have_no_body) 
     settings.hoodLength=0;CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(stats.parts==1);
     p.apertureRadius=0;CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(draws.empty());
     p.light.type=LightType::Point;p.volumetric=0;p.apertureRadius=.2f;CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(draws.empty());
+}
+TEST_SUITE_END
+
+TEST_SUITE(AreaShadowTests)
+TEST_CASE(spot_depth_reconstruction_and_parallel_plane_penumbra) {
+    const auto projection=ayt::render::detail::spotShadowProjection(.95f,30);
+    CHECK(std::abs(projection.nearZ-.3f)<1e-6);CHECK(projection.farZ==30);
+    for(float z:{.3f,1.f,5.f,20.f,30.f}){
+        const auto matrix=ayt::math::lh::perspective(projection.fov,1,projection.nearZ,projection.farZ);
+        const auto clip=matrix*ayt::math::FVector4(0,0,z,1);const float encoded=clip.z/clip.w*.5f+.5f;
+        CHECK(std::abs(ayt::render::detail::spotShadowDistance(encoded,projection.nearZ,projection.farZ)-z)<z*1e-4f);
+    }
+    CHECK(performanceShadowPenumbra(.2f,5,5)==0);CHECK(std::abs(performanceShadowPenumbra(.2f,10,5)-.2f)<1e-6);
+    CHECK(std::abs(performanceShadowPenumbra(.4f,10,5)-.4f)<1e-6);CHECK(performanceShadowPenumbra(.2f,15,5)>.39f);
+    CHECK(performanceShadowPenumbra(.2f,10,0)==0);CHECK(performanceShadowPenumbra(.2f,4,5)==0);
+    auto p=light(1);p.light.castShadow=true;p.apertureRadius=.2f;PerformanceLighting packet;CHECK(packet.assign({&p,1},{}));const auto legacy=packet.shadowSources.lights[0].coneCosOuter;
+    p.areaShadow=true;CHECK(packet.assign({&p,1},{}));CHECK(packet.shadowSources.lights[0].coneCosOuter<legacy);
+    p.areaShadowBias=-1;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].areaShadow);
 }
 TEST_SUITE_END

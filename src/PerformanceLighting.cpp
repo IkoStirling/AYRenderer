@@ -1,4 +1,5 @@
 #include <AYRenderer/PerformanceLighting.h>
+#include "detail/SpotShadowProjection.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -22,10 +23,10 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
             || !finite(entry.patternFocus,0,1) || !finite(entry.iris,.01f,1)
             || !finite(entry.apertureRadius,0,1) || !finite(entry.shadowSoftness,0,4)
             || (l.type==LightType::Point&&(l.castShadow||entry.volumetric!=0||entry.pattern!=LightPattern::Open||entry.constantFlux))
-            || !finite(entry.focusDistance,0,10000)||entry.prismCount<1||entry.prismCount>8
+            || !finite(entry.areaShadowBias,0,.1f)|| !finite(entry.focusDistance,0,10000)||entry.prismCount<1||entry.prismCount>8
             || !finite(entry.prismAngle,0,.35f)||!finite(entry.prismRotation,-100000,100000)
             || (l.type==LightType::Spot&&entry.prismAngle>0&&std::acos(l.coneCosOuter)+entry.prismAngle>1.56f)
-            || (l.type==LightType::Point&&(entry.prismCount!=1||entry.focusDistance!=0))
+            || (l.type==LightType::Point&&(entry.prismCount!=1||entry.focusDistance!=0||entry.areaShadow))
             || entry.intensityUnit>LightIntensityUnit::Lumen
             || (bool(entry.iesProfile)!=entry.iesTexture.isValid())
             || (entry.iesProfile&&(l.type!=LightType::Spot||entry.iesProfile->peakCandela()<=0))
@@ -51,6 +52,11 @@ bool PerformanceLighting::assign(std::span<const PerformanceLight> source, Perfo
             next.shadowSlots[i]=static_cast<int32_t>(next.shadowSources.count);
             Light shadow=light;shadow.color={0,0,0};
             if(next.lights[i].prismCount>1)shadow.coneCosOuter=std::cos(std::acos(light.coneCosOuter)+next.lights[i].prismAngle);
+            if(next.lights[i].areaShadow&&next.lights[i].apertureRadius>0){
+                const auto projection=detail::spotShadowProjection(shadow.coneCosOuter,shadow.range);
+                const float slope=std::tan(std::acos(shadow.coneCosOuter))+next.lights[i].apertureRadius*next.lights[i].iris/projection.nearZ;
+                shadow.coneCosOuter=std::cos(std::min(std::atan(slope),1.527163095f));
+            }
             next.shadowSources.add(shadow);
         }
     }
@@ -66,6 +72,10 @@ float performanceLightFluxScale(const PerformanceLight& light) noexcept {
     constexpr double reference=2.0-0.9993908270190958-0.9986295347545738;
     const double solidAngle=2.0-double(light.light.coneCosInner)-double(light.light.coneCosOuter);
     return float(reference/std::max(solidAngle,1e-9));
+}
+float performanceShadowPenumbra(float radius,float receiver,float blocker) noexcept {
+    if(!std::isfinite(radius)||!std::isfinite(receiver)||!std::isfinite(blocker)||radius<0||blocker<=0||receiver<=blocker)return 0;
+    return float(std::min(double(radius)*(receiver-blocker)/blocker,1e30));
 }
 float performanceLightIntensity(const PerformanceLight& entry) noexcept {
     if(entry.intensityUnit==LightIntensityUnit::Legacy)return entry.light.intensity*performanceLightFluxScale(entry);

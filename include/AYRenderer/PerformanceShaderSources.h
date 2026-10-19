@@ -2,6 +2,17 @@
 #include <string>
 namespace ayt::render {
 inline constexpr const char* kPerformancePatternSource=R"(
+fn performanceShadowOffset(index:int, count:float):vec2 {
+ let angle=float(index)*6.283185307/count
+ let radius=0.35+0.55*(float(index)-floor(float(index)*0.5)*2.0)
+ return vec2(cos(angle),sin(angle))*radius
+}
+fn performanceShadowDistance(encoded:float, area:vec4):float {
+ return area.y*area.z/max(area.z-(encoded*2.0-1.0)*(area.z-area.y),0.00000001)
+}
+fn performancePenumbraRadius(radius:float, receiver:float, blocker:float):float {
+ return radius*max(receiver-blocker,0.0)/max(blocker,0.00001)
+}
 fn performanceIesUv(delta:vec3, axis:vec3, right:vec3, up:vec3):vec2 {
  let d=delta/max(length(delta),0.00001)
  let theta=acos(clamp(dot(d,axis),-1.0,1.0))*0.318309886
@@ -127,6 +138,8 @@ material PerformanceSurface {
  uniform vec4 performanceUp
  uniform vec4 performancePatternSettings
  uniform vec4 performanceLens
+ uniform vec4 performanceShadowArea
+ uniform vec4 performanceShadowAreaOptions
  uniform vec4 performanceIesSettings
  uniform vec4 performancePatternOptics
  uniform vec4 performanceEye
@@ -198,7 +211,38 @@ material PerformanceSurface {
    let ref=q.z*0.5+0.5
    if(clip.w>0.0 && localUv.x>=0.0 && localUv.x<=1.0 && localUv.y>=0.0 && localUv.y<=1.0 && ref>=0.0 && ref<=1.0){
     let shadowUv=mix(performanceShadowRect.xy,performanceShadowRect.zw,localUv)
-    if(performanceShadowSettings.z<0.001){
+    if(performanceShadowArea.x>0.0){
+     let tile=performanceShadowRect.zw-performanceShadowRect.xy
+     let edge=vec2(performanceShadowAreaOptions.y*0.5)
+     let receiver=max(clip.w,performanceShadowArea.y)
+     let searchUv=performanceShadowArea.x*max(receiver-performanceShadowArea.y,0.0)/max(2.0*performanceShadowArea.w*performanceShadowArea.y*receiver,0.00001)
+     let search=vec2(min(performanceShadowAreaOptions.w*performanceShadowAreaOptions.y,tile.x*searchUv),min(performanceShadowAreaOptions.w*performanceShadowAreaOptions.y,tile.y*searchUv))
+     let blockerSum=0.0;let blockers=0.0
+     let centerDepth=sampleLod(shadowAtlas,shadowUv,0.0).r
+     let centerDistance=performanceShadowDistance(centerDepth,performanceShadowArea)
+     if(centerDepth<0.999999 && centerDistance+performanceShadowAreaOptions.z<receiver){blockerSum=centerDistance;blockers=1.0}
+     for(blockerTap in range(int(performanceShadowAreaOptions.x),16)){
+      let tap=clamp(shadowUv+performanceShadowOffset(blockerTap,performanceShadowAreaOptions.x)*search,performanceShadowRect.xy+edge,performanceShadowRect.zw-edge)
+      let depth=sampleLod(shadowAtlas,tap,0.0).r
+      let distance=performanceShadowDistance(depth,performanceShadowArea)
+      if(depth<0.999999 && distance+performanceShadowAreaOptions.z<receiver){blockerSum=blockerSum+distance;blockers=blockers+1.0}
+     }
+     visibility=1.0
+     if(blockers>0.5){
+      let blocker=blockerSum/blockers
+      let worldRadius=performancePenumbraRadius(performanceShadowArea.x,receiver,blocker)
+      let radiusUv=worldRadius/max(2.0*performanceShadowArea.w*receiver,0.00001)
+      let radius=vec2(max(performanceShadowSettings.z*performanceShadowAreaOptions.y,min(performanceShadowAreaOptions.w*performanceShadowAreaOptions.y,tile.x*radiusUv)),max(performanceShadowSettings.z*performanceShadowAreaOptions.y,min(performanceShadowAreaOptions.w*performanceShadowAreaOptions.y,tile.y*radiusUv)))
+      let soft=0.0
+      for(filterTap in range(int(performanceShadowAreaOptions.x),16)){
+       let tap=clamp(shadowUv+performanceShadowOffset(filterTap,performanceShadowAreaOptions.x)*radius,performanceShadowRect.xy+edge,performanceShadowRect.zw-edge)
+       let depth=sampleLod(shadowAtlas,tap,0.0).r
+       let distance=performanceShadowDistance(depth,performanceShadowArea)
+       soft=soft+max(step(receiver-performanceShadowAreaOptions.z,distance),step(0.999999,depth))
+      }
+      visibility=soft/performanceShadowAreaOptions.x
+     }
+    } else if(performanceShadowSettings.z<0.001){
      let depth=sampleLod(shadowAtlas,shadowUv,0.0).r
      visibility=max(1.0-step(depth+performanceShadowSettings.y,ref),step(0.999,depth))
     } else {

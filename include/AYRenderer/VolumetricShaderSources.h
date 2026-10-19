@@ -1,7 +1,7 @@
 #pragma once
 #include "AYRenderer/PerformanceShaderSources.h"
 namespace ayt::render {
-inline constexpr char kVolumetricCacheKey[]="volumetric_v12_lens_prism";
+inline constexpr char kVolumetricCacheKey[]="volumetric_v13_area_shadow";
 inline const std::string kVolumetricPhoskiaOwned=std::string(kPerformancePatternSource)+R"PHOSKIA(
 material Volumetric {
  texture2d sceneColor
@@ -32,6 +32,8 @@ material Volumetric {
  uniform vec4 fogSpot
  uniform vec4 fogPatternSettings
  uniform vec4 fogLens
+ uniform vec4 fogShadowArea
+ uniform vec4 fogShadowAreaOptions
  uniform vec4 fogIesSettings
  uniform vec4 fogPatternOptics
  uniform vec4 fogPatternRight
@@ -181,7 +183,38 @@ material Volumetric {
     let ref=q.z*0.5+0.5
     if(clip.w>0.0 && localUv.x>=0.0 && localUv.x<=1.0 && localUv.y>=0.0 && localUv.y<=1.0 && ref>=0.0 && ref<=1.0) {
      let shadowUv=mix(rect.xy,rect.zw,localUv)
-     if(fogPatternOptics.z<0.001){
+     if(fogShadowArea.x>0.0){
+     let tile=rect.zw-rect.xy
+     let edge=vec2(fogShadowAreaOptions.y*0.5)
+     let receiver=max(clip.w,fogShadowArea.y)
+     let searchUv=fogShadowArea.x*max(receiver-fogShadowArea.y,0.0)/max(2.0*fogShadowArea.w*fogShadowArea.y*receiver,0.00001)
+     let search=vec2(min(fogShadowAreaOptions.w*fogShadowAreaOptions.y,tile.x*searchUv),min(fogShadowAreaOptions.w*fogShadowAreaOptions.y,tile.y*searchUv))
+     let blockerSum=0.0;let blockers=0.0
+     let centerDepth=sampleLod(shadowAtlas,shadowUv,0.0).r
+     let centerDistance=performanceShadowDistance(centerDepth,fogShadowArea)
+     if(centerDepth<0.999999 && centerDistance+fogShadowAreaOptions.z<receiver){blockerSum=centerDistance;blockers=1.0}
+     for(blockerTap in range(int(fogShadowAreaOptions.x),16)){
+      let tap=clamp(shadowUv+performanceShadowOffset(blockerTap,fogShadowAreaOptions.x)*search,rect.xy+edge,rect.zw-edge)
+      let depth=sampleLod(shadowAtlas,tap,0.0).r
+      let distance=performanceShadowDistance(depth,fogShadowArea)
+      if(depth<0.999999 && distance+fogShadowAreaOptions.z<receiver){blockerSum=blockerSum+distance;blockers=blockers+1.0}
+     }
+     visibility=1.0
+     if(blockers>0.5){
+      let blocker=blockerSum/blockers
+      let worldRadius=performancePenumbraRadius(fogShadowArea.x,receiver,blocker)
+      let radiusUv=worldRadius/max(2.0*fogShadowArea.w*receiver,0.00001)
+      let radius=vec2(max(fogPatternOptics.z*fogShadowAreaOptions.y,min(fogShadowAreaOptions.w*fogShadowAreaOptions.y,tile.x*radiusUv)),max(fogPatternOptics.z*fogShadowAreaOptions.y,min(fogShadowAreaOptions.w*fogShadowAreaOptions.y,tile.y*radiusUv)))
+      let soft=0.0
+      for(filterTap in range(int(fogShadowAreaOptions.x),16)){
+       let tap=clamp(shadowUv+performanceShadowOffset(filterTap,fogShadowAreaOptions.x)*radius,rect.xy+edge,rect.zw-edge)
+       let depth=sampleLod(shadowAtlas,tap,0.0).r
+       let distance=performanceShadowDistance(depth,fogShadowArea)
+       soft=soft+max(step(receiver-fogShadowAreaOptions.z,distance),step(0.999999,depth))
+      }
+      visibility=soft/fogShadowAreaOptions.x
+     }
+    } else if(fogPatternOptics.z<0.001){
       let depth=sampleLod(shadowAtlas,shadowUv,0.0).r
       visibility=max(1.0-step(depth+fogShadowParams.z,ref),step(0.999,depth))
      } else {

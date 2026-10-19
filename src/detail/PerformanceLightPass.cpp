@@ -2,6 +2,7 @@
 #include "detail/PassExecContext.h"
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/ShadowPass.h"
+#include "detail/SpotShadowProjection.h"
 #include "detail/BgfxMatrix.h"
 #include <AYRenderer/PerformanceShaderSources.h>
 #include <algorithm>
@@ -13,7 +14,7 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         || !ctx.adapter.isInitialized() || ctx.adapter.isNoopBackend())return 0;
     BlackboardGBufferView gb;
     if(!ctx.resourceBlackboard->resolveGBuffer(gb) || !_geometry.ensure(ctx.adapter))return 0;
-    if(!_program.isValid())_program=ctx.pool.acquire(kPerformanceSurfaceSource,"performance_surface_v8_lens_prism");
+    if(!_program.isValid())_program=ctx.pool.acquire(kPerformanceSurfaceSource,"performance_surface_v9_area_shadow");
     if(!_program.isValid())return 0;
     bool valid=true;
     const auto texture=[&](const char* name,bgfx::TextureHandle handle){
@@ -75,6 +76,9 @@ uint32_t PerformanceLightPass::execute(PassExecContext& ctx) {
         uniform("performanceShadow",matrix,64);uniform("performanceShadowRect",shadowRect,16);
         const float texel=shadowed?1.f/float(ctx.shadowPass->shadowSampleMapSize()):0.f;
         vector("performanceShadowSettings",shadowed?1.f:0.f,bias,entry.shadowSoftness,texel);texture("shadowAtlas",shadowTexture);
+        const auto shadowProjection=spotShadowProjection(slot>=0?packet.shadowSources.lights[slot].coneCosOuter:l.coneCosOuter,l.range);
+        vector("performanceShadowArea",entry.areaShadow&&shadowed?entry.apertureRadius*entry.iris:0.f,shadowProjection.nearZ,shadowProjection.farZ,shadowProjection.tanHalfFov);
+        vector("performanceShadowAreaOptions",16,texel,entry.areaShadowBias,32);
         if(!valid)break;
         _geometry.bind(ctx.adapter);
         ctx.adapter.setDrawScissor(rect.x,rect.y,rect.width,rect.height);

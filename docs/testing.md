@@ -551,3 +551,9 @@ initialization failure in a concurrent run. SDK127/53/86/544 passed; owned inven
 opaque occlusion with dark-body baseline subtraction. Studio housing/shade/disabled smokes passed;
 invalid dimensions exit2. SDK127/53/87/545 passed; inventory1014/10. No production shader
 source changed; shared PBR/particle variants remain68.
+
+
+2026-10-19 PCSS stage: Contracts161/1373, LightingShadow137/1478, Sequence107/3902,
+production shaders12/208 (68 variants); each D3D backend7/306. GPU partial-shadow pixels:
+contact0, legacy hard0, large pupil350, small pupil90; volume hard/soft difference48 and bounded by
+unshadowed energy. Studio new/legacy smokes passed. SDK127/53/88/545 and inventory1016/10 passed.

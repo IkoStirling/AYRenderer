@@ -44,6 +44,13 @@ struct PerformanceLight {
     /// Geometric image focus distance in meters/world units, [0,10000]; zero
     /// preserves legacy focus. Finite pupil yields a distance-dependent blur.
     float focusDistance=0;
+    /// Optional bounded PCSS: pupil radius=apertureRadius*iris. Blocker search
+    /// and distance-dependent penumbra approximate a finite area emitter;
+    /// legacy hard/2x2 PCF remains the default. Needs castShadow and a slot.
+    bool areaShadow=false;
+    /// Receiver/blocker comparison tolerance in world units, [0,.1], used only
+    /// by PCSS. Legacy light.shadowBias remains an NDC bias for hard/PCF.
+    float areaShadowBias=.003f;
     /// One (disabled) or2..8 equal-energy prism lobes. Each keeps the authored
     /// cone and shares intensity/count; tilt is [0,.35] radians about the axis.
     uint8_t prismCount=1;
@@ -76,6 +83,9 @@ struct PerformanceLighting {
 struct LightScreenRect { uint16_t x=0,y=0,width=0,height=0; bool visible=false; };
 /// Radiant intensity multiplier shared by surface and volume; Point returns1.
 float performanceLightFluxScale(const PerformanceLight& light) noexcept;
+/// Parallel-plane penumbra radius in world units; zero at contact. Invalid
+/// inputs or a receiver in front of the blocker produce0.
+float performanceShadowPenumbra(float sourceRadius,float receiverDistance,float blockerDistance) noexcept;
 /// Resolve physical/legacy units to the shared scene-linear intensity.
 /// No range fade, inverse square, mask, or exposure is applied here.
 float performanceLightIntensity(const PerformanceLight& light) noexcept;

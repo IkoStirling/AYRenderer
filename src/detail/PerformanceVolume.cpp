@@ -5,6 +5,7 @@
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/SceneColorPipeline.h"
 #include "detail/ShadowPass.h"
+#include "detail/SpotShadowProjection.h"
 #include <AYRenderer/VolumetricShaderSources.h>
 #include <algorithm>
 #include <cmath>
@@ -99,6 +100,9 @@ uint32_t VolumetricPass::executePerformance(PassExecContext& ctx) {
         for(const auto* name:{"fogShadow0","fogShadow1","fogShadow2"})uniform(name,matrix,64);
         for(const auto* name:{"fogShadowRect0","fogShadowRect1","fogShadowRect2"})uniform(name,sr,16);
         vector("fogShadowParams",0,0,bias,shadowed?1.f:0.f);texture("shadowAtlas",shadow);
+        const auto shadowProjection=spotShadowProjection(slot>=0?packet.shadowSources.lights[slot].coneCosOuter:light.coneCosOuter,light.range);
+        vector("fogShadowArea",entry.areaShadow&&shadowed?entry.apertureRadius*entry.iris:0.f,shadowProjection.nearZ,shadowProjection.farZ,shadowProjection.tanHalfFov);
+        vector("fogShadowAreaOptions",8,shadowTexel,entry.areaShadowBias,32);
         if(!valid){adapter.resetDrawScissor();return draws;}
         _geometry.bind(adapter);adapter.setDrawScissor(rect.x,rect.y,rect.width,rect.height);
         if(extinction)adapter.setStateDepthTestAlways();
