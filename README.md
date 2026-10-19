@@ -1,5 +1,19 @@
 # AYRenderer
 
+## 主呈现文档与缓存生命周期（2026-10-20）
+
+高级宿主可用 RendererSubSystem::setMainPresentationForOwner 临时替代 World 与独立
+相机视图，在主管线提交一次 RenderScene，包含完整 Deferred 扩展灯。匹配 owner 的
+clear、owner 替换和 shutdown 恢复捕获的相机、灯包、雾/密度绑定、天空、镜头/曝光、
+后处理开关、编辑器叠加、管线与视口并使时域历史失效；无关 owner 的 clear 不生效。
+提交线程内使用，回调期间递归 set/clear 被忽略，不创建额外渲染帧。
+这是文档宿主接缝，独立 CameraRenderView 仍保持 Forward 契约。
+
+EmissivePointCloud/FixtureEmitters/FixtureHousings 的 releaseResources 可显式回收
+同一存活 Renderer 上的缓存。先撤下所有借用/保留 draw packet，丢弃共享句柄的 facade 副本；
+调用幂等，选项可复用，设备重建仍须重建 facade。GPU诊断 host packets 继续异步托管。
+
+
 ## 聚光灯数组与 HDR 发光点（2026-10-17）
 
 主Deferred的setPerformanceLights复制最多256个Spot，表面/体积/阴影独立预算，

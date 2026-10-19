@@ -32,6 +32,12 @@ bool buildFixtureHousingDraws(std::span<const PerformanceLight> lights,
 /// transforms only, so retained scenes never lose previously created meshes.
 class FixtureHousings final {
 public:
+    /// Owner-thread explicit cache release for document hosts. Detach all draw
+    /// packets first; renderer must be the same live device used by append.
+    /// Discard facade copies sharing these handles before release. Idempotent;
+    /// options remain reusable, borrowed batches become invalid.
+    void releaseResources(Renderer& renderer);
+
     bool append(Renderer& renderer,RenderScene& scene,std::span<const PerformanceLight> lights,
         FixtureHousingSettings settings={},std::string* error=nullptr);
     FixtureHousingStats stats() const noexcept {return _stats;}

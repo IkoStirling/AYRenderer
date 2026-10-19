@@ -1,5 +1,19 @@
 # AYRenderer Design
 
+## 2026-10-20 单 owner 主呈现
+
+RendererSubSystem 在 renderScenePass 开头优先主呈现 owner，跳过 World、主相机同步、
+可见性过滤与多 CameraRenderView 提取；回调填充 OwnedCpu scene 后主 Renderer 只提交一次。
+首次提交时 Renderer::Impl 保存呈现值快照，callback 期间拒绝重入 set/clear。
+匹配解绑清 scene、失效提取缓存、还原值、重建原 pipeline、重新绑定天空 cube，并恢复宿主视口。
+异常路径同样解绑/恢复后继续抛出，shutdown 在设备资源销毁前收回租约。
+时域GPU历史不复制，切换明确失效；渲染资源的创建/销毁和未列入呈现快照的业务状态仍归宿主。
+
+文档缓存显式 releaseResources：GPU点阵 state 先释放，由 context 保留排队 readback 目的地；
+随后销毁 facade 创建的 mesh/material/texture。保留 packet 或共享 facade 副本须先撤下。
+Renderer::destroyTexture 只清同句柄密度绑定，文档释放不会清除已经恢复的宿主密度场。
+
+
 ## 2026-10-17 — 聚光灯数组与批量发光点
 
 PerformanceLighting复制并校验最多256个Spot，独立表面/体积/阴影预算；旧八灯结构保持兼容，

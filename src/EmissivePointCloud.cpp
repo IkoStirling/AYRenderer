@@ -12,6 +12,16 @@
 #include <cstring>
 
 namespace ayt::render {
+void EmissivePointCloud::releaseResources(Renderer& renderer){
+    if(_renderer!=&renderer)return;
+    _gpuState.reset();_batches.clear();
+    renderer.destroyMesh(_quad);
+    renderer.destroyTexture(_texture);
+    renderer.destroyMaterial(_material);
+    renderer.destroyMaterial(_instancedMaterial);
+    _renderer=nullptr;_stats={};
+}
+
 namespace {
 struct VisiblePoint { std::size_t index; float radius,energy; std::uint32_t rank; };
 struct PointSelection {

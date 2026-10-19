@@ -91,5 +91,44 @@ TEST_CASE(subsystem_extracts_each_view_with_matching_aspect_and_restores_primary
     sub.clearSceneBuildersForOwner(&owner); observed.clear(); sub.update(0); CHECK(observed.empty());
     CHECK(sub.setCameraViewports({})); CHECK(sub.cameraViewports().empty()); sub.shutdown();
 }
+
+TEST_CASE(main_presentation_owner_replaces_world_and_restores_host_state) {
+    int window=0,owner=0,other=0;
+    RendererSubSystem::setWindowProvider({});RendererSubSystem::setBootstrapBackend(Backend::Noop);
+    RendererSubSystem::setBootstrapWindow(&window,320,240);RendererSubSystem::setBootstrapViewport(12,16,280,200);
+    RendererSubSystem sub;CHECK(sub.initialize());auto& renderer=sub.renderer();
+    renderer.setAmbientStrength(.37f);renderer.setDepthHazeEnabled(true);renderer.setSsaoEnabled(true);renderer.setColorGradingEnabled(true);renderer.setTaaEnabled(true);VolumetricSettings hostFog;hostFog.enabled=true;hostFog.density=.123f;renderer.setVolumetricSettings(hostFog);
+    renderer.setMainCameraLookAtPerspective({2,3,-4},{0,0,0},{0,1,0},50,1.4f,.1f,100);
+    const auto eye=renderer.mainCameraPosition();
+    PerformanceLight hostLight;hostLight.id=777;hostLight.light.type=LightType::Spot;hostLight.light.range=20;hostLight.light.coneCosInner=.98f;hostLight.light.coneCosOuter=.95f;hostLight.light.intensity=3;
+    CHECK(renderer.setPerformanceLights(std::span<const PerformanceLight>(&hostLight,1)));
+    int worldCalls=0,previewCalls=0;sub.setSceneBuilder([&](RenderScene&){++worldCalls;});
+    sub.setMainPresentationForOwner(&owner,[&](Renderer& r,RenderScene&){
+        sub.clearMainPresentationForOwner(&owner);CHECK(sub.hasMainPresentation());sub.setMainPresentationForOwner(&other,[](Renderer&,RenderScene&){CHECK(false);});
+        ++previewCalls;r.setDepthHazeEnabled(false);r.setSsaoEnabled(false);r.setColorGradingEnabled(false);r.setFxaaEnabled(true);r.configurePipeline(RenderPipelineDesc::makeDeferred());r.setAmbientStrength(.02f);
+        auto fog=r.volumetricSettings();fog.density=.8f;r.setVolumetricSettings(fog);
+        r.setMainCameraLookAtPerspective({30,40,-50},{0,0,0},{0,1,0},50,1,.1f,100);
+        r.setPerformanceLights({});r.setDebugOverlayEnabled(true);r.setDebugOverlaySuppressed(true);
+    });
+    CHECK(sub.hasMainPresentation());sub.setViewportRect(30,40,120,100);sub.update(0);CHECK(worldCalls==0);
+    sub.renderCompositeFrame(true,nullptr,[](bool,CompositeUiPhase){});
+    CHECK(previewCalls==1);CHECK(worldCalls==0);CHECK(renderer.pipelineDesc().path==RenderPath::Deferred);
+    CHECK_FLOAT_EQ(renderer.volumetricSettings().density,.8f,1e-6f);CHECK(renderer.performanceLightStats().sourceLights==0);
+    sub.clearMainPresentationForOwner(&other);CHECK(sub.hasMainPresentation());
+    sub.clearMainPresentationForOwner(&owner);CHECK_FALSE(sub.hasMainPresentation());
+    CHECK(renderer.depthHazeEnabled());CHECK(renderer.ssaoEnabled());CHECK(renderer.colorGradingEnabled());CHECK(renderer.taaEnabled());CHECK_FALSE(renderer.fxaaEnabled());
+    CHECK(renderer.pipelineDesc().path==RenderPath::Forward);CHECK_FLOAT_EQ(renderer.ambientStrength(),.37f,1e-6f);
+    CHECK_FLOAT_EQ(renderer.volumetricSettings().density,.123f,1e-6f);CHECK(renderer.performanceLightStats().sourceLights==1);
+    CHECK_FALSE(renderer.isDebugOverlayEnabled());CHECK_FALSE(renderer.isDebugOverlaySuppressed());
+    CHECK(sub.viewportWidth()==280);CHECK(sub.viewportHeight()==200);
+    // Camera override resumes the host's main camera contract; extraction is fresh.
+    sub.update(0);CHECK(worldCalls==1);
+    sub.setMainPresentationForOwner(&owner,[](Renderer& r,RenderScene&){r.setAmbientStrength(.01f);});
+    sub.renderCompositeFrame(true,nullptr,[](bool,CompositeUiPhase){});
+    sub.setMainPresentationForOwner(&other,[](Renderer& r,RenderScene&){CHECK_FLOAT_EQ(r.ambientStrength(),.37f,1e-6f);});
+    sub.clearMainPresentationForOwner(&owner);CHECK(sub.hasMainPresentation());
+    sub.renderCompositeFrame(true,nullptr,[](bool,CompositeUiPhase){});
+    sub.shutdown();CHECK_FALSE(sub.hasMainPresentation());
+}
 TEST_SUITE_END
 }

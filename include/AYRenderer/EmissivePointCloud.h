@@ -102,6 +102,12 @@ bool buildEmissivePointInstanceBatches(std::span<const EmissivePoint> points,
 /// Persistent owner-thread facade for reusable HDR point-cloud batches.
 class EmissivePointCloud final {
 public:
+    /// Owner-thread explicit cache release for document hosts. Detach all draw
+    /// packets first; renderer must be the same live device used by append.
+    /// Discard facade copies sharing these handles before release. Idempotent;
+    /// options remain reusable, borrowed batches become invalid.
+    void releaseResources(Renderer& renderer);
+
     /// Renderer owns cached GPU assets. Prepare/append/render on its owner thread.
     /// Borrowed scene payloads live until this object's next append/destruction;
     /// use an OwnedCpu RenderScene when retaining frames. Renderer must outlive use.

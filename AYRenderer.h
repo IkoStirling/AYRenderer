@@ -634,6 +634,8 @@ public:
 private:
     friend class UIRenderBackend;
     friend class EmissivePointCloud;
+    void beginMainPresentation();
+    void endMainPresentation();
     std::shared_ptr<detail::GpuPointState> createGpuPointState(std::string* error);
     bool cameraOutputMatches(CameraOutputHandle output, uint16_t width, uint16_t height) const noexcept;
     void renderPreviewScene(const RenderScene& scene, const PreviewSceneCamera& camera,

@@ -36,6 +36,12 @@ bool buildFixtureEmitterBatch(std::span<const PerformanceLight> lights,
 /// uses scene depth, no depth writes, and enters existing exposure/Bloom paths.
 class FixtureEmitters final {
 public:
+    /// Owner-thread explicit cache release for document hosts. Detach all draw
+    /// packets first; renderer must be the same live device used by append.
+    /// Discard facade copies sharing these handles before release. Idempotent;
+    /// options remain reusable, borrowed batches become invalid.
+    void releaseResources(Renderer& renderer);
+
     bool append(Renderer& renderer,RenderScene& scene,std::span<const PerformanceLight> lights,
         const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
         FixtureEmitterSettings settings={},std::string* error=nullptr);

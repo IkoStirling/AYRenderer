@@ -5,6 +5,15 @@
 #include <cmath>
 #include <numbers>
 namespace ayt::render {
+void FixtureEmitters::releaseResources(Renderer& renderer){
+    if(_renderer!=&renderer)return;
+    _batch={};
+    renderer.destroyMesh(_quad);
+    renderer.destroyTexture(_texture);
+    renderer.destroyMaterial(_material);
+    _renderer=nullptr;_stats={};
+}
+
 namespace {
 float smooth(float a,float b,float v){const float t=std::clamp((v-a)/(b-a),0.f,1.f);return t*t*(3-2*t);}
 float transmission(const math::FVector3& origin,const math::FVector3& target,VolumetricSettings fog,const VolumetricDensityField* field){

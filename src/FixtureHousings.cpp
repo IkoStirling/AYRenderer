@@ -4,6 +4,16 @@
 #include <cmath>
 #include <numbers>
 namespace ayt::render {
+void FixtureHousings::releaseResources(Renderer& renderer){
+    if(_renderer!=&renderer)return;
+    _draws.clear();
+    renderer.destroyMesh(_body);
+    renderer.destroyMesh(_hood);
+    renderer.destroyMesh(_leaf);
+    renderer.destroyMaterial(_material);
+    _renderer=nullptr;_stats={};
+}
+
 namespace {
 math::Float4x4 transform(math::FVector3 position,math::FVector3 right,math::FVector3 up,math::FVector3 axis){
     auto m=math::Float4x4::identity();

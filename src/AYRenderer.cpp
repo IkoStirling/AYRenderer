@@ -650,6 +650,56 @@ struct Renderer::Impl {
     uint16_t                      viewportW = 0;
     uint16_t                      viewportH = 0;
 
+    struct MainPresentationState {
+        RenderPipelineDesc pipeline;
+        bool overlayEnabled=false,overlaySuppressed=false;
+        decltype(Impl::depthHazeEnabled) depthHazeEnabled;
+        decltype(Impl::ssaoEnabled) ssaoEnabled;
+        decltype(Impl::gbufferDebugEnabled) gbufferDebugEnabled;
+        decltype(Impl::decalsEnabled) decalsEnabled;
+        decltype(Impl::colorGradingEnabled) colorGradingEnabled;
+        decltype(Impl::fxaaEnabled) fxaaEnabled;
+        decltype(Impl::smaaEnabled) smaaEnabled;
+        decltype(Impl::taaEnabled) taaEnabled;
+        decltype(Impl::mainView) mainView;
+        decltype(Impl::mainProjection) mainProjection;
+        decltype(Impl::mainCameraValid) mainCameraValid;
+        decltype(Impl::mainCameraPosition) mainCameraPosition;
+        decltype(Impl::performance) performance;
+        decltype(Impl::sceneLights) sceneLights;
+        decltype(Impl::skySource) skySource;
+        decltype(Impl::skyCubeTexture) skyCubeTexture;
+        decltype(Impl::ambientStrength) ambientStrength;
+        decltype(Impl::lensEffects) lensEffects;
+        decltype(Impl::postProcessBloomStrength) postProcessBloomStrength;
+        decltype(Impl::postProcessBloomThreshold) postProcessBloomThreshold;
+        decltype(Impl::postProcessBloomSoftKnee) postProcessBloomSoftKnee;
+        decltype(Impl::postProcessExposure) postProcessExposure;
+        decltype(Impl::autoExposureEnabled) autoExposureEnabled;
+        decltype(Impl::autoExposureKey) autoExposureKey;
+        decltype(Impl::autoExposureMinimum) autoExposureMinimum;
+        decltype(Impl::autoExposureMaximum) autoExposureMaximum;
+        decltype(Impl::autoExposureBrightenSpeed) autoExposureBrightenSpeed;
+        decltype(Impl::autoExposureDarkenSpeed) autoExposureDarkenSpeed;
+        decltype(Impl::postProcessGamma) postProcessGamma;
+        decltype(Impl::postProcessTonemapMode) postProcessTonemapMode;
+        decltype(Impl::volumetric) volumetric;
+        decltype(Impl::densityField) densityField;
+        decltype(Impl::requestedVolumetricLocal) requestedVolumetricLocal;
+        decltype(Impl::ssr) ssr;
+        decltype(Impl::screenIndirect) screenIndirect;
+        decltype(Impl::wireframeEnabled) wireframeEnabled;
+        decltype(Impl::viewportOrientationAxisEnabled) viewportOrientationAxisEnabled;
+        decltype(Impl::editorTransformGizmo) editorTransformGizmo;
+        decltype(Impl::editorGrid2D) editorGrid2D;
+        decltype(Impl::editorDebugLines) editorDebugLines;
+        decltype(Impl::editorDebugDepthTest) editorDebugDepthTest;
+        decltype(Impl::editorSelectionOutline2D) editorSelectionOutline2D;
+        decltype(Impl::hasSimulationTime) hasSimulationTime;
+        decltype(Impl::simulationTimeSeconds) simulationTimeSeconds;
+    };
+    std::unique_ptr<MainPresentationState> mainPresentationState;
+
     // -1 = normal (3D on view 0). >=0 = composite scene view (usually 1).
     int                           compositeSceneViewId = -1;
 
@@ -1091,6 +1141,7 @@ void Renderer::shutdown()
     if (!_impl) {
         return;
     }
+    _impl->mainPresentationState.reset();
     _impl->densityField={};_impl->volumetric.local=_impl->requestedVolumetricLocal;
     for (auto& [id, view] : _impl->runtimeViews) {
         (void)id;
@@ -3385,6 +3436,114 @@ ColorGradingPreset Renderer::colorGradingPreset() const noexcept
 }
 
 // SSR host settings survive pipeline replacement, but never store GPU handles.
+void Renderer::beginMainPresentation() {
+    if (!_impl || _impl->mainPresentationState) return;
+    auto saved=std::make_unique<Impl::MainPresentationState>();
+    saved->pipeline=_impl->pipelineDesc;
+    saved->overlayEnabled=_impl->debugOverlay.isEnabled();
+    saved->overlaySuppressed=_impl->debugOverlay.isSuppressed();
+    saved->depthHazeEnabled=_impl->depthHazeEnabled;
+    saved->ssaoEnabled=_impl->ssaoEnabled;
+    saved->gbufferDebugEnabled=_impl->gbufferDebugEnabled;
+    saved->decalsEnabled=_impl->decalsEnabled;
+    saved->colorGradingEnabled=_impl->colorGradingEnabled;
+    saved->fxaaEnabled=_impl->fxaaEnabled;
+    saved->smaaEnabled=_impl->smaaEnabled;
+    saved->taaEnabled=_impl->taaEnabled;
+    saved->mainView=_impl->mainView;
+    saved->mainProjection=_impl->mainProjection;
+    saved->mainCameraValid=_impl->mainCameraValid;
+    saved->mainCameraPosition=_impl->mainCameraPosition;
+    saved->performance=_impl->performance;
+    saved->sceneLights=_impl->sceneLights;
+    saved->skySource=_impl->skySource;
+    saved->skyCubeTexture=_impl->skyCubeTexture;
+    saved->ambientStrength=_impl->ambientStrength;
+    saved->lensEffects=_impl->lensEffects;
+    saved->postProcessBloomStrength=_impl->postProcessBloomStrength;
+    saved->postProcessBloomThreshold=_impl->postProcessBloomThreshold;
+    saved->postProcessBloomSoftKnee=_impl->postProcessBloomSoftKnee;
+    saved->postProcessExposure=_impl->postProcessExposure;
+    saved->autoExposureEnabled=_impl->autoExposureEnabled;
+    saved->autoExposureKey=_impl->autoExposureKey;
+    saved->autoExposureMinimum=_impl->autoExposureMinimum;
+    saved->autoExposureMaximum=_impl->autoExposureMaximum;
+    saved->autoExposureBrightenSpeed=_impl->autoExposureBrightenSpeed;
+    saved->autoExposureDarkenSpeed=_impl->autoExposureDarkenSpeed;
+    saved->postProcessGamma=_impl->postProcessGamma;
+    saved->postProcessTonemapMode=_impl->postProcessTonemapMode;
+    saved->volumetric=_impl->volumetric;
+    saved->densityField=_impl->densityField;
+    saved->requestedVolumetricLocal=_impl->requestedVolumetricLocal;
+    saved->ssr=_impl->ssr;
+    saved->screenIndirect=_impl->screenIndirect;
+    saved->wireframeEnabled=_impl->wireframeEnabled;
+    saved->viewportOrientationAxisEnabled=_impl->viewportOrientationAxisEnabled;
+    saved->editorTransformGizmo=_impl->editorTransformGizmo;
+    saved->editorGrid2D=_impl->editorGrid2D;
+    saved->editorDebugLines=_impl->editorDebugLines;
+    saved->editorDebugDepthTest=_impl->editorDebugDepthTest;
+    saved->editorSelectionOutline2D=_impl->editorSelectionOutline2D;
+    saved->hasSimulationTime=_impl->hasSimulationTime;
+    saved->simulationTimeSeconds=_impl->simulationTimeSeconds;
+    _impl->mainPresentationState=std::move(saved);
+    _impl->invalidateTemporalResources(detail::ResourceInvalidationReason::FeatureDisabled);
+}
+void Renderer::endMainPresentation() {
+    if (!_impl || !_impl->mainPresentationState) return;
+    auto saved=std::move(_impl->mainPresentationState);
+    _impl->depthHazeEnabled=saved->depthHazeEnabled;
+    _impl->ssaoEnabled=saved->ssaoEnabled;
+    _impl->gbufferDebugEnabled=saved->gbufferDebugEnabled;
+    _impl->decalsEnabled=saved->decalsEnabled;
+    _impl->colorGradingEnabled=saved->colorGradingEnabled;
+    _impl->fxaaEnabled=saved->fxaaEnabled;
+    _impl->smaaEnabled=saved->smaaEnabled;
+    _impl->taaEnabled=saved->taaEnabled;
+    _impl->mainView=std::move(saved->mainView);
+    _impl->mainProjection=std::move(saved->mainProjection);
+    _impl->mainCameraValid=std::move(saved->mainCameraValid);
+    _impl->mainCameraPosition=std::move(saved->mainCameraPosition);
+    _impl->performance=std::move(saved->performance);
+    _impl->sceneLights=std::move(saved->sceneLights);
+    _impl->skySource=std::move(saved->skySource);
+    _impl->skyCubeTexture=std::move(saved->skyCubeTexture);
+    _impl->ambientStrength=std::move(saved->ambientStrength);
+    _impl->lensEffects=std::move(saved->lensEffects);
+    _impl->postProcessBloomStrength=std::move(saved->postProcessBloomStrength);
+    _impl->postProcessBloomThreshold=std::move(saved->postProcessBloomThreshold);
+    _impl->postProcessBloomSoftKnee=std::move(saved->postProcessBloomSoftKnee);
+    _impl->postProcessExposure=std::move(saved->postProcessExposure);
+    _impl->autoExposureEnabled=std::move(saved->autoExposureEnabled);
+    _impl->autoExposureKey=std::move(saved->autoExposureKey);
+    _impl->autoExposureMinimum=std::move(saved->autoExposureMinimum);
+    _impl->autoExposureMaximum=std::move(saved->autoExposureMaximum);
+    _impl->autoExposureBrightenSpeed=std::move(saved->autoExposureBrightenSpeed);
+    _impl->autoExposureDarkenSpeed=std::move(saved->autoExposureDarkenSpeed);
+    _impl->postProcessGamma=std::move(saved->postProcessGamma);
+    _impl->postProcessTonemapMode=std::move(saved->postProcessTonemapMode);
+    _impl->volumetric=std::move(saved->volumetric);
+    _impl->densityField=std::move(saved->densityField);
+    _impl->requestedVolumetricLocal=std::move(saved->requestedVolumetricLocal);
+    _impl->ssr=std::move(saved->ssr);
+    _impl->screenIndirect=std::move(saved->screenIndirect);
+    _impl->wireframeEnabled=std::move(saved->wireframeEnabled);
+    _impl->viewportOrientationAxisEnabled=std::move(saved->viewportOrientationAxisEnabled);
+    _impl->editorTransformGizmo=std::move(saved->editorTransformGizmo);
+    _impl->editorGrid2D=std::move(saved->editorGrid2D);
+    _impl->editorDebugLines=std::move(saved->editorDebugLines);
+    _impl->editorDebugDepthTest=std::move(saved->editorDebugDepthTest);
+    _impl->editorSelectionOutline2D=std::move(saved->editorSelectionOutline2D);
+    _impl->hasSimulationTime=std::move(saved->hasSimulationTime);
+    _impl->simulationTimeSeconds=std::move(saved->simulationTimeSeconds);
+    _impl->debugOverlay.setEnabled(saved->overlayEnabled);
+    _impl->debugOverlay.setSuppressed(saved->overlaySuppressed);
+    _impl->applyPipelineDesc(saved->pipeline);
+    setSkySourceCube(_impl->skyCubeTexture);
+    _impl->applyEditorOverlayKnobs();
+    _impl->invalidateTemporalResources(detail::ResourceInvalidationReason::FeatureDisabled);
+}
+
 void Renderer::setVolumetricSettings(const VolumetricSettings& settings) {
     // Independent of decal authoring.
     if (_impl){auto value=sanitizeVolumetricSettings(settings);_impl->requestedVolumetricLocal=value.local;if(_impl->densityField.profile)value.local=true;_impl->volumetric=value;}

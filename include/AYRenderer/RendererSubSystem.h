@@ -115,6 +115,17 @@ public:
     /// the submission owner before geometry extraction; Host override wins.
     /// clearSceneBuildersForOwner also detaches this provider before teardown.
     void setSceneCameraProviderForOwner(const void* owner, SceneCameraProvider provider);
+    /// Advanced single-owner document preview on the main pipeline (including Deferred).
+    /// Runs once on the submission thread, replacing World extraction and runtime
+    /// camera views. Callback/captured resources must live until matching clear.
+    /// Matching clear restores camera, lighting, fog, post effects and pipeline;
+    /// an unrelated owner cannot detach the active preview. Recursive set/clear
+    /// during submission is ignored. Resources and unlisted Renderer setter
+    /// state remain caller-owned. No extra render/frame.
+    using MainPresentationCallback = std::function<void(Renderer&, RenderScene&)>;
+    void setMainPresentationForOwner(const void* owner, MainPresentationCallback callback);
+    void clearMainPresentationForOwner(const void* owner);
+    bool hasMainPresentation() const noexcept { return _mainPresentationOwner != nullptr; }
     Renderer& renderer();
     RenderScene& renderScene();
 
@@ -192,6 +203,10 @@ private:
     // The backend/UI lifecycle remains single submission-thread until phase 2.
     RenderScene        _scene{RenderScene::DrawDataOwnership::OwnedCpu};
     SceneBuildCallback _sceneBuilder;
+    const void* _mainPresentationOwner = nullptr;
+    MainPresentationCallback _mainPresentation;
+    bool _insideMainPresentation=false;
+    uint16_t _presentationViewportX=0,_presentationViewportY=0,_presentationViewportW=0,_presentationViewportH=0;
     struct CameraViewPacket {
         CameraViewportDesc viewport;
         SceneCamera3D camera;
