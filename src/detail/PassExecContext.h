@@ -55,6 +55,7 @@ namespace ayt::render::detail
 // pointer so Forward/Transparent can read it without FrameContext
 // mutability (per docs/execution-plan.md §5.3 + §5.4 E6).
 class ShadowPass;
+struct DeferredDecalVisibility;
 
 // GBufferPass owns the deferred MRT: albedo/metallic, normal/roughness,
 // world-position/packed material data, emissive/coverage, and depth.
@@ -386,6 +387,9 @@ struct PassExecContext {
     bool rigidInstancing = false;
     InstancingStats* instancingStats = nullptr;
     const std::vector<DeferredDecal>* decals = nullptr; // borrowed immutable per-dispatch host copy
+    // Renderer plans once before FrameGraph import. Borrowed until synchronous
+    // dispatch completes; direct pass hosts may omit this and compute locally.
+    const DeferredDecalVisibility* decalVisibility = nullptr;
 
 };
 

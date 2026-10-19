@@ -4,6 +4,7 @@
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/FgResource.h"
+#include "detail/DeferredDecalVisibility.h"
 namespace ayt::render::detail {
 bool DeferredDecalPass::prepare(BGFXAdapter& adapter,uint16_t width,uint16_t height,bgfx::TextureHandle depth,uint32_t generation) {
     if(!adapter.isInitialized()||adapter.isNoopBackend()||!width||!height||!BGFXAdapter::isValid(depth))return false;
@@ -23,6 +24,9 @@ bool DeferredDecalPass::prepare(BGFXAdapter& adapter,uint16_t width,uint16_t hei
 }
 uint32_t DeferredDecalPass::execute(PassExecContext& ctx) {
     if(!ctx.frame.decalsEnabled||!ctx.decals||ctx.decals->empty()||ctx.decals->size()>kMaxDeferredDecals||!ctx.resourceBlackboard||!ctx.frameGraph||!ctx.adapter.isInitialized()||ctx.adapter.isNoopBackend()||!ctx.viewportWidth||!ctx.viewportHeight)return 0;
+    const auto visible = ctx.decalVisibility ? *ctx.decalVisibility
+        : selectDeferredDecals(*ctx.decals, ctx.frame);
+    if (!visible.count) return 0;
     BlackboardGBufferView gb;
     if(!ctx.resourceBlackboard->resolveGBuffer(gb)||!BGFXAdapter::isValid(_targets[0])||!BGFXAdapter::isValid(_targets[1])||gb.depth.idx!=_depth.idx||gb.generation!=_generation||gb.width!=_width||gb.height!=_height)return 0;
     if(!_geometry.ensure(ctx.adapter))return 0;
@@ -37,8 +41,8 @@ uint32_t DeferredDecalPass::execute(PassExecContext& ctx) {
         }
     }
     std::array<bgfx::TextureHandle,4> source={gb.albedo,gb.normal,gb.worldPosition,gb.material};
-    for(size_t i=0;i<ctx.decals->size();++i) {
-        const auto& d=(*ctx.decals)[i];bool bound=true;
+    for(size_t i=0;i<visible.count;++i) {
+        const auto& d=(*ctx.decals)[visible.indices[i]];bool bound=true;
         auto tex=[&](const char* n,bgfx::TextureHandle h){auto b=_program.getTextureBinding(n);bound&=b!=shader::InvalidBinding;if(b!=shader::InvalidBinding)_program.setTexture(_program.getTextureStage(b),b,toShaderTexture(h));};
         auto u=[&](const char* n,const void* p,uint32_t bytes){auto b=_program.getUniformBinding(n);bound&=b!=shader::InvalidBinding;if(b!=shader::InvalidBinding)_program.setUniform(b,p,bytes);};
         const char* names[4]={"sourceAlbedo","sourceNormal","sourceWorld","sourceSurface"};for(int c=0;c<4;++c)tex(names[c],source[c]);
@@ -57,10 +61,10 @@ uint32_t DeferredDecalPass::execute(PassExecContext& ctx) {
         _geometry.bind(ctx.adapter);ctx.adapter.setStateDepthTestAlways();shader::DrawCallContext draw;draw.viewId=view;draw.state=0;_program.submit(draw);
         source=_colors[i%2];
     }
-    auto target=output(ctx.decals->size());
+    auto target=output(visible.count);
     ctx.resourceBlackboard->publishGBuffer(target,source[0],source[1],source[2],source[3],gb.depth,_width,_height,_generation,true);
     for(auto id:{FgResourceId::GBufferAlbedo,FgResourceId::GBufferNormal,FgResourceId::GBufferWorldPosition,FgResourceId::GBufferSurface})ctx.frameGraph->markProduced(id);
-    return static_cast<uint32_t>(ctx.decals->size());
+    return static_cast<uint32_t>(visible.count);
 }
 void DeferredDecalPass::destroyResources(BGFXAdapter& adapter) {
     _program.reset();_geometry.destroy(adapter);

@@ -8,6 +8,8 @@ namespace ayt::render {
 inline constexpr size_t kMaxDeferredDecals=16;
 /// Advanced host projector: local cube [-1,1], local +Z faces receiver, UV=XY.
 /// Renderer copies descriptors; texture handles borrow Renderer-owned resources.
+/// Main-view frustum culling preserves visible order and may skip the whole
+/// stage when every projector is outside. Retained GPU targets are reused on reentry.
 struct DeferredDecal {
     math::Float4x4 localToWorld=math::Float4x4::identity();
     math::FVector3 color{1,1,1};

@@ -88,11 +88,11 @@ public:
     TextureHandle cameraOutputTexture(CameraOutputHandle output) const noexcept;
     /// Release color/depth storage and invalidate the handle; stale handles are harmless.
     void destroyCameraOutput(CameraOutputHandle output);
-    /// Static camera-frustum culling defaults on; shadows remain independent.
-    /// Disable for comparisons or hosts with unbounded custom vertex deformation.
     /// Bounded owned last-main-render diagnostics. Disabled by default; owner thread only.
     void setDebugCaptureEnabled(bool enabled);
     RenderDebugSnapshot debugSnapshot() const;
+    /// Conservative static-mesh and Deferred projector culling defaults on.
+    /// Shadows remain independent. Disable for comparisons or unbounded deformation.
     void setFrustumCullingEnabled(bool enabled);
     bool frustumCullingEnabled() const noexcept;
     /// Merge contiguous compatible rigid opaque GBuffer/shadow submissions.
@@ -462,6 +462,9 @@ public:
     VolumetricSettings volumetricSettings() const noexcept;
     /// Owner-thread, copies up to16 positive-scale projectors in stable order.
     /// Texture resources must remain alive through rendering. No ECS serialization yet.
+    /// Main Deferred rendering conservatively skips offscreen projectors; the
+    /// frustum-culling switch restores every projector for comparison. A missing
+    /// resource anywhere in a nonempty visible transaction rejects the whole batch.
     void setDeferredDecals(const std::vector<DeferredDecal>& decals);
     const std::vector<DeferredDecal>& deferredDecals() const noexcept;
     void setDeferredDecalsEnabled(bool enabled);

@@ -1,5 +1,26 @@
 # AYRenderer Design
 
+## 2026-10-19 — Deferred 投影盒保守可见性
+
+`DeferredDecalVisibility` 在主渲染的 FrameGraph 导入之前，按原 descriptor 顺序记录最多16个
+可见索引。八个 local [-1,1] 角乘非抖动 VP × localToWorld；只有全部角严格位于同一
+clip 半空间外才剔除，不做透视除法。支持 [0,w]/[-w,w] 深度，XY 复用两像素 TAA 边界；
+接触边界、近裁面相交、相机在盒内保持可见。还按投影盒世界坐标范围为各平面增加
+完整 binary16 ULP 余量，覆盖 GBuffer RGBA16F 世界位置舍入进视锥外投影盒的情况。
+非有限中间值和非严格仿射输入保守放行。
+
+Renderer 与 Pass 通过只在同步 dispatch 期间借用的 `PassExecContext::decalVisibility`
+共用一次选择结果；独立 Pass 宿主省略该指针时调用同一 helper。没有新公共结构字段、
+GPU view、shader 变体或公开玩法入口。`setFrustumCullingEnabled(false)` 恢复原顺序全列表。
+图规划的最终 FBO、实际 view34..49 连续编号、ping/pong 及发布目标都按可见数量计算，
+不按原索引奇偶决定。任何可见项存在时仍对完整原列表作变换/纹理事务校验，失败不提交。
+
+可见数0时不 prepare 私有颜色组、不添加 Decal 节点、不 acquire 程序或 submit，后续读取
+本帧原始 GBuffer。已经创建的私有 MRT 在暂时屏外期间保留，避免视口边缘反复分配；
+再入镜时原 prepare 的尺寸、depth 和 generation 校验负责重建。关闭/清空仍释放私有目标。
+可见项仍全屏复制；不提供遮挡剔除、scissor、volume draw、tile 或 atlas 扩展。
+实际验收与复现见 [docs/testing.md](docs/testing.md)。
+
 ## 2026-10-14 — 独立相机 Forward 视图
 
 公开 CameraViews recipe 与 renderer-owned CameraOutputHandle；每 batch最多16视图，
@@ -18,7 +39,7 @@ constexpr容量与公开上限静态交叉检查，防止布局变更后重用�
 
 slot24；view34..49 在GBuffer7后、Motion3/SSAO14前。Renderer 有界复制16个
 高级Host descriptor，过滤非有限/奇异/镜像/剪切变换和零opacity；正交基正尺度允许非等比。
-只在启用且列表非空时 prepare 原 GBuffer depth，再创建2组4色MRT并借用depth。
+只在启用且存在可能可见的项时 prepare 原 GBuffer depth，再创建2组4色MRT并借用depth。
 MRT不拥有深度，FBO destroyTextures=false，先销毁Decal组再销毁原GBuffer。
 FG BaseGBuffer(29) 是原始输入；标准GB颜色ID导入最终parity目标，由Decal节点写入，
 深度仍导入原目标。Blackboard只在全部draw成功后发布coherent组；缺纹理/程序失败

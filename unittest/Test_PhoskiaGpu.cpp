@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "AYTest.h"
+#include "AYRenderer.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "AYShader/ShaderBuild.h"
 #include "AYShader/ShadercDriver.h"
@@ -17,10 +18,12 @@
 #include "AYRenderer/VolumetricShaderSources.h"
 #include "AYRenderer/DeferredDecalShaderSources.h"
 #include "detail/DeferredDecalPass.h"
+#include "detail/DeferredDecalVisibility.h"
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/PassExecContext.h"
 #include "detail/BgfxMatrix.h"
+#include "detail/TextureImageLoader.h"
 
 #include <array>
 #include <algorithm>
@@ -33,6 +36,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #ifdef _WIN32
@@ -212,6 +216,377 @@ TEST_CASE(deferred_decal_real_pass_ping_pong_resize_and_borrowed_depth_lifetime)
     // Borrowed base depth/FBO remain valid and can be sampled after decal teardown.
     auto pixels=f.render("texture2d original","return sample(original,vec2(0.5))",[&](const auto& shader){auto b=shader.getTextureBinding("original");shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(a));});
     checkPixels(pixels,{.2f,.4f,.6f,.3f});
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(deferred_decal_culling_preserves_order_parity_and_complete_transaction_validation) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f;
+    const bool initialized = f.initialize(backend);
+    CHECK(initialized); if (!initialized) return;
+    auto grid = [&](Pixel value) {
+        std::array<Pixel, 16> data; data.fill(value);
+        auto h = bgfx::createTexture2D(4, 4, false, 1, bgfx::TextureFormat::RGBA32F,
+            BGFX_TEXTURE_RT | BGFX_SAMPLER_POINT, bgfx::copy(data.data(), sizeof(data)));
+        CHECK(bgfx::isValid(h)); f.textures.push_back(h); return h;
+    };
+    auto a = grid({.2f,.4f,.6f,.3f}), n = grid({.5f,.5f,1,.8f});
+    auto w = grid({0,0,.5f,.4f}), surface = grid({.1f,.2f,.3f,1});
+    auto depth = bgfx::createTexture2D(4, 4, false, 1, bgfx::TextureFormat::D24S8, BGFX_TEXTURE_RT);
+    CHECK(bgfx::isValid(depth)); f.textures.push_back(depth);
+    bgfx::TextureHandle attachments[5] = {a,n,w,surface,depth};
+    auto base = bgfx::createFrameBuffer(5, attachments, false);
+    CHECK(bgfx::isValid(base));
+    struct BaseCleanup { bgfx::FrameBufferHandle h; ~BaseCleanup(){bgfx::destroy(h);} } baseCleanup{base};
+    FrameContext frame; frame.decalsEnabled = true; frame.frustumCulling = true;
+    ayt::render::RenderScene scene;
+    std::unordered_map<uint64_t,GpuMesh> meshes;
+    std::unordered_map<uint64_t,GpuTexture> textures;
+    std::unordered_map<uint64_t,GpuMaterial> materials;
+    RenderResourceBlackboard bb; FrameGraph graph(f.adapter); DeferredDecalPass pass;
+    struct PassCleanup { DeferredDecalPass& p; BGFXAdapter& a; ~PassCleanup(){p.destroyResources(a);} } passCleanup{pass,f.adapter};
+    ayt::render::DeferredDecal red, blue, offscreen;
+    red.color = {1,0,0}; blue.color = {0,0,1}; red.opacity = blue.opacity = .5f;
+    offscreen.localToWorld(0,3) = 10;
+    std::vector<ayt::render::DeferredDecal> decals{offscreen, red, offscreen, blue, offscreen};
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,4,4,frame,0,base};
+    ctx.resourceBlackboard = &bb; ctx.frameGraph = &graph; ctx.decals = &decals;
+    auto dispatch = [&](size_t expected) {
+        const auto selected = selectDeferredDecals(decals, frame);
+        CHECK(selected.count == expected);
+        if (expected) CHECK(pass.prepare(f.adapter,4,4,depth,1));
+        bb.beginFrame(); bb.publishGBuffer(base,a,n,w,surface,depth,4,4,1,true);
+        PostProcessGraphPlanInput input;
+        input.width = input.height = 4; input.sceneColor = base;
+        input.decals = expected != 0; input.baseGBuffer = base;
+        input.gbuffer = expected ? pass.output(expected) : base;
+        CHECK(buildPostProcessGraphPlan(graph,input).compileSucceeded);
+        CHECK(graph.shouldExecute(ayt::render::RenderPassSlot::DeferredDecal) == (expected != 0));
+        CHECK(pass.execute(ctx) == expected);
+        BlackboardGBufferView result; CHECK(bb.resolveGBuffer(result));
+        CHECK(result.framebuffer.idx == (expected ? pass.output(expected).idx : base.idx));
+        CHECK(result.depth.idx == depth.idx);
+        CHECK(graph.producedThisFrame(FgResourceId::GBufferAlbedo) == (expected != 0));
+        for (int i = 0; i < 3; ++i) f.adapter.endFrame();
+        return f.render("texture2d result", "return sample(result,vec2(0.5))",
+            [&](const auto& shader) { auto b=shader.getTextureBinding("result");
+                shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(result.albedo)); });
+    };
+    auto optimized = dispatch(2); // Source count 5, final target changes parity.
+    frame.frustumCulling = false;
+    auto baseline = dispatch(5);
+    CHECK(optimized.size() == baseline.size());
+    for (size_t i = 0; i < optimized.size() && i < baseline.size(); ++i)
+        for (size_t c = 0; c < 4; ++c) CHECK(std::abs(optimized[i][c]-baseline[i][c]) < .008f);
+    for (const auto& p : optimized) {
+        CHECK(std::abs(p[0]-.3f)<.008f); CHECK(std::abs(p[1]-.1f)<.008f); CHECK(std::abs(p[2]-.65f)<.008f);
+    }
+    frame.frustumCulling = true;
+    decals = {offscreen, red}; dispatch(1); // Even source count, odd output count.
+    decals = {red, blue, red}; dispatch(3);
+    decals = {offscreen, offscreen};
+    auto empty = dispatch(0); checkPixels(empty,{.2f,.4f,.6f,.3f});
+    // An offscreen descriptor with a missing resource still rejects the whole
+    // mixed transaction. Visibility must not hide resource failures.
+    decals = {red, offscreen}; decals[1].albedo.id = 999999;
+    bb.beginFrame(); bb.publishGBuffer(base,a,n,w,surface,depth,4,4,1,true);
+    CHECK(pass.execute(ctx) == 0);
+    BlackboardGBufferView result; CHECK(bb.resolveGBuffer(result)); CHECK(result.framebuffer.idx == base.idx);
+    decals[1].albedo = {}; decals[1].localToWorld(0,0) = 0;
+    CHECK(pass.execute(ctx) == 0); CHECK(bb.resolveGBuffer(result)); CHECK(result.framebuffer.idx == base.idx);
+    decals = {red}; frame.decalsEnabled = false;
+    CHECK(pass.execute(ctx) == 0); frame.decalsEnabled = true; dispatch(1);
+    // Quantized world positions can receive a projector just outside the exact
+    // near plane. Exercise the real shader with the binary16-rounded receiver.
+    std::array<Pixel,16> nearWorld;
+    nearWorld.fill({0,0,.0999755859375f,.4f});
+    bgfx::updateTexture2D(w,0,0,0,0,4,4,bgfx::copy(nearWorld.data(),sizeof(nearWorld)));
+    frame.cullingViewProjection = ayt::math::lh::perspective(
+        ayt::math::radians(90.0f),1,.1f,10);
+    auto tiny = red;
+    for(int axis=0;axis<3;++axis) tiny.localToWorld(axis,axis)=.001f;
+    tiny.localToWorld(2,3)=.0999755859375f-.00099f;
+    decals={tiny}; frame.frustumCulling=false;
+    baseline=dispatch(1); frame.frustumCulling=true; optimized=dispatch(1);
+    CHECK(optimized.size()==baseline.size());
+    for(size_t i=0;i<optimized.size() && i<baseline.size();++i) {
+        CHECK(optimized[i][0]>.5f); CHECK(optimized[i][2]<.35f);
+        for(size_t c=0;c<4;++c) CHECK(std::abs(optimized[i][c]-baseline[i][c])<.008f);
+    }
+    pass.destroyResources(f.adapter); decals = {offscreen};
+    dispatch(0); CHECK(!bgfx::isValid(pass.output(1))); // Cold all-offscreen path allocates nothing.
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(deferred_decal_culling_fixed_scene_image_and_timing_baseline) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f;
+    const bool initialized = f.initialize(backend);
+    CHECK(initialized); if (!initialized) return;
+    bgfx::setDebug(BGFX_DEBUG_PROFILER); // View timestamps are opt-in on bgfx.
+    constexpr uint16_t width = 1024, height = 576;
+    constexpr size_t pixels = size_t(width) * height;
+    std::array<bgfx::TextureHandle, 4> colors, staging;
+    for (size_t channel = 0; channel < 4; ++channel) {
+        const bool world = channel == 2;
+        const auto format = world ? bgfx::TextureFormat::RGBA16F : bgfx::TextureFormat::RGBA8;
+        std::vector<uint8_t> data(pixels * (world ? 8 : 4));
+        for (size_t i = 0; i < pixels; ++i) {
+            if (world) {
+                const std::array<uint16_t,4> value{0,0,0x3800,0x3400}; // (0,0,.5,.25), exact binary16.
+                std::memcpy(data.data()+i*8,value.data(),8);
+            } else {
+                const std::array<uint8_t,4> value = channel == 0
+                    ? std::array<uint8_t,4>{uint8_t(i%251),uint8_t((i/width)%241),uint8_t((i*7)%253),77}
+                    : channel == 1 ? std::array<uint8_t,4>{128,128,255,204}
+                    : std::array<uint8_t,4>{26,51,77,255};
+                std::memcpy(data.data()+i*4,value.data(),4);
+            }
+        }
+        colors[channel] = bgfx::createTexture2D(width,height,false,1,format,
+            BGFX_TEXTURE_RT | BGFX_SAMPLER_POINT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP,
+            bgfx::copy(data.data(),uint32_t(data.size())));
+        staging[channel] = bgfx::createTexture2D(width,height,false,1,format,
+            BGFX_TEXTURE_READ_BACK | BGFX_TEXTURE_BLIT_DST);
+        CHECK(bgfx::isValid(colors[channel])); CHECK(bgfx::isValid(staging[channel]));
+        f.textures.push_back(colors[channel]); f.textures.push_back(staging[channel]);
+    }
+    auto depth = bgfx::createTexture2D(width,height,false,1,bgfx::TextureFormat::D24S8,BGFX_TEXTURE_RT);
+    CHECK(bgfx::isValid(depth)); f.textures.push_back(depth);
+    bgfx::TextureHandle attachments[5]{colors[0],colors[1],colors[2],colors[3],depth};
+    auto base = bgfx::createFrameBuffer(5,attachments,false); CHECK(bgfx::isValid(base));
+    struct BaseCleanup { bgfx::FrameBufferHandle h; ~BaseCleanup(){bgfx::destroy(h);} } baseCleanup{base};
+    FrameContext frame; frame.decalsEnabled = true;
+    frame.cullingMarginX = 4.0f/width; frame.cullingMarginY = 4.0f/height;
+    ayt::render::RenderScene scene;
+    std::unordered_map<uint64_t,GpuMesh> meshes;
+    std::unordered_map<uint64_t,GpuTexture> textures;
+    std::unordered_map<uint64_t,GpuMaterial> materials;
+    RenderResourceBlackboard bb; FrameGraph graph(f.adapter); DeferredDecalPass pass;
+    struct PassCleanup { DeferredDecalPass& p; BGFXAdapter& a; ~PassCleanup(){p.destroyResources(a);} } passCleanup{pass,f.adapter};
+    std::vector<ayt::render::DeferredDecal> decals;
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,width,height,frame,0,base};
+    ctx.resourceBlackboard = &bb; ctx.frameGraph = &graph; ctx.decals = &decals;
+    auto percentile = [](std::vector<double> values, double fraction) {
+        if (values.empty()) return 0.0;
+        std::sort(values.begin(),values.end());
+        return values[size_t(std::ceil(fraction*values.size()))-1];
+    };
+    using Image = std::array<std::vector<uint8_t>,4>;
+    auto readImages = [&]() {
+        BlackboardGBufferView result; CHECK(bb.resolveGBuffer(result));
+        const std::array<bgfx::TextureHandle,4> outputs{
+            result.albedo,result.normal,result.worldPosition,result.material};
+        Image image;
+        uint32_t ready = 0;
+        for (size_t i = 0; i < outputs.size(); ++i) {
+            image[i].resize(pixels*(i==2?8:4));
+            bgfx::blit(uint16_t(120+i),staging[i],0,0,outputs[i]);
+            ready = std::max(ready,bgfx::readTexture(staging[i],image[i].data()));
+        }
+        for (int i = 0; i < 120 && f.adapter.gpuFrameCounter() < ready; ++i) f.adapter.endFrame();
+        CHECK(f.adapter.gpuFrameCounter() >= ready);
+        return image;
+    };
+    const char* scenarios[] = {"none","all-visible","mixed","all-offscreen"};
+    for (int scenario = 0; scenario < 4; ++scenario) {
+        decals.assign(scenario == 0 ? 0 : 16,{});
+        for (size_t i = 0; i < decals.size(); ++i) {
+            decals[i].color = {float(i%3)/2,float((i+1)%3)/2,float((i+2)%3)/2};
+            decals[i].opacity = .15f;
+            const bool visible = scenario == 1 || (scenario == 2 && i%3 == 1);
+            if (!visible) decals[i].localToWorld(0,3) = 10+float(i);
+        }
+        Image baseline;
+        for (bool culling : {false,true}) {
+            frame.frustumCulling = culling;
+            const uint32_t expected = !culling ? uint32_t(decals.size())
+                : scenario == 1 ? 16 : scenario == 2 ? 5 : 0;
+            std::vector<double> cpuMs, gpuMs, backendDraws;
+            std::unordered_set<uint32_t> timedFrames;
+            constexpr int warmupFrames = 64, measuredFrames = 32;
+            uint32_t measuredFirstFrame = 0;
+            // Warm the programs, targets and delayed GPU query pipeline first.
+            for (int iteration = 0; iteration < warmupFrames+measuredFrames; ++iteration) {
+                if (iteration == warmupFrames) measuredFirstFrame = f.adapter.gpuFrameCounter();
+                const auto start = std::chrono::steady_clock::now();
+                auto selected = selectDeferredDecals(decals,frame);
+                ctx.decalVisibility = &selected;
+                CHECK(selected.count == expected);
+                if (selected.count) CHECK(pass.prepare(f.adapter,width,height,depth,1));
+                bb.beginFrame(); bb.publishGBuffer(base,colors[0],colors[1],colors[2],colors[3],depth,width,height,1,true);
+                PostProcessGraphPlanInput input;
+                input.width=width; input.height=height; input.sceneColor=base;
+                input.decals = selected.count != 0; input.baseGBuffer = base;
+                input.gbuffer = selected.count ? pass.output(selected.count) : base;
+                CHECK(buildPostProcessGraphPlan(graph,input).compileSucceeded);
+                const auto submitted = graph.shouldExecute(ayt::render::RenderPassSlot::DeferredDecal) ? pass.execute(ctx) : 0;
+                CHECK(submitted == expected);
+                const double elapsed = std::chrono::duration<double,std::milli>(
+                    std::chrono::steady_clock::now()-start).count();
+                f.adapter.endFrame();
+                if (iteration < warmupFrames) continue;
+                cpuMs.push_back(elapsed);
+                const auto* stats = bgfx::getStats();
+                backendDraws.push_back(stats->numDraw);
+                double gpu = 0;
+                uint32_t timingFrame = UINT32_MAX, timedViews = 0;
+                bool coherent = true;
+                for (uint16_t view = 0; view < stats->numViews; ++view) {
+                    const auto& value = stats->viewStats[view];
+                    if (value.view >= DeferredDecalPass::kFirstView
+                        && value.view < DeferredDecalPass::kFirstView+ayt::render::kMaxDeferredDecals
+                        && value.gpuTimeEnd > value.gpuTimeBegin && stats->gpuTimerFreq > 0) {
+                        if (timedViews && timingFrame != value.gpuFrameNum) coherent = false;
+                        timingFrame = value.gpuFrameNum; ++timedViews;
+                        gpu += double(value.gpuTimeEnd-value.gpuTimeBegin)*1000.0/stats->gpuTimerFreq;
+                    }
+                }
+                if (gpu > 0 && coherent && timedViews == expected
+                    && timingFrame >= measuredFirstFrame && timingFrame < f.adapter.gpuFrameCounter()
+                    && timedFrames.insert(timingFrame).second) gpuMs.push_back(gpu);
+            }
+            CHECK(percentile(backendDraws,.5) == expected);
+            std::cout << "[DecalCullingBaseline] {\"backend\":\"" << backend
+                << "\",\"scenario\":\"" << scenarios[scenario] << "\",\"culling\":" << (culling?"true":"false")
+                << ",\"width\":" << width << ",\"height\":" << height << ",\"samples\":" << cpuMs.size()
+                << ",\"warmupFrames\":" << warmupFrames
+                << ",\"vendorId\":" << bgfx::getCaps()->vendorId << ",\"deviceId\":" << bgfx::getCaps()->deviceId
+                << ",\"measuredFirstFrame\":" << measuredFirstFrame << ",\"submittedEndFrame\":" << f.adapter.gpuFrameCounter()
+                << ",\"draws\":" << expected << ",\"backendDrawsMedian\":" << percentile(backendDraws,.5)
+                << ",\"cpuSubmitMedianMs\":" << percentile(cpuMs,.5) << ",\"cpuSubmitP95Ms\":" << percentile(cpuMs,.95)
+                << ",\"gpuTimingSamples\":" << gpuMs.size() << ",\"gpuViewsMedianMs\":" << percentile(gpuMs,.5)
+                << ",\"gpuViewsP95Ms\":" << percentile(gpuMs,.95) << "}\n";
+            const auto image = readImages();
+            if (!culling) { baseline = image; continue; }
+            for (size_t channel = 0; channel < image.size(); ++channel) {
+                CHECK(image[channel].size() == baseline[channel].size());
+                size_t differences = 0; unsigned maxError = 0;
+                for (size_t i = 0; i < image[channel].size(); ++i) {
+                    const unsigned error = unsigned(std::abs(int(image[channel][i])-int(baseline[channel][i])));
+                    maxError = std::max(maxError,error);
+                    if (error > (channel==2?0u:1u)) ++differences;
+                }
+                CHECK(differences == 0);
+                std::cout << "[DecalCullingImage] {\"backend\":\"" << backend << "\",\"scenario\":\""
+                    << scenarios[scenario] << "\",\"attachment\":" << channel
+                    << ",\"bytes\":" << image[channel].size() << ",\"maxByteError\":" << maxError
+                    << ",\"outsideTolerance\":" << differences << "}\n";
+            }
+        }
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(deferred_decal_main_renderer_graph_bypass_resize_and_final_pixels) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    HWND window = CreateWindowExW(0,L"STATIC",L"Decal culling integration",WS_OVERLAPPED,
+        0,0,256,256,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window != nullptr); if (!window) return;
+    struct WindowCleanup { HWND h; ~WindowCleanup(){DestroyWindow(h);} } windowCleanup{window};
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc init; init.windowHandle = window; init.width = init.height = 256;
+    init.msaa = 0; init.vsync = false;
+    init.backend = std::string(backend)=="d3d12" ? ayt::render::Backend::Direct3D12 : ayt::render::Backend::Direct3D11;
+    const bool initialized = renderer.initialize(init); CHECK(initialized); if (!initialized) return;
+    renderer.configurePipeline(ayt::render::RenderPipelineDesc::makeDeferred());
+    renderer.setShadowsEnabled(false); renderer.setFxaaEnabled(false);
+    renderer.setSmaaEnabled(false); renderer.setTaaEnabled(false);
+    renderer.setMainCamera(ayt::math::Float4x4::identity(),ayt::math::Float4x4::identity());
+    auto material = renderer.createMaterialFromPhoskia(R"(material DecalReceiver {
+        property baseColor = vec4(0.2,0.4,0.6,1.0)
+        vertex { in pos:position return modelViewProjection*vec4(pos,1.0) }
+        fragment { return baseColor }
+    })","decal_culling_receiver");
+    CHECK(material.isValid());
+    renderer.setMaterialColor(material,"baseColor",.2f,.4f,.6f,1);
+    auto mesh = renderer.createUnitCube(); CHECK(mesh.isValid());
+    ayt::render::RenderScene scene;
+    ayt::render::DrawItem item; item.mesh = mesh; item.material = material;
+    item.world = ayt::math::translate(0,0,.5f)*ayt::math::scale(.6f,.6f,.2f);
+    scene.add(item);
+    ayt::render::DeferredDecal red,blue,offscreen;
+    red.color={1,0,0}; blue.color={0,0,1}; red.opacity=blue.opacity=.5f;
+    red.localToWorld(0,0)=red.localToWorld(2,2)=-1;
+    red.localToWorld(2,3)=.5f; blue.localToWorld=red.localToWorld;
+    offscreen=red; offscreen.localToWorld(0,3)=10;
+    const char* directory = std::getenv("AY_DECAL_CAPTURE_DIRECTORY");
+    const auto root = directory ? std::filesystem::path(directory)/backend
+        : std::filesystem::temp_directory_path()/(std::string("ay-decal-culling-")+backend+"-"
+            +std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    auto renderFrames = [&](uint32_t expected) {
+        for (int i=0;i<6;++i) {
+            renderer.beginFrame(); renderer.render(scene); renderer.endFrame();
+            CHECK(renderer.getFrameStats().graph.compileSucceeded);
+            uint32_t actual = 0;
+            for (const auto& pass : renderer.getFrameStats().passes)
+                if (pass.name=="DeferredDecal") actual+=pass.drawCalls;
+            CHECK(actual==expected);
+        }
+    };
+    auto capture = [&](const char* label,uint32_t expected) {
+        renderFrames(expected);
+        const auto path = root/(std::string(label)+".png");
+        for (int i=0;i<6;++i) {
+            renderer.beginFrame(); renderer.render(scene);
+            CHECK(renderer.captureScreenshot(path.string())); renderer.endFrame();
+        }
+        auto image = decodeImageFile(path.string()); CHECK(!image.rgba8.empty());
+        std::cout << "[DecalCullingCapture] " << path.string() << '\n';
+        return image;
+    };
+    auto compare = [&](const auto& a,const auto& b) {
+        CHECK(a.width==b.width); CHECK(a.height==b.height); CHECK(a.rgba8.size()==b.rgba8.size());
+        size_t differences=0; unsigned maxError=0;
+        for (size_t i=0;i<a.rgba8.size() && i<b.rgba8.size();++i) {
+            const unsigned error=unsigned(std::abs(int(a.rgba8[i])-int(b.rgba8[i])));
+            maxError=std::max(maxError,error); if(error>1)++differences;
+        }
+        CHECK(differences==0);
+        std::cout<<"[DecalCullingFinalImage] backend="<<backend<<" maxByteError="<<maxError
+                 <<" outsideTolerance="<<differences<<'\n';
+    };
+    auto plain=capture("disabled",0);
+    const auto coldTextures=bgfx::getStats()->numTextures;
+    renderer.setDeferredDecals({offscreen,offscreen}); renderer.setDeferredDecalsEnabled(true);
+    auto invisible=capture("all-offscreen",0);
+    CHECK(bgfx::getStats()->numTextures==coldTextures); // No private MRT allocation on cold bypass.
+    compare(plain,invisible);
+    renderer.setDeferredDecals({offscreen,red,offscreen,blue,offscreen});
+    renderer.setFrustumCullingEnabled(false);
+    auto baseline=capture("mixed-baseline",5);
+    renderer.setFrustumCullingEnabled(true);
+    auto optimized=capture("mixed-culled",2); compare(baseline,optimized);
+    size_t changed=0;
+    for(size_t i=0;i<plain.rgba8.size() && i<optimized.rgba8.size();++i)
+        if(std::abs(int(plain.rgba8[i])-int(optimized.rgba8[i]))>4)++changed;
+    CHECK(changed>100); // The integration must really contain receiving geometry.
+    renderer.resize(320,192); renderer.setViewportRect(0,0,320,192);
+    renderer.setFrustumCullingEnabled(false); baseline=capture("resized-baseline",5);
+    renderer.setFrustumCullingEnabled(true); optimized=capture("resized-culled",2); compare(baseline,optimized);
+    renderer.setDeferredDecalsEnabled(false); renderFrames(0);
+    renderer.setDeferredDecalsEnabled(true); renderFrames(2);
+    renderer.setDeferredDecals({offscreen}); renderFrames(0);
+    renderer.setDeferredDecals({red}); renderFrames(1);
+    renderer.setTaaEnabled(true); renderFrames(1);
+    renderer.setMainCamera(ayt::math::translate(-10,0,0),ayt::math::Float4x4::identity());
+    renderer.notifyCameraCut(); renderFrames(0);
+    renderer.setMainCamera(ayt::math::Float4x4::identity(),ayt::math::Float4x4::identity());
+    renderer.notifyCameraCut(); renderFrames(1);
+    renderer.shutdown();
 #else
     SKIP_TEST("Windows device fixture required");
 #endif

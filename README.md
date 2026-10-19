@@ -13,6 +13,14 @@ CPU/Noop 用例 CameraViews；独立 D3D11 读回用例 CameraViewsGpu。
 
 ## Deferred Decal v1（2026-10-06）
 
+2026-10-19：主 Deferred 使用非抖动相机和两像素边界，对投影盒作保守视锥剔除。
+只提交可能影响当前视口的贴花，保留源列表的叠加顺序；全屏外时不加入贴花图节点，
+冷启动也不创建私有 MRT。已有目标在屏外期间保留，重新入镜复用；关闭/空列表仍释放。
+`setFrustumCullingEnabled(false)` 同时关闭几何和贴花剔除，可作画面/性能对照。
+计数压缩后重新选择 ping-pong 目标；仍校验整个源列表的纹理，不能用剔除掩盖缺资源。
+可见贴花仍逐项全屏复制，没有屏幕矩形裁剪、tile/atlas 或透明接收者支持。
+定向 CPU、GPU 图像及固定场景性能入口见 [测试说明](docs/testing.md)。
+
 GBuffer 后、Motion/SSAO/Lighting 前的投影贴花；`setDeferredDecals` 复制最多16项，
 `setDeferredDecalsEnabled` 默认关闭。localToWorld 是正尺度、正交基仿射矩阵；
 local [-1,1] 盒裁剪，+Z 面向接收表面，XY 为 UV。无纹理时也可投纯色贴花。
@@ -21,7 +29,7 @@ local [-1,1] 盒裁剪，+Z 面向接收表面，XY 为 UV。无纹理时也可�
 两组全尺寸 MRT 交替读写、借用原深度；缺资源不发布部分结果；禁用时下一帧释放私有目标。
 Editor 提供明确标注 test projector 的地面预览及 opacity，不是 ECS 创作/场景保存功能。
 首版是正确性优先的全屏复制，每项一次draw；全尺寸两组颜色约40 bytes/pixel，
-大量贴花尚无tile/culling/atlas优化。仅不透明/切孔接收，不改轮廓、深度或透明材质。
+大量可见贴花尚无tile/scissor/atlas优化。仅不透明/切孔接收，不改轮廓、深度或透明材质。
 
 ## 体积光／雾 v1（2026-10-06）
 

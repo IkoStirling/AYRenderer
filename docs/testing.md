@@ -1,5 +1,80 @@
 # AYRenderer 测试维护
 
+## 2026-10-19 Deferred 贴花保守视锥剔除
+
+主路径在 FrameGraph 规划前计算一次投影盒可见索引，Pass 复用该结果；独立 Pass
+宿主使用同一 helper。保持源列表叠加顺序，最终 ping/pong 按可见数选择；完整原列表
+纹理校验不因剔除而跳过。全屏外不分配新的私有目标、不提交贴花节点；已经分配的
+MRT 在暂时屏外时保留，重新入镜核对尺寸/depth/generation。关闭/清空仍释放。
+GBuffer 的 binary16 世界坐标舍入由额外世界空间 ULP 余量覆盖；没有 shader 或清单变更。
+
+实际环境：Windows 11 10.0.26200、Ryzen 7 5800H、RTX 3060 Laptop GPU，驱动
+32.0.16.1692，MSVC 14.51.36231 Debug；设备读回 vendor/device 为 4318/9568。
+构建目录 `out/build/render-phoskia-20261004`。全部10个 Renderer 测试程序、
+66项离线生产 shader 和 `AYEditorShell_Demo` 构建/链接通过。
+清单审计977例/10分区，无遗漏或重复。CPU最终9组940例/14968断言全部通过、零skip；
+贴花契约为7例/71断言，覆盖两种深度约定、六面、接触、旋转非等比、平移相机、近裁面、
+相机在盒内、稳定边界、非有限数据、容量及半精度舍入。
+
+首轮 CPU 全量为8/9组通过（114.35s）；Shader组在临时生产包写入处失败，随后发生
+连带装载失败。保留原JSON和日志；同一二进制在正常非沙箱环境仅复核该组，12例全部
+通过（44.31s），没有为复核修改源码或容差。成功的其他组未重复执行。
+最初受限构建的 PDB C1902 同样在正常 MSVC 构建环境解决。
+
+D3D11/D3D12 各5个独立进程用例、5375断言全部通过，零skip：
+
+- 原有4附件材质/法线/元数据回读及借用深度、resize、资源释放回归。
+- 源数5→可见2、源数2→可见1、全可见、全屏外；验证压缩后的最终FBO与叠加颜色。
+- 被剔除项缺纹理或变换非法仍使混合事务整体回退，未发布部分GBuffer。
+- 半精度近裁面接收点真实shader回读；CPU精确盒在视锥外也保留实际可接收的贴花。
+- 真实主 Renderer 最终PNG、冷启动零私有纹理增量、resize与开关切换；TAA开启后的
+  camera cut、移出和再入镜验证图编译及贴花数量。PNG逐字节对照在TAA关闭时进行。
+
+1024×576固定探针有无贴花、16项全可见、16项中5项可见及16项全屏外四种场景。
+每个场景/开关组合先预热64帧，记录32个CPU提交样本；CPU范围是可见性、图规划和
+Pass提交，不含 `endFrame` 等待。GPU开启 bgfx profiler，只接受全部贴花view属于同一
+GPU帧、位于当前测量提交窗口且未重复的时间戳。下表为中位数，单位ms，关→开指
+`setFrustumCullingEnabled(false/true)`；GPU括号为有效去重样本数，N/A不是零耗时。
+
+| 后端 | 场景 | 贴花draw 关→开 | CPU提交 关→开 | GPU views 关→开 |
+|---|---|---|---|---|
+| D3D11 | 无贴花 | 0→0 | 0.0042→0.0044 | N/A→N/A |
+| D3D11 | 全可见 | 16→16 | 0.7523→0.7713 | 0.9021(9)→0.8970(10) |
+| D3D11 | 混合 | 16→5 | 0.7054→0.2929 | N/A(0)→0.2099(26) |
+| D3D11 | 全屏外 | 16→0 | 0.7026→0.0635 | 0.6748(22)→N/A(0 draw) |
+| D3D12 | 无贴花 | 0→0 | 0.0067→0.0057 | N/A→N/A |
+| D3D12 | 全可见 | 16→16 | 0.9313→0.8981 | 9.2559(31)→8.8666(31) |
+| D3D12 | 混合 | 16→5 | 0.9129→0.3572 | 8.7451(31)→2.7136(31) |
+| D3D12 | 全屏外 | 16→0 | 0.8867→0.0658 | 8.7786(31)→N/A(0 draw) |
+
+两个后端各四场景、四附件完整图像对照最大字节误差均为0；真实主链三组PNG
+（禁用/全屏外、混合、resize）最大误差也为0。附件比较门限原定RGBA8≤1字节、
+world-position原始binary16字节完全相同；没有放宽门限。合成探针不代表完整场景帧率，
+全可见时仍有CPU剔除成本和逐项全屏复制。D3D11混合基线没有合格GPU窗口样本，
+不能计算其GPU提升比例；不同后端绝对计时也不能用于一般性能排名。
+
+复现CPU与清单：
+
+```powershell
+cmake --build out/build/render-phoskia-20261004 --target AYRenderer_TestGroups AYEditorShell_Demo --parallel 4
+ctest --test-dir out/build/render-phoskia-20261004 -L '^renderer-full$' -LE '^gpu$' --output-on-failure -j 1
+pwsh -NoProfile -File scripts/tests/verify-module-test-inventory.ps1 -Module AYRenderer -BuildDirectory out/build/render-phoskia-20261004
+```
+
+设备用例使用 `AYRenderer_GpuTests.exe --suite AYRenderer_PhoskiaGpu --case <name>`，
+每项独立进程，`AY_TAA_GPU_TEST=d3d11` 或 `d3d12`，不得与shader构建并发运行。
+固定性能/图像入口为 `deferred_decal_culling_fixed_scene_image_and_timing_baseline`；
+主链入口为 `deferred_decal_main_renderer_graph_bypass_resize_and_final_pixels`，
+`AY_DECAL_CAPTURE_DIRECTORY` 可指定PNG输出目录。
+本次完整runner、CPU/设备JSON、原始失败、计时/p95/帧号和PNG保留于
+`out/render-decal-culling-20261019/`，最终汇总为 `cpu-summary.json` 与 `gpu-summary.json`。
+`initial-*`/`gpu-summary-initial.json` 是早期取样，不能替代带提交窗口过滤的最终数据。
+SDK doctor：123能力/53模块/83搜索用例/519已文档化入口，0错误0警告。
+
+额外观察：既有 `validDeferredDecalTransform` 对45°Z旋转加scale(4,.25,1)的正交正尺度
+矩阵返回false；首轮旋转fixture因此未满足准入前提。最终使用既有校验接受的30°旋转
+验证剔除；该45°准入问题需单独修复，本次未修改AYMath或投影体准入算法。
+
 ## 2026-10-06 Deferred Decal v1 / 三项新增能力集成收尾
 
 VS2026 Insider Debug，同 out/build/render-phoskia-20261004，production66变体构建部署。

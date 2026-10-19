@@ -15,6 +15,7 @@
 #include "detail/SsrPass.h"
 #include "detail/VolumetricPass.h"
 #include "detail/DeferredDecalPass.h"
+#include "detail/DeferredDecalVisibility.h"
 #include "detail/DebugOverlay.h"
 #include "detail/FgResource.h"        // §F2 (2026-07-24) — FrameGraph FgResourceId + FgTextureDesc
 #include "detail/FrameDrawLists.h"
@@ -1861,16 +1862,20 @@ void Renderer::render(const RenderScene& scene)
     }
     graphInput.haze = hazePassEnabled;
     auto* decalPass = _impl->pipeline.findPass<detail::DeferredDecalPass>();
+    const auto visibleDecals = backendReady && frame.decalsEnabled
+        && decalPass && decalPass->isEnabled()
+        ? detail::selectDeferredDecals(_impl->decals, frame)
+        : detail::DeferredDecalVisibility{};
     if (decalPass && (!frame.decalsEnabled || _impl->decals.empty() || !decalPass->isEnabled())
         && detail::BGFXAdapter::isValid(decalPass->output(1)) && _impl->adapter.isInitialized())
         decalPass->destroyResources(_impl->adapter);
-    if (backendReady && frame.decalsEnabled && !_impl->decals.empty()
+    if (backendReady && frame.decalsEnabled && visibleDecals.count != 0
         && decalPass && decalPass->isEnabled() && gbufferPassPtr && gbufferPassPtr->isEnabled()) {
         gbufferPassPtr->prepareOutput(_impl->adapter);
         if (decalPass->prepare(_impl->adapter, fgW, fgH, gbufferPassPtr->gbufferDepthRt(), gbufferPassPtr->targetGeneration())) {
             graphInput.decals = true;
             graphInput.baseGBuffer = gbufferPassPtr->gbufferFbo();
-            graphInput.gbuffer = decalPass->output(_impl->decals.size());
+            graphInput.gbuffer = decalPass->output(visibleDecals.count);
         }
     }
     const auto* fogPass = _impl->pipeline.findPass<detail::VolumetricPass>();
@@ -1986,6 +1991,7 @@ void Renderer::render(const RenderScene& scene)
     ctx.rigidInstancing = _impl->rigidInstancingEnabled;
     ctx.instancingStats = &instancingStats;
     ctx.decals = &_impl->decals;
+    ctx.decalVisibility = &visibleDecals;
 
     static uint32_t s_compositeLog = 0;
     if (s_compositeLog < 3) {
