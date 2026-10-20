@@ -1,0 +1,218 @@
+{
+    "__coordConvention": "ay-coordinates-lh-yup-zfwd-ccw-uvtop-m-v1",
+    "__schemaVersion": 5,
+    "entities": [
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "1db9069b1cf06c890000000000002076",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber-wet.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 1,
+            "kind": "spatial",
+            "name": "rubber-wet / cube 1",
+            "owner": "",
+            "persistentId": "ae4940eee287afea0000000000002074",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "6313c81ec2ca04e20000000000002075",
+                "position": [
+                    0.0,
+                    -0.18,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    8.0,
+                    0.25,
+                    6.0
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "820a1da0c04826440000000000002079",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/copper-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 2,
+            "kind": "spatial",
+            "name": "copper-wet / sphere 2",
+            "owner": "",
+            "persistentId": "df6a6690b9c7064f0000000000002077",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "3d0ba83e9c1d637b0000000000002078",
+                "position": [
+                    -1.4,
+                    1.5,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.149438,
+                    0.0,
+                    0.988771
+                ],
+                "scale": [
+                    2.4,
+                    2.4,
+                    2.4
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "122111ac82a51008000000000000207c",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/copper-wet.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 3,
+            "kind": "spatial",
+            "name": "copper-wet / cube 3",
+            "owner": "",
+            "persistentId": "3b9066a8477d31bb000000000000207a",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "35d34fbf15fc83dd000000000000207b",
+                "position": [
+                    1.6,
+                    1.1,
+                    0.0
+                ],
+                "rotation": [
+                    -0.0,
+                    -0.174108,
+                    -0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.8,
+                    2.2,
+                    1.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "ad284b84197d8c19000000000000207f",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/copper-wet.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 4,
+            "kind": "spatial",
+            "name": "copper-wet / cube 4",
+            "owner": "",
+            "persistentId": "0338b0959100a6d2000000000000207d",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "866d0a4d2ba9db7b000000000000207e",
+                "position": [
+                    0.0,
+                    0.05,
+                    -1.8
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    4.0,
+                    0.1,
+                    0.8
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "7b914305d5bfb5f50000000000002082",
+                    "$type": "PerspectiveCameraComponent",
+                    "active": true,
+                    "blendDuration": 0.0,
+                    "farZ": 100.0,
+                    "fovYDegrees": 43.0,
+                    "layerMask": 4294967295,
+                    "localOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "localRotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "nearZ": 0.1,
+                    "orthographicHeight": 10.0,
+                    "priority": 10,
+                    "projectionMode": 0,
+                    "viewportId": 0
+                }
+            ],
+            "id": 5,
+            "kind": "spatial",
+            "name": "Showcase Camera",
+            "owner": "",
+            "persistentId": "912c6078c2a73d280000000000002080",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "10806b6763703bb50000000000002081",
+                "position": [
+                    5.0,
+                    3.2,
+                    -6.5
+                ],
+                "rotation": [
+                    0.123716,
+                    -0.319245,
+                    0.042078,
+                    0.938619
+                ],
+                "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                ]
+            },
+            "spatialParent": ""
+        }
+    ]
+}

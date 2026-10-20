@@ -9,6 +9,7 @@
 #include "detail/GBufferLayout.h"
 #include "detail/RasterConvention.h"
 #include "detail/RenderPass.h"
+#include "detail/PbrSurfaceBinding.h"
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/RigidInstancing.h"
 
@@ -62,6 +63,9 @@ material GBufferFill {
     property emissive = vec4(0.0, 0.0, 0.0, 0.0)
     property materialModel = vec4(0.0, 0.0, 0.0, 0.0)
     property doubleSided = vec4(0.0, 0.0, 0.0, 0.0)
+    property uvTransform = vec4(1.0, 1.0, 0.0, 0.0)
+    property normalStrength = vec4(1.0, 0.0, 0.0, 0.0)
+    property roughnessBias = vec4(0.0, 0.0, 0.0, 0.0)
     property normalYSign = vec4(1.0, 0.0, 0.0, 0.0)
     property castSkinned = vec4(0.0, 0.0, 0.0, 0.0)
     uniform mat4 u_prevViewProj
@@ -102,26 +106,30 @@ material GBufferFill {
         out gbufferNormal : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferWorldPosition : color = vec4(0.0, 0.0, 0.0, 0.0)
         out gbufferMaterial : color = vec4(0.0, 0.0, 0.0, 0.0)
+        let materialUv = vUv * uvTransform.xy + uvTransform.zw
         let rawN = normalize(worldNormal)
         let tangentSeed = worldTangent.xyz - rawN * dot(worldTangent.xyz, rawN)
                          + vec3(0.000001, 0.0, 0.0)
         let T = normalize(tangentSeed)
         let B = normalize(cross(rawN, T)) * worldTangent.w
-        let tangentNormal = sample(normalMap, vUv).xyz * 2.0
+        let tangentNormal = sample(normalMap, materialUv).xyz * 2.0
                           - vec3(1.0, 1.0, 1.0)
-        let mappedN = normalize(T * tangentNormal.x
-                              + B * tangentNormal.y * normalYSign.x
+        let mappedN = rawN
+        if (normalStrength.x > 0.0) {
+            mappedN = normalize(T * tangentNormal.x * normalStrength.x
+                              + B * tangentNormal.y * normalYSign.x * normalStrength.x
                               + rawN * tangentNormal.z)
+        }
         let viewDir = normalize(cameraPos.xyz - worldPos)
         let faceSign = mix(1.0, step(0.0, dot(mappedN, viewDir)) * 2.0 - 1.0,
                            max(0.0, min(1.0, doubleSided.x)))
         let n = mappedN * faceSign
-        let albedo = sample(albedoMap, vUv) * baseColor
-        let materialMetallic = max(0.0, min(1.0, metallic.x * sample(metallicMap, vUv).x))
-        let materialRoughness = max(0.045, min(1.0, roughness.x * sample(roughnessMap, vUv).x))
-        let materialAo = max(0.0, min(1.0, ao.x * sample(aoMap, vUv).x))
+        let albedo = sample(albedoMap, materialUv) * baseColor
+        let materialMetallic = max(0.0, min(1.0, metallic.x * sample(metallicMap, materialUv).x))
+        let materialRoughness = max(0.045, min(1.0, roughness.x * sample(roughnessMap, materialUv).x + roughnessBias.x))
+        let materialAo = max(0.0, min(1.0, ao.x * sample(aoMap, materialUv).x))
         let packedAoModel = materialModel.x * 2.0 + materialAo
-        let materialEmissive = emissive.xyz * sample(emissiveMap, vUv).rgb
+        let materialEmissive = emissive.xyz * sample(emissiveMap, materialUv).rgb
         gbufferAlbedo = vec4(albedo.rgb, materialMetallic)
         gbufferNormal = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), materialRoughness)
         gbufferWorldPosition = vec4(worldPos, packedAoModel)
@@ -132,11 +140,11 @@ material GBufferFill {
 
 // Cache key: worldPos in RT2 (RGBA16F FBO) for deferred shadow PCF.
 static constexpr const char* kGBufferCacheKey =
-    "gbuffer_fill_v16_model_coverage_split";
+    "gbuffer_fill_v17_surface_controls";
 static constexpr const char* kWorldLit2DGBufferCacheKey =
     "gbuffer_world_lit_2d_cutout_v2_tilemap_uv";
 static constexpr const char* kGBufferAlphaCutoutCacheKey =
-    "gbuffer_fill_v16_alpha_model_coverage_split";
+    "gbuffer_fill_v17_alpha_surface_controls";
 
 // WorldLit2D is a geometry substage of the existing GBuffer producer. The
 // shared unit quad only carries position+UV, so this program derives its
@@ -311,6 +319,9 @@ uniform vec4 opacitySource;
 uniform vec4 cameraPos;
 uniform vec4 doubleSided;
 uniform vec4 normalYSign;
+uniform vec4 uvTransform;
+uniform vec4 normalStrength;
+uniform vec4 roughnessBias;
 uniform vec4 metallic;
 uniform vec4 roughness;
 uniform vec4 ao;
@@ -325,8 +336,9 @@ SAMPLER2D(aoMap, 5);
 SAMPLER2D(emissiveMap, 6);
 void main()
 {
-    vec4 albedo = texture2D(albedoMap, v_texcoord0) * baseColor;
-    vec4 opacitySample = texture2D(opacityMap, v_texcoord0);
+    vec2 materialUv = v_texcoord0 * uvTransform.xy + uvTransform.zw;
+    vec4 albedo = texture2D(albedoMap, materialUv) * baseColor;
+    vec4 opacitySample = texture2D(opacityMap, materialUv);
     float dedicatedOpacity = mix(opacitySample.r, opacitySample.a,
                                  step(1.5, opacitySource.x));
     float sampledOpacity = mix(1.0, dedicatedOpacity,
@@ -340,20 +352,23 @@ void main()
                      + vec3(0.000001, 0.0, 0.0);
     vec3 T = normalize(tangentSeed);
     vec3 B = normalize(cross(rawN, T)) * v_tangent.w;
-    vec3 tangentNormal = texture2D(normalMap, v_texcoord0).xyz * 2.0
+    vec3 tangentNormal = texture2D(normalMap, materialUv).xyz * 2.0
                        - vec3(1.0, 1.0, 1.0);
-    vec3 mappedN = normalize(T * tangentNormal.x
-                           + B * tangentNormal.y * normalYSign.x
+    vec3 mappedN = rawN;
+    if (normalStrength.x > 0.0) {
+        mappedN = normalize(T * tangentNormal.x * normalStrength.x
+                           + B * tangentNormal.y * normalYSign.x * normalStrength.x
                            + rawN * tangentNormal.z);
+    }
     vec3 viewDir = normalize(cameraPos.xyz - v_position);
     float faceSign = mix(1.0, step(0.0, dot(mappedN, viewDir)) * 2.0 - 1.0,
                          clamp(doubleSided.x, 0.0, 1.0));
     vec3 n = mappedN * faceSign;
-    float materialMetallic = clamp(metallic.x * texture2D(metallicMap, v_texcoord0).x, 0.0, 1.0);
-    float materialRoughness = clamp(roughness.x * texture2D(roughnessMap, v_texcoord0).x, 0.045, 1.0);
-    float materialAo = clamp(ao.x * texture2D(aoMap, v_texcoord0).x, 0.0, 1.0);
+    float materialMetallic = clamp(metallic.x * texture2D(metallicMap, materialUv).x, 0.0, 1.0);
+    float materialRoughness = clamp(roughness.x * texture2D(roughnessMap, materialUv).x + roughnessBias.x, 0.045, 1.0);
+    float materialAo = clamp(ao.x * texture2D(aoMap, materialUv).x, 0.0, 1.0);
     float packedAoModel = materialModel.x * 2.0 + materialAo;
-    vec3 materialEmissive = emissive.xyz * texture2D(emissiveMap, v_texcoord0).rgb;
+    vec3 materialEmissive = emissive.xyz * texture2D(emissiveMap, materialUv).rgb;
     gl_FragData[0] = vec4(albedo.rgb, materialMetallic);
     gl_FragData[1] = vec4(n * 0.5 + vec3(0.5, 0.5, 0.5), materialRoughness);
     gl_FragData[2] = vec4(v_position, packedAoModel);
@@ -746,6 +761,7 @@ uint32_t GBufferPass::execute(PassExecContext& ctx)
         };
         uploadMaterialScalar("metallic", 0.0f);
         uploadMaterialScalar("roughness", 0.5f);
+        uploadPbrSurface(material,drawProgram);
         uploadMaterialScalar("ao", 1.0f);
         const shader::BindingId materialModelBinding =
             drawProgram.getUniformBinding("materialModel");

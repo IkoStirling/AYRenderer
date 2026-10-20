@@ -138,6 +138,7 @@ uniform vec4 alphaCutoff;
 uniform vec4 baseColor;
 uniform vec4 opacity;
 uniform vec4 opacitySource;
+uniform vec4 uvTransform;
 uniform vec4 tint;
 uniform vec4 atlasTexel;
 uniform vec4 samplingQuality;
@@ -146,34 +147,35 @@ SAMPLER2D(opacityMap, 1);
 
 void main()
 {
+    vec2 materialUv = v_texcoord0 * uvTransform.xy + uvTransform.zw;
     vec2 safeTexel = max(atlasTexel.xy, vec2(0.000001, 0.000001));
-    vec2 nearestUv = (floor(v_texcoord0 / safeTexel) + vec2(0.5, 0.5))
+    vec2 nearestUv = (floor(materialUv / safeTexel) + vec2(0.5, 0.5))
                    * safeTexel;
-    vec2 sampleUv = mix(nearestUv, v_texcoord0,
+    vec2 sampleUv = mix(nearestUv, materialUv,
                         step(0.5, samplingQuality.x));
     vec4 albedoSample = texture2D(albedoMap, sampleUv);
     if (samplingQuality.x > 1.5) {
         vec2 d4 = atlasTexel.xy * 0.25;
-        albedoSample = (texture2D(albedoMap, v_texcoord0 + vec2(-d4.x, -d4.y))
-                      + texture2D(albedoMap, v_texcoord0 + vec2( d4.x, -d4.y))
-                      + texture2D(albedoMap, v_texcoord0 + vec2(-d4.x,  d4.y))
-                      + texture2D(albedoMap, v_texcoord0 + vec2( d4.x,  d4.y)))
+        albedoSample = (texture2D(albedoMap, materialUv + vec2(-d4.x, -d4.y))
+                      + texture2D(albedoMap, materialUv + vec2( d4.x, -d4.y))
+                      + texture2D(albedoMap, materialUv + vec2(-d4.x,  d4.y))
+                      + texture2D(albedoMap, materialUv + vec2( d4.x,  d4.y)))
                      * 0.25;
     }
     if (samplingQuality.x > 2.5) {
         vec2 d9 = atlasTexel.xy * 0.3333333;
-        albedoSample = (texture2D(albedoMap, v_texcoord0 + vec2(-d9.x, -d9.y))
-                      + texture2D(albedoMap, v_texcoord0 + vec2( 0.0,  -d9.y))
-                      + texture2D(albedoMap, v_texcoord0 + vec2( d9.x, -d9.y))
-                      + texture2D(albedoMap, v_texcoord0 + vec2(-d9.x,  0.0))
-                      + texture2D(albedoMap, v_texcoord0)
-                      + texture2D(albedoMap, v_texcoord0 + vec2( d9.x,  0.0))
-                      + texture2D(albedoMap, v_texcoord0 + vec2(-d9.x,  d9.y))
-                      + texture2D(albedoMap, v_texcoord0 + vec2( 0.0,   d9.y))
-                      + texture2D(albedoMap, v_texcoord0 + vec2( d9.x,  d9.y)))
+        albedoSample = (texture2D(albedoMap, materialUv + vec2(-d9.x, -d9.y))
+                      + texture2D(albedoMap, materialUv + vec2( 0.0,  -d9.y))
+                      + texture2D(albedoMap, materialUv + vec2( d9.x, -d9.y))
+                      + texture2D(albedoMap, materialUv + vec2(-d9.x,  0.0))
+                      + texture2D(albedoMap, materialUv)
+                      + texture2D(albedoMap, materialUv + vec2( d9.x,  0.0))
+                      + texture2D(albedoMap, materialUv + vec2(-d9.x,  d9.y))
+                      + texture2D(albedoMap, materialUv + vec2( 0.0,   d9.y))
+                      + texture2D(albedoMap, materialUv + vec2( d9.x,  d9.y)))
                      * (1.0 / 9.0);
     }
-    vec4 opacitySample = texture2D(opacityMap, v_texcoord0);
+    vec4 opacitySample = texture2D(opacityMap, materialUv);
     float dedicatedOpacity = mix(opacitySample.r, opacitySample.a,
                                  step(1.5, opacitySource.x));
     float sampledOpacity = mix(1.0, dedicatedOpacity,
@@ -195,7 +197,7 @@ void main()
 // here rather than in ShadowSettings because the mask caster
 // uses its own Phoskia/`.sc` switch path.
 inline constexpr const char* kShadowMaskCasterCacheKey =
-    "shadow_mask_caster_sc_v5_world_lit_2d_uv";
+    "shadow_mask_caster_sc_v6_surface_uv";
 
 // Lit receiver — ABI matches verified hand .sc (all lighting/bias as vec4,
 // swizzle .xyz / .x). Unrolled 3x3 PCF + in-map gate.

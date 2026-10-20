@@ -1,0 +1,218 @@
+{
+    "__coordConvention": "ay-coordinates-lh-yup-zfwd-ccw-uvtop-m-v1",
+    "__schemaVersion": 5,
+    "entities": [
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "ff3911ea45ea62e8000000000000149d",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber-wet.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 1,
+            "kind": "spatial",
+            "name": "rubber-wet / cube 1",
+            "owner": "",
+            "persistentId": "6f21c7b1c2267503000000000000149b",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "4e7eb72c800a51a3000000000000149c",
+                "position": [
+                    0.0,
+                    -0.18,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    8.0,
+                    0.25,
+                    6.0
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "98a9be19c0cb900e00000000000014a0",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/panel-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 2,
+            "kind": "spatial",
+            "name": "panel-wet / sphere 2",
+            "owner": "",
+            "persistentId": "16e0efcf11ea96ad000000000000149e",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "0f8c4b5085b40825000000000000149f",
+                "position": [
+                    -1.4,
+                    1.5,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.149438,
+                    0.0,
+                    0.988771
+                ],
+                "scale": [
+                    2.4,
+                    2.4,
+                    2.4
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "15359300789f5b9600000000000014a3",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/panel-wet.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 3,
+            "kind": "spatial",
+            "name": "panel-wet / cube 3",
+            "owner": "",
+            "persistentId": "b1c94f352698380500000000000014a1",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "eefcff8a8a632f6f00000000000014a2",
+                "position": [
+                    1.6,
+                    1.1,
+                    0.0
+                ],
+                "rotation": [
+                    -0.0,
+                    -0.174108,
+                    -0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.8,
+                    2.2,
+                    1.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "116d4fd5eca21db400000000000014a6",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/panel-wet.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 4,
+            "kind": "spatial",
+            "name": "panel-wet / cube 4",
+            "owner": "",
+            "persistentId": "112eaecb4b239f1f00000000000014a4",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "bf49c952dbdf23e200000000000014a5",
+                "position": [
+                    0.0,
+                    0.05,
+                    -1.8
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    4.0,
+                    0.1,
+                    0.8
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "79de4f76d0726ce800000000000014a9",
+                    "$type": "PerspectiveCameraComponent",
+                    "active": true,
+                    "blendDuration": 0.0,
+                    "farZ": 100.0,
+                    "fovYDegrees": 43.0,
+                    "layerMask": 4294967295,
+                    "localOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "localRotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "nearZ": 0.1,
+                    "orthographicHeight": 10.0,
+                    "priority": 10,
+                    "projectionMode": 0,
+                    "viewportId": 0
+                }
+            ],
+            "id": 5,
+            "kind": "spatial",
+            "name": "Showcase Camera",
+            "owner": "",
+            "persistentId": "1e8870b06902434100000000000014a7",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "f60e2285e77b68f100000000000014a8",
+                "position": [
+                    5.0,
+                    3.2,
+                    -6.5
+                ],
+                "rotation": [
+                    0.123716,
+                    -0.319245,
+                    0.042078,
+                    0.938619
+                ],
+                "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                ]
+            },
+            "spatialParent": ""
+        }
+    ]
+}

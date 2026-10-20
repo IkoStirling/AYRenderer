@@ -1,6 +1,7 @@
 #include "detail/ForwardOpaquePass.h"
 #include "detail/RasterConvention.h"
 #include "detail/SceneLighting.h"
+#include "detail/PbrSurfaceBinding.h"
 
 #include "AYRenderer/RenderTypes.h"
 #include "detail/FrameContext.h"
@@ -179,6 +180,10 @@ void ForwardOpaquePass::flushMaterial(GpuMaterial& material,
         }
         material.shader.setUniform(binding, slot.data, slot.size);
     }
+
+    uploadPbrSurface(material,material.shader);
+    const float cutoff[4] = {material.alphaCutout ? material.alphaCutoff : 0.f, 0, 0, 0};
+    trySetUniformVec4(material.shader, "alphaCutoff", cutoff);
 
     // PBR is shared with TransparentPass. Clear its optional haze uniforms on
     // opaque submissions so a previous frame's transparent values cannot leak
@@ -365,6 +370,8 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
         // §P2 L4 (2026-08-24) — `world` arg dropped (was unused).
         flushMaterial(material, textures, frame, adapter,
                       ctx.shadowPass, item.shadowFlags);
+        trySetUniformMat4(material.shader,"u_normalMatrix",nullptr,
+                          normalMatrixForTransform(item.world));
         // PBR consumes the Lights arrays and active count, while SimpleLit
         // consumes the legacy uniforms. Upload both from the same frame.
         (void)uploadSceneLighting(material.shader, packedLights);

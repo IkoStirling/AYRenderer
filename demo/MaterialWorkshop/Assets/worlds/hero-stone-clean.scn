@@ -1,0 +1,218 @@
+{
+    "__coordConvention": "ay-coordinates-lh-yup-zfwd-ccw-uvtop-m-v1",
+    "__schemaVersion": 5,
+    "entities": [
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "fd7dedb471bca7ae0000000000000ca2",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber-clean.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 1,
+            "kind": "spatial",
+            "name": "rubber-clean / cube 1",
+            "owner": "",
+            "persistentId": "9643c221d7f22d290000000000000ca0",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "e81a8439a02507770000000000000ca1",
+                "position": [
+                    0.0,
+                    -0.18,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    8.0,
+                    0.25,
+                    6.0
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "d0397f14e42dac9b0000000000000ca5",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/stone-clean.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 2,
+            "kind": "spatial",
+            "name": "stone-clean / sphere 2",
+            "owner": "",
+            "persistentId": "31680cce67566ad40000000000000ca3",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "cf576b9cd520828e0000000000000ca4",
+                "position": [
+                    -1.4,
+                    1.5,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.149438,
+                    0.0,
+                    0.988771
+                ],
+                "scale": [
+                    2.4,
+                    2.4,
+                    2.4
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "b9999e8e0576752c0000000000000ca8",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/stone-clean.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 3,
+            "kind": "spatial",
+            "name": "stone-clean / cube 3",
+            "owner": "",
+            "persistentId": "bac9b6d84f181d840000000000000ca6",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "f8e7c53e909323a00000000000000ca7",
+                "position": [
+                    1.6,
+                    1.1,
+                    0.0
+                ],
+                "rotation": [
+                    -0.0,
+                    -0.174108,
+                    -0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.8,
+                    2.2,
+                    1.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "45615e6b68649cf30000000000000cab",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/stone-clean.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 4,
+            "kind": "spatial",
+            "name": "stone-clean / cube 4",
+            "owner": "",
+            "persistentId": "7cc7db880716cbea0000000000000ca9",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "0e03714c6c451bba0000000000000caa",
+                "position": [
+                    0.0,
+                    0.05,
+                    -1.8
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    4.0,
+                    0.1,
+                    0.8
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "9145ff10615b4d2e0000000000000cae",
+                    "$type": "PerspectiveCameraComponent",
+                    "active": true,
+                    "blendDuration": 0.0,
+                    "farZ": 100.0,
+                    "fovYDegrees": 43.0,
+                    "layerMask": 4294967295,
+                    "localOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "localRotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "nearZ": 0.1,
+                    "orthographicHeight": 10.0,
+                    "priority": 10,
+                    "projectionMode": 0,
+                    "viewportId": 0
+                }
+            ],
+            "id": 5,
+            "kind": "spatial",
+            "name": "Showcase Camera",
+            "owner": "",
+            "persistentId": "d251f768f1a484300000000000000cac",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "9ce9052f23575efa0000000000000cad",
+                "position": [
+                    5.0,
+                    3.2,
+                    -6.5
+                ],
+                "rotation": [
+                    0.123716,
+                    -0.319245,
+                    0.042078,
+                    0.938619
+                ],
+                "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                ]
+            },
+            "spatialParent": ""
+        }
+    ]
+}

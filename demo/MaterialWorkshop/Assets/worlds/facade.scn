@@ -1,0 +1,1466 @@
+{
+    "__coordConvention": "ay-coordinates-lh-yup-zfwd-ccw-uvtop-m-v1",
+    "__schemaVersion": 5,
+    "entities": [
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "864784ee2d667f5300000000000000ed",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/stone.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 1,
+            "kind": "spatial",
+            "name": "stone / cube 1",
+            "owner": "",
+            "persistentId": "6b52657d04e09bad00000000000000eb",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "bf7faef4b268f50400000000000000ec",
+                "position": [
+                    0.0,
+                    -0.2,
+                    1.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    13.0,
+                    0.25,
+                    8.0
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "cad88f1b4304dd6400000000000000f0",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/stone.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 2,
+            "kind": "spatial",
+            "name": "stone / cube 2",
+            "owner": "",
+            "persistentId": "42ea1e544f7ea16d00000000000000ee",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "30dd6e56489f748c00000000000000ef",
+                "position": [
+                    0.0,
+                    2.2,
+                    1.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    8.0,
+                    4.4,
+                    2.6
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "bb7f1258b15b786200000000000000f3",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 3,
+            "kind": "spatial",
+            "name": "wood / cube 3",
+            "owner": "",
+            "persistentId": "07493384fd52830800000000000000f1",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "51d3bd892baf1ede00000000000000f2",
+                "position": [
+                    -2.7,
+                    1.3,
+                    -0.43
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.35,
+                    1.6,
+                    0.18
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "f4209c22e1edf70d00000000000000f6",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 4,
+            "kind": "spatial",
+            "name": "ceramic / cube 4",
+            "owner": "",
+            "persistentId": "cc414ab8181a905e00000000000000f4",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "512190ea94abff8700000000000000f5",
+                "position": [
+                    -2.7,
+                    1.3,
+                    -0.56
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.05,
+                    1.32,
+                    0.12
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "2c220ac0d5f2c49f00000000000000f9",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 5,
+            "kind": "spatial",
+            "name": "metal / cube 5",
+            "owner": "",
+            "persistentId": "ac82e2e99f3e194600000000000000f7",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "a9f32ffb40e0646800000000000000f8",
+                "position": [
+                    -2.7,
+                    0.52,
+                    -0.75
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.5,
+                    0.13,
+                    0.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "1f2c8bef6006c8d000000000000000fc",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 6,
+            "kind": "spatial",
+            "name": "wood / cube 6",
+            "owner": "",
+            "persistentId": "d77f15ac87aaaf6600000000000000fa",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "88c54e87eb94b91b00000000000000fb",
+                "position": [
+                    -0.9,
+                    1.3,
+                    -0.43
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.35,
+                    1.6,
+                    0.18
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "d18f4854dfa3244400000000000000ff",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 7,
+            "kind": "spatial",
+            "name": "ceramic / cube 7",
+            "owner": "",
+            "persistentId": "dedaafa2a3f2511900000000000000fd",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "b3bbda76348026db00000000000000fe",
+                "position": [
+                    -0.9,
+                    1.3,
+                    -0.56
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.05,
+                    1.32,
+                    0.12
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "138460c9be0f8d4e0000000000000102",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 8,
+            "kind": "spatial",
+            "name": "metal / cube 8",
+            "owner": "",
+            "persistentId": "5c1eec8862038ccd0000000000000100",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "4feb48c4252fb0310000000000000101",
+                "position": [
+                    -0.9,
+                    0.52,
+                    -0.75
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.5,
+                    0.13,
+                    0.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "7c6b25a561fb32640000000000000105",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 9,
+            "kind": "spatial",
+            "name": "wood / cube 9",
+            "owner": "",
+            "persistentId": "e399ba2995d8166f0000000000000103",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "bbfbcbb1ae0303e90000000000000104",
+                "position": [
+                    0.9,
+                    1.3,
+                    -0.43
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.35,
+                    1.6,
+                    0.18
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "28edbe62f89742350000000000000108",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 10,
+            "kind": "spatial",
+            "name": "ceramic / cube 10",
+            "owner": "",
+            "persistentId": "f1da3d5358a403760000000000000106",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "21d0dbf6c8a9d5c00000000000000107",
+                "position": [
+                    0.9,
+                    1.3,
+                    -0.56
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.05,
+                    1.32,
+                    0.12
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "dc21ee58454c378f000000000000010b",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 11,
+            "kind": "spatial",
+            "name": "metal / cube 11",
+            "owner": "",
+            "persistentId": "4609ee18fe1355600000000000000109",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "99ddae57fe6a36e2000000000000010a",
+                "position": [
+                    0.9,
+                    0.52,
+                    -0.75
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.5,
+                    0.13,
+                    0.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "8eee8db913a25c9b000000000000010e",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 12,
+            "kind": "spatial",
+            "name": "wood / cube 12",
+            "owner": "",
+            "persistentId": "191b64182e0869e5000000000000010c",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "74b8e5f9e7dffd3e000000000000010d",
+                "position": [
+                    2.7,
+                    1.3,
+                    -0.43
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.35,
+                    1.6,
+                    0.18
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "b0653af8f36352eb0000000000000111",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 13,
+            "kind": "spatial",
+            "name": "ceramic / cube 13",
+            "owner": "",
+            "persistentId": "9705257a193ad288000000000000010f",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "328210410cc0099f0000000000000110",
+                "position": [
+                    2.7,
+                    1.3,
+                    -0.56
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.05,
+                    1.32,
+                    0.12
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "8a37048f0661c2d00000000000000114",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 14,
+            "kind": "spatial",
+            "name": "metal / cube 14",
+            "owner": "",
+            "persistentId": "382113ae42ed80c30000000000000112",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "e7b5680d8b5908a50000000000000113",
+                "position": [
+                    2.7,
+                    0.52,
+                    -0.75
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.5,
+                    0.13,
+                    0.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "548947a8ca1202d50000000000000117",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 15,
+            "kind": "spatial",
+            "name": "wood / cube 15",
+            "owner": "",
+            "persistentId": "46422ab4fc6668350000000000000115",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "5fda89cbf4771f850000000000000116",
+                "position": [
+                    -2.7,
+                    3.2,
+                    -0.43
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.35,
+                    1.6,
+                    0.18
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "193181a250640c5d000000000000011a",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 16,
+            "kind": "spatial",
+            "name": "ceramic / cube 16",
+            "owner": "",
+            "persistentId": "8ccb6e24e3dcf8f70000000000000118",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "96f7357304ba4f4f0000000000000119",
+                "position": [
+                    -2.7,
+                    3.2,
+                    -0.56
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.05,
+                    1.32,
+                    0.12
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "07ae008681cc6ec4000000000000011d",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 17,
+            "kind": "spatial",
+            "name": "metal / cube 17",
+            "owner": "",
+            "persistentId": "b44d1d0402fdfcfa000000000000011b",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "302c13f6a122b895000000000000011c",
+                "position": [
+                    -2.7,
+                    2.42,
+                    -0.75
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.5,
+                    0.13,
+                    0.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "b2d12522fd0b94370000000000000120",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 18,
+            "kind": "spatial",
+            "name": "wood / cube 18",
+            "owner": "",
+            "persistentId": "1458d61875f32dfe000000000000011e",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "9825e276500c14f4000000000000011f",
+                "position": [
+                    -0.9,
+                    3.2,
+                    -0.43
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.35,
+                    1.6,
+                    0.18
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "38f5f59f4c37eef70000000000000123",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 19,
+            "kind": "spatial",
+            "name": "ceramic / cube 19",
+            "owner": "",
+            "persistentId": "6423c0abfd581a970000000000000121",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "bfd80d34635a2a5b0000000000000122",
+                "position": [
+                    -0.9,
+                    3.2,
+                    -0.56
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.05,
+                    1.32,
+                    0.12
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "7ff0c92eebba8a790000000000000126",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 20,
+            "kind": "spatial",
+            "name": "metal / cube 20",
+            "owner": "",
+            "persistentId": "05ce862d82da07370000000000000124",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "5a0631470cdf85fa0000000000000125",
+                "position": [
+                    -0.9,
+                    2.42,
+                    -0.75
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.5,
+                    0.13,
+                    0.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "2b6be809f25793a00000000000000129",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 21,
+            "kind": "spatial",
+            "name": "wood / cube 21",
+            "owner": "",
+            "persistentId": "5788f5dec00246610000000000000127",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "dcd429b568a0530b0000000000000128",
+                "position": [
+                    0.9,
+                    3.2,
+                    -0.43
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.35,
+                    1.6,
+                    0.18
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "8304aeef10c1149e000000000000012c",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 22,
+            "kind": "spatial",
+            "name": "ceramic / cube 22",
+            "owner": "",
+            "persistentId": "c4cf9e91ec205ff1000000000000012a",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "3c8c1cc9abfe43bd000000000000012b",
+                "position": [
+                    0.9,
+                    3.2,
+                    -0.56
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.05,
+                    1.32,
+                    0.12
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "d0fc3c67bb85556c000000000000012f",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 23,
+            "kind": "spatial",
+            "name": "metal / cube 23",
+            "owner": "",
+            "persistentId": "9fea97cef999daf5000000000000012d",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "1ca9db5570a29c5c000000000000012e",
+                "position": [
+                    0.9,
+                    2.42,
+                    -0.75
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.5,
+                    0.13,
+                    0.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "25739315476e15870000000000000132",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 24,
+            "kind": "spatial",
+            "name": "wood / cube 24",
+            "owner": "",
+            "persistentId": "c2e8ace9bc87fd710000000000000130",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "66432df18a6a38dd0000000000000131",
+                "position": [
+                    2.7,
+                    3.2,
+                    -0.43
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.35,
+                    1.6,
+                    0.18
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "49b6fab0826a3e730000000000000135",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 25,
+            "kind": "spatial",
+            "name": "ceramic / cube 25",
+            "owner": "",
+            "persistentId": "016d7d7239bbe4050000000000000133",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "0726c12ba195f8c30000000000000134",
+                "position": [
+                    2.7,
+                    3.2,
+                    -0.56
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.05,
+                    1.32,
+                    0.12
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "e89a8ead229c8e9a0000000000000138",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 26,
+            "kind": "spatial",
+            "name": "metal / cube 26",
+            "owner": "",
+            "persistentId": "0fc6f4278596ef0a0000000000000136",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "726d0a441ab1077a0000000000000137",
+                "position": [
+                    2.7,
+                    2.42,
+                    -0.75
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.5,
+                    0.13,
+                    0.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "b37e9fd41a152b93000000000000013b",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/paint.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 27,
+            "kind": "spatial",
+            "name": "paint / cube 27",
+            "owner": "",
+            "persistentId": "b05a9c56dcfbb6110000000000000139",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "3bbb88cb4eddae78000000000000013a",
+                "position": [
+                    0.0,
+                    4.5,
+                    -0.4
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    8.6,
+                    0.5,
+                    0.8
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "afe727b8beafebf5000000000000013e",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/panel.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 28,
+            "kind": "spatial",
+            "name": "panel / cube 28",
+            "owner": "",
+            "persistentId": "5d9b873ea39d8f4b000000000000013c",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "c4ca2710f2dcebef000000000000013d",
+                "position": [
+                    0.0,
+                    4.5,
+                    -0.83
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    4.0,
+                    0.23,
+                    0.06
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "d07130ec1af3fb8c0000000000000141",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 29,
+            "kind": "spatial",
+            "name": "metal / cylinder 29",
+            "owner": "",
+            "persistentId": "f75d3d5af8ae63c4000000000000013f",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "6e20340fcf3c143c0000000000000140",
+                "position": [
+                    -4.7,
+                    1.75,
+                    1.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    0.2,
+                    3.5,
+                    0.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "e806a82efd8a1fc80000000000000144",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 30,
+            "kind": "spatial",
+            "name": "rubber / torus 30",
+            "owner": "",
+            "persistentId": "7c941545aaae75260000000000000142",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "91f467dc1a6db9550000000000000143",
+                "position": [
+                    -4.7,
+                    2.7,
+                    1.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    0.3,
+                    0.3,
+                    0.3
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "7bbc6999092253230000000000000147",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 31,
+            "kind": "spatial",
+            "name": "metal / cylinder 31",
+            "owner": "",
+            "persistentId": "5745fa2d85cbf3220000000000000145",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "4566850282f985bb0000000000000146",
+                "position": [
+                    -4.35,
+                    1.75,
+                    1.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    0.2,
+                    3.5,
+                    0.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "0fbb2255273bbce4000000000000014a",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 32,
+            "kind": "spatial",
+            "name": "rubber / torus 32",
+            "owner": "",
+            "persistentId": "968062787ef88d620000000000000148",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "2f5d99d81d320ea50000000000000149",
+                "position": [
+                    -4.35,
+                    2.7,
+                    1.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    0.3,
+                    0.3,
+                    0.3
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "921506a055628404000000000000014d",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 33,
+            "kind": "spatial",
+            "name": "metal / cylinder 33",
+            "owner": "",
+            "persistentId": "4aec34f794b7a41f000000000000014b",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "90f7aeb565b614e3000000000000014c",
+                "position": [
+                    -4.0,
+                    1.75,
+                    1.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    0.2,
+                    3.5,
+                    0.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "d174fbe536239a460000000000000150",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 34,
+            "kind": "spatial",
+            "name": "rubber / torus 34",
+            "owner": "",
+            "persistentId": "59b9e1195fe83bb8000000000000014e",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "da4e28be24ca796d000000000000014f",
+                "position": [
+                    -4.0,
+                    2.7,
+                    1.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    0.3,
+                    0.3,
+                    0.3
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "ce79f981c387fc3c0000000000000153",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 35,
+            "kind": "spatial",
+            "name": "wood / cube 35",
+            "owner": "",
+            "persistentId": "923d55fd0526bb1b0000000000000151",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "a18a0d30cb6262a90000000000000152",
+                "position": [
+                    3.7,
+                    0.18,
+                    -2.2
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    2.5,
+                    0.3,
+                    1.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "0868b3abc2452da90000000000000156",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/fabric.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 36,
+            "kind": "spatial",
+            "name": "fabric / cube 36",
+            "owner": "",
+            "persistentId": "51467008034fa7650000000000000154",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "fda34fbc63e7b76d0000000000000155",
+                "position": [
+                    3.7,
+                    0.45,
+                    -2.2
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    2.2,
+                    0.25,
+                    0.9
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "f8fee01d4282d1a20000000000000159",
+                    "$type": "PerspectiveCameraComponent",
+                    "active": true,
+                    "blendDuration": 0.0,
+                    "farZ": 100.0,
+                    "fovYDegrees": 47.0,
+                    "layerMask": 4294967295,
+                    "localOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "localRotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "nearZ": 0.1,
+                    "orthographicHeight": 10.0,
+                    "priority": 10,
+                    "projectionMode": 0,
+                    "viewportId": 0
+                }
+            ],
+            "id": 37,
+            "kind": "spatial",
+            "name": "Showcase Camera",
+            "owner": "",
+            "persistentId": "e1a49a80063520fa0000000000000157",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "c1aa1a5864f18b8d0000000000000158",
+                "position": [
+                    9.0,
+                    6.0,
+                    -11.0
+                ],
+                "rotation": [
+                    0.123265,
+                    -0.313547,
+                    0.041088,
+                    0.940641
+                ],
+                "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                ]
+            },
+            "spatialParent": ""
+        }
+    ]
+}

@@ -699,6 +699,23 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
         material.getAlphaCutoff(), material.isDoubleSided());
     const MaterialModel materialModel = inferMaterialModel(material, shaderRef);
     (void)mgr.setMaterialModel(handle, materialModel);
+    if (materialModel == MaterialModel::StandardLit) {
+        // Missing resource factors must be explicit instance values. bgfx
+        // uniform storage outlives a draw, so relying on shader properties
+        // lets a later preview's values bleed into sparse/legacy materials.
+        // Match the established GBuffer and authoring-document defaults.
+        const auto missingFloat = [&](const char* name, float value) {
+            if (!material.hasParameter(name)) mgr.setMaterialFloat(handle, name, value);
+        };
+        missingFloat("metallic", 0.0f);
+        missingFloat("roughness", 0.5f);
+        missingFloat("ao", 1.0f);
+        missingFloat("opacity", 1.0f);
+        missingFloat("opacitySource", 0.0f);
+        missingFloat("normalYSign", 1.0f);
+        missingFloat("premultipliedAlpha", 0.0f);
+        if (!material.hasParameter("emissive")) mgr.setMaterialVec3(handle, "emissive", 0, 0, 0);
+    }
     // Source blend composition is independent from alpha pass routing. The
     // importer serializes this reserved parameter so Assimp and a future FBX
     // SDK adapter feed the same renderer contract.

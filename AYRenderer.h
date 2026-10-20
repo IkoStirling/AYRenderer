@@ -2,6 +2,7 @@
 // AYRenderer.h — engine renderer entry (pimpl; no bgfx in this header)
 
 #include "AYRenderer/ColorStylizationSettings.h"
+#include "AYRenderer/PbrSurfaceSettings.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
 #include "AYRenderer/SsrSettings.h"
@@ -20,6 +21,7 @@
 namespace ayt::shader {
 class ShaderResourcePool;
 }
+namespace ayt::resource { class Material; }
 
 namespace ayt::render
 {
@@ -27,6 +29,7 @@ namespace ayt::render
 class UIRenderBackend;
 class RendererSubSystem;
 struct PreviewSceneCamera;
+struct PreviewSceneSettings;
 
 namespace detail {
 class BGFXAdapter;
@@ -151,6 +154,18 @@ public:
                                             const std::string& varyingDefSc,
                                             const std::string& cacheKey = "");
     MaterialHandle createMaterialFromFile(const std::string& path);
+    /// Advanced Host: upload an independent concrete resource snapshot for
+    /// authoring previews, using the same supported parameters as loadMaterial.
+    /// ownerPath resolves shader/texture references; the input is consumed
+    /// synchronously and is never adopted or registered in the material cache.
+    /// Destroy the returned material when finished; shared texture resources
+    /// remain Renderer-owned. Compiled programs are shared with Scene materials;
+    /// destroying a snapshot preserves programs still used by another material.
+    /// StandardLit resource factors omitted by a file use per-instance defaults
+    /// (metallic 0, roughness .5, AO/opacity/normal-Y 1, emission 0).
+    /// Material file edits require a fresh snapshot.
+    MaterialHandle createMaterialFromResource(const ayt::resource::Material& material,
+                                              const std::string& ownerPath);
     MaterialHandle loadMaterial(const std::string& path);
     // Creates a shared 2D surface material. WorldLit2D opaque/cutout draws
     // consume it in GBuffer; SceneOverlay keeps using ordinary Phoskia
@@ -196,10 +211,19 @@ public:
 
     // P2.1 diagnostics and host-side surface overrides. alphaMode uses the
     // resource contract values: 0=Opaque, 1=Mask, 2=Blend.
+    /// 0=Opaque, 1=Mask, 2=Blend. Mask cutoff applies to the built-in PBR
+    /// Forward and Deferred paths and their alpha-aware shadow/motion replay.
+    /// Cutoff clamps to 0..1 (non-finite -> .5); non-Mask PBR draws reset it to 0.
     void setMaterialSurfaceProperties(MaterialHandle material, int alphaMode,
                                       float alphaCutoff, bool doubleSided);
 
     void setMaterialFloat(MaterialHandle material, const char* uniformName, float value);
+    /// Advanced Host PBR override; copied/sanitized on the submission owner thread.
+    /// Persists through .mat parameters uvTransform(Float4), normalStrength(Float)
+    /// and roughnessBias(Float). Missing/invalid handles are safe no-ops/defaults.
+    /// Default controls are also supplied to legacy materials on each draw.
+    void setMaterialPbrSurfaceSettings(MaterialHandle material,const PbrSurfaceSettings& settings);
+    PbrSurfaceSettings materialPbrSurfaceSettings(MaterialHandle material) const;
     void setMaterialVec3(MaterialHandle material, const char* uniformName,
                          float x, float y, float z);
 
@@ -609,9 +633,10 @@ public:
 private:
     friend class UIRenderBackend;
     bool cameraOutputMatches(CameraOutputHandle output, uint16_t width, uint16_t height) const noexcept;
-    void renderPreviewScene(const RenderScene& scene, const PreviewSceneCamera& camera,
+    bool renderPreviewScene(const RenderScene& scene, const PreviewSceneCamera& camera,
                             uint16_t framebuffer, uint16_t width, uint16_t height,
-                            uint8_t firstView, uint32_t clearRgba);
+                            uint8_t firstView, uint32_t clearRgba,
+                            const PreviewSceneSettings& settings,uint16_t hdrFramebuffer);
 
     detail::BGFXAdapter* bgfxAdapter() noexcept;
     const detail::BGFXAdapter* bgfxAdapter() const noexcept;

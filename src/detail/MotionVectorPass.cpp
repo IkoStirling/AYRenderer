@@ -1,4 +1,5 @@
 #include "detail/MotionVectorPass.h"
+#include "detail/PbrSurfaceBinding.h"
 #include "detail/BuiltinShaderCatalog.h"
 
 #include "AYRenderer/RenderTypes.h"
@@ -99,6 +100,7 @@ material MotionVectorCutout {
     uniform vec4 alphaCutoff
     uniform vec4 opacity
     uniform vec4 opacitySource
+    property uvTransform = vec4(1.0, 1.0, 0.0, 0.0)
     uniform mat4 previousWorld
     uniform mat4 previousViewProjection
     uniform vec4 motionParams
@@ -129,8 +131,9 @@ material MotionVectorCutout {
         // Must precede alpha discard so derivatives remain well-defined.
         let previousDepth = previousClip.z / max(previousClip.w, 0.00001)
         let previousDepthFootprint = min(fwidth(previousDepth), 1.0)
-        let albedo = sample(albedoMap, vUv) * baseColor
-        let opacitySample = sample(opacityMap, vUv)
+        let materialUv = vUv * uvTransform.xy + uvTransform.zw
+        let albedo = sample(albedoMap, materialUv) * baseColor
+        let opacitySample = sample(opacityMap, materialUv)
         let dedicatedOpacity = mix(opacitySample.x, opacitySample.w,
                                    step(1.5, opacitySource.x))
         let sampledOpacity = mix(1.0, dedicatedOpacity,
@@ -167,7 +170,7 @@ material MotionVectorCutout {
 constexpr const char* kMotionVectorCacheKey =
     "motion_vector_phoskia_rgba16f_depth_footprint_v7_reactive";
 constexpr const char* kMotionVectorCutoutCacheKey =
-    "motion_vector_phoskia_rgba16f_depth_footprint_cutout_v7_reactive";
+    "motion_vector_phoskia_rgba16f_depth_footprint_cutout_v8_surface_uv";
 
 struct CommitKey final {
     uint64_t objectId = 0;
@@ -645,6 +648,7 @@ uint32_t MotionVectorPass::execute(PassExecContext& ctx)
                            motionJitter, sizeof(motionJitter));
 
         if (alphaAware) {
+            uploadPbrSurface(material,program);
             const float baseColor[4] = {
                 material.hasColorOverride ? material.colorOverride.x : 1.0f,
                 material.hasColorOverride ? material.colorOverride.y : 1.0f,

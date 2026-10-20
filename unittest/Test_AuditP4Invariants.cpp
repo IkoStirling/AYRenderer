@@ -336,11 +336,11 @@ TEST_CASE(caster_cache_key_v7) {
           == "shadow_caster_phoskia_v7_audit_p4");
 }
 
-TEST_CASE(mask_caster_cache_key_v4) {
-    // L7 fix: bumped v3 → v4 to invalidate the mask caster
-    // shader cache after the colorOverride ternary removal.
+TEST_CASE(mask_caster_cache_key_tracks_surface_uv_revision) {
+    // Surface UVs change the opacity footprint in every alpha-aware replay;
+    // do not reuse an older WorldLit2D-only mask caster program.
     CHECK(std::string_view(kShadowMaskCasterCacheKey)
-          == "shadow_mask_caster_sc_v5_world_lit_2d_uv");
+          == "shadow_mask_caster_sc_v6_surface_uv");
 }
 
 TEST_SUITE_END

@@ -18,6 +18,36 @@ inline MeshHandle uploadGalleryGeometry(Renderer& renderer,const GalleryGeometry
     layout.add({VertexAttribute::TexCoord0,2,VertexComponentType::Float,false});
     return renderer.createMesh(mesh.vertices.data(),uint32_t(mesh.vertices.size()),layout,mesh.indices.data(),uint32_t(mesh.indices.size()));
 }
+// Face-separated positions/normals/UVs: the convenience textured cube has
+// positions and UVs only, so a lit gallery supplies an explicit normal stream.
+inline GalleryGeometry galleryCube()
+{
+    const float points[6][4][3]={
+        {{-.5f,-.5f,-.5f},{.5f,-.5f,-.5f},{.5f,.5f,-.5f},{-.5f,.5f,-.5f}},
+        {{-.5f,-.5f,.5f},{.5f,-.5f,.5f},{.5f,.5f,.5f},{-.5f,.5f,.5f}},
+        {{.5f,-.5f,-.5f},{.5f,-.5f,.5f},{.5f,.5f,.5f},{.5f,.5f,-.5f}},
+        {{-.5f,-.5f,.5f},{-.5f,-.5f,-.5f},{-.5f,.5f,-.5f},{-.5f,.5f,.5f}},
+        {{-.5f,.5f,-.5f},{.5f,.5f,-.5f},{.5f,.5f,.5f},{-.5f,.5f,.5f}},
+        {{-.5f,-.5f,.5f},{.5f,-.5f,.5f},{.5f,-.5f,-.5f},{-.5f,-.5f,-.5f}}};
+    const float normals[6][3]={{0,0,-1},{0,0,1},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
+    using Vertex=GalleryVertex;
+    std::array<Vertex,24> vertices{};std::array<uint16_t,36> indices{};
+    const uint16_t flipped[6]={0,2,1,0,3,2},straight[6]={0,1,2,0,2,3};
+    for(int face=0;face<6;++face) {
+        for(int corner=0;corner<4;++corner) {
+            auto* p=points[face][corner];auto* n=normals[face];
+            vertices[face*4+corner]={p[0],p[1],p[2],n[0],n[1],n[2],
+                points[face][1][0]-points[face][0][0],
+                points[face][1][1]-points[face][0][1],
+                points[face][1][2]-points[face][0][2],face==1 ? -1.0f : 1.0f,
+                corner==1 || corner==2 ? 1.0f : 0.0f,corner<2 ? 1.0f : 0.0f};
+        }
+        for(int j=0;j<6;++j)indices[face*6+j]=uint16_t(face*4+(face==1?straight[j]:flipped[j]));
+    }
+    GalleryGeometry mesh;
+    mesh.vertices.assign(vertices.begin(),vertices.end());mesh.indices.assign(indices.begin(),indices.end());return mesh;
+}
+inline MeshHandle createGalleryCube(Renderer& renderer){return uploadGalleryGeometry(renderer,galleryCube());}
 inline GalleryGeometry gallerySphere() {
     constexpr int rows=16,columns=32;constexpr float pi=3.14159265358979323846f;
     GalleryGeometry mesh;

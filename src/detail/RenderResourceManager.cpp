@@ -1,5 +1,6 @@
 #include "detail/RenderResourceManager.h"
 #include "detail/WireframeGeometry.h"
+#include "detail/PbrSurfaceBinding.h"
 
 #include "detail/RenderAssetBridge.h"
 #include "detail/TextureImageLoader.h"
@@ -157,9 +158,9 @@ bool extractWireframePositions(const void* vertices,
 // uniform was dropped and why (size / binding / null).
 bool storeUniformSlot(GpuMaterial& material, const char* name,
                       shader::BindingId binding,
-                      const void* data, size_t size)
+                      const void* data, size_t size,bool semantic=false)
 {
-    if (name == nullptr || binding == shader::InvalidBinding || data == nullptr
+    if (name == nullptr || (binding == shader::InvalidBinding && !semantic) || data == nullptr
         || size == 0 || size > 64) {
         std::fprintf(stderr,
                      "[RenderResourceManager] storeUniformSlot dropped name=%s "
@@ -379,15 +380,31 @@ void RenderResourceManager::destroyMaterialGpuOnly(uint64_t id)
     if (it == _materials.end()) {
         return;
     }
-    // §P1 M2 (2026-08-24) — release the ShaderResource too. Without
-    // this, hot-reload paths that swap GPU-only (keep handle id) but
-    // never go through destroyMaterial() leak shader compile slots in
-    // the pool until shutdown drains. Also keeps the "GpuMaterial
-    // owns a shader ref" invariant consistent with destroyMaterial().
-    if (it->second.shader.isValid()) {
-        _shaderPool.release(it->second.shader);
-    }
+    releaseMaterialShader(it->second);
     _materials.erase(it);
+}
+
+void RenderResourceManager::releaseMaterialShader(GpuMaterial& material)
+{
+    // acquire/compile deduplicates tokens; release invalidates ALL their copies.
+    // Keep ownership in the existing material table rather than duplicating it
+    // in a second reference-count map (GPU-only reload moves material entries).
+    const bool shared = std::any_of(_materials.begin(), _materials.end(),
+        [&](const auto& entry) {
+            return &entry.second != &material && entry.second.shader == material.shader;
+        });
+    if (!shared && material.shader.isValid()) {
+        _shaderPool.release(material.shader);
+    }
+    material.shader.reset();
+}
+
+void RenderResourceManager::replaceMaterialShader(GpuMaterial& material, shader::ShaderResource shader)
+{
+    if (material.shader != shader) {
+        releaseMaterialShader(material);
+        material.shader = shader;
+    }
 }
 
 MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
@@ -952,7 +969,7 @@ void RenderResourceManager::refreshMaterialsAfterHotReload()
             continue;
         }
 
-        material.shader = fresh;
+        replaceMaterialShader(material, fresh);
         rebindMaterialAfterShaderSwap(material);
     }
 }
@@ -987,7 +1004,7 @@ uint32_t RenderResourceManager::reloadMaterialsForShaderFile(const std::string& 
             continue;
         }
 
-        material.shader = fresh;
+        replaceMaterialShader(material, fresh);
         rebindMaterialAfterShaderSwap(material);
         ++updated;
     }
@@ -1050,11 +1067,8 @@ bool RenderResourceManager::reloadMaterialFromPath(const std::string& path)
         return false;
     }
 
-    // Drop path cache so bindMaterialFromResource can create a fresh GPU mat,
-    // then remap onto the stable handle id so scene refs stay valid.
-    _materialCacheByKey.erase(cached);
-    destroyMaterialGpuOnly(id);
-
+    // Stage a distinct instance before retiring the last good Scene material.
+    // Failed shader acquisition must preserve both the stable handle and cache.
     MaterialHandle fresh = bindMaterialFromResource(*this, *material, path);
     if (!fresh.isValid()) {
         std::fprintf(stderr, "[RenderResourceManager] reloadMaterial bind failed '%s'\n",
@@ -1063,6 +1077,7 @@ bool RenderResourceManager::reloadMaterialFromPath(const std::string& path)
     }
 
     if (fresh.id != id) {
+        destroyMaterialGpuOnly(id);
         _materials[id] = std::move(_materials.at(fresh.id));
         _materials.erase(fresh.id);
     }
@@ -1198,9 +1213,7 @@ void RenderResourceManager::destroyMaterial(MaterialHandle& material)
 
     const auto it = _materials.find(material.id);
     if (it != _materials.end()) {
-        if (it->second.shader.isValid()) {
-            _shaderPool.release(it->second.shader);
-        }
+        releaseMaterialShader(it->second);
         _materials.erase(it);
     }
     material = {};
@@ -1235,7 +1248,10 @@ void RenderResourceManager::setMaterialColor(MaterialHandle material, const char
         return;
     }
 
-    storeUniformSlot(mat, propertyName, binding, value, sizeof(value));
+    // Specialized GBuffer/shadow/motion programs consume this semantic even
+    // if an advanced Host's forward program does not declare the property.
+    storeUniformSlot(mat, propertyName, binding, value, sizeof(value),
+                     std::strcmp(propertyName, "uvTransform") == 0);
 }
 
 void RenderResourceManager::setMaterialFloat(MaterialHandle material, const char* uniformName,
@@ -1256,13 +1272,33 @@ void RenderResourceManager::setMaterialFloat(MaterialHandle material, const char
     // Passing only four bytes makes bgfx read beyond the stored payload and
     // turns imported metallic/roughness values into nondeterministic data.
     const float padded[4] = {value, 0.0f, 0.0f, 0.0f};
-    storeUniformSlot(mat, uniformName, binding, padded, sizeof(padded));
+    storeUniformSlot(mat, uniformName, binding, padded, sizeof(padded),
+                     std::strcmp(uniformName, "normalStrength") == 0 ||
+                         std::strcmp(uniformName, "roughnessBias") == 0);
 }
 
-void RenderResourceManager::setMaterialVec2(MaterialHandle material, const char* uniformName,
-                                            float x, float y)
+void RenderResourceManager::setMaterialPbrSurfaceSettings(MaterialHandle material,
+                                                          const PbrSurfaceSettings &settings)
 {
-    if (!material.isValid() || uniformName == nullptr) {
+    if (!_materials.contains(material.id))
+        return;
+    const auto value = sanitizePbrSurface(settings);
+    setMaterialColor(material, "uvTransform", value.uvScaleX, value.uvScaleY, value.uvOffsetX,
+                     value.uvOffsetY);
+    setMaterialFloat(material, "normalStrength", value.normalStrength);
+    setMaterialFloat(material, "roughnessBias", value.roughnessBias);
+}
+PbrSurfaceSettings RenderResourceManager::materialPbrSurfaceSettings(MaterialHandle material) const
+{
+    const auto found = _materials.find(material.id);
+    return found == _materials.end() ? PbrSurfaceSettings{} : resolvePbrSurface(found->second);
+}
+
+void RenderResourceManager::setMaterialVec2(MaterialHandle material, const char *uniformName, float x,
+                                            float y)
+{
+    if (!material.isValid() || uniformName == nullptr)
+    {
         return;
     }
 
@@ -1369,7 +1405,7 @@ void RenderResourceManager::setMaterialSurfaceProperties(MaterialHandle material
     GpuMaterial& mat = it->second;
     mat.alphaCutout = alphaMode == 1;
     mat.blendMode = alphaMode == 2 ? BlendMode::Alpha : BlendMode::Opaque;
-    mat.alphaCutoff = std::clamp(alphaCutoff, 0.0f, 1.0f);
+    mat.alphaCutoff = std::isfinite(alphaCutoff) ? std::clamp(alphaCutoff, 0.0f, 1.0f) : .5f;
     mat.doubleSided = doubleSided;
 
     // PBR/forward shaders use this value to orient thin-sheet normals toward

@@ -30,6 +30,8 @@
 #include "detail/PassExecContext.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/TextureImageLoader.h"
+#include "../demo/ProceduralGalleryGeometry.h"
+#include "AYMath/MathUtils.h"
 
 #include <array>
 #include <algorithm>
@@ -171,6 +173,155 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(pbr_mask_uv_and_opacity_channels_match_main_paths_without_cutoff_bleed) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    HWND window=CreateWindowExW(0,L"STATIC",L"PBR mask regression",WS_OVERLAPPED,
+        0,0,160,120,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window);if(!window)return;
+    struct WindowCleanup{HWND h;~WindowCleanup(){DestroyWindow(h);}} cleanup{window};
+    using namespace ayt::render;
+    using namespace ayt::math;
+    Renderer renderer;InitDesc init;init.windowHandle=window;init.width=160;init.height=120;
+    init.msaa=0;init.vsync=false;init.backend=std::string(backend)=="d3d12"?Backend::Direct3D12:Backend::Direct3D11;
+    CHECK(renderer.initialize(init));if(!renderer.isInitialized())return;
+    renderer.setFxaaEnabled(false);renderer.setSmaaEnabled(false);renderer.setTaaEnabled(false);
+    renderer.setPostProcessGamma(1);renderer.setPostProcessExposure(1);
+    renderer.setPostProcessTonemapMode(Renderer::TonemapMode::None);
+    renderer.setDirectionalLight({0,0,1},{1,1,1});
+    renderer.setMainCamera(Float4x4::identity(),Float4x4::identity(),{0,0,-2});
+    const float vertices[][12]={
+        {-.5f,-.5f,.5f,0,0,-1,1,0,0,1,0,1},{.5f,-.5f,.5f,0,0,-1,1,0,0,1,1,1},
+        {.5f,.5f,.5f,0,0,-1,1,0,0,1,1,0},{-.5f,.5f,.5f,0,0,-1,1,0,0,1,0,0}};
+    const uint16_t indices[]={0,2,1,0,3,2};
+    VertexLayoutDesc layout;layout.add({VertexAttribute::Position,3,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::Normal,3,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::Tangent,4,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::TexCoord0,2,VertexComponentType::Float,false});
+    auto mesh=renderer.createMesh(vertices,4,layout,indices,6);CHECK(mesh.isValid());
+    std::array<uint8_t,8*8*4> alphaPixels,opacityPixels,whitePixels;
+    for(int y=0;y<8;++y)for(int x=0;x<8;++x){const size_t p=(y*8+x)*4;
+        const uint8_t coverage=((x/2+y/2)%2)?255:0;
+        for(int c=0;c<4;++c){alphaPixels[p+c]=c==3?coverage:255;opacityPixels[p+c]=coverage;whitePixels[p+c]=255;}}
+    auto alpha=renderer.createTextureFromRgba8(8,8,alphaPixels.data());
+    auto opacity=renderer.createTextureFromRgba8(8,8,opacityPixels.data());
+    auto white=renderer.createTextureFromRgba8(8,8,whitePixels.data());
+    CHECK(alpha.isValid());CHECK(opacity.isValid());CHECK(white.isValid());
+    auto mask=renderer.createMaterialFromPhoskia(kPbrPhoskiaSource);
+    auto opaque=renderer.createMaterialFromPhoskia(kPbrPhoskiaSource);
+    for(auto material:{mask,opaque}){
+        CHECK(material.isValid());renderer.setMaterialColor(material,"baseColor",.2f,.4f,.6f,1);
+        renderer.setMaterialFloat(material,"metallic",0);renderer.setMaterialFloat(material,"roughness",.6f);
+        renderer.setMaterialFloat(material,"ao",1);renderer.setMaterialFloat(material,"opacity",1);
+        renderer.setMaterialFloat(material,"normalYSign",1);renderer.setMaterialVec3(material,"emissive",.35f,.1f,.05f);
+        renderer.setMaterialTexture(material,"baseColorTexture",alpha);
+        renderer.setMaterialFloat(material,"castSkinned",0);renderer.setMaterialFloat(material,"premultipliedAlpha",0);
+    }
+    renderer.setMaterialSurfaceProperties(mask,1,.5f,true);
+    renderer.setMaterialSurfaceProperties(opaque,0,.5f,true);
+    const auto directory=std::getenv("AY_PBR_SURFACE_CAPTURE_DIRECTORY");
+    const auto root=directory?std::filesystem::path(directory)/backend/"mask":
+        std::filesystem::temp_directory_path()/(std::string("ay-pbr-mask-")+backend+"-"+
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    std::array<std::vector<bool>,6> reference;
+    for(bool deferred:{false,true})for(int source=0;source<3;++source)for(int mode=0;mode<2;++mode){
+        renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());
+        renderer.setShadowsEnabled(false);
+        renderer.setMaterialTexture(mask,"baseColorTexture",source?white:alpha);
+        renderer.setMaterialTexture(mask,"opacityTexture",opacity);
+        renderer.setMaterialFloat(mask,"opacitySource",float(source));
+        renderer.setMaterialFloat(opaque,"opacitySource",0);
+        PbrSurfaceSettings surface;if(mode){surface.uvScaleX=2;surface.uvScaleY=3;surface.uvOffsetX=.17f;surface.uvOffsetY=.23f;}
+        renderer.setMaterialPbrSurfaceSettings(mask,surface);
+        RenderScene scene;scene.add(mesh,mask,translate(-.5f,0,0)*scale(.8f,1.6f,1));
+        scene.add(mesh,opaque,translate(.5f,0,0)*scale(.8f,1.6f,1));
+        const auto path=root/((deferred?std::string("deferred-"):std::string("forward-"))+
+            std::to_string(source)+"-"+std::to_string(mode)+".png");
+        for(int frame=0;frame<14;++frame){ClearDesc clear;clear.r=.01f;clear.g=.02f;clear.b=.03f;
+            renderer.beginFrame(clear);renderer.render(scene);if(frame==10)CHECK(renderer.captureScreenshot(path.string()));renderer.endFrame();}
+        const auto image=decodeImageFile(path.string());CHECK(image.width==160&&image.height==120);
+        if(image.rgba8.size()!=160*120*4)continue;
+        std::vector<bool> footprint;int holes=0,solid=0,opaqueHoles=0;
+        for(int y=16;y<104;++y)for(int x=12;x<68;++x){const bool covered=image.rgba8[(y*160+x)*4]>20;
+            footprint.push_back(covered);if(covered)++solid;else ++holes;
+            if(image.rgba8[(y*160+x+80)*4]<20)++opaqueHoles;}
+        std::cout<<"[PbrMask] "<<backend<<" source="<<source<<" mode="<<mode<<" deferred="<<deferred
+            <<" holes="<<holes<<" solid="<<solid<<" opaqueHoles="<<opaqueHoles<<'\n';
+        CHECK(holes>500);CHECK(solid>500);CHECK(opaqueHoles==0);
+        const size_t variant=size_t(source*2+mode);
+        if(!deferred)reference[variant]=footprint;else CHECK(footprint==reference[variant]);
+        if(source>0)CHECK(footprint==reference[size_t(mode)]);
+    }
+    CHECK(reference[0]!=reference[1]);
+    renderer.destroyMaterial(mask);renderer.destroyMaterial(opaque);renderer.destroyMesh(mesh);
+    renderer.destroyTexture(alpha);renderer.destroyTexture(opacity);renderer.destroyTexture(white);renderer.shutdown();
+#else
+    SKIP_TEST("Windows D3D device required");
+#endif
+}
+
+TEST_CASE(pbr_surface_controls_and_nonuniform_scale_match_across_main_paths) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend||!backend[0])SKIP_TEST("Isolated D3D11/12 device required");
+    using namespace ayt::render;using namespace ayt::math;
+    HWND window=CreateWindowExW(0,L"STATIC",L"PBR surface parity",WS_OVERLAPPED,0,0,256,192,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window);if(!window)return;
+    struct Cleanup{HWND w;~Cleanup(){DestroyWindow(w);}}cleanup{window};
+    Renderer renderer;InitDesc init;init.windowHandle=window;init.width=256;init.height=192;init.vsync=false;init.msaa=0;
+    init.backend=std::string(backend)=="d3d12"?Backend::Direct3D12:Backend::Direct3D11;
+    CHECK(renderer.initialize(init));if(!renderer.isInitialized())return;
+    renderer.setFxaaEnabled(false);renderer.setSmaaEnabled(false);renderer.setTaaEnabled(false);
+    renderer.setPostProcessGamma(1);renderer.setPostProcessExposure(1);renderer.setPostProcessTonemapMode(Renderer::TonemapMode::None);
+    renderer.setDirectionalLight({-.4f,-.6f,1},{1.5f,1.3f,1.1f});
+    renderer.setMainCameraLookAtPerspective({0,.2f,-3},{0,0,0},{0,1,0},42,256.f/192,.1f,20);
+    auto sphere=demo::uploadGalleryGeometry(renderer,demo::gallerySphere());CHECK(sphere.isValid());
+    std::array<uint8_t,8*8*4> checker{};
+    for(int y=0;y<8;++y)for(int x=0;x<8;++x){const int p=(y*8+x)*4;const bool v=(x/2+y/2)%2;
+        checker[p]=v?190:60;checker[p+1]=v?80:170;checker[p+2]=v?35:200;checker[p+3]=255;}
+    auto color=renderer.createTextureFromRgba8(8,8,checker.data(),"pbr_surface_probe");
+    const uint8_t normalPixel[]={190,155,235,255};auto normal=renderer.createTextureFromRgba8(1,1,normalPixel,"pbr_surface_normal");
+    auto material=renderer.createMaterialFromPhoskia(kPbrPhoskiaSource);CHECK(material.isValid());
+    renderer.setMaterialTexture(material,"baseColorTexture",color);renderer.setMaterialTexture(material,"normalTexture",normal);
+    renderer.setMaterialColor(material,"baseColor",1,1,1,1);renderer.setMaterialVec3(material,"emissive",0,0,0);
+    renderer.setMaterialFloat(material,"metallic",.2f);renderer.setMaterialFloat(material,"roughness",.45f);renderer.setMaterialFloat(material,"ao",1);
+    renderer.setMaterialFloat(material,"opacity",1);renderer.setMaterialFloat(material,"normalYSign",1);
+    for(const char* n:{"castSkinned","opacitySource","premultipliedAlpha","doubleSided"})renderer.setMaterialFloat(material,n,0);
+    const auto env=std::getenv("AY_PBR_SURFACE_CAPTURE_DIRECTORY");
+    const auto root=env?std::filesystem::path(env)/backend:std::filesystem::temp_directory_path()/(std::string("ay-pbr-surface-")+backend+"-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    std::array<decltype(decodeImageFile(std::string{})),4> reference;
+    for(bool deferred:{false,true})for(int mode=0;mode<4;++mode){
+        renderer.configurePipeline(deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault());renderer.setShadowsEnabled(false);
+        PbrSurfaceSettings surface;if(mode>=2){surface.uvScaleX=2;surface.uvScaleY=3;surface.uvOffsetX=.17f;surface.uvOffsetY=.23f;surface.normalStrength=mode==2?0:2.2f;surface.roughnessBias=mode==2?.25f:-.2f;}
+        renderer.setMaterialPbrSurfaceSettings(material,surface);
+        RenderScene scene;scene.add(sphere,material,mode==0?scale(1.4f,1.4f,1.4f):scale(1.9f,.8f,1.2f));
+        const auto path=root/((deferred?std::string("deferred-"):std::string("forward-"))+std::to_string(mode)+".png");
+        for(int frame=0;frame<14;++frame){ClearDesc clear;clear.r=.02f;clear.g=.03f;clear.b=.04f;renderer.beginFrame(clear);renderer.render(scene);
+            if(frame==10)CHECK(renderer.captureScreenshot(path.string()));renderer.endFrame();}
+        auto image=decodeImageFile(path.string());CHECK(image.width==256&&image.height==192);if(image.rgba8.size()!=256*192*4)continue;
+        if(!deferred)reference[mode]=std::move(image);
+        else if(reference[mode].rgba8.size()==image.rgba8.size()){
+            double error=0;int large=0,samples=0;
+            // Interior avoids raster coverage and UV discontinuities at the silhouette.
+            for(int y=73;y<119;++y)for(int x=94;x<162;++x)for(int c=0;c<3;++c){const int p=(y*256+x)*4+c;
+                const int delta=std::abs(int(image.rgba8[p])-int(reference[mode].rgba8[p]));error+=delta;++samples;if(delta>8)++large;}
+            std::cout<<"[PbrSurfaceParity] backend="<<backend<<" mode="<<mode<<" meanByteError="<<error/samples<<" large="<<large<<'\n';
+            CHECK(error/samples<1.5);CHECK(large<samples/100);
+        }
+    }
+    if(reference[1].rgba8.size()==reference[2].rgba8.size()&&!reference[1].rgba8.empty()){
+        int changed=0;for(size_t p=0;p<reference[1].rgba8.size();p+=4)if(std::abs(int(reference[1].rgba8[p])-int(reference[2].rgba8[p]))>8)++changed;
+        CHECK(changed>500); // Controls visibly affect the rendered material.
+    }
+    renderer.destroyMaterial(material);renderer.destroyTexture(color);renderer.destroyTexture(normal);renderer.destroyMesh(sphere);renderer.shutdown();
+#else
+    SKIP_TEST("Windows D3D device required");
+#endif
+}
 
 TEST_CASE(forward_deferred_background_and_stylization_share_viewport_and_pbr) {
 #ifdef _WIN32

@@ -9,6 +9,8 @@
 #include "AYShader/ShaderResourcePool.h"
 #include "detail/RigidInstancing.h"
 #include "detail/ShadowCaster.h"
+#include "detail/RenderViewOrder.h"
+#include <cstring>
 
 #include <array>
 #include <algorithm>
@@ -213,6 +215,98 @@ struct TaaGpuFixture {
 
 } // namespace
 #endif
+
+TEST_SUITE(AYRenderer_PbrReplayGpu)
+TEST_CASE(mask_uv_and_three_opacity_sources_share_gbuffer_shadow_and_motion_coverage)
+{
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0])SKIP_TEST("Isolated D3D11/12 device required");
+    TaaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    configureRenderViewOrder(f.adapter);
+    struct Vertex {float p[3],n[3],uv[2],t[4],ids[4],weights[4];};
+    const Vertex vertices[]={
+        {{-1,-1,.25f},{0,0,-1},{0,1},{1,0,0,1},{0,0,0,0},{1,0,0,0}},
+        {{1,-1,.25f},{0,0,-1},{1,1},{1,0,0,1},{0,0,0,0},{1,0,0,0}},
+        {{1,1,.25f},{0,0,-1},{1,0},{1,0,0,1},{0,0,0,0},{1,0,0,0}},
+        {{-1,1,.25f},{0,0,-1},{0,0},{1,0,0,1},{0,0,0,0},{1,0,0,0}}};
+    const uint16_t indices[]={0,2,1,0,3,2};
+    bgfx::VertexLayout layout;
+    layout.begin().add(bgfx::Attrib::Position,3,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Normal,3,bgfx::AttribType::Float).add(bgfx::Attrib::TexCoord0,2,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Tangent,4,bgfx::AttribType::Float).add(bgfx::Attrib::Indices,4,bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Weight,4,bgfx::AttribType::Float).end();
+    GpuMesh mesh;mesh.vertexBuffer=f.adapter.createVertexBuffer(vertices,sizeof(vertices),layout);
+    mesh.indexBuffer=f.adapter.createIndexBuffer(indices,sizeof(indices));mesh.indexCount=6;
+    std::unordered_map<uint64_t,GpuMesh> meshes{{1,mesh}};
+    std::vector<Pixel> alpha(kSize*kSize),opacity(alpha.size()),white(alpha.size(),Pixel{1,1,1,1});
+    for(int y=0;y<kSize;++y)for(int x=0;x<kSize;++x){const float a=((x/4+y/4)%2)?1.f:0.f;
+        alpha[y*kSize+x]={1,1,1,a};opacity[y*kSize+x]={a,a,a,a};}
+    const auto alphaTexture=f.input(alpha,true),opacityTexture=f.input(opacity,true),whiteTexture=f.input(white,true);
+    std::unordered_map<uint64_t,GpuTexture> textures;
+    textures[1].handle=alphaTexture;textures[2].handle=opacityTexture;textures[3].handle=whiteTexture;
+    for(auto& [id,texture]:textures){texture.width=kSize;texture.height=kSize;}
+    std::unordered_map<uint64_t,GpuMaterial> materials;
+    auto& material=materials[1];material.shader=f.program;material.doubleSided=true;
+    material.alphaCutout=true;material.alphaCutoff=.5f;material.hasColorOverride=true;material.colorOverride={1,1,1,1};
+    material.textures.push_back({"baseColorTexture",ayt::shader::InvalidBinding,{1}});
+    material.textures.push_back({"opacityTexture",ayt::shader::InvalidBinding,{2}});
+    GpuMaterial::UniformSlot uvSlot;uvSlot.name="uvTransform";uvSlot.size=16;material.uniformSlots.push_back(uvSlot);
+    GpuMaterial::UniformSlot sourceSlot;sourceSlot.name="opacitySource";sourceSlot.size=16;material.uniformSlots.push_back(sourceSlot);
+    ayt::render::RenderScene scene;
+    ayt::render::DrawItem item;item.mesh.id=1;item.material.id=1;item.motionObjectId=1;scene.add(item);
+    FrameContext frame;frame.view=frame.projection=ayt::math::Float4x4::identity();frame.cameraPosition={0,0,-2};
+    PassExecContext ctx{f.adapter,f.pool,scene,meshes,textures,materials,0,0,kSize,kSize,frame};
+    GBufferPass gbuffer;gbuffer.setGbufferSize(kSize,kSize);ctx.gbufferPass=&gbuffer;
+    MotionVectorPass motion;motion.setOutputSize(kSize,kSize);motion.setRequestedThisFrame(true);
+    ShadowCaster shadow;shadow.ensureProgram(f.pool);CHECK(shadow.isProgramReady());
+    auto colorRead=bgfx::createTexture2D(kSize,kSize,false,1,bgfx::TextureFormat::RGBA8,
+        BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);f.textures.push_back(colorRead);
+    auto motionRead=bgfx::createTexture2D(kSize,kSize,false,1,bgfx::TextureFormat::RGBA16F,
+        BGFX_TEXTURE_READ_BACK|BGFX_TEXTURE_BLIT_DST);f.textures.push_back(motionRead);
+    std::array<std::vector<bool>,2> footprints;
+    for(int source=0;source<3;++source)for(int mode=0;mode<2;++mode){
+        const float uv[4]={mode?1.5f:1.f,mode?.75f:1.f,mode?.17f:0.f,mode?.13f:0.f};
+        const float opacitySource[4]={float(source),0,0,0};
+        std::memcpy(material.uniformSlots[0].data,uv,16);std::memcpy(material.uniformSlots[1].data,opacitySource,16);
+        material.textures[0].texture.id=source?3:1;
+        CHECK(gbuffer.execute(ctx)==1);
+        std::vector<uint8_t> gbufferPixels(kSize*kSize*4);
+        bgfx::blit(200,colorRead,0,0,gbuffer.gbufferMaterialRt());
+        auto ready=bgfx::readTexture(colorRead,gbufferPixels.data());
+        for(int i=0;i<120&&f.adapter.gpuFrameCounter()<ready;++i)f.adapter.endFrame();
+        CHECK(f.adapter.gpuFrameCounter()>=ready);
+        // Seed motion history, then replay against the current borrowed GBuffer depth.
+        CHECK(motion.execute(ctx)==1);f.adapter.endFrame();
+        CHECK(gbuffer.execute(ctx)==1);CHECK(motion.execute(ctx)==1);
+        std::vector<uint16_t> motionPixels(kSize*kSize*4);
+        bgfx::blit(200,motionRead,0,0,motion.velocityTexture());
+        ready=bgfx::readTexture(motionRead,motionPixels.data());
+        for(int i=0;i<120&&f.adapter.gpuFrameCounter()<ready;++i)f.adapter.endFrame();
+        CHECK(f.adapter.gpuFrameCounter()>=ready);
+        f.adapter.setViewFrameBuffer(0,f.target);f.adapter.setViewRect(0,0,0,kSize,kSize);
+        f.adapter.setViewTransform(0,frame.view,frame.projection);f.adapter.setViewClearRaw(0,BGFX_CLEAR_COLOR,0);
+        CHECK(shadow.drawCasters(f.adapter,0,BGFX_STATE_WRITE_RGB|BGFX_STATE_WRITE_A,scene,meshes,textures,materials)==1);
+        const auto shadowPixels=f.readTarget(200);
+        int mismatchedShadow=0,mismatchedMotion=0,covered=0,holes=0;std::vector<bool> footprint;
+        for(int y=1;y<kSize-1;++y)for(int x=1;x<kSize-1;++x){const size_t p=y*kSize+x;
+            const bool expected=gbufferPixels[p*4+3]>127;
+            if(expected)++covered;else ++holes;footprint.push_back(expected);
+            if((shadowPixels[p][3]>.5f)!=expected)++mismatchedShadow;
+            if((bx::halfToFloat(motionPixels[p*4+3])>.5f)!=expected)++mismatchedMotion;}
+        std::cout<<"[PbrReplay] "<<backend<<" source="<<source<<" mode="<<mode<<" covered="<<covered
+            <<" holes="<<holes<<" shadowErrors="<<mismatchedShadow<<" motionErrors="<<mismatchedMotion<<'\n';
+        CHECK(covered>100);CHECK(holes>100);CHECK(mismatchedShadow==0);CHECK(mismatchedMotion==0);
+        if(!source)footprints[mode]=footprint;else CHECK(footprint==footprints[mode]);
+    }
+    CHECK(footprints[0]!=footprints[1]);
+    shadow.destroy(f.adapter);motion.destroyResources(f.adapter);gbuffer.destroyResources(f.adapter);
+    f.adapter.destroy(mesh.vertexBuffer);f.adapter.destroy(mesh.indexBuffer);
+#else
+    SKIP_TEST("Windows D3D device required");
+#endif
+}
+TEST_SUITE_END
 
 TEST_SUITE(AYRenderer_InstancingGpu)
 

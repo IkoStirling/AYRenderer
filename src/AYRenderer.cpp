@@ -1,4 +1,6 @@
 #include "AYRenderer.h"
+#include "detail/RenderAssetBridge.h"
+#include <AYResource/assetsImpl/Material.h>
 
 #include "AYRenderer/F1DiagFlags.h"
 #include "detail/BGFXAdapter.h"
@@ -37,6 +39,7 @@
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/PostProcessPass.h"
 #include "detail/PostProcessPipeline.h"
+#include "detail/PreviewSceneValidation.h"
 #include "detail/PresentPass.h"
 #include "detail/EditorOverlayPass.h"
 #include "detail/Forward2DOpaquePass.h"  // CM-1 (2026-08-11) — 2D lane pass factory.
@@ -437,6 +440,7 @@ struct Renderer::Impl {
         uint16_t width = 0, height = 0;
     };
     std::unordered_map<uint64_t, CameraOutput> cameraOutputs;
+    detail::PostProcessPass previewPostProcess;
     bool cameraViewBatchSubmitted = false, cameraFrameOpen = false;
     struct RuntimeView {
         detail::ForwardOpaquePass opaque;
@@ -1147,9 +1151,12 @@ void Renderer::shutdown()
     }
     for (auto& [id, view] : _impl->runtimeViews) {
         (void)id;
-        if (_impl->adapter.isInitialized()) view->transparent.destroyResources(_impl->adapter);
+        if (_impl->adapter.isInitialized())
+            view->transparent.destroyResources(_impl->adapter);
     }
     _impl->runtimeViews.clear();
+    if (_impl->adapter.isInitialized())
+        _impl->previewPostProcess.destroyResources(_impl->adapter);
     for (auto& [id, output] : _impl->cameraOutputs) {
         (void)id;
         _impl->resources.destroyTexture(output.texture);
@@ -2236,31 +2243,54 @@ void Renderer::render(const RenderScene& scene)
     _impl->prevMainProjection = _impl->mainProjection;
 }
 
-void Renderer::renderPreviewScene(const RenderScene& scene, const PreviewSceneCamera& camera,
-    uint16_t framebuffer, uint16_t width, uint16_t height, uint8_t firstView, uint32_t clearRgba)
+bool Renderer::renderPreviewScene(const RenderScene &scene, const PreviewSceneCamera &camera,
+                                  uint16_t framebuffer, uint16_t width, uint16_t height, uint8_t firstView,
+                                  uint32_t clearRgba, const PreviewSceneSettings &requestedSettings,
+                                  uint16_t hdrFramebuffer)
 {
-    if (!isInitialized() || !width || !height) return;
+    if (!isInitialized() || !width || !height || !detail::validPreviewCamera(camera))
+        return false;
+    const auto settings = detail::sanitizePreviewSettings(requestedSettings);
     detail::configureRenderViewOrder(_impl->adapter);
     detail::FrameContext frame;
-    frame.view = camera.view; frame.projection = camera.projection;
+    frame.view = camera.view;
+    frame.projection = camera.projection;
     frame.cameraPosition = camera.position;
+    frame.lightDirection = settings.lightDirection;
+    frame.lightColor = settings.lightColor;
+    frame.exposure = settings.exposure;
+    frame.gamma = settings.gamma;
+    frame.tonemapMode = static_cast<detail::FrameContext::TonemapMode>(settings.toneMap);
     detail::FrameDrawLists lists;
-    detail::buildFrameDrawLists(scene, _impl->resources.meshes(),
-        _impl->resources.materials(), frame, lists);
-    detail::PassExecContext ctx{_impl->adapter, _impl->shaderPool, scene,
-        _impl->resources.meshes(), _impl->resources.textures(),
-        _impl->resources.materials(), 0, 0, width, height, frame,
-        static_cast<uint8_t>(firstView + 1u), bgfx::FrameBufferHandle{framebuffer}};
+    detail::buildFrameDrawLists(scene, _impl->resources.meshes(), _impl->resources.materials(), frame, lists);
+    detail::PassExecContext ctx{
+        _impl->adapter,
+        _impl->shaderPool,
+        scene,
+        _impl->resources.meshes(),
+        _impl->resources.textures(),
+        _impl->resources.materials(),
+        0,
+        0,
+        width,
+        height,
+        frame,
+        static_cast<uint8_t>(firstView + 1u),
+        bgfx::FrameBufferHandle{settings.displayTransform ? hdrFramebuffer : framebuffer}};
     ctx.drawLists = &lists;
+    ctx.sceneLights = settings.lights;
     detail::ForwardOpaquePass opaque;
     opaque.execute(ctx);
-    _impl->adapter.setViewClearRaw(ctx.viewId, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-        clearRgba, 1.0f, 0);
+    _impl->adapter.setViewClearRaw(ctx.viewId, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearRgba, 1.0f, 0);
     ctx.viewId = static_cast<uint8_t>(firstView + 2u);
     detail::TransparentPass transparent;
     transparent.execute(ctx);
     detail::Forward2DOpaquePass overlay(static_cast<uint8_t>(firstView + 3u));
     overlay.execute(ctx);
+    if (settings.displayTransform)
+        return _impl->previewPostProcess.executeToTarget(ctx, static_cast<uint8_t>(firstView + 4u),
+                                                         bgfx::FrameBufferHandle{framebuffer}) == 1;
+    return true;
 }
 
 CameraOutputHandle Renderer::createCameraOutput(uint16_t width, uint16_t height) {
@@ -2687,6 +2717,14 @@ MaterialHandle Renderer::loadMaterial(const std::string& path)
     return _impl->resources.loadMaterial(path);
 }
 
+MaterialHandle Renderer::createMaterialFromResource(const ayt::resource::Material &material,
+                                                    const std::string &ownerPath)
+{
+    if (!_impl || !_impl->adapter.isInitialized() || !_impl->shaderPoolReady)
+        return {};
+    return detail::bindMaterialFromResource(_impl->resources, material, ownerPath);
+}
+
 MaterialHandle Renderer::createMaterial2D(const Material2DDesc& desc,
                                           const std::string& cacheKey)
 {
@@ -2804,8 +2842,17 @@ void Renderer::setMaterialFloat(MaterialHandle material, const char* uniformName
     _impl->resources.setMaterialFloat(material, uniformName, value);
 }
 
-void Renderer::setMaterialVec3(MaterialHandle material, const char* uniformName,
-                               float x, float y, float z)
+void Renderer::setMaterialPbrSurfaceSettings(MaterialHandle material, const PbrSurfaceSettings &settings)
+{
+    if (_impl)
+        _impl->resources.setMaterialPbrSurfaceSettings(material, settings);
+}
+PbrSurfaceSettings Renderer::materialPbrSurfaceSettings(MaterialHandle material) const
+{
+    return _impl ? _impl->resources.materialPbrSurfaceSettings(material) : PbrSurfaceSettings{};
+}
+
+void Renderer::setMaterialVec3(MaterialHandle material, const char *uniformName, float x, float y, float z)
 {
     if (!_impl) {
         return;

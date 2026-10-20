@@ -2,6 +2,7 @@
 set(AYRENDERER_TEST_GROUPS Contracts SceneMaterial Geometry LightingShadow PostProcess FrameGraph UI Shader Audit Gpu)
 
 set(AYRENDERER_TEST_Contracts_SOURCES
+    Test_PbrSurface.cpp
     Test_Ssr.cpp
     Test_Volumetric.cpp
     Test_DeferredDecal.cpp
@@ -111,6 +112,7 @@ set(AYRENDERER_TEST_FrameGraph_SOURCES
     Test_RenderPipelineConfig.cpp)
 
 set(AYRENDERER_TEST_UI_SOURCES
+    Test_PreviewScene.cpp
     Test_BgfxFontAtlas.cpp
     Test_UIBatchBaseline.cpp
     Test_UIDpiScale.cpp
@@ -143,6 +145,7 @@ set(AYRENDERER_TEST_Audit_SOURCES
     Test_AuditP5Invariants.cpp)
 
 set(AYRENDERER_TEST_Gpu_SOURCES
+    Test_PreviewSceneGpu.cpp
     Test_EditorDebugGpu.cpp
     Test_CameraViewsGpu.cpp
     Test_PhoskiaGpu.cpp

@@ -1,0 +1,218 @@
+{
+    "__coordConvention": "ay-coordinates-lh-yup-zfwd-ccw-uvtop-m-v1",
+    "__schemaVersion": 5,
+    "entities": [
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "ad2ca12be47abdd40000000000002c46",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber-worn.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 1,
+            "kind": "spatial",
+            "name": "rubber-worn / cube 1",
+            "owner": "",
+            "persistentId": "6050143d5721d0770000000000002c44",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "6f430d40475aaae50000000000002c45",
+                "position": [
+                    0.0,
+                    -0.18,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    8.0,
+                    0.25,
+                    6.0
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "846e78f0ffa736bc0000000000002c49",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/leather-worn.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 2,
+            "kind": "spatial",
+            "name": "leather-worn / sphere 2",
+            "owner": "",
+            "persistentId": "b74e2f9237e3d6440000000000002c47",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "ddd2601761e091c60000000000002c48",
+                "position": [
+                    -1.4,
+                    1.5,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.149438,
+                    0.0,
+                    0.988771
+                ],
+                "scale": [
+                    2.4,
+                    2.4,
+                    2.4
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "45abdb90597ac7df0000000000002c4c",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/leather-worn.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 3,
+            "kind": "spatial",
+            "name": "leather-worn / cube 3",
+            "owner": "",
+            "persistentId": "472800c44431c6050000000000002c4a",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "d3e0b2151fea766c0000000000002c4b",
+                "position": [
+                    1.6,
+                    1.1,
+                    0.0
+                ],
+                "rotation": [
+                    -0.0,
+                    -0.174108,
+                    -0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.8,
+                    2.2,
+                    1.5
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "01cf17d69ed0de890000000000002c4f",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/leather-worn.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 4,
+            "kind": "spatial",
+            "name": "leather-worn / cube 4",
+            "owner": "",
+            "persistentId": "c995f1430c9c629e0000000000002c4d",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "749f884cf42391d60000000000002c4e",
+                "position": [
+                    0.0,
+                    0.05,
+                    -1.8
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    4.0,
+                    0.1,
+                    0.8
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "561d42ecf672d64f0000000000002c52",
+                    "$type": "PerspectiveCameraComponent",
+                    "active": true,
+                    "blendDuration": 0.0,
+                    "farZ": 100.0,
+                    "fovYDegrees": 43.0,
+                    "layerMask": 4294967295,
+                    "localOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "localRotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "nearZ": 0.1,
+                    "orthographicHeight": 10.0,
+                    "priority": 10,
+                    "projectionMode": 0,
+                    "viewportId": 0
+                }
+            ],
+            "id": 5,
+            "kind": "spatial",
+            "name": "Showcase Camera",
+            "owner": "",
+            "persistentId": "e4395b370845bd7d0000000000002c50",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "037cfecc4715b18d0000000000002c51",
+                "position": [
+                    5.0,
+                    3.2,
+                    -6.5
+                ],
+                "rotation": [
+                    0.123716,
+                    -0.319245,
+                    0.042078,
+                    0.938619
+                ],
+                "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                ]
+            },
+            "spatialParent": ""
+        }
+    ]
+}

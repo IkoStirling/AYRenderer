@@ -1,0 +1,2605 @@
+{
+  "scenes": {
+    "Assets/worlds/cutout-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        6.0,
+        4.5,
+        -10.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.25178849697113037,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5404195189476013,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/cutout-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        6.0,
+        4.5,
+        -10.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.25178849697113037,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5404195189476013,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/cutout-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        6.0,
+        4.5,
+        -10.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.25178849697113037,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5404195189476013,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/cutout.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        6.0,
+        4.5,
+        -10.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.25178849697113037,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5404195189476013,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/facade-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        9.0,
+        6.0,
+        -11.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2606023848056793,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6435011029243469,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/facade-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        9.0,
+        6.0,
+        -11.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2606023848056793,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6435011029243469,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/facade-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        9.0,
+        6.0,
+        -11.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2606023848056793,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6435011029243469,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/facade.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        9.0,
+        6.0,
+        -11.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2606023848056793,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6435011029243469,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/gallery-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        8.0,
+        7.0,
+        -11.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.39424437284469604,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.588002622127533,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/gallery-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        8.0,
+        7.0,
+        -11.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.39424437284469604,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.588002622127533,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/gallery-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        8.0,
+        7.0,
+        -11.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.39424437284469604,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.588002622127533,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/gallery.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        8.0,
+        7.0,
+        -11.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.39424437284469604,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.588002622127533,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/study-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        8.5,
+        10.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.4798581600189209,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5016040802001953,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/study-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        8.5,
+        10.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.4798581600189209,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5016040802001953,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/study-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        8.5,
+        10.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.4798581600189209,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5016040802001953,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/study.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        8.5,
+        10.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.4798581600189209,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5016040802001953,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/workbench-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        7.5,
+        6.0,
+        -9.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.38885581493377686,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6947382688522339,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/workbench-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        7.5,
+        6.0,
+        -9.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.38885581493377686,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6947382688522339,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/workbench-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        7.5,
+        6.0,
+        -9.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.38885581493377686,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6947382688522339,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/workbench.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        7.5,
+        6.0,
+        -9.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.38885581493377686,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6947382688522339,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-ceramic-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-ceramic-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-ceramic-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-ceramic.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-fabric-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-fabric-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-fabric-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-fabric.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-metal-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-metal-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-metal-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-metal.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-paint-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-paint-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-paint-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-paint.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-panel-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-panel-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-panel-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-panel.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-rubber-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-rubber-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-rubber-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-rubber.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-stone-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-stone-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-stone-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-stone.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-wood-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-wood-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-wood-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-wood.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/shapes-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        12.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.5288969278335571,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.2639637291431427,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/shapes-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        12.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.5288969278335571,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.2639637291431427,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/shapes-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        12.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.5288969278335571,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.2639637291431427,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/shapes.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        12.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.5288969278335571,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.2639637291431427,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/collection-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        10.0,
+        12.0,
+        -15.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.46196672320365906,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.46972039341926575,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/collection-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        10.0,
+        12.0,
+        -15.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.46196672320365906,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.46972039341926575,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/collection-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        10.0,
+        12.0,
+        -15.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.46196672320365906,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.46972039341926575,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/collection.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        10.0,
+        12.0,
+        -15.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.46196672320365906,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.46972039341926575,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-asphalt-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-asphalt-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-asphalt-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-asphalt.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-brick-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-brick-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-brick-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-brick.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-concrete-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-concrete-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-concrete-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-concrete.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-copper-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-copper-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-copper-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-copper.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-leather-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-leather-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-leather-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-leather.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-marble-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-marble-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-marble-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-marble.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-plastic-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-plastic-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-plastic-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-plastic.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-terrazzo-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-terrazzo-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-terrazzo-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-terrazzo.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/shapes-extra-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        12.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.5288969278335571,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.2639637291431427,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/shapes-extra-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        12.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.5288969278335571,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.2639637291431427,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/shapes-extra-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        12.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.5288969278335571,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.2639637291431427,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/shapes-extra.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        12.0,
+        -14.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.5288969278335571,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.2639637291431427,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-acrylic-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-acrylic-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-acrylic-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/hero-acrylic.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        5.0,
+        3.200000047683716,
+        -6.5
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.2621012330055237,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.6556956171989441,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/transparency-clean.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        7.0,
+        5.0,
+        -10.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.26939547061920166,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5667291879653931,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/transparency-wet.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        7.0,
+        5.0,
+        -10.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.26939547061920166,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5667291879653931,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/transparency-worn.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        7.0,
+        5.0,
+        -10.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.26939547061920166,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5667291879653931,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    },
+    "Assets/worlds/transparency.scn": {
+      "mode": "3D",
+      "threeDEye": [
+        7.0,
+        5.0,
+        -10.0
+      ],
+      "threeDMoveSpeed": 6.0,
+      "threeDOrthoHeight": 10.0,
+      "threeDPitchRadians": -0.26939547061920166,
+      "threeDProjection": "Perspective",
+      "threeDYawRadians": -0.5667291879653931,
+      "twoDCenter": [
+        0.0,
+        0.0
+      ],
+      "twoDPlane": "XY",
+      "twoDViewHeight": 600.0,
+      "visibility": {
+        "cameraOverlay2D": true,
+        "meshes": true,
+        "ui": true,
+        "worldLit2D": true
+      }
+    }
+  },
+  "schemaVersion": 1
+}

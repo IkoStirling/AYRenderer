@@ -1,5 +1,25 @@
 # AYRenderer
 
+## PBR 材质与可编辑内容（2026-10-20）
+
+`PbrSurfaceSettings` 统一 Forward/Deferred 的 UV 缩放/偏移、法线强度和粗糙度偏置，
+默认值保留旧材质；使用现有 `.mat` 通用参数，不扩 IMaterial ABI 或 GBuffer 附件。
+Forward 法线改为 inverse-transpose，内置 PBR 的 Mask cutoff 与 Deferred 对齐。
+高级 Host 可创建独立资源材质快照，供 Editor 预览，不改路径缓存里的 Scene 材质。
+`PreviewSceneSettings` 提供独立灯光与可选 HDR 显示，复用主 PostProcess shader，
+与 retained UI 共用 view/内存预算；相机非有限值在提交前拒绝。
+
+[Material Workshop](demo/MaterialWorkshop/README.md) 包含十七种程序化表面、四种状态、
+主场景、参数/剪裁/形状/透明研究及近景，共 128 份原生材质、411 张贴图和 104 个可编辑 Scene。
+`AYRenderer_MaterialTool` 使用资源模块编码器，`AYRenderer_MaterialDemo` 真正加载材质文件。
+可用生成器重建、使用 `AYEditor_MaterialSampleTool` 写网格/场景工程，再在 Editor 中编辑。
+精选与连续过程导出使用 `demo/ExportMaterialShowcase.ps1`。
+Native 展示以共用直射灯为对照，默认关闭阴影、TAA 和环境 cube；不声称完整 IBL 等价。
+材质实例共享编译程序，销毁快照只在没有其他材质使用该程序时才释放池令牌。
+路径材质重载先准备新 GPU 实例，获取失败时保留原缓存和稳定句柄。
+StandardLit 资源桥为省略的旧参数建立实例缺省值：金属0、粗糙度0.5、AO/opacity/normal-Y为1、
+发光为0，保留显式参数；避免稀疏材质继承其他 draw 或预览留下的 program uniform 值。
+
 ## 色板动态与生产构建复用（2026-10-19）
 
 `--animate-palette`以3.2秒循环在原始、暖色、冷色三个实际色板之间平滑插值；

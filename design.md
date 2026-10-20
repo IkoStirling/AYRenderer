@@ -1,5 +1,48 @@
 # AYRenderer Design
 
+## 2026-10-20 — PBR 表面语义与隔离预览
+
+表面控制是值类型，不增加 IMaterial 虚接口、材质文件版本或 GBuffer 附件。
+`PbrSurfaceBinding` 从现有 uniformSlots 读取/有限化每个 draw 的 UV/法线/粗糙度参数，
+即使材质 shader 不声明这些语义也保留槽值，供统一 GBuffer、Shadow、Motion 重放使用。
+每次 draw 都上传 identity 默认值，避免共享 GPU program 的参数缓存泄漏。
+Forward PBR 的法线使用 inverse-transpose，切线按模型线性部分变换后正交化。
+PBR Mask 在 Forward shader 先按共同 opacity 足迹 discard；非 Mask draw 显式清空 cutoff。
+这些更改不改变 WorldLit2D 的专属采样契约。
+
+`createMaterialFromResource` 是 owner-thread 的具体 Material 快照桥：复用原资源参数/贴图语义，
+创建独立 GPU material，不登记源路径缓存；材质由调用者销毁，共享纹理由 Renderer 持有。
+它不承诺枚举任意 IMaterial，也不创建第二套资源解析器。
+
+ShaderResource 是池拥有的非计数令牌，重复 acquire/compile 可返回相同 id；release 会使全部副本
+失效。RenderResourceManager 以现有 material table 为唯一所有权依据，销毁或交换 shader 时
+先检查其他材质是否仍使用同一令牌，最后一个使用者离开才 release；不复制一份容易在稳定 id
+重载搬移时失配的引用计数表。仅销毁/替换路径需要 O(材质数) 检查，不增加 draw 的查找成本。
+同一 shader revision 的显式重载保留当前令牌。路径材质先构建新实例再替换稳定 id，失败不主动
+销毁原 GpuMaterial 或路径 cache。池热重载/关闭仍可主动使令牌失效，随后遵循原恢复流程。
+模块回归直接检查共享 program 的有效性与最终回收，真实 Workshop fixture 同帧提交 Scene
+和材质创作视图，覆盖连续 revision、预览关闭重开、保存后显式 reload 和 Scene 编辑保存重开。
+额外的稀疏旧材质 GPU 用例复现了非生命周期的 uniform 继承：独立句柄仍可能读取上一次 draw
+的粗糙度/金属/发光。StandardLit 资源桥现补齐缺省实例槽（metallic0、roughness.5、AO/opacity/
+normal-Y1、opacitySource/premultipliedAlpha/emissive0），仅处理源资源中省略的参数，
+显式参数与未知参数保留。与既有 GBuffer、Editor 文档默认值对齐，不改变 ShaderResource ABI。
+
+默认 PreviewSceneCamera / 四-view 入口保持布局和行为；新 settings 重载显式请求 HDR 显示。
+UI target 附属一份 RGBA16F+depth lease，使用 retained-UI 硬预算与 view allocator，
+resize、release、shutdown 回收；预算/相机失败在 beforeDraw 前返回。
+曝光/Gamma 复用主后处理 sanitize，PostProcessPass 抽出 executeToTarget，共用 shader/几何，
+独立 pass instance 在 shader pool / adapter 关闭前销毁；目标不得与采样 FBO 相同。
+预览构造独立 FrameContext、相机、灯光和 draw lists，不借主 FrameGraph、时序历史或设置。
+真实多预览与主管线共存检查见 Test_PreviewSceneGpu，内存/view 边界见 Test_PreviewScene。
+
+演示配方/几何由 Native Viewer 与 Editor SampleTool 共享，但不是新公共场景格式。
+生成材质仍由 AYResource 编码；SampleTool 使用正式 MeshConverter、EditorSceneDocument、
+多实例 camera acquisition 和资产注册表规范后缀。CPU 重开计数之外还检查资源注册加载与
+FullClient 工程验证，避免把无法通过运行时查找的网格当作可编辑工程交付。
+样例含九组主/研究场景和十七种近景，各四状态；场景清单与 Native 构图共用 MaterialSceneRecipe。
+原有材质/纹理保持字节一致，新增场景增量纳入工程而不重写已有 Scene。新增单元噪声按整周期
+包裹种子；亚克力只用既有 straight-alpha Blend，不扩展 BRDF、折射或透明排序契约。
+
 ## 2026-10-19 — Host色板演示与本地生产shader复用
 
 作者组合配方暴露了原JSON整体double比较误拒短小数的问题。解析仍先严格解码、清洗并核对完整形状；

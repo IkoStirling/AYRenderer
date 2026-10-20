@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYRenderer/RenderTypes.h"
+#include "AYRenderer/PbrSurfaceSettings.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/GpuResources.h"
@@ -93,6 +94,8 @@ public:
     void setMaterialColor(MaterialHandle material, const char* propertyName,
                           float r, float g, float b, float a);
     void setMaterialFloat(MaterialHandle material, const char* uniformName, float value);
+    void setMaterialPbrSurfaceSettings(MaterialHandle material,const PbrSurfaceSettings& settings);
+    PbrSurfaceSettings materialPbrSurfaceSettings(MaterialHandle material) const;
     void setMaterialVec2(MaterialHandle material, const char* uniformName,
                          float x, float y);
     void setMaterialVec3(MaterialHandle material, const char* uniformName,
@@ -196,6 +199,10 @@ private:
     void destroyMeshGpuOnly(uint64_t id);
     void destroyTextureGpuOnly(uint64_t id);
     void destroyMaterialGpuOnly(uint64_t id);
+    // ShaderResource copies are pool tokens, not counted references. Only the
+    // final material using a token may invalidate its shared GPU program.
+    void releaseMaterialShader(GpuMaterial& material);
+    void replaceMaterialShader(GpuMaterial& material, shader::ShaderResource shader);
 
     void resetMaterialBindingCache(GpuMaterial& material);
     void rebindMaterialAfterShaderSwap(GpuMaterial& material);

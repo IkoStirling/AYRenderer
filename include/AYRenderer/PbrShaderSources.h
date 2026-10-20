@@ -32,6 +32,7 @@ material PBR {
     texture2d brdfLut
 
     uniform mat4 u_lightViewProj
+    uniform mat4 u_normalMatrix
     uniform vec4 cameraPos
     uniform vec4 lightDir
     uniform vec4 lightColor
@@ -56,10 +57,14 @@ material PBR {
     property ao         = vec4(1.0, 0.0, 0.0, 0.0)
     property emissive   = vec4(0.0, 0.0, 0.0, 0.0)
     property opacity    = vec4(1.0, 0.0, 0.0, 0.0)
+    property alphaCutoff = vec4(0.0, 0.0, 0.0, 0.0)
     // 0 = BaseColor alpha only, 1 = dedicated opacity red,
     // 2 = dedicated opacity alpha.
     property opacitySource = vec4(0.0, 0.0, 0.0, 0.0)
     property doubleSided = vec4(0.0, 0.0, 0.0, 0.0)
+    property uvTransform = vec4(1.0, 1.0, 0.0, 0.0)
+    property normalStrength = vec4(1.0, 0.0, 0.0, 0.0)
+    property roughnessBias = vec4(0.0, 0.0, 0.0, 0.0)
     property normalYSign = vec4(1.0, 0.0, 0.0, 0.0)
     property premultipliedAlpha = vec4(0.0, 0.0, 0.0, 0.0)
     property shadowBias = vec4(0.003, 0.0, 0.0, 0.0)
@@ -73,7 +78,7 @@ material PBR {
         in uv  : texcoord
         in boneId : boneindices
         in boneWt : boneweights
-        out worldNormal : normal = (modelMatrix * mix(
+        out worldNormal : normal = (u_normalMatrix * mix(
             vec4(nrm, 0.0),
             skinningMatrix(boneId, boneWt, Skeleton.bones, vec4(nrm, 0.0)),
             castSkinned.x)).xyz
@@ -98,13 +103,17 @@ material PBR {
         in worldPos : position
         in uvOut : texcoord
 
-        let sampledBase = sample(baseColorTexture, uvOut) * baseColor
-        let sampledOpacityTexture = sample(opacityTexture, uvOut)
+        let materialUv = uvOut * uvTransform.xy + uvTransform.zw
+        let sampledBase = sample(baseColorTexture, materialUv) * baseColor
+        let sampledOpacityTexture = sample(opacityTexture, materialUv)
         let dedicatedOpacity = mix(sampledOpacityTexture.x,
                                    sampledOpacityTexture.w,
                                    step(1.5, opacitySource.x))
         let sampledOpacity = mix(1.0, dedicatedOpacity,
                                  step(0.5, opacitySource.x))
+        let surfaceAlpha = sampledBase.a * sampledOpacity
+                         * max(0.0, min(1.0, opacity.x))
+        if (surfaceAlpha < alphaCutoff.x) { discard }
         let albedo = sampledBase.rgb
         let V = normalize(cameraPos.xyz - worldPos)
         let rawN = normalize(worldNormal)
@@ -112,20 +121,23 @@ material PBR {
                          + vec3(0.000001, 0.0, 0.0)
         let T = normalize(tangentSeed)
         let B = normalize(cross(rawN, T)) * worldTangent.w
-        let tangentNormal = sample(normalTexture, uvOut).xyz * 2.0
+        let tangentNormal = sample(normalTexture, materialUv).xyz * 2.0
                           - vec3(1.0, 1.0, 1.0)
-        let mappedN = normalize(T * tangentNormal.x
-                              + B * tangentNormal.y * normalYSign.x
+        let mappedN = rawN
+        if (normalStrength.x > 0.0) {
+            mappedN = normalize(T * tangentNormal.x * normalStrength.x
+                              + B * tangentNormal.y * normalYSign.x * normalStrength.x
                               + rawN * tangentNormal.z)
+        }
         let faceSign = mix(1.0, step(0.0, dot(mappedN, V)) * 2.0 - 1.0,
                            max(0.0, min(1.0, doubleSided.x)))
         let N = mappedN * faceSign
         let materialMetallic = max(0.0, min(1.0,
-            metallic.x * sample(metallicTexture, uvOut).x))
+            metallic.x * sample(metallicTexture, materialUv).x))
         let materialRoughness = max(0.045, min(1.0,
-            roughness.x * sample(roughnessTexture, uvOut).x))
+            roughness.x * sample(roughnessTexture, materialUv).x + roughnessBias.x))
         let materialAo = max(0.0, min(1.0,
-            ao.x * sample(aoTexture, uvOut).x))
+            ao.x * sample(aoTexture, materialUv).x))
         let NdotV = max(dot(N, V), 0.001)
         let materialF0 = mix(vec3(0.04, 0.04, 0.04), albedo, materialMetallic)
 
@@ -904,10 +916,9 @@ material PBR {
         let iblAmbient = (iblDiffuse + iblSpecular)
                        * (ambientStrength.x * materialAo)
         let ambient = mix(legacyAmbient, iblAmbient, iblV2Active.x)
-        let materialEmissive = emissive.xyz * sample(emissiveTexture, uvOut).rgb
+        let materialEmissive = emissive.xyz * sample(emissiveTexture, materialUv).rgb
         let color = ambient + direct + materialEmissive
-        let alpha = sampledBase.a * sampledOpacity
-                  * max(0.0, min(1.0, opacity.x))
+        let alpha = surfaceAlpha
         let hazeDistance = length(worldPos - cameraPos.xyz)
         let transparentFog = clamp(
             (1.0 - exp(-depthHaze.x * hazeDistance)) * depthHaze.y,

@@ -105,11 +105,21 @@ public:
 
     /// Render an isolated forward scene into a depth-backed UI target. The callback
     /// queues GPU simulation on its reserved view before draw extraction. Uses four
-    /// unique views from the shared offscreen allocator; false skips the callback.
+    /// unique views from the shared offscreen allocator. Target/camera/view-budget
+    /// validation failures skip the callback.
     /// Call during UI population, outside retained layer/target paints. Borrowed
     /// scene data must survive this synchronous call; no project World is ticked.
     bool renderScenePreview(RenderTargetHandle target, const RenderScene& scene,
                             const PreviewSceneCamera& camera, uint32_t clearRgba,
+                            const std::function<void(uint16_t)>& beforeDraw = {});
+    /// Isolated lighting and optional HDR display transform. Acquires one
+    /// additional pooled target/view only when displayTransform is requested;
+    /// budget/paint-context failures skip beforeDraw and never submit a scene.
+    /// A later display-pass failure returns false after beforeDraw has run;
+    /// false is not permission to replay GPU simulation in the same frame.
+    bool renderScenePreview(RenderTargetHandle target, const RenderScene& scene,
+                            const PreviewSceneCamera& camera, uint32_t clearRgba,
+                            const PreviewSceneSettings& settings,
                             const std::function<void(uint16_t)>& beforeDraw = {});
 
     LayerHandle createLayer(const LayerDesc& desc) override;

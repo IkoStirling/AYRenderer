@@ -1,5 +1,92 @@
 # AYRenderer 测试维护
 
+## 材质工具箱与共享 program 生命周期（2026-10-20）
+
+本阶段证据根：`out/material-toolbox-20261020/`。CPU/Noop 只证明句柄、参数和所有权契约；
+Scene 与作者视图的 GPU 隔离另由真实 D3D11/D3D12 夹具检查。
+
+| 检查 | 实际结果与证据 |
+|---|---|
+| Renderer 九个 CPU 分区 | 969 例 / 15951 断言，无失败、无跳过；`reviewed-cpu/` 七组 + `sparse-fixed-scene-material.json` + `reviewed-audit-fixed.json` |
+| 共享资源桥 | 上述 SceneMaterial 分区85例/10226断言，内含资源桥11例/112断言；直接检查共享 token 有效性/最终回收、缺省实例值与显式参数保留 |
+| 主路径表面/非均匀尺度 | 两后端各 29 断言；`normal-after.json`、`pbr-surface-d3d12.json` |
+| 三种 opacity 来源及 UV | 两后端各 83 断言；`pbr-mask-d3d11.json` / `pbr-mask-d3d12.json` |
+| GBuffer/Shadow/Motion 足迹 | 两后端各 79 断言；`pbr-replay-d3d11.json` / `pbr-replay-d3d12.json` |
+| HDR 多预览与主后处理 | 两后端各 392 断言；`preview-display-d3d11.json` / `preview-display-d3d12.json`，原色/ACES/Reinhard 独立整数像素参考 |
+| 预算/相机有限性与 lease 回收 | 2 例 / 34 断言，包含在 UI 分区；`preview-lifecycle.json` |
+| MaterialTool 与周期表面 | 8 个真实 CLI/生成器用例，`material-tool-path-nul-before.log`；覆盖不写入失败、128项上限、未知字段、越界/NUL路径与周期性 |
+| Native 严格作者输入与 Blend | 两后端 `native-delivery-d3d11/`、`native-delivery-d3d12/`；坏材质、PNG、缺图、坏作者 shader 配有效 fallback 均拒绝；alpha=0 真实编码参考各路径变化164553像素 |
+| 导出输入一致性/保留旧输出 | `export-source-contract/acceptance.json`，真实 viewer 完成首章期间改复制库；拒绝登记该章，保留两张截图；已有输出目录不改写 |
+
+首次 Audit 失败是旧测试仍要求 shadow mask v5，修正为实际 surface-UV v6 后单独复测通过。
+`reviewed-cpu/Audit.json` 是保留的失败报告，不能当作最终通过；不累加重复运行次数。
+导出还保留了一次 shaderc exit1 无诊断失败；同输入单独复现成功。预检实例现在保留到首个
+实际材质接管 program，避免先释放唯一 token 再重复编译；失败仍终止导出，不静默重试。
+
+### 复现入口
+
+从根目录构建 `AYRenderer_SceneMaterialTests`、`AYRenderer_UITests`、`AYRenderer_GpuTests`、
+`AYRenderer_MaterialTool`、`AYRenderer_MaterialDemo`。生产 shader staging 的 Native 目标依次构建，
+避免多个复制任务同时改写同一输出目录。
+
+```powershell
+AYRenderer_SceneMaterialTests --suite RenderAssetBridgeTests --report-json <新报告.json>
+AYRenderer_UITests --suite AYRenderer_PreviewScene --report-json <新报告.json>
+$env:AY_TAA_GPU_TEST = 'd3d12' # d3d11 同样验证
+AYRenderer_GpuTests --suite AYRenderer_PreviewSceneGpu --report-json <新报告.json>
+AYRenderer_GpuTests --suite AYRenderer_PhoskiaGpu --case pbr_surface_controls_and_nonuniform_scale_match_across_main_paths --report-json <新报告.json>
+python AYRuntime/AYRenderer/demo/TestMaterialTools.py <AYRenderer_MaterialTool.exe>
+python AYRuntime/AYRenderer/demo/TestMaterialDemo.py <AYRenderer_MaterialTool.exe> <AYRenderer_MaterialDemo.exe> <新目录> --d3d12
+python AYRuntime/AYRenderer/demo/TestMaterialExport.py <AYRenderer_MaterialDemo.exe> <新目录>
+```
+
+Editor 真实集成目标（均为 opt-in `EXCLUDE_FROM_ALL`，不混入 Noop CPU 分区）：
+
+```powershell
+AYEditor_MaterialPreviewRenderTest <新目录> d3d12
+AYEditor_MaterialWorkshopRenderTest <新目录> d3d12
+AYEditor_MaterialWorkshopRenderTest <另一新目录> d3d12 --force-sc
+AYEditor_MaterialWorkshopRenderTest <又一新目录> d3d12 --multiple
+AYEditor_MaterialWorkshopRenderTest <旧材质新目录> d3d12 --sparse
+AYEditor_MaterialWorkshopRenderTest <目录验收新目录> d3d12 --catalog
+AYEditor_MaterialWorkshopSessionRenderTest <新目录> d3d12
+```
+
+`workshop-sc-rgb-*` / `workshop-multiple-*` 验证实际 Scene 几何和纹理预览：未保存编辑的
+Scene RGB 变化为0；连续四次 revision、第二预览独立编辑/关闭、主相机、保存等待显式 reload、
+材质重开与 Scene 加物体保存重开的实际画面均通过。raw SC 只验证旧兼容 program 的生命周期，
+不声称它实现新 PBR 表面语义。`editor-preview-shapes-*` 验证实际 ComboBox 切换形状及 undo RGBA8±1。
+
+`workshop-sparse-before-d3d11` 首次复现了省略普通 PBR 参数的旧材质会继承预览 uniform 值。
+资源桥补齐 StandardLit 缺省实例槽后，`workshop-sparse-fixed-d3d11/12` 在实际 GPU 上通过：
+同时修改金属度/粗糙度/AO/发光后，Scene 变化仍为0，预览变化146235像素，保存重载后Scene变化20989像素。
+CPU 新例确认缺省值独立且显式参数不被覆盖；之后 raw-SC 兼容两后端复测仍通过。
+
+`acceptance-catalog-d3d11/` / `acceptance-catalog-d3d12/` 各加载104个实际原生 Scene，
+按各自保存的 camera 渲染 Forward/Deferred，共416张 Scene 画面，另有四张空 Scene 参考。
+逐帧检查 mesh/material 资源加载与对象数量、预览后的主相机不变、截图尺寸和相对空场的几何覆盖。
+首版绝对亮度判据误拒深色橡胶，保留失败图片，改为与同后端/显示状态的实际空场逐像素比较；
+不能通过提高黑材质亮度来迎合判据。`acceptance-editor-gpu.json` 记录该目录验收及八项编辑夹具的进程结果。
+
+`session-shortcuts-*` 使用真实 EditorSession、资产库、Dock、Enter/Ctrl+S 路由和 GPU backend；
+Scene 提取为显式测试 Host，不替代默认 GameLoop 的原生指针操作验收。Editor 材质 CPU 10例/208断言，
+`authoring-created-d3d11/` / `authoring-created-d3d12/` 进一步通过真实 Session 新建材质、
+无外部贴图的独立 companion shader 实际预览、新旧两个文档隔离、Enter 和 pending-field Ctrl+S、
+磁盘重开及返回 Scene 像素不变。`DefaultEditorModuleAssemblyTest` 1例/13断言通过，
+`AYEditorShell_Demo` 完整构建；这两个门禁仍不等同于人工原生窗口操作验收。
+另复用未改变的 Shell50/1418、ProjectWorkflow35/477、AssetBrowser25/357、Framework7/108 成功报告。
+AYResource 单材质独立 ASan 构建6例/316断言通过；关闭新 STL 容器注解以兼容第三方库，
+仍启用地址检测，不宣称容器注解覆盖。MaterialConverter 通过，FBX 外部 fixture 跳过保留在报告中。
+
+样例现有128份材质、411张PNG、4种原生mesh、104个Scene。截图/章节/动画帧数量是内容交付量，
+不计入测试用例数。完整命令与能力边界见[样例说明](../demo/MaterialWorkshop/README.md)。
+
+完整展示每后端60章/306张PNG，源输入541项摘要及截图解码均通过；`delivery-verification.json`
+逐图保存摘要，54组状态/路径比较都有表面变化。完整展示的原程序以 `delivery-capture-viewer.exe`
+保存，manifest摘要不因后来构建而改写。末次稀疏默认修复后，最新Native另捕获collection/
+transparency的17表面×四状态×两路径×两后端32图，逐像素与已有导出比较均在RGBA8±1内；
+证据 `current-viewer-content/compatibility.json`。不为未受影响内容重复导出所有章节。
+
 ## 最终内容与架构收口（2026-10-19）
 
 色板演示两管线各32帧，相邻31对均有实际变化，几何固定；`palette-performance.gif`含并排过程。

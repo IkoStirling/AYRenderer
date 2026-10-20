@@ -1,0 +1,1349 @@
+{
+    "__coordConvention": "ay-coordinates-lh-yup-zfwd-ccw-uvtop-m-v1",
+    "__schemaVersion": 5,
+    "entities": [
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "2738911e69f88c540000000000001230",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber-wet.mat",
+                    "meshPath": "meshes/cube.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 1,
+            "kind": "spatial",
+            "name": "rubber-wet / cube 1",
+            "owner": "",
+            "persistentId": "691b34f3c9d0f32b000000000000122e",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "6da944c7be7b32a7000000000000122f",
+                "position": [
+                    0.0,
+                    -0.28,
+                    4.5
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    24.0,
+                    0.3,
+                    14.0
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "cbcf0c00dcfddfdb0000000000001233",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 2,
+            "kind": "spatial",
+            "name": "metal-wet / sphere 2",
+            "owner": "",
+            "persistentId": "b6580783a6264dcd0000000000001231",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "15f16226b0e3e5da0000000000001232",
+                "position": [
+                    -9.45,
+                    1.25,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "78b6dfc3670134c40000000000001236",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/stone-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 3,
+            "kind": "spatial",
+            "name": "stone-wet / sphere 3",
+            "owner": "",
+            "persistentId": "128c10eb3783be2e0000000000001234",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "c8ea73e0bbcd9d570000000000001235",
+                "position": [
+                    -6.75,
+                    1.25,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "a18822452f7902d30000000000001239",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 4,
+            "kind": "spatial",
+            "name": "wood-wet / sphere 4",
+            "owner": "",
+            "persistentId": "857203b7d5de8f790000000000001237",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "0d122419f5f7ae2c0000000000001238",
+                "position": [
+                    -4.05,
+                    1.25,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "afe36eeca2ff4efc000000000000123c",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 5,
+            "kind": "spatial",
+            "name": "ceramic-wet / sphere 5",
+            "owner": "",
+            "persistentId": "66923debf1e50385000000000000123a",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "6e50bc8f9aa07622000000000000123b",
+                "position": [
+                    -1.35,
+                    1.25,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "79446f4f1cb1b582000000000000123f",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 6,
+            "kind": "spatial",
+            "name": "rubber-wet / sphere 6",
+            "owner": "",
+            "persistentId": "4c498577cab49435000000000000123d",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "16be2e1d7a6c8999000000000000123e",
+                "position": [
+                    1.35,
+                    1.25,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "9701682b668401a20000000000001242",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/paint-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 7,
+            "kind": "spatial",
+            "name": "paint-wet / sphere 7",
+            "owner": "",
+            "persistentId": "3875b453648eab7e0000000000001240",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "07d4647ea17fee4f0000000000001241",
+                "position": [
+                    4.05,
+                    1.25,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "2acc1aee16f56f370000000000001245",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/fabric-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 8,
+            "kind": "spatial",
+            "name": "fabric-wet / sphere 8",
+            "owner": "",
+            "persistentId": "1bdd44bf33c618fa0000000000001243",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "f2bc001f5525420c0000000000001244",
+                "position": [
+                    6.75,
+                    1.25,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "22e0fde6eb1ceecb0000000000001248",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/panel-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 9,
+            "kind": "spatial",
+            "name": "panel-wet / sphere 9",
+            "owner": "",
+            "persistentId": "d0d780ac94679fff0000000000001246",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "e8f55c0381d6aa670000000000001247",
+                "position": [
+                    9.45,
+                    1.25,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "9fc238ed269a0793000000000000124b",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 10,
+            "kind": "spatial",
+            "name": "metal-wet / sphere 10",
+            "owner": "",
+            "persistentId": "6e8d699dac61adcb0000000000001249",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "b7b2475e94a741b2000000000000124a",
+                "position": [
+                    -9.45,
+                    1.25,
+                    3.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    2.2,
+                    0.8,
+                    1.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "414c259ea00a6816000000000000124e",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/stone-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 11,
+            "kind": "spatial",
+            "name": "stone-wet / sphere 11",
+            "owner": "",
+            "persistentId": "9c87c2ee1355ef02000000000000124c",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "9e737685f1d2cad2000000000000124d",
+                "position": [
+                    -6.75,
+                    1.25,
+                    3.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    2.2,
+                    0.8,
+                    1.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "052ea4b8255c2e880000000000001251",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 12,
+            "kind": "spatial",
+            "name": "wood-wet / sphere 12",
+            "owner": "",
+            "persistentId": "84e7228438ce1b8f000000000000124f",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "bc60fafbc55418060000000000001250",
+                "position": [
+                    -4.05,
+                    1.25,
+                    3.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    2.2,
+                    0.8,
+                    1.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "029829a4ba7561af0000000000001254",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 13,
+            "kind": "spatial",
+            "name": "ceramic-wet / sphere 13",
+            "owner": "",
+            "persistentId": "b20a6327eaa4dba50000000000001252",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "e243b8f0f64422350000000000001253",
+                "position": [
+                    -1.35,
+                    1.25,
+                    3.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    2.2,
+                    0.8,
+                    1.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "bfa0267e9ae95b5c0000000000001257",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 14,
+            "kind": "spatial",
+            "name": "rubber-wet / sphere 14",
+            "owner": "",
+            "persistentId": "9c747a7fead05bc40000000000001255",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "62a97c42be7ffba80000000000001256",
+                "position": [
+                    1.35,
+                    1.25,
+                    3.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    2.2,
+                    0.8,
+                    1.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "d03498002f5e5250000000000000125a",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/paint-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 15,
+            "kind": "spatial",
+            "name": "paint-wet / sphere 15",
+            "owner": "",
+            "persistentId": "fd32ead8c1fe876d0000000000001258",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "fa9dc37eca60dc790000000000001259",
+                "position": [
+                    4.05,
+                    1.25,
+                    3.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    2.2,
+                    0.8,
+                    1.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "57e9217ed8dfd83f000000000000125d",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/fabric-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 16,
+            "kind": "spatial",
+            "name": "fabric-wet / sphere 16",
+            "owner": "",
+            "persistentId": "6a24a70fe89f7aaf000000000000125b",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "dbbb17b3c78de9de000000000000125c",
+                "position": [
+                    6.75,
+                    1.25,
+                    3.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    2.2,
+                    0.8,
+                    1.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "feb980e8cfca69e70000000000001260",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/panel-wet.mat",
+                    "meshPath": "meshes/sphere.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 17,
+            "kind": "spatial",
+            "name": "panel-wet / sphere 17",
+            "owner": "",
+            "persistentId": "d623d6421d02d9dd000000000000125e",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "8795b50657ae02cf000000000000125f",
+                "position": [
+                    9.45,
+                    1.25,
+                    3.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    2.2,
+                    0.8,
+                    1.2
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "d250302f46ecaf200000000000001263",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal-wet.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 18,
+            "kind": "spatial",
+            "name": "metal-wet / cylinder 18",
+            "owner": "",
+            "persistentId": "dbb632173a36a0530000000000001261",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "6a1fc8f3880c9c3e0000000000001262",
+                "position": [
+                    -9.45,
+                    1.25,
+                    6.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "c8ce31443cfe75080000000000001266",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/stone-wet.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 19,
+            "kind": "spatial",
+            "name": "stone-wet / cylinder 19",
+            "owner": "",
+            "persistentId": "8795d341cc8ffff60000000000001264",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "7454c07e86870b980000000000001265",
+                "position": [
+                    -6.75,
+                    1.25,
+                    6.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "61ab1e591d2021b30000000000001269",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood-wet.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 20,
+            "kind": "spatial",
+            "name": "wood-wet / cylinder 20",
+            "owner": "",
+            "persistentId": "8d29e2fbe35f670c0000000000001267",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "72f33f899d6434230000000000001268",
+                "position": [
+                    -4.05,
+                    1.25,
+                    6.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "a82be21e09015c10000000000000126c",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic-wet.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 21,
+            "kind": "spatial",
+            "name": "ceramic-wet / cylinder 21",
+            "owner": "",
+            "persistentId": "f78c64a7eb914ef3000000000000126a",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "ce40a1344509f027000000000000126b",
+                "position": [
+                    -1.35,
+                    1.25,
+                    6.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "1c4f984b97c294c9000000000000126f",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber-wet.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 22,
+            "kind": "spatial",
+            "name": "rubber-wet / cylinder 22",
+            "owner": "",
+            "persistentId": "e3445843f01cdeeb000000000000126d",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "71ed24eb06d919cf000000000000126e",
+                "position": [
+                    1.35,
+                    1.25,
+                    6.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "3c3b17ea6e69904a0000000000001272",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/paint-wet.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 23,
+            "kind": "spatial",
+            "name": "paint-wet / cylinder 23",
+            "owner": "",
+            "persistentId": "010a65670da0f47b0000000000001270",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "6c619f6b6604e4520000000000001271",
+                "position": [
+                    4.05,
+                    1.25,
+                    6.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "46e4a4dbf4b427b40000000000001275",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/fabric-wet.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 24,
+            "kind": "spatial",
+            "name": "fabric-wet / cylinder 24",
+            "owner": "",
+            "persistentId": "1361c9f216227bf60000000000001273",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "aa8ecc108cdddf1b0000000000001274",
+                "position": [
+                    6.75,
+                    1.25,
+                    6.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "4fca3c6b07d29de90000000000001278",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/panel-wet.mat",
+                    "meshPath": "meshes/cylinder.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 25,
+            "kind": "spatial",
+            "name": "panel-wet / cylinder 25",
+            "owner": "",
+            "persistentId": "41036d07a8da74b60000000000001276",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "1d2580cf824565230000000000001277",
+                "position": [
+                    9.45,
+                    1.25,
+                    6.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "7f765d7e87570b5d000000000000127b",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/metal-wet.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 26,
+            "kind": "spatial",
+            "name": "metal-wet / torus 26",
+            "owner": "",
+            "persistentId": "7e1e2d0fdcbdfc590000000000001279",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "81a15390f7c16666000000000000127a",
+                "position": [
+                    -9.45,
+                    0.8,
+                    9.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "abdef9d6b640b4b7000000000000127e",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/stone-wet.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 27,
+            "kind": "spatial",
+            "name": "stone-wet / torus 27",
+            "owner": "",
+            "persistentId": "244f4edb59e3e89b000000000000127c",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "9c9e265a7de05c05000000000000127d",
+                "position": [
+                    -6.75,
+                    0.8,
+                    9.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "bc3274eed5bc94280000000000001281",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/wood-wet.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 28,
+            "kind": "spatial",
+            "name": "wood-wet / torus 28",
+            "owner": "",
+            "persistentId": "085bb669fd21076f000000000000127f",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "3f9bd2156d06bed80000000000001280",
+                "position": [
+                    -4.05,
+                    0.8,
+                    9.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "61fa56e6e58845940000000000001284",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/ceramic-wet.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 29,
+            "kind": "spatial",
+            "name": "ceramic-wet / torus 29",
+            "owner": "",
+            "persistentId": "1358edae2ca507ff0000000000001282",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "b8c8aebfd51294360000000000001283",
+                "position": [
+                    -1.35,
+                    0.8,
+                    9.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "eb287321ff4643340000000000001287",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/rubber-wet.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 30,
+            "kind": "spatial",
+            "name": "rubber-wet / torus 30",
+            "owner": "",
+            "persistentId": "aa15a0bf74be888d0000000000001285",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "820b372116f09e1a0000000000001286",
+                "position": [
+                    1.35,
+                    0.8,
+                    9.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "9bf67d0f2c7d6e74000000000000128a",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/paint-wet.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 31,
+            "kind": "spatial",
+            "name": "paint-wet / torus 31",
+            "owner": "",
+            "persistentId": "5621dee5b71b78a40000000000001288",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "2b625f95143c87f90000000000001289",
+                "position": [
+                    4.05,
+                    0.8,
+                    9.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "7bb74265f763dcb6000000000000128d",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/fabric-wet.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 32,
+            "kind": "spatial",
+            "name": "fabric-wet / torus 32",
+            "owner": "",
+            "persistentId": "eec89271696bf8b0000000000000128b",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "48e8ea2e0a136bcf000000000000128c",
+                "position": [
+                    6.75,
+                    0.8,
+                    9.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "ac95ef81fdd97aa00000000000001290",
+                    "$type": "MeshComponent",
+                    "layer": 0,
+                    "materialPath": "materials/panel-wet.mat",
+                    "meshPath": "meshes/torus.msh",
+                    "skinned": false
+                }
+            ],
+            "id": 33,
+            "kind": "spatial",
+            "name": "panel-wet / torus 33",
+            "owner": "",
+            "persistentId": "9c5b826f3becf605000000000000128e",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "3e80dd9a770aebf3000000000000128f",
+                "position": [
+                    9.45,
+                    0.8,
+                    9.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.174108,
+                    0.0,
+                    0.984727
+                ],
+                "scale": [
+                    1.7,
+                    1.7,
+                    1.7
+                ]
+            },
+            "spatialParent": ""
+        },
+        {
+            "components": [
+                {
+                    "$displayName": "",
+                    "$instanceId": "7b10915e1237975b0000000000001293",
+                    "$type": "PerspectiveCameraComponent",
+                    "active": true,
+                    "blendDuration": 0.0,
+                    "farZ": 100.0,
+                    "fovYDegrees": 43.0,
+                    "layerMask": 4294967295,
+                    "localOffset": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "localRotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "nearZ": 0.1,
+                    "orthographicHeight": 10.0,
+                    "priority": 10,
+                    "projectionMode": 0,
+                    "viewportId": 0
+                }
+            ],
+            "id": 34,
+            "kind": "spatial",
+            "name": "Showcase Camera",
+            "owner": "",
+            "persistentId": "a82ab8b692fac9770000000000001291",
+            "spatial": {
+                "$displayName": "Spatial Transform",
+                "$instanceId": "1ccbbe93a0b421db0000000000001292",
+                "position": [
+                    5.0,
+                    12.0,
+                    -14.0
+                ],
+                "rotation": [
+                    0.259104,
+                    -0.127024,
+                    0.034397,
+                    0.956842
+                ],
+                "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                ]
+            },
+            "spatialParent": ""
+        }
+    ]
+}

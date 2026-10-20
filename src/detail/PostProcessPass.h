@@ -43,6 +43,10 @@ public:
     std::string_view name() const override { return "PostProcess"; }
 
     uint32_t execute(PassExecContext& ctx) override;
+    // Isolated authoring targets reuse the exact display shader without
+    // borrowing the main FrameGraph, temporal resources or fixed view ID.
+    uint32_t executeToTarget(PassExecContext& ctx,uint8_t viewId,
+                             bgfx::FrameBufferHandle destination);
 
     // Compatibility wrapper. New consumers call
     // selectSceneColorSourceFbo() from SceneColorPipeline directly.

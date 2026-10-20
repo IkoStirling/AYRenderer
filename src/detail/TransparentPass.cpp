@@ -1,4 +1,5 @@
 #include "detail/TransparentPass.h"
+#include "detail/PbrSurfaceBinding.h"
 #include "detail/BuiltinShaderCatalog.h"
 #include "detail/RasterConvention.h"
 #include "detail/GpuResources.h"
@@ -345,6 +346,12 @@ TransparentPass::SubmitResult TransparentPass::submitItem(
             material.shader.setUniform(binding, slot.data, slot.size);
         }
     }
+
+    uploadPbrSurface(material,material.shader);
+    const float cutoff[4] = {0, 0, 0, 0};
+    trySetUniformVec4(material.shader, "alphaCutoff", cutoff);
+    trySetUniformMat4(material.shader,"u_normalMatrix",nullptr,
+                      normalMatrixForTransform(item.world));
 
     if (mode == SubmitMode::SelectionMask) {
         // Produce an opaque white visibility mask regardless of the selected

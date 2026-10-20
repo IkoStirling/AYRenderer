@@ -6,6 +6,7 @@
 #include "detail/Draw2D.h"
 #include "detail/RasterConvention.h"
 #include "detail/RenderPass.h"
+#include "detail/PbrSurfaceBinding.h"
 #include "detail/RigidInstancing.h"
 
 #include <bgfx/bgfx.h>
@@ -340,6 +341,7 @@ uint32_t ShadowCaster::drawCasters(
                                  item);
 
             if (alphaMask) {
+                uploadPbrSurface(material,drawProgram);
                 // The shared mask shader must be reset for ordinary 3D draws
                 // after a WorldLit2D draw. BakedAtlas selects raw mesh UVs,
                 // which is the legacy 3D contract.

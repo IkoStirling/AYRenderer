@@ -1,0 +1,4417 @@
+{
+  "schemaVersion": 1,
+  "materials": [
+    {
+      "id": "metal",
+      "name": "Satin Steel",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/metal_d.png",
+        "normalTexture": "textures/metal_n.png",
+        "roughnessTexture": "textures/metal_r.png",
+        "metallicTexture": "textures/metal_m.png",
+        "aoTexture": "textures/metal_ao.png",
+        "emissiveTexture": "textures/metal_e.png"
+      }
+    },
+    {
+      "id": "metal-clean",
+      "name": "Satin Steel / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/metal-clean_d.png",
+        "normalTexture": "textures/metal-clean_n.png",
+        "roughnessTexture": "textures/metal-clean_r.png",
+        "metallicTexture": "textures/metal-clean_m.png",
+        "aoTexture": "textures/metal-clean_ao.png",
+        "emissiveTexture": "textures/metal-clean_e.png"
+      }
+    },
+    {
+      "id": "metal-wet",
+      "name": "Satin Steel / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/metal-wet_d.png",
+        "normalTexture": "textures/metal-wet_n.png",
+        "roughnessTexture": "textures/metal-wet_r.png",
+        "metallicTexture": "textures/metal-wet_m.png",
+        "aoTexture": "textures/metal-wet_ao.png",
+        "emissiveTexture": "textures/metal-wet_e.png"
+      }
+    },
+    {
+      "id": "metal-worn",
+      "name": "Satin Steel / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/metal-worn_d.png",
+        "normalTexture": "textures/metal-worn_n.png",
+        "roughnessTexture": "textures/metal-worn_r.png",
+        "metallicTexture": "textures/metal-worn_m.png",
+        "aoTexture": "textures/metal-worn_ao.png",
+        "emissiveTexture": "textures/metal-worn_e.png"
+      }
+    },
+    {
+      "id": "stone",
+      "name": "Warm Stone Blocks",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/stone_d.png",
+        "normalTexture": "textures/stone_n.png",
+        "roughnessTexture": "textures/stone_r.png",
+        "metallicTexture": "textures/stone_m.png",
+        "aoTexture": "textures/stone_ao.png",
+        "emissiveTexture": "textures/stone_e.png"
+      }
+    },
+    {
+      "id": "stone-clean",
+      "name": "Warm Stone Blocks / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/stone-clean_d.png",
+        "normalTexture": "textures/stone-clean_n.png",
+        "roughnessTexture": "textures/stone-clean_r.png",
+        "metallicTexture": "textures/stone-clean_m.png",
+        "aoTexture": "textures/stone-clean_ao.png",
+        "emissiveTexture": "textures/stone-clean_e.png"
+      }
+    },
+    {
+      "id": "stone-wet",
+      "name": "Warm Stone Blocks / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/stone-wet_d.png",
+        "normalTexture": "textures/stone-wet_n.png",
+        "roughnessTexture": "textures/stone-wet_r.png",
+        "metallicTexture": "textures/stone-wet_m.png",
+        "aoTexture": "textures/stone-wet_ao.png",
+        "emissiveTexture": "textures/stone-wet_e.png"
+      }
+    },
+    {
+      "id": "stone-worn",
+      "name": "Warm Stone Blocks / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/stone-worn_d.png",
+        "normalTexture": "textures/stone-worn_n.png",
+        "roughnessTexture": "textures/stone-worn_r.png",
+        "metallicTexture": "textures/stone-worn_m.png",
+        "aoTexture": "textures/stone-worn_ao.png",
+        "emissiveTexture": "textures/stone-worn_e.png"
+      }
+    },
+    {
+      "id": "wood",
+      "name": "Walnut Planks",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood_d.png",
+        "normalTexture": "textures/wood_n.png",
+        "roughnessTexture": "textures/wood_r.png",
+        "metallicTexture": "textures/wood_m.png",
+        "aoTexture": "textures/wood_ao.png",
+        "emissiveTexture": "textures/wood_e.png"
+      }
+    },
+    {
+      "id": "wood-clean",
+      "name": "Walnut Planks / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-clean_d.png",
+        "normalTexture": "textures/wood-clean_n.png",
+        "roughnessTexture": "textures/wood-clean_r.png",
+        "metallicTexture": "textures/wood-clean_m.png",
+        "aoTexture": "textures/wood-clean_ao.png",
+        "emissiveTexture": "textures/wood-clean_e.png"
+      }
+    },
+    {
+      "id": "wood-wet",
+      "name": "Walnut Planks / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-wet_d.png",
+        "normalTexture": "textures/wood-wet_n.png",
+        "roughnessTexture": "textures/wood-wet_r.png",
+        "metallicTexture": "textures/wood-wet_m.png",
+        "aoTexture": "textures/wood-wet_ao.png",
+        "emissiveTexture": "textures/wood-wet_e.png"
+      }
+    },
+    {
+      "id": "wood-worn",
+      "name": "Walnut Planks / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-worn_d.png",
+        "normalTexture": "textures/wood-worn_n.png",
+        "roughnessTexture": "textures/wood-worn_r.png",
+        "metallicTexture": "textures/wood-worn_m.png",
+        "aoTexture": "textures/wood-worn_ao.png",
+        "emissiveTexture": "textures/wood-worn_e.png"
+      }
+    },
+    {
+      "id": "ceramic",
+      "name": "Glazed Aqua Tiles",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic_d.png",
+        "normalTexture": "textures/ceramic_n.png",
+        "roughnessTexture": "textures/ceramic_r.png",
+        "metallicTexture": "textures/ceramic_m.png",
+        "aoTexture": "textures/ceramic_ao.png",
+        "emissiveTexture": "textures/ceramic_e.png"
+      }
+    },
+    {
+      "id": "ceramic-clean",
+      "name": "Glazed Aqua Tiles / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-clean_d.png",
+        "normalTexture": "textures/ceramic-clean_n.png",
+        "roughnessTexture": "textures/ceramic-clean_r.png",
+        "metallicTexture": "textures/ceramic-clean_m.png",
+        "aoTexture": "textures/ceramic-clean_ao.png",
+        "emissiveTexture": "textures/ceramic-clean_e.png"
+      }
+    },
+    {
+      "id": "ceramic-wet",
+      "name": "Glazed Aqua Tiles / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-wet_d.png",
+        "normalTexture": "textures/ceramic-wet_n.png",
+        "roughnessTexture": "textures/ceramic-wet_r.png",
+        "metallicTexture": "textures/ceramic-wet_m.png",
+        "aoTexture": "textures/ceramic-wet_ao.png",
+        "emissiveTexture": "textures/ceramic-wet_e.png"
+      }
+    },
+    {
+      "id": "ceramic-worn",
+      "name": "Glazed Aqua Tiles / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-worn_d.png",
+        "normalTexture": "textures/ceramic-worn_n.png",
+        "roughnessTexture": "textures/ceramic-worn_r.png",
+        "metallicTexture": "textures/ceramic-worn_m.png",
+        "aoTexture": "textures/ceramic-worn_ao.png",
+        "emissiveTexture": "textures/ceramic-worn_e.png"
+      }
+    },
+    {
+      "id": "rubber",
+      "name": "Diamond Rubber",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/rubber_d.png",
+        "normalTexture": "textures/rubber_n.png",
+        "roughnessTexture": "textures/rubber_r.png",
+        "metallicTexture": "textures/rubber_m.png",
+        "aoTexture": "textures/rubber_ao.png",
+        "emissiveTexture": "textures/rubber_e.png"
+      }
+    },
+    {
+      "id": "rubber-clean",
+      "name": "Diamond Rubber / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/rubber-clean_d.png",
+        "normalTexture": "textures/rubber-clean_n.png",
+        "roughnessTexture": "textures/rubber-clean_r.png",
+        "metallicTexture": "textures/rubber-clean_m.png",
+        "aoTexture": "textures/rubber-clean_ao.png",
+        "emissiveTexture": "textures/rubber-clean_e.png"
+      }
+    },
+    {
+      "id": "rubber-wet",
+      "name": "Diamond Rubber / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/rubber-wet_d.png",
+        "normalTexture": "textures/rubber-wet_n.png",
+        "roughnessTexture": "textures/rubber-wet_r.png",
+        "metallicTexture": "textures/rubber-wet_m.png",
+        "aoTexture": "textures/rubber-wet_ao.png",
+        "emissiveTexture": "textures/rubber-wet_e.png"
+      }
+    },
+    {
+      "id": "rubber-worn",
+      "name": "Diamond Rubber / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/rubber-worn_d.png",
+        "normalTexture": "textures/rubber-worn_n.png",
+        "roughnessTexture": "textures/rubber-worn_r.png",
+        "metallicTexture": "textures/rubber-worn_m.png",
+        "aoTexture": "textures/rubber-worn_ao.png",
+        "emissiveTexture": "textures/rubber-worn_e.png"
+      }
+    },
+    {
+      "id": "paint",
+      "name": "Chipped Safety Paint",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/paint_d.png",
+        "normalTexture": "textures/paint_n.png",
+        "roughnessTexture": "textures/paint_r.png",
+        "metallicTexture": "textures/paint_m.png",
+        "aoTexture": "textures/paint_ao.png",
+        "emissiveTexture": "textures/paint_e.png"
+      }
+    },
+    {
+      "id": "paint-clean",
+      "name": "Chipped Safety Paint / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/paint-clean_d.png",
+        "normalTexture": "textures/paint-clean_n.png",
+        "roughnessTexture": "textures/paint-clean_r.png",
+        "metallicTexture": "textures/paint-clean_m.png",
+        "aoTexture": "textures/paint-clean_ao.png",
+        "emissiveTexture": "textures/paint-clean_e.png"
+      }
+    },
+    {
+      "id": "paint-wet",
+      "name": "Chipped Safety Paint / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/paint-wet_d.png",
+        "normalTexture": "textures/paint-wet_n.png",
+        "roughnessTexture": "textures/paint-wet_r.png",
+        "metallicTexture": "textures/paint-wet_m.png",
+        "aoTexture": "textures/paint-wet_ao.png",
+        "emissiveTexture": "textures/paint-wet_e.png"
+      }
+    },
+    {
+      "id": "paint-worn",
+      "name": "Chipped Safety Paint / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/paint-worn_d.png",
+        "normalTexture": "textures/paint-worn_n.png",
+        "roughnessTexture": "textures/paint-worn_r.png",
+        "metallicTexture": "textures/paint-worn_m.png",
+        "aoTexture": "textures/paint-worn_ao.png",
+        "emissiveTexture": "textures/paint-worn_e.png"
+      }
+    },
+    {
+      "id": "fabric",
+      "name": "Teal Woven Fabric",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/fabric_d.png",
+        "normalTexture": "textures/fabric_n.png",
+        "roughnessTexture": "textures/fabric_r.png",
+        "metallicTexture": "textures/fabric_m.png",
+        "aoTexture": "textures/fabric_ao.png",
+        "emissiveTexture": "textures/fabric_e.png"
+      }
+    },
+    {
+      "id": "fabric-clean",
+      "name": "Teal Woven Fabric / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/fabric-clean_d.png",
+        "normalTexture": "textures/fabric-clean_n.png",
+        "roughnessTexture": "textures/fabric-clean_r.png",
+        "metallicTexture": "textures/fabric-clean_m.png",
+        "aoTexture": "textures/fabric-clean_ao.png",
+        "emissiveTexture": "textures/fabric-clean_e.png"
+      }
+    },
+    {
+      "id": "fabric-wet",
+      "name": "Teal Woven Fabric / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/fabric-wet_d.png",
+        "normalTexture": "textures/fabric-wet_n.png",
+        "roughnessTexture": "textures/fabric-wet_r.png",
+        "metallicTexture": "textures/fabric-wet_m.png",
+        "aoTexture": "textures/fabric-wet_ao.png",
+        "emissiveTexture": "textures/fabric-wet_e.png"
+      }
+    },
+    {
+      "id": "fabric-worn",
+      "name": "Teal Woven Fabric / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/fabric-worn_d.png",
+        "normalTexture": "textures/fabric-worn_n.png",
+        "roughnessTexture": "textures/fabric-worn_r.png",
+        "metallicTexture": "textures/fabric-worn_m.png",
+        "aoTexture": "textures/fabric-worn_ao.png",
+        "emissiveTexture": "textures/fabric-worn_e.png"
+      }
+    },
+    {
+      "id": "panel",
+      "name": "Luminous Circuit Panel",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        1,
+        1,
+        1
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/panel_d.png",
+        "normalTexture": "textures/panel_n.png",
+        "roughnessTexture": "textures/panel_r.png",
+        "metallicTexture": "textures/panel_m.png",
+        "aoTexture": "textures/panel_ao.png",
+        "emissiveTexture": "textures/panel_e.png"
+      }
+    },
+    {
+      "id": "panel-clean",
+      "name": "Luminous Circuit Panel / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        1,
+        1,
+        1
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/panel-clean_d.png",
+        "normalTexture": "textures/panel-clean_n.png",
+        "roughnessTexture": "textures/panel-clean_r.png",
+        "metallicTexture": "textures/panel-clean_m.png",
+        "aoTexture": "textures/panel-clean_ao.png",
+        "emissiveTexture": "textures/panel-clean_e.png"
+      }
+    },
+    {
+      "id": "panel-wet",
+      "name": "Luminous Circuit Panel / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        1,
+        1,
+        1
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/panel-wet_d.png",
+        "normalTexture": "textures/panel-wet_n.png",
+        "roughnessTexture": "textures/panel-wet_r.png",
+        "metallicTexture": "textures/panel-wet_m.png",
+        "aoTexture": "textures/panel-wet_ao.png",
+        "emissiveTexture": "textures/panel-wet_e.png"
+      }
+    },
+    {
+      "id": "panel-worn",
+      "name": "Luminous Circuit Panel / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        1,
+        1,
+        1
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/panel-worn_d.png",
+        "normalTexture": "textures/panel-worn_n.png",
+        "roughnessTexture": "textures/panel-worn_r.png",
+        "metallicTexture": "textures/panel-worn_m.png",
+        "aoTexture": "textures/panel-worn_ao.png",
+        "emissiveTexture": "textures/panel-worn_e.png"
+      }
+    },
+    {
+      "id": "copper",
+      "name": "Patinated Copper",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/copper_d.png",
+        "normalTexture": "textures/copper_n.png",
+        "roughnessTexture": "textures/copper_r.png",
+        "metallicTexture": "textures/copper_m.png",
+        "aoTexture": "textures/copper_ao.png",
+        "emissiveTexture": "textures/copper_e.png"
+      }
+    },
+    {
+      "id": "copper-clean",
+      "name": "Patinated Copper / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/copper-clean_d.png",
+        "normalTexture": "textures/copper-clean_n.png",
+        "roughnessTexture": "textures/copper-clean_r.png",
+        "metallicTexture": "textures/copper-clean_m.png",
+        "aoTexture": "textures/copper-clean_ao.png",
+        "emissiveTexture": "textures/copper-clean_e.png"
+      }
+    },
+    {
+      "id": "copper-wet",
+      "name": "Patinated Copper / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/copper-wet_d.png",
+        "normalTexture": "textures/copper-wet_n.png",
+        "roughnessTexture": "textures/copper-wet_r.png",
+        "metallicTexture": "textures/copper-wet_m.png",
+        "aoTexture": "textures/copper-wet_ao.png",
+        "emissiveTexture": "textures/copper-wet_e.png"
+      }
+    },
+    {
+      "id": "copper-worn",
+      "name": "Patinated Copper / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/copper-worn_d.png",
+        "normalTexture": "textures/copper-worn_n.png",
+        "roughnessTexture": "textures/copper-worn_r.png",
+        "metallicTexture": "textures/copper-worn_m.png",
+        "aoTexture": "textures/copper-worn_ao.png",
+        "emissiveTexture": "textures/copper-worn_e.png"
+      }
+    },
+    {
+      "id": "concrete",
+      "name": "Poured Concrete",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/concrete_d.png",
+        "normalTexture": "textures/concrete_n.png",
+        "roughnessTexture": "textures/concrete_r.png",
+        "metallicTexture": "textures/concrete_m.png",
+        "aoTexture": "textures/concrete_ao.png",
+        "emissiveTexture": "textures/concrete_e.png"
+      }
+    },
+    {
+      "id": "concrete-clean",
+      "name": "Poured Concrete / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/concrete-clean_d.png",
+        "normalTexture": "textures/concrete-clean_n.png",
+        "roughnessTexture": "textures/concrete-clean_r.png",
+        "metallicTexture": "textures/concrete-clean_m.png",
+        "aoTexture": "textures/concrete-clean_ao.png",
+        "emissiveTexture": "textures/concrete-clean_e.png"
+      }
+    },
+    {
+      "id": "concrete-wet",
+      "name": "Poured Concrete / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/concrete-wet_d.png",
+        "normalTexture": "textures/concrete-wet_n.png",
+        "roughnessTexture": "textures/concrete-wet_r.png",
+        "metallicTexture": "textures/concrete-wet_m.png",
+        "aoTexture": "textures/concrete-wet_ao.png",
+        "emissiveTexture": "textures/concrete-wet_e.png"
+      }
+    },
+    {
+      "id": "concrete-worn",
+      "name": "Poured Concrete / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/concrete-worn_d.png",
+        "normalTexture": "textures/concrete-worn_n.png",
+        "roughnessTexture": "textures/concrete-worn_r.png",
+        "metallicTexture": "textures/concrete-worn_m.png",
+        "aoTexture": "textures/concrete-worn_ao.png",
+        "emissiveTexture": "textures/concrete-worn_e.png"
+      }
+    },
+    {
+      "id": "terrazzo",
+      "name": "Cream Terrazzo",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/terrazzo_d.png",
+        "normalTexture": "textures/terrazzo_n.png",
+        "roughnessTexture": "textures/terrazzo_r.png",
+        "metallicTexture": "textures/terrazzo_m.png",
+        "aoTexture": "textures/terrazzo_ao.png",
+        "emissiveTexture": "textures/terrazzo_e.png"
+      }
+    },
+    {
+      "id": "terrazzo-clean",
+      "name": "Cream Terrazzo / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/terrazzo-clean_d.png",
+        "normalTexture": "textures/terrazzo-clean_n.png",
+        "roughnessTexture": "textures/terrazzo-clean_r.png",
+        "metallicTexture": "textures/terrazzo-clean_m.png",
+        "aoTexture": "textures/terrazzo-clean_ao.png",
+        "emissiveTexture": "textures/terrazzo-clean_e.png"
+      }
+    },
+    {
+      "id": "terrazzo-wet",
+      "name": "Cream Terrazzo / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/terrazzo-wet_d.png",
+        "normalTexture": "textures/terrazzo-wet_n.png",
+        "roughnessTexture": "textures/terrazzo-wet_r.png",
+        "metallicTexture": "textures/terrazzo-wet_m.png",
+        "aoTexture": "textures/terrazzo-wet_ao.png",
+        "emissiveTexture": "textures/terrazzo-wet_e.png"
+      }
+    },
+    {
+      "id": "terrazzo-worn",
+      "name": "Cream Terrazzo / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/terrazzo-worn_d.png",
+        "normalTexture": "textures/terrazzo-worn_n.png",
+        "roughnessTexture": "textures/terrazzo-worn_r.png",
+        "metallicTexture": "textures/terrazzo-worn_m.png",
+        "aoTexture": "textures/terrazzo-worn_ao.png",
+        "emissiveTexture": "textures/terrazzo-worn_e.png"
+      }
+    },
+    {
+      "id": "leather",
+      "name": "Brown Pebbled Leather",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/leather_d.png",
+        "normalTexture": "textures/leather_n.png",
+        "roughnessTexture": "textures/leather_r.png",
+        "metallicTexture": "textures/leather_m.png",
+        "aoTexture": "textures/leather_ao.png",
+        "emissiveTexture": "textures/leather_e.png"
+      }
+    },
+    {
+      "id": "leather-clean",
+      "name": "Brown Pebbled Leather / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/leather-clean_d.png",
+        "normalTexture": "textures/leather-clean_n.png",
+        "roughnessTexture": "textures/leather-clean_r.png",
+        "metallicTexture": "textures/leather-clean_m.png",
+        "aoTexture": "textures/leather-clean_ao.png",
+        "emissiveTexture": "textures/leather-clean_e.png"
+      }
+    },
+    {
+      "id": "leather-wet",
+      "name": "Brown Pebbled Leather / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/leather-wet_d.png",
+        "normalTexture": "textures/leather-wet_n.png",
+        "roughnessTexture": "textures/leather-wet_r.png",
+        "metallicTexture": "textures/leather-wet_m.png",
+        "aoTexture": "textures/leather-wet_ao.png",
+        "emissiveTexture": "textures/leather-wet_e.png"
+      }
+    },
+    {
+      "id": "leather-worn",
+      "name": "Brown Pebbled Leather / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/leather-worn_d.png",
+        "normalTexture": "textures/leather-worn_n.png",
+        "roughnessTexture": "textures/leather-worn_r.png",
+        "metallicTexture": "textures/leather-worn_m.png",
+        "aoTexture": "textures/leather-worn_ao.png",
+        "emissiveTexture": "textures/leather-worn_e.png"
+      }
+    },
+    {
+      "id": "asphalt",
+      "name": "Fine Asphalt",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/asphalt_d.png",
+        "normalTexture": "textures/asphalt_n.png",
+        "roughnessTexture": "textures/asphalt_r.png",
+        "metallicTexture": "textures/asphalt_m.png",
+        "aoTexture": "textures/asphalt_ao.png",
+        "emissiveTexture": "textures/asphalt_e.png"
+      }
+    },
+    {
+      "id": "asphalt-clean",
+      "name": "Fine Asphalt / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/asphalt-clean_d.png",
+        "normalTexture": "textures/asphalt-clean_n.png",
+        "roughnessTexture": "textures/asphalt-clean_r.png",
+        "metallicTexture": "textures/asphalt-clean_m.png",
+        "aoTexture": "textures/asphalt-clean_ao.png",
+        "emissiveTexture": "textures/asphalt-clean_e.png"
+      }
+    },
+    {
+      "id": "asphalt-wet",
+      "name": "Fine Asphalt / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/asphalt-wet_d.png",
+        "normalTexture": "textures/asphalt-wet_n.png",
+        "roughnessTexture": "textures/asphalt-wet_r.png",
+        "metallicTexture": "textures/asphalt-wet_m.png",
+        "aoTexture": "textures/asphalt-wet_ao.png",
+        "emissiveTexture": "textures/asphalt-wet_e.png"
+      }
+    },
+    {
+      "id": "asphalt-worn",
+      "name": "Fine Asphalt / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/asphalt-worn_d.png",
+        "normalTexture": "textures/asphalt-worn_n.png",
+        "roughnessTexture": "textures/asphalt-worn_r.png",
+        "metallicTexture": "textures/asphalt-worn_m.png",
+        "aoTexture": "textures/asphalt-worn_ao.png",
+        "emissiveTexture": "textures/asphalt-worn_e.png"
+      }
+    },
+    {
+      "id": "brick",
+      "name": "Fired Clay Bond",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/brick_d.png",
+        "normalTexture": "textures/brick_n.png",
+        "roughnessTexture": "textures/brick_r.png",
+        "metallicTexture": "textures/brick_m.png",
+        "aoTexture": "textures/brick_ao.png",
+        "emissiveTexture": "textures/brick_e.png"
+      }
+    },
+    {
+      "id": "brick-clean",
+      "name": "Fired Clay Bond / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/brick-clean_d.png",
+        "normalTexture": "textures/brick-clean_n.png",
+        "roughnessTexture": "textures/brick-clean_r.png",
+        "metallicTexture": "textures/brick-clean_m.png",
+        "aoTexture": "textures/brick-clean_ao.png",
+        "emissiveTexture": "textures/brick-clean_e.png"
+      }
+    },
+    {
+      "id": "brick-wet",
+      "name": "Fired Clay Bond / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/brick-wet_d.png",
+        "normalTexture": "textures/brick-wet_n.png",
+        "roughnessTexture": "textures/brick-wet_r.png",
+        "metallicTexture": "textures/brick-wet_m.png",
+        "aoTexture": "textures/brick-wet_ao.png",
+        "emissiveTexture": "textures/brick-wet_e.png"
+      }
+    },
+    {
+      "id": "brick-worn",
+      "name": "Fired Clay Bond / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/brick-worn_d.png",
+        "normalTexture": "textures/brick-worn_n.png",
+        "roughnessTexture": "textures/brick-worn_r.png",
+        "metallicTexture": "textures/brick-worn_m.png",
+        "aoTexture": "textures/brick-worn_ao.png",
+        "emissiveTexture": "textures/brick-worn_e.png"
+      }
+    },
+    {
+      "id": "marble",
+      "name": "Ivory Veined Marble",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/marble_d.png",
+        "normalTexture": "textures/marble_n.png",
+        "roughnessTexture": "textures/marble_r.png",
+        "metallicTexture": "textures/marble_m.png",
+        "aoTexture": "textures/marble_ao.png",
+        "emissiveTexture": "textures/marble_e.png"
+      }
+    },
+    {
+      "id": "marble-clean",
+      "name": "Ivory Veined Marble / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/marble-clean_d.png",
+        "normalTexture": "textures/marble-clean_n.png",
+        "roughnessTexture": "textures/marble-clean_r.png",
+        "metallicTexture": "textures/marble-clean_m.png",
+        "aoTexture": "textures/marble-clean_ao.png",
+        "emissiveTexture": "textures/marble-clean_e.png"
+      }
+    },
+    {
+      "id": "marble-wet",
+      "name": "Ivory Veined Marble / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/marble-wet_d.png",
+        "normalTexture": "textures/marble-wet_n.png",
+        "roughnessTexture": "textures/marble-wet_r.png",
+        "metallicTexture": "textures/marble-wet_m.png",
+        "aoTexture": "textures/marble-wet_ao.png",
+        "emissiveTexture": "textures/marble-wet_e.png"
+      }
+    },
+    {
+      "id": "marble-worn",
+      "name": "Ivory Veined Marble / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/marble-worn_d.png",
+        "normalTexture": "textures/marble-worn_n.png",
+        "roughnessTexture": "textures/marble-worn_r.png",
+        "metallicTexture": "textures/marble-worn_m.png",
+        "aoTexture": "textures/marble-worn_ao.png",
+        "emissiveTexture": "textures/marble-worn_e.png"
+      }
+    },
+    {
+      "id": "plastic",
+      "name": "Blue Molded Polymer",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/plastic_d.png",
+        "normalTexture": "textures/plastic_n.png",
+        "roughnessTexture": "textures/plastic_r.png",
+        "metallicTexture": "textures/plastic_m.png",
+        "aoTexture": "textures/plastic_ao.png",
+        "emissiveTexture": "textures/plastic_e.png"
+      }
+    },
+    {
+      "id": "plastic-clean",
+      "name": "Blue Molded Polymer / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/plastic-clean_d.png",
+        "normalTexture": "textures/plastic-clean_n.png",
+        "roughnessTexture": "textures/plastic-clean_r.png",
+        "metallicTexture": "textures/plastic-clean_m.png",
+        "aoTexture": "textures/plastic-clean_ao.png",
+        "emissiveTexture": "textures/plastic-clean_e.png"
+      }
+    },
+    {
+      "id": "plastic-wet",
+      "name": "Blue Molded Polymer / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/plastic-wet_d.png",
+        "normalTexture": "textures/plastic-wet_n.png",
+        "roughnessTexture": "textures/plastic-wet_r.png",
+        "metallicTexture": "textures/plastic-wet_m.png",
+        "aoTexture": "textures/plastic-wet_ao.png",
+        "emissiveTexture": "textures/plastic-wet_e.png"
+      }
+    },
+    {
+      "id": "plastic-worn",
+      "name": "Blue Molded Polymer / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/plastic-worn_d.png",
+        "normalTexture": "textures/plastic-worn_n.png",
+        "roughnessTexture": "textures/plastic-worn_r.png",
+        "metallicTexture": "textures/plastic-worn_m.png",
+        "aoTexture": "textures/plastic-worn_ao.png",
+        "emissiveTexture": "textures/plastic-worn_e.png"
+      }
+    },
+    {
+      "id": "acrylic",
+      "name": "Tinted Transparent Acrylic",
+      "baseColor": [
+        1,
+        1,
+        1,
+        0.28
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/acrylic_d.png",
+        "normalTexture": "textures/acrylic_n.png",
+        "roughnessTexture": "textures/acrylic_r.png",
+        "metallicTexture": "textures/acrylic_m.png",
+        "aoTexture": "textures/acrylic_ao.png",
+        "emissiveTexture": "textures/acrylic_e.png"
+      },
+      "alphaMode": 2
+    },
+    {
+      "id": "acrylic-clean",
+      "name": "Tinted Transparent Acrylic / Clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        0.28
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/acrylic-clean_d.png",
+        "normalTexture": "textures/acrylic-clean_n.png",
+        "roughnessTexture": "textures/acrylic-clean_r.png",
+        "metallicTexture": "textures/acrylic-clean_m.png",
+        "aoTexture": "textures/acrylic-clean_ao.png",
+        "emissiveTexture": "textures/acrylic-clean_e.png"
+      },
+      "alphaMode": 2
+    },
+    {
+      "id": "acrylic-wet",
+      "name": "Tinted Transparent Acrylic / Wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        0.28
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/acrylic-wet_d.png",
+        "normalTexture": "textures/acrylic-wet_n.png",
+        "roughnessTexture": "textures/acrylic-wet_r.png",
+        "metallicTexture": "textures/acrylic-wet_m.png",
+        "aoTexture": "textures/acrylic-wet_ao.png",
+        "emissiveTexture": "textures/acrylic-wet_e.png"
+      },
+      "alphaMode": 2
+    },
+    {
+      "id": "acrylic-worn",
+      "name": "Tinted Transparent Acrylic / Worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        0.28
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/acrylic-worn_d.png",
+        "normalTexture": "textures/acrylic-worn_n.png",
+        "roughnessTexture": "textures/acrylic-worn_r.png",
+        "metallicTexture": "textures/acrylic-worn_m.png",
+        "aoTexture": "textures/acrylic-worn_ao.png",
+        "emissiveTexture": "textures/acrylic-worn_e.png"
+      },
+      "alphaMode": 2
+    },
+    {
+      "id": "study-uv-half",
+      "name": "UV 0.5x / wood",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        0.5,
+        0.5,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood_d.png",
+        "normalTexture": "textures/wood_n.png",
+        "roughnessTexture": "textures/wood_r.png",
+        "metallicTexture": "textures/wood_m.png",
+        "aoTexture": "textures/wood_ao.png",
+        "emissiveTexture": "textures/wood_e.png"
+      }
+    },
+    {
+      "id": "study-uv-one",
+      "name": "UV 1x / wood",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood_d.png",
+        "normalTexture": "textures/wood_n.png",
+        "roughnessTexture": "textures/wood_r.png",
+        "metallicTexture": "textures/wood_m.png",
+        "aoTexture": "textures/wood_ao.png",
+        "emissiveTexture": "textures/wood_e.png"
+      }
+    },
+    {
+      "id": "study-uv-two",
+      "name": "UV 2x / wood",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood_d.png",
+        "normalTexture": "textures/wood_n.png",
+        "roughnessTexture": "textures/wood_r.png",
+        "metallicTexture": "textures/wood_m.png",
+        "aoTexture": "textures/wood_ao.png",
+        "emissiveTexture": "textures/wood_e.png"
+      }
+    },
+    {
+      "id": "study-uv-four",
+      "name": "UV 4x / wood",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        4,
+        4,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood_d.png",
+        "normalTexture": "textures/wood_n.png",
+        "roughnessTexture": "textures/wood_r.png",
+        "metallicTexture": "textures/wood_m.png",
+        "aoTexture": "textures/wood_ao.png",
+        "emissiveTexture": "textures/wood_e.png"
+      }
+    },
+    {
+      "id": "study-normal-zero",
+      "name": "Normal 0 / ceramic",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 0,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic_d.png",
+        "normalTexture": "textures/ceramic_n.png",
+        "roughnessTexture": "textures/ceramic_r.png",
+        "metallicTexture": "textures/ceramic_m.png",
+        "aoTexture": "textures/ceramic_ao.png",
+        "emissiveTexture": "textures/ceramic_e.png"
+      }
+    },
+    {
+      "id": "study-normal-half",
+      "name": "Normal 0.5 / ceramic",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic_d.png",
+        "normalTexture": "textures/ceramic_n.png",
+        "roughnessTexture": "textures/ceramic_r.png",
+        "metallicTexture": "textures/ceramic_m.png",
+        "aoTexture": "textures/ceramic_ao.png",
+        "emissiveTexture": "textures/ceramic_e.png"
+      }
+    },
+    {
+      "id": "study-normal-one",
+      "name": "Normal 1 / ceramic",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic_d.png",
+        "normalTexture": "textures/ceramic_n.png",
+        "roughnessTexture": "textures/ceramic_r.png",
+        "metallicTexture": "textures/ceramic_m.png",
+        "aoTexture": "textures/ceramic_ao.png",
+        "emissiveTexture": "textures/ceramic_e.png"
+      }
+    },
+    {
+      "id": "study-normal-two",
+      "name": "Normal 2 / ceramic",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 2,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic_d.png",
+        "normalTexture": "textures/ceramic_n.png",
+        "roughnessTexture": "textures/ceramic_r.png",
+        "metallicTexture": "textures/ceramic_m.png",
+        "aoTexture": "textures/ceramic_ao.png",
+        "emissiveTexture": "textures/ceramic_e.png"
+      }
+    },
+    {
+      "id": "study-rough-low",
+      "name": "Rough -0.25 / metal",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": -0.25,
+      "textures": {
+        "baseColorTexture": "textures/metal_d.png",
+        "normalTexture": "textures/metal_n.png",
+        "roughnessTexture": "textures/metal_r.png",
+        "metallicTexture": "textures/metal_m.png",
+        "aoTexture": "textures/metal_ao.png",
+        "emissiveTexture": "textures/metal_e.png"
+      }
+    },
+    {
+      "id": "study-rough-zero",
+      "name": "Rough +0 / metal",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/metal_d.png",
+        "normalTexture": "textures/metal_n.png",
+        "roughnessTexture": "textures/metal_r.png",
+        "metallicTexture": "textures/metal_m.png",
+        "aoTexture": "textures/metal_ao.png",
+        "emissiveTexture": "textures/metal_e.png"
+      }
+    },
+    {
+      "id": "study-rough-mid",
+      "name": "Rough +0.25 / metal",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0.25,
+      "textures": {
+        "baseColorTexture": "textures/metal_d.png",
+        "normalTexture": "textures/metal_n.png",
+        "roughnessTexture": "textures/metal_r.png",
+        "metallicTexture": "textures/metal_m.png",
+        "aoTexture": "textures/metal_ao.png",
+        "emissiveTexture": "textures/metal_e.png"
+      }
+    },
+    {
+      "id": "study-rough-high",
+      "name": "Rough +0.5 / metal",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0.5,
+      "textures": {
+        "baseColorTexture": "textures/metal_d.png",
+        "normalTexture": "textures/metal_n.png",
+        "roughnessTexture": "textures/metal_r.png",
+        "metallicTexture": "textures/metal_m.png",
+        "aoTexture": "textures/metal_ao.png",
+        "emissiveTexture": "textures/metal_e.png"
+      }
+    },
+    {
+      "id": "study-uv-half-clean",
+      "name": "UV 0.5x / wood-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        0.5,
+        0.5,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-clean_d.png",
+        "normalTexture": "textures/wood-clean_n.png",
+        "roughnessTexture": "textures/wood-clean_r.png",
+        "metallicTexture": "textures/wood-clean_m.png",
+        "aoTexture": "textures/wood-clean_ao.png",
+        "emissiveTexture": "textures/wood-clean_e.png"
+      }
+    },
+    {
+      "id": "study-uv-one-clean",
+      "name": "UV 1x / wood-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-clean_d.png",
+        "normalTexture": "textures/wood-clean_n.png",
+        "roughnessTexture": "textures/wood-clean_r.png",
+        "metallicTexture": "textures/wood-clean_m.png",
+        "aoTexture": "textures/wood-clean_ao.png",
+        "emissiveTexture": "textures/wood-clean_e.png"
+      }
+    },
+    {
+      "id": "study-uv-two-clean",
+      "name": "UV 2x / wood-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-clean_d.png",
+        "normalTexture": "textures/wood-clean_n.png",
+        "roughnessTexture": "textures/wood-clean_r.png",
+        "metallicTexture": "textures/wood-clean_m.png",
+        "aoTexture": "textures/wood-clean_ao.png",
+        "emissiveTexture": "textures/wood-clean_e.png"
+      }
+    },
+    {
+      "id": "study-uv-four-clean",
+      "name": "UV 4x / wood-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        4,
+        4,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-clean_d.png",
+        "normalTexture": "textures/wood-clean_n.png",
+        "roughnessTexture": "textures/wood-clean_r.png",
+        "metallicTexture": "textures/wood-clean_m.png",
+        "aoTexture": "textures/wood-clean_ao.png",
+        "emissiveTexture": "textures/wood-clean_e.png"
+      }
+    },
+    {
+      "id": "study-normal-zero-clean",
+      "name": "Normal 0 / ceramic-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 0,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-clean_d.png",
+        "normalTexture": "textures/ceramic-clean_n.png",
+        "roughnessTexture": "textures/ceramic-clean_r.png",
+        "metallicTexture": "textures/ceramic-clean_m.png",
+        "aoTexture": "textures/ceramic-clean_ao.png",
+        "emissiveTexture": "textures/ceramic-clean_e.png"
+      }
+    },
+    {
+      "id": "study-normal-half-clean",
+      "name": "Normal 0.5 / ceramic-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-clean_d.png",
+        "normalTexture": "textures/ceramic-clean_n.png",
+        "roughnessTexture": "textures/ceramic-clean_r.png",
+        "metallicTexture": "textures/ceramic-clean_m.png",
+        "aoTexture": "textures/ceramic-clean_ao.png",
+        "emissiveTexture": "textures/ceramic-clean_e.png"
+      }
+    },
+    {
+      "id": "study-normal-one-clean",
+      "name": "Normal 1 / ceramic-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-clean_d.png",
+        "normalTexture": "textures/ceramic-clean_n.png",
+        "roughnessTexture": "textures/ceramic-clean_r.png",
+        "metallicTexture": "textures/ceramic-clean_m.png",
+        "aoTexture": "textures/ceramic-clean_ao.png",
+        "emissiveTexture": "textures/ceramic-clean_e.png"
+      }
+    },
+    {
+      "id": "study-normal-two-clean",
+      "name": "Normal 2 / ceramic-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 2,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-clean_d.png",
+        "normalTexture": "textures/ceramic-clean_n.png",
+        "roughnessTexture": "textures/ceramic-clean_r.png",
+        "metallicTexture": "textures/ceramic-clean_m.png",
+        "aoTexture": "textures/ceramic-clean_ao.png",
+        "emissiveTexture": "textures/ceramic-clean_e.png"
+      }
+    },
+    {
+      "id": "study-rough-low-clean",
+      "name": "Rough -0.25 / metal-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": -0.25,
+      "textures": {
+        "baseColorTexture": "textures/metal-clean_d.png",
+        "normalTexture": "textures/metal-clean_n.png",
+        "roughnessTexture": "textures/metal-clean_r.png",
+        "metallicTexture": "textures/metal-clean_m.png",
+        "aoTexture": "textures/metal-clean_ao.png",
+        "emissiveTexture": "textures/metal-clean_e.png"
+      }
+    },
+    {
+      "id": "study-rough-zero-clean",
+      "name": "Rough +0 / metal-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/metal-clean_d.png",
+        "normalTexture": "textures/metal-clean_n.png",
+        "roughnessTexture": "textures/metal-clean_r.png",
+        "metallicTexture": "textures/metal-clean_m.png",
+        "aoTexture": "textures/metal-clean_ao.png",
+        "emissiveTexture": "textures/metal-clean_e.png"
+      }
+    },
+    {
+      "id": "study-rough-mid-clean",
+      "name": "Rough +0.25 / metal-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0.25,
+      "textures": {
+        "baseColorTexture": "textures/metal-clean_d.png",
+        "normalTexture": "textures/metal-clean_n.png",
+        "roughnessTexture": "textures/metal-clean_r.png",
+        "metallicTexture": "textures/metal-clean_m.png",
+        "aoTexture": "textures/metal-clean_ao.png",
+        "emissiveTexture": "textures/metal-clean_e.png"
+      }
+    },
+    {
+      "id": "study-rough-high-clean",
+      "name": "Rough +0.5 / metal-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0.5,
+      "textures": {
+        "baseColorTexture": "textures/metal-clean_d.png",
+        "normalTexture": "textures/metal-clean_n.png",
+        "roughnessTexture": "textures/metal-clean_r.png",
+        "metallicTexture": "textures/metal-clean_m.png",
+        "aoTexture": "textures/metal-clean_ao.png",
+        "emissiveTexture": "textures/metal-clean_e.png"
+      }
+    },
+    {
+      "id": "study-uv-half-wet",
+      "name": "UV 0.5x / wood-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        0.5,
+        0.5,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-wet_d.png",
+        "normalTexture": "textures/wood-wet_n.png",
+        "roughnessTexture": "textures/wood-wet_r.png",
+        "metallicTexture": "textures/wood-wet_m.png",
+        "aoTexture": "textures/wood-wet_ao.png",
+        "emissiveTexture": "textures/wood-wet_e.png"
+      }
+    },
+    {
+      "id": "study-uv-one-wet",
+      "name": "UV 1x / wood-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-wet_d.png",
+        "normalTexture": "textures/wood-wet_n.png",
+        "roughnessTexture": "textures/wood-wet_r.png",
+        "metallicTexture": "textures/wood-wet_m.png",
+        "aoTexture": "textures/wood-wet_ao.png",
+        "emissiveTexture": "textures/wood-wet_e.png"
+      }
+    },
+    {
+      "id": "study-uv-two-wet",
+      "name": "UV 2x / wood-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-wet_d.png",
+        "normalTexture": "textures/wood-wet_n.png",
+        "roughnessTexture": "textures/wood-wet_r.png",
+        "metallicTexture": "textures/wood-wet_m.png",
+        "aoTexture": "textures/wood-wet_ao.png",
+        "emissiveTexture": "textures/wood-wet_e.png"
+      }
+    },
+    {
+      "id": "study-uv-four-wet",
+      "name": "UV 4x / wood-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        4,
+        4,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-wet_d.png",
+        "normalTexture": "textures/wood-wet_n.png",
+        "roughnessTexture": "textures/wood-wet_r.png",
+        "metallicTexture": "textures/wood-wet_m.png",
+        "aoTexture": "textures/wood-wet_ao.png",
+        "emissiveTexture": "textures/wood-wet_e.png"
+      }
+    },
+    {
+      "id": "study-normal-zero-wet",
+      "name": "Normal 0 / ceramic-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 0,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-wet_d.png",
+        "normalTexture": "textures/ceramic-wet_n.png",
+        "roughnessTexture": "textures/ceramic-wet_r.png",
+        "metallicTexture": "textures/ceramic-wet_m.png",
+        "aoTexture": "textures/ceramic-wet_ao.png",
+        "emissiveTexture": "textures/ceramic-wet_e.png"
+      }
+    },
+    {
+      "id": "study-normal-half-wet",
+      "name": "Normal 0.5 / ceramic-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-wet_d.png",
+        "normalTexture": "textures/ceramic-wet_n.png",
+        "roughnessTexture": "textures/ceramic-wet_r.png",
+        "metallicTexture": "textures/ceramic-wet_m.png",
+        "aoTexture": "textures/ceramic-wet_ao.png",
+        "emissiveTexture": "textures/ceramic-wet_e.png"
+      }
+    },
+    {
+      "id": "study-normal-one-wet",
+      "name": "Normal 1 / ceramic-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-wet_d.png",
+        "normalTexture": "textures/ceramic-wet_n.png",
+        "roughnessTexture": "textures/ceramic-wet_r.png",
+        "metallicTexture": "textures/ceramic-wet_m.png",
+        "aoTexture": "textures/ceramic-wet_ao.png",
+        "emissiveTexture": "textures/ceramic-wet_e.png"
+      }
+    },
+    {
+      "id": "study-normal-two-wet",
+      "name": "Normal 2 / ceramic-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 2,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-wet_d.png",
+        "normalTexture": "textures/ceramic-wet_n.png",
+        "roughnessTexture": "textures/ceramic-wet_r.png",
+        "metallicTexture": "textures/ceramic-wet_m.png",
+        "aoTexture": "textures/ceramic-wet_ao.png",
+        "emissiveTexture": "textures/ceramic-wet_e.png"
+      }
+    },
+    {
+      "id": "study-rough-low-wet",
+      "name": "Rough -0.25 / metal-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": -0.25,
+      "textures": {
+        "baseColorTexture": "textures/metal-wet_d.png",
+        "normalTexture": "textures/metal-wet_n.png",
+        "roughnessTexture": "textures/metal-wet_r.png",
+        "metallicTexture": "textures/metal-wet_m.png",
+        "aoTexture": "textures/metal-wet_ao.png",
+        "emissiveTexture": "textures/metal-wet_e.png"
+      }
+    },
+    {
+      "id": "study-rough-zero-wet",
+      "name": "Rough +0 / metal-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/metal-wet_d.png",
+        "normalTexture": "textures/metal-wet_n.png",
+        "roughnessTexture": "textures/metal-wet_r.png",
+        "metallicTexture": "textures/metal-wet_m.png",
+        "aoTexture": "textures/metal-wet_ao.png",
+        "emissiveTexture": "textures/metal-wet_e.png"
+      }
+    },
+    {
+      "id": "study-rough-mid-wet",
+      "name": "Rough +0.25 / metal-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0.25,
+      "textures": {
+        "baseColorTexture": "textures/metal-wet_d.png",
+        "normalTexture": "textures/metal-wet_n.png",
+        "roughnessTexture": "textures/metal-wet_r.png",
+        "metallicTexture": "textures/metal-wet_m.png",
+        "aoTexture": "textures/metal-wet_ao.png",
+        "emissiveTexture": "textures/metal-wet_e.png"
+      }
+    },
+    {
+      "id": "study-rough-high-wet",
+      "name": "Rough +0.5 / metal-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0.5,
+      "textures": {
+        "baseColorTexture": "textures/metal-wet_d.png",
+        "normalTexture": "textures/metal-wet_n.png",
+        "roughnessTexture": "textures/metal-wet_r.png",
+        "metallicTexture": "textures/metal-wet_m.png",
+        "aoTexture": "textures/metal-wet_ao.png",
+        "emissiveTexture": "textures/metal-wet_e.png"
+      }
+    },
+    {
+      "id": "study-uv-half-worn",
+      "name": "UV 0.5x / wood-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        0.5,
+        0.5,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-worn_d.png",
+        "normalTexture": "textures/wood-worn_n.png",
+        "roughnessTexture": "textures/wood-worn_r.png",
+        "metallicTexture": "textures/wood-worn_m.png",
+        "aoTexture": "textures/wood-worn_ao.png",
+        "emissiveTexture": "textures/wood-worn_e.png"
+      }
+    },
+    {
+      "id": "study-uv-one-worn",
+      "name": "UV 1x / wood-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-worn_d.png",
+        "normalTexture": "textures/wood-worn_n.png",
+        "roughnessTexture": "textures/wood-worn_r.png",
+        "metallicTexture": "textures/wood-worn_m.png",
+        "aoTexture": "textures/wood-worn_ao.png",
+        "emissiveTexture": "textures/wood-worn_e.png"
+      }
+    },
+    {
+      "id": "study-uv-two-worn",
+      "name": "UV 2x / wood-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-worn_d.png",
+        "normalTexture": "textures/wood-worn_n.png",
+        "roughnessTexture": "textures/wood-worn_r.png",
+        "metallicTexture": "textures/wood-worn_m.png",
+        "aoTexture": "textures/wood-worn_ao.png",
+        "emissiveTexture": "textures/wood-worn_e.png"
+      }
+    },
+    {
+      "id": "study-uv-four-worn",
+      "name": "UV 4x / wood-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        4,
+        4,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/wood-worn_d.png",
+        "normalTexture": "textures/wood-worn_n.png",
+        "roughnessTexture": "textures/wood-worn_r.png",
+        "metallicTexture": "textures/wood-worn_m.png",
+        "aoTexture": "textures/wood-worn_ao.png",
+        "emissiveTexture": "textures/wood-worn_e.png"
+      }
+    },
+    {
+      "id": "study-normal-zero-worn",
+      "name": "Normal 0 / ceramic-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 0,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-worn_d.png",
+        "normalTexture": "textures/ceramic-worn_n.png",
+        "roughnessTexture": "textures/ceramic-worn_r.png",
+        "metallicTexture": "textures/ceramic-worn_m.png",
+        "aoTexture": "textures/ceramic-worn_ao.png",
+        "emissiveTexture": "textures/ceramic-worn_e.png"
+      }
+    },
+    {
+      "id": "study-normal-half-worn",
+      "name": "Normal 0.5 / ceramic-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-worn_d.png",
+        "normalTexture": "textures/ceramic-worn_n.png",
+        "roughnessTexture": "textures/ceramic-worn_r.png",
+        "metallicTexture": "textures/ceramic-worn_m.png",
+        "aoTexture": "textures/ceramic-worn_ao.png",
+        "emissiveTexture": "textures/ceramic-worn_e.png"
+      }
+    },
+    {
+      "id": "study-normal-one-worn",
+      "name": "Normal 1 / ceramic-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-worn_d.png",
+        "normalTexture": "textures/ceramic-worn_n.png",
+        "roughnessTexture": "textures/ceramic-worn_r.png",
+        "metallicTexture": "textures/ceramic-worn_m.png",
+        "aoTexture": "textures/ceramic-worn_ao.png",
+        "emissiveTexture": "textures/ceramic-worn_e.png"
+      }
+    },
+    {
+      "id": "study-normal-two-worn",
+      "name": "Normal 2 / ceramic-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 2,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/ceramic-worn_d.png",
+        "normalTexture": "textures/ceramic-worn_n.png",
+        "roughnessTexture": "textures/ceramic-worn_r.png",
+        "metallicTexture": "textures/ceramic-worn_m.png",
+        "aoTexture": "textures/ceramic-worn_ao.png",
+        "emissiveTexture": "textures/ceramic-worn_e.png"
+      }
+    },
+    {
+      "id": "study-rough-low-worn",
+      "name": "Rough -0.25 / metal-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": -0.25,
+      "textures": {
+        "baseColorTexture": "textures/metal-worn_d.png",
+        "normalTexture": "textures/metal-worn_n.png",
+        "roughnessTexture": "textures/metal-worn_r.png",
+        "metallicTexture": "textures/metal-worn_m.png",
+        "aoTexture": "textures/metal-worn_ao.png",
+        "emissiveTexture": "textures/metal-worn_e.png"
+      }
+    },
+    {
+      "id": "study-rough-zero-worn",
+      "name": "Rough +0 / metal-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/metal-worn_d.png",
+        "normalTexture": "textures/metal-worn_n.png",
+        "roughnessTexture": "textures/metal-worn_r.png",
+        "metallicTexture": "textures/metal-worn_m.png",
+        "aoTexture": "textures/metal-worn_ao.png",
+        "emissiveTexture": "textures/metal-worn_e.png"
+      }
+    },
+    {
+      "id": "study-rough-mid-worn",
+      "name": "Rough +0.25 / metal-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0.25,
+      "textures": {
+        "baseColorTexture": "textures/metal-worn_d.png",
+        "normalTexture": "textures/metal-worn_n.png",
+        "roughnessTexture": "textures/metal-worn_r.png",
+        "metallicTexture": "textures/metal-worn_m.png",
+        "aoTexture": "textures/metal-worn_ao.png",
+        "emissiveTexture": "textures/metal-worn_e.png"
+      }
+    },
+    {
+      "id": "study-rough-high-worn",
+      "name": "Rough +0.5 / metal-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "normalStrength": 1,
+      "roughnessBias": 0.5,
+      "textures": {
+        "baseColorTexture": "textures/metal-worn_d.png",
+        "normalTexture": "textures/metal-worn_n.png",
+        "roughnessTexture": "textures/metal-worn_r.png",
+        "metallicTexture": "textures/metal-worn_m.png",
+        "aoTexture": "textures/metal-worn_ao.png",
+        "emissiveTexture": "textures/metal-worn_e.png"
+      }
+    },
+    {
+      "id": "screen-base-alpha",
+      "name": "Perforated screen / Base color alpha",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_alpha.png",
+        "normalTexture": "textures/metal_n.png",
+        "roughnessTexture": "textures/metal_r.png",
+        "metallicTexture": "textures/metal_m.png",
+        "aoTexture": "textures/metal_ao.png",
+        "emissiveTexture": "textures/metal_e.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 0
+    },
+    {
+      "id": "screen-opacity-red",
+      "name": "Perforated screen / Opacity red",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_opaque.png",
+        "normalTexture": "textures/metal_n.png",
+        "roughnessTexture": "textures/metal_r.png",
+        "metallicTexture": "textures/metal_m.png",
+        "aoTexture": "textures/metal_ao.png",
+        "emissiveTexture": "textures/metal_e.png",
+        "opacityTexture": "textures/screen_opacity.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 1
+    },
+    {
+      "id": "screen-opacity-alpha",
+      "name": "Perforated screen / Opacity alpha",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_opaque.png",
+        "normalTexture": "textures/metal_n.png",
+        "roughnessTexture": "textures/metal_r.png",
+        "metallicTexture": "textures/metal_m.png",
+        "aoTexture": "textures/metal_ao.png",
+        "emissiveTexture": "textures/metal_e.png",
+        "opacityTexture": "textures/screen_opacity.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 2
+    },
+    {
+      "id": "screen-base-alpha-clean",
+      "name": "Perforated screen / Base color alpha-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_alpha.png",
+        "normalTexture": "textures/metal-clean_n.png",
+        "roughnessTexture": "textures/metal-clean_r.png",
+        "metallicTexture": "textures/metal-clean_m.png",
+        "aoTexture": "textures/metal-clean_ao.png",
+        "emissiveTexture": "textures/metal-clean_e.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 0
+    },
+    {
+      "id": "screen-opacity-red-clean",
+      "name": "Perforated screen / Opacity red-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_opaque.png",
+        "normalTexture": "textures/metal-clean_n.png",
+        "roughnessTexture": "textures/metal-clean_r.png",
+        "metallicTexture": "textures/metal-clean_m.png",
+        "aoTexture": "textures/metal-clean_ao.png",
+        "emissiveTexture": "textures/metal-clean_e.png",
+        "opacityTexture": "textures/screen_opacity.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 1
+    },
+    {
+      "id": "screen-opacity-alpha-clean",
+      "name": "Perforated screen / Opacity alpha-clean",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_opaque.png",
+        "normalTexture": "textures/metal-clean_n.png",
+        "roughnessTexture": "textures/metal-clean_r.png",
+        "metallicTexture": "textures/metal-clean_m.png",
+        "aoTexture": "textures/metal-clean_ao.png",
+        "emissiveTexture": "textures/metal-clean_e.png",
+        "opacityTexture": "textures/screen_opacity.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 2
+    },
+    {
+      "id": "screen-base-alpha-wet",
+      "name": "Perforated screen / Base color alpha-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_alpha.png",
+        "normalTexture": "textures/metal-wet_n.png",
+        "roughnessTexture": "textures/metal-wet_r.png",
+        "metallicTexture": "textures/metal-wet_m.png",
+        "aoTexture": "textures/metal-wet_ao.png",
+        "emissiveTexture": "textures/metal-wet_e.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 0
+    },
+    {
+      "id": "screen-opacity-red-wet",
+      "name": "Perforated screen / Opacity red-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_opaque.png",
+        "normalTexture": "textures/metal-wet_n.png",
+        "roughnessTexture": "textures/metal-wet_r.png",
+        "metallicTexture": "textures/metal-wet_m.png",
+        "aoTexture": "textures/metal-wet_ao.png",
+        "emissiveTexture": "textures/metal-wet_e.png",
+        "opacityTexture": "textures/screen_opacity.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 1
+    },
+    {
+      "id": "screen-opacity-alpha-wet",
+      "name": "Perforated screen / Opacity alpha-wet",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_opaque.png",
+        "normalTexture": "textures/metal-wet_n.png",
+        "roughnessTexture": "textures/metal-wet_r.png",
+        "metallicTexture": "textures/metal-wet_m.png",
+        "aoTexture": "textures/metal-wet_ao.png",
+        "emissiveTexture": "textures/metal-wet_e.png",
+        "opacityTexture": "textures/screen_opacity.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 2
+    },
+    {
+      "id": "screen-base-alpha-worn",
+      "name": "Perforated screen / Base color alpha-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_alpha.png",
+        "normalTexture": "textures/metal-worn_n.png",
+        "roughnessTexture": "textures/metal-worn_r.png",
+        "metallicTexture": "textures/metal-worn_m.png",
+        "aoTexture": "textures/metal-worn_ao.png",
+        "emissiveTexture": "textures/metal-worn_e.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 0
+    },
+    {
+      "id": "screen-opacity-red-worn",
+      "name": "Perforated screen / Opacity red-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_opaque.png",
+        "normalTexture": "textures/metal-worn_n.png",
+        "roughnessTexture": "textures/metal-worn_r.png",
+        "metallicTexture": "textures/metal-worn_m.png",
+        "aoTexture": "textures/metal-worn_ao.png",
+        "emissiveTexture": "textures/metal-worn_e.png",
+        "opacityTexture": "textures/screen_opacity.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 1
+    },
+    {
+      "id": "screen-opacity-alpha-worn",
+      "name": "Perforated screen / Opacity alpha-worn",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "metallic": 1,
+      "roughness": 1,
+      "ao": 1,
+      "emissive": [
+        0,
+        0,
+        0
+      ],
+      "uvTransform": [
+        2,
+        2,
+        0.13,
+        0.19
+      ],
+      "normalStrength": 0.5,
+      "roughnessBias": 0,
+      "textures": {
+        "baseColorTexture": "textures/screen_base_opaque.png",
+        "normalTexture": "textures/metal-worn_n.png",
+        "roughnessTexture": "textures/metal-worn_r.png",
+        "metallicTexture": "textures/metal-worn_m.png",
+        "aoTexture": "textures/metal-worn_ao.png",
+        "emissiveTexture": "textures/metal-worn_e.png",
+        "opacityTexture": "textures/screen_opacity.png"
+      },
+      "alphaMode": 1,
+      "alphaCutoff": 0.5,
+      "doubleSided": true,
+      "opacitySource": 2
+    }
+  ]
+}

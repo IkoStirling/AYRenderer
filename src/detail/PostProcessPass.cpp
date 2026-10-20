@@ -143,6 +143,14 @@ PostProcessPass::~PostProcessPass() = default;
 
 uint32_t PostProcessPass::execute(PassExecContext& ctx)
 {
+    return executeToTarget(ctx,kBlitViewId,ctx.frameGraph
+        ?ctx.frameGraph->resolve(FgResourceId::FinalLdrColor)
+        :bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE});
+}
+
+uint32_t PostProcessPass::executeToTarget(PassExecContext& ctx,uint8_t viewId,
+                                         bgfx::FrameBufferHandle finalLdr)
+{
     BGFXAdapter& adapter = ctx.adapter;
     shader::ShaderResourcePool& pool = ctx.pool;
     const FrameContext& frame = ctx.frame;
@@ -150,7 +158,6 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     // scene FBO binding + camera VP for every FO submit that frame).
     // After BloomExtract=10 / BlurH=11 / BlurV=12 / DepthHaze=13;
     // before UI=255. Forward + Deferred share kBlitViewId.
-    const uint8_t viewId = kBlitViewId;
     const uint16_t viewportWidth  = ctx.viewportWidth;
     const uint16_t viewportHeight = ctx.viewportHeight;
 
@@ -234,13 +241,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
         return 0;
     }
 
-    if (ctx.frameGraph == nullptr) {
-        rateLimitedEarlyReturn("PostProcessPass", "frameGraph missing");
-        return 0;
-    }
-    const bgfx::FrameBufferHandle finalLdr =
-        ctx.frameGraph->resolve(FgResourceId::FinalLdrColor);
-    if (!BGFXAdapter::isValid(finalLdr)) {
+    if (!BGFXAdapter::isValid(finalLdr) || finalLdr.idx==sourceFbo.idx) {
         rateLimitedEarlyReturn("PostProcessPass", "FinalLdrColor invalid");
         return 0;
     }
@@ -370,7 +371,7 @@ uint32_t PostProcessPass::execute(PassExecContext& ctx)
     // combination identical.
     adapter.setStateDepthTestAlways();
     _program.submit(sub);
-    ctx.frameGraph->markProduced(FgResourceId::FinalLdrColor);
+    if(ctx.frameGraph)ctx.frameGraph->markProduced(FgResourceId::FinalLdrColor);
 
     static bool s_loggedSubmit = false;
     if (!s_loggedSubmit) {
@@ -509,16 +510,9 @@ void PostProcessPass::destroyResources(BGFXAdapter& adapter)
 {
     _fullscreen.destroy(adapter);
     if (_program.isValid()) {
-        // R5.1 — release the ShaderResource. ShaderResource doesn't
-        // carry a back-pointer to its pool; the pool reference is
-        // held by Renderer::Impl and outlives this pass (see
-        // AYRenderer.cpp:160 shutdown order: resources → shaderPool
-        // → adapter). Resetting _program here is the documented
-        // ShaderResource contract (see ShaderResource::reset in
-        // AYShader/ShaderResource.h:32) — the pool's dtor releases the
-        // underlying GPU program once the refcount hits zero,
-        // regardless of which ShaderResource instance held the last
-        // reference.
+        // Drop only this pass's token. The pool owns the cached program;
+        // reset is not reference-counted GPU reclamation. Main and preview
+        // PostProcess instances can share this entry until pool shutdown.
         _program.reset();
     }
     _uBloomStrength = ayt::shader::InvalidBinding;

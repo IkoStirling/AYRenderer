@@ -3,11 +3,20 @@ set(AY_RESOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../AYResource")
 include("${AY_SHADER_ROOT}/cmake/AYBgfx.cmake")
 
 # CPU authoring utility: no device or production shader staging is needed.
+add_executable(AYRenderer_MaterialTool MaterialTool.cpp)
+target_link_libraries(AYRenderer_MaterialTool PRIVATE AYRenderer AYResource nlohmann_json::nlohmann_json)
+target_include_directories(AYRenderer_MaterialTool PRIVATE ${AY_RESOURCE_ROOT}/interface)
+
 add_executable(AYRenderer_RenderStyleTool RenderStyleTool.cpp)
 target_link_libraries(AYRenderer_RenderStyleTool PRIVATE AYRenderer)
 target_include_directories(AYRenderer_RenderStyleTool PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
 if(WIN32)
+    add_executable(AYRenderer_MaterialDemo MaterialDemo.cpp)
+    target_link_libraries(AYRenderer_MaterialDemo PRIVATE AYRenderer AYResource user32 gdi32)
+    target_compile_definitions(AYRenderer_MaterialDemo PRIVATE AY_MATERIAL_LIBRARY_HINT="${CMAKE_CURRENT_SOURCE_DIR}/MaterialWorkshop/Assets/materials")
+    ay_stage_production_shaders(AYRenderer_MaterialDemo)
+
     add_executable(AYRenderer_ColorStylizationDemo ColorStylizationDemo.cpp)
     target_link_libraries(AYRenderer_ColorStylizationDemo PRIVATE AYRenderer user32 gdi32)
     ay_stage_production_shaders(AYRenderer_ColorStylizationDemo)

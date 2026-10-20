@@ -124,7 +124,7 @@ namespace {
 // the builtin names.
 // Live pins (GBufferPass.h externs) — never self-compare a local mirror.
 inline constexpr const char* kExpectedGBufferCacheKey =
-    "gbuffer_fill_v16_model_coverage_split";
+    "gbuffer_fill_v17_surface_controls";
 inline constexpr const char* kExpectedGBufferBuildStamp =
     "material-contract-v3-model-coverage-split";
 

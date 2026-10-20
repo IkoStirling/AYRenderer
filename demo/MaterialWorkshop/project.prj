@@ -1,0 +1,547 @@
+{
+  "displayName": "Material Workshop",
+  "editor": {
+    "defaultSceneView": "3D"
+  },
+  "engineCompatibility": {
+    "minimum": "1",
+    "tested": "1"
+  },
+  "engineProfile": "CLIENT_3D",
+  "id": "material-workshop",
+  "paths": {
+    "assets": "Assets",
+    "gameAssembly": "",
+    "gameCode": ""
+  },
+  "run": {
+    "arguments": [],
+    "executable": "",
+    "workingDirectory": "."
+  },
+  "schemaVersion": 2,
+  "startupWorld": "gallery",
+  "templateVersion": 1,
+  "worlds": [
+    {
+      "id": "gallery",
+      "scene": "worlds/gallery.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "facade",
+      "scene": "worlds/facade.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "workbench",
+      "scene": "worlds/workbench.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "study",
+      "scene": "worlds/study.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "cutout",
+      "scene": "worlds/cutout.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "gallery-clean",
+      "scene": "worlds/gallery-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "facade-clean",
+      "scene": "worlds/facade-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "workbench-clean",
+      "scene": "worlds/workbench-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "study-clean",
+      "scene": "worlds/study-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "cutout-clean",
+      "scene": "worlds/cutout-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "gallery-wet",
+      "scene": "worlds/gallery-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "facade-wet",
+      "scene": "worlds/facade-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "workbench-wet",
+      "scene": "worlds/workbench-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "study-wet",
+      "scene": "worlds/study-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "cutout-wet",
+      "scene": "worlds/cutout-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "gallery-worn",
+      "scene": "worlds/gallery-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "facade-worn",
+      "scene": "worlds/facade-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "workbench-worn",
+      "scene": "worlds/workbench-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "study-worn",
+      "scene": "worlds/study-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "cutout-worn",
+      "scene": "worlds/cutout-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "shapes",
+      "scene": "worlds/shapes.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-metal",
+      "scene": "worlds/hero-metal.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-stone",
+      "scene": "worlds/hero-stone.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-wood",
+      "scene": "worlds/hero-wood.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-ceramic",
+      "scene": "worlds/hero-ceramic.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-rubber",
+      "scene": "worlds/hero-rubber.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-paint",
+      "scene": "worlds/hero-paint.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-fabric",
+      "scene": "worlds/hero-fabric.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-panel",
+      "scene": "worlds/hero-panel.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "shapes-clean",
+      "scene": "worlds/shapes-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-metal-clean",
+      "scene": "worlds/hero-metal-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-stone-clean",
+      "scene": "worlds/hero-stone-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-wood-clean",
+      "scene": "worlds/hero-wood-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-ceramic-clean",
+      "scene": "worlds/hero-ceramic-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-rubber-clean",
+      "scene": "worlds/hero-rubber-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-paint-clean",
+      "scene": "worlds/hero-paint-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-fabric-clean",
+      "scene": "worlds/hero-fabric-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-panel-clean",
+      "scene": "worlds/hero-panel-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "shapes-wet",
+      "scene": "worlds/shapes-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-metal-wet",
+      "scene": "worlds/hero-metal-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-stone-wet",
+      "scene": "worlds/hero-stone-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-wood-wet",
+      "scene": "worlds/hero-wood-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-ceramic-wet",
+      "scene": "worlds/hero-ceramic-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-rubber-wet",
+      "scene": "worlds/hero-rubber-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-paint-wet",
+      "scene": "worlds/hero-paint-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-fabric-wet",
+      "scene": "worlds/hero-fabric-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-panel-wet",
+      "scene": "worlds/hero-panel-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "shapes-worn",
+      "scene": "worlds/shapes-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-metal-worn",
+      "scene": "worlds/hero-metal-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-stone-worn",
+      "scene": "worlds/hero-stone-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-wood-worn",
+      "scene": "worlds/hero-wood-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-ceramic-worn",
+      "scene": "worlds/hero-ceramic-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-rubber-worn",
+      "scene": "worlds/hero-rubber-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-paint-worn",
+      "scene": "worlds/hero-paint-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-fabric-worn",
+      "scene": "worlds/hero-fabric-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-panel-worn",
+      "scene": "worlds/hero-panel-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "collection",
+      "scene": "worlds/collection.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "shapes-extra",
+      "scene": "worlds/shapes-extra.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-copper",
+      "scene": "worlds/hero-copper.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-concrete",
+      "scene": "worlds/hero-concrete.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-terrazzo",
+      "scene": "worlds/hero-terrazzo.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-leather",
+      "scene": "worlds/hero-leather.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-asphalt",
+      "scene": "worlds/hero-asphalt.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-brick",
+      "scene": "worlds/hero-brick.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-marble",
+      "scene": "worlds/hero-marble.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-plastic",
+      "scene": "worlds/hero-plastic.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "collection-clean",
+      "scene": "worlds/collection-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "shapes-extra-clean",
+      "scene": "worlds/shapes-extra-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-copper-clean",
+      "scene": "worlds/hero-copper-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-concrete-clean",
+      "scene": "worlds/hero-concrete-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-terrazzo-clean",
+      "scene": "worlds/hero-terrazzo-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-leather-clean",
+      "scene": "worlds/hero-leather-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-asphalt-clean",
+      "scene": "worlds/hero-asphalt-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-brick-clean",
+      "scene": "worlds/hero-brick-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-marble-clean",
+      "scene": "worlds/hero-marble-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-plastic-clean",
+      "scene": "worlds/hero-plastic-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "collection-wet",
+      "scene": "worlds/collection-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "shapes-extra-wet",
+      "scene": "worlds/shapes-extra-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-copper-wet",
+      "scene": "worlds/hero-copper-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-concrete-wet",
+      "scene": "worlds/hero-concrete-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-terrazzo-wet",
+      "scene": "worlds/hero-terrazzo-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-leather-wet",
+      "scene": "worlds/hero-leather-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-asphalt-wet",
+      "scene": "worlds/hero-asphalt-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-brick-wet",
+      "scene": "worlds/hero-brick-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-marble-wet",
+      "scene": "worlds/hero-marble-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-plastic-wet",
+      "scene": "worlds/hero-plastic-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "collection-worn",
+      "scene": "worlds/collection-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "shapes-extra-worn",
+      "scene": "worlds/shapes-extra-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-copper-worn",
+      "scene": "worlds/hero-copper-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-concrete-worn",
+      "scene": "worlds/hero-concrete-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-terrazzo-worn",
+      "scene": "worlds/hero-terrazzo-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-leather-worn",
+      "scene": "worlds/hero-leather-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-asphalt-worn",
+      "scene": "worlds/hero-asphalt-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-brick-worn",
+      "scene": "worlds/hero-brick-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-marble-worn",
+      "scene": "worlds/hero-marble-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-plastic-worn",
+      "scene": "worlds/hero-plastic-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "transparency",
+      "scene": "worlds/transparency.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-acrylic",
+      "scene": "worlds/hero-acrylic.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "transparency-clean",
+      "scene": "worlds/transparency-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-acrylic-clean",
+      "scene": "worlds/hero-acrylic-clean.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "transparency-wet",
+      "scene": "worlds/transparency-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-acrylic-wet",
+      "scene": "worlds/hero-acrylic-wet.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "transparency-worn",
+      "scene": "worlds/transparency-worn.scn",
+      "tilemaps": []
+    },
+    {
+      "id": "hero-acrylic-worn",
+      "scene": "worlds/hero-acrylic-worn.scn",
+      "tilemaps": []
+    }
+  ]
+}

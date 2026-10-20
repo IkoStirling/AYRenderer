@@ -1,5 +1,6 @@
 #include "AYRenderer/UIRenderBackend.h"
 #include "detail/RenderViewNamespaces.h"
+#include "detail/PreviewSceneValidation.h"
 static_assert(ayt::render::detail::uiViewCapacity() == ayt::render::UIRenderBackend::kMaxOffscreenPaintsPerFrame);
 
 #include "AYRenderer.h"
@@ -1022,6 +1023,7 @@ struct TextureRef {
 struct RenderTargetRef {
     ayt::ui::IRenderBackend::RenderTargetDesc desc{};
     detail::PooledRenderTargetHandle pooled{};
+    detail::PooledRenderTargetHandle previewHdr{};
     void* textureToken = nullptr;
 };
 
@@ -1215,6 +1217,7 @@ void UIRenderBackend::shutdownFromRenderer(detail::BGFXAdapter& adapter,
         if (_targetPool != nullptr) {
             for (const auto& entry : _frame->renderTargets) {
                 _targetPool->release(entry.second.pooled);
+                _targetPool->release(entry.second.previewHdr);
             }
         }
         _frame->renderTargets.clear();
@@ -1401,10 +1404,13 @@ bool UIRenderBackend::resizeRenderTarget(RenderTargetHandle target,
     const detail::RenderTargetKey key{
         static_cast<uint16_t>(desc.width), static_cast<uint16_t>(desc.height),
         bgfx::TextureFormat::RGBA8, true, 1, true};
-    const detail::PooledRenderTargetHandle replacement = _targetPool->acquire(
-        key, false, detail::RenderTargetPoolCategory::RetainedUi);
-    if (!replacement.isValid()) return false;
+    const detail::PooledRenderTargetHandle replacement =
+        _targetPool->acquire(key, false, detail::RenderTargetPoolCategory::RetainedUi);
+    if (!replacement.isValid())
+        return false;
     _targetPool->release(ref.pooled);
+    _targetPool->release(ref.previewHdr);
+    ref.previewHdr = {};
     ref.pooled = replacement;
     ref.desc = desc;
     return true;
@@ -1414,11 +1420,17 @@ void UIRenderBackend::releaseRenderTarget(RenderTargetHandle target)
 {
     if (_frame == nullptr) return;
     auto it = _frame->renderTargets.find(target.id);
-    if (it == _frame->renderTargets.end()) return;
-    if (_targetPool != nullptr) _targetPool->release(it->second.pooled);
+    if (it == _frame->renderTargets.end())
+        return;
+    if (_targetPool != nullptr)
+    {
+        _targetPool->release(it->second.pooled);
+        _targetPool->release(it->second.previewHdr);
+    }
     _frame->targetTextures.erase(it->second.textureToken);
     _frame->renderTargets.erase(it);
-    if (_frame->boundTarget.id == target.id) bindRenderTarget({-1});
+    if (_frame->boundTarget.id == target.id)
+        bindRenderTarget({-1});
 }
 
 Renderer* UIRenderBackend::previewRenderer() noexcept {
@@ -1429,29 +1441,70 @@ bool UIRenderBackend::renderScenePreview(RenderTargetHandle target,
     const RenderScene& scene, const PreviewSceneCamera& camera, uint32_t clearRgba,
     const std::function<void(uint16_t)>& beforeDraw)
 {
-    if (!_initialized || !_frame || !_frame->renderer || !_targetPool
-        || _frame->activeLayer.isValid() || _frame->boundTarget.isValid()
-        || _frame->nextOffscreenViewId + 3u > kLastLayerViewId
-        || !ensureRenderTarget(target.id)) return false;
-    const auto found = _frame->renderTargets.find(target.id);
-    if (found == _frame->renderTargets.end()) return false;
+    return renderScenePreview(target,scene,camera,clearRgba,PreviewSceneSettings{},beforeDraw);
+}
+
+bool UIRenderBackend::renderScenePreview(RenderTargetHandle target, const RenderScene &scene,
+                                         const PreviewSceneCamera &camera, uint32_t clearRgba,
+                                         const PreviewSceneSettings &settings,
+                                         const std::function<void(uint16_t)> &beforeDraw)
+{
+    const uint16_t viewCount = settings.displayTransform ? 5u : 4u;
+    if (!_initialized || !_frame || !_frame->renderer || !_targetPool ||
+        !detail::validPreviewCamera(camera) || _frame->activeLayer.isValid() ||
+        _frame->boundTarget.isValid() || _frame->nextOffscreenViewId + viewCount - 1u > kLastLayerViewId ||
+        !ensureRenderTarget(target.id))
+        return false;
+    auto found = _frame->renderTargets.find(target.id);
+    if (found == _frame->renderTargets.end())
+        return false;
     const auto fbo = _targetPool->framebuffer(found->second.pooled);
-    if (!detail::BGFXAdapter::isValid(fbo)) return false;
+    if (!detail::BGFXAdapter::isValid(fbo))
+        return false;
+    bgfx::FrameBufferHandle hdr = BGFX_INVALID_HANDLE;
+    if (settings.displayTransform)
+    {
+        const detail::RenderTargetKey key{uint16_t(found->second.desc.width),
+                                          uint16_t(found->second.desc.height),
+                                          bgfx::TextureFormat::RGBA16F,
+                                          true,
+                                          1,
+                                          false};
+        auto &lease = found->second.previewHdr;
+        if (!_targetPool->matches(lease, key))
+        {
+            const auto replacement =
+                _targetPool->acquire(key, false, detail::RenderTargetPoolCategory::RetainedUi);
+            if (!replacement.isValid())
+            {
+                ++_frame->layerStats.allocationFailures;
+                return false;
+            }
+            _targetPool->release(lease);
+            lease = replacement;
+        }
+        hdr = _targetPool->framebuffer(lease);
+        if (!detail::BGFXAdapter::isValid(hdr))
+            return false;
+    }
     flushColoredRects();
     uint8_t first;
-    if (!_frame->reserveOffscreenViews(4,first)) return false;
-    if (beforeDraw) beforeDraw(first);
-    _frame->renderer->renderPreviewScene(scene, camera, fbo.idx,
-        static_cast<uint16_t>(found->second.desc.width),
-        static_cast<uint16_t>(found->second.desc.height), first, clearRgba);
-    return true;
+    if (!_frame->reserveOffscreenViews(viewCount, first))
+        return false;
+    if (beforeDraw)
+        beforeDraw(first);
+    return _frame->renderer->renderPreviewScene(
+        scene, camera, fbo.idx, static_cast<uint16_t>(found->second.desc.width),
+        static_cast<uint16_t>(found->second.desc.height), first, clearRgba, settings, hdr.idx);
 }
 
 void UIRenderBackend::bindRenderTarget(RenderTargetHandle target)
 {
-    if (_frame == nullptr || _adapter == nullptr || _frame->activeLayer.isValid()) return;
-    FrameState& frame = *_frame;
-    if (!target.isValid()) {
+    if (_frame == nullptr || _adapter == nullptr || _frame->activeLayer.isValid())
+        return;
+    FrameState &frame = *_frame;
+    if (!target.isValid())
+    {
         if (!frame.boundTarget.isValid()) return;
         flushColoredRects();
         frame.boundTarget = {-1};
