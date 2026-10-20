@@ -1,5 +1,15 @@
 # AYRenderer Design
 
+## 2026-10-21 — 作者材质的 shader 多根回退
+
+RenderAssetBridge 先检查材质相邻引用，再按 assetRoots 的挂载顺序逐根查找。
+相对的 shaders/name.phoskia 在各根兼容 flat basename；绝对引用本身不参与逐根拼接。
+此前只查 assetRoot() 的首根，项目/派生根优先时会漏掉后续 runtime shader 根。
+Resource 继续拥有资源根顺序，Renderer 不扫描任意父目录、不把开发源码路径写入材质。
+RenderAssetBridgeTests 检查第二根与旧 flat 引用，Editor 的真实两后端测试另验证导入流程。
+该内部修复没有 Renderer API/材质文件/GPU ownership 变更。
+
+
 ## 2026-10-20 — PBR 表面语义与隔离预览
 
 表面控制是值类型，不增加 IMaterial 虚接口、材质文件版本或 GBuffer 附件。

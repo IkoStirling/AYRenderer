@@ -19,6 +19,7 @@
 
 #include <bgfx/bgfx.h>
 
+#include <filesystem>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -518,6 +519,43 @@ TEST_CASE(sparse_standard_lit_resources_get_instance_defaults_without_overwritin
     pool.shutdown();
     adapter.shutdown();
     removeFile(path);
+}
+
+
+TEST_CASE(material_shader_resolves_all_mounted_roots_and_legacy_flat_fallback)
+{
+    if (!fileExists(AY_SHADER_SHADERC_HINT))
+        SKIP_TEST("shaderc is required for shader mount resolution");
+    namespace fs = std::filesystem;
+    const fs::path root = tempPath("ay_bridge_shader_mounts");
+    fs::create_directories(root / "project/materials");
+    fs::create_directories(root / "runtime");
+    const auto oldRoots = ayt::resource::assetRoots();
+    struct Cleanup {
+        fs::path root;
+        std::vector<std::string> roots;
+        ~Cleanup() {
+            ayt::resource::setAssetRoots(roots);
+            std::error_code error;
+            fs::remove_all(root, error);
+        }
+    } cleanup{root, oldRoots};
+    const auto shader = root / "runtime/bridge_mount.phoskia";
+    CHECK(writeTextFile(shader.string(), kBridgeMaterialShader));
+    ayt::resource::setAssetRoots({(root / "project").string(), (root / "runtime").string()});
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend = ayt::render::Backend::Noop;
+    CHECK(renderer.initialize(desc));
+    for (const auto* reference : {"bridge_mount.phoskia", "shaders/bridge_mount.phoskia"}) {
+        ayt::resource::Material source;
+        source.initialise("Imported fallback", reference);
+        auto handle = renderer.createMaterialFromResource(source,
+            (root / "project/materials/imported.mat").string());
+        CHECK(handle.isValid());
+        renderer.destroyMaterial(handle);
+    }
+    renderer.shutdown();
 }
 
 TEST_SUITE_END

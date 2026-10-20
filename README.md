@@ -1,5 +1,12 @@
 # AYRenderer
 
+## 作者材质的多资源根着色器解析（2026-10-21）
+
+材质 shader 先按原相邻路径解析，再依挂载顺序检查所有资源根。
+旧 `shaders/name.phoskia` 引用仍兼容各根的 flat basename。
+这修复项目/派生根排在运行时 shader 根前面时，导入材质找不到 shader 的问题。
+RenderAssetBridgeTests 覆盖第二个根和旧 flat 回退；真实导入材质的 D3D11/D3D12 流程另在 Editor 验证。
+
 ## PBR 材质与可编辑内容（2026-10-20）
 
 `PbrSurfaceSettings` 统一 Forward/Deferred 的 UV 缩放/偏移、法线强度和粗糙度偏置，

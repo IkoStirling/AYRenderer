@@ -139,8 +139,9 @@ std::string resolveShaderPath(const std::string& materialPath,
     if (ayt::io::File::exists(baseHit)) {
         return baseHit;
     }
-    const std::string& root = ayt::resource::assetRoot();
-    if (!root.empty() && !ayt::io::path::isAbsolute(shaderRef)) {
+    if (ayt::io::path::isAbsolute(shaderRef)) return baseHit;
+    for (const auto& root : ayt::resource::assetRoots()) {
+        if (root.empty()) continue;
         const std::string rootHit = ayt::io::path::join(root, shaderRef);
         if (ayt::io::File::exists(rootHit)) {
             return rootHit;
