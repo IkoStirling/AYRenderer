@@ -84,7 +84,7 @@ AYResource 单材质独立 ASan 构建6例/316断言通过；关闭新 STL 容�
 完整展示每后端60章/306张PNG，源输入541项摘要及截图解码均通过；`delivery-verification.json`
 逐图保存摘要，54组状态/路径比较都有表面变化。完整展示的原程序以 `delivery-capture-viewer.exe`
 保存，manifest摘要不因后来构建而改写。末次稀疏默认修复后，最新Native另捕获collection/
-transparency的17表面×四状态×两路径×两后端32图，逐像素与已有导出比较均在RGBA8±1内；
+transparency两个构图中覆盖17表面，四状态×两路径×两后端共32图，逐像素与已有导出比较均在RGBA8±1内；
 证据 `current-viewer-content/compatibility.json`。不为未受影响内容重复导出所有章节。
 
 ## 最终内容与架构收口（2026-10-19）
