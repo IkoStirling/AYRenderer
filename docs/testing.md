@@ -1,5 +1,24 @@
 # AYRenderer 测试维护
 
+## Cube 与渲染目标创建接纳（2026-10-22）
+
+先以已有1×1缓存key请求65536/UINT32_MAX cube，安全复现旧路径在尺寸检查前返回缓存项。
+`cube-admission-before.json`为1例10断言、2个失败的原始证据；未执行可能读取短缓冲或分配巨量内存的旧路径。
+修复后`admission-bridge-final.json`为19例338断言通过；定向真实设备
+`admission-gpu-final-{d3d11,d3d12}.json`各1例1653断言通过，无跳过。
+
+最终完整CPU九组994例/17021断言通过，无跳过；`admission-cpu/`。
+全Gpu分区D3D11/12各53例/44219断言通过，无跳过；`admission-gpu-full-*.json`。
+库存1047项、十分区无遗漏/重复，Editor463例/12308断言通过。
+两后端`admission-native-{MaterialWorkshop,AssetReimport}-*`通过，包含未保存Scene变化0、
+保存显式重载后变化、真实导入Apply/Cancel、失败保留/重试与Scene保存重开。
+SDK127能力/53模块/97搜索例/556文档入口零错零警告。本阶段没有新增ASan覆盖。
+
+检查包含非法尺寸、设备上限、256MiB六面预算、无缓存拒绝、非法格式、缓存及纹理/FBO数量保持。
+正向检查包括raw六面独立颜色、可更新cube的六面×三级颜色、preferred-color回退及全部资源回收。
+这证明创建入口的接纳与正常绘制，不等于覆盖任意外来更新矩形、设备丢失或GPU OOM。
+`createColorDepthFrameBuffer`保持首选格式回退语义；严格格式入口仍拒绝无效枚举。
+
 ## 管线职责归位与设备门禁收敛（2026-10-22）
 
 产品描述/纯兼容策略与具体Pass工厂从主Renderer移出，默认链、公开布局与shader键不变。

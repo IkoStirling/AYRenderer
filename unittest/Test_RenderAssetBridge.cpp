@@ -119,6 +119,56 @@ struct ForceScScope {
 
 TEST_SUITE(RenderAssetBridgeTests)
 
+TEST_CASE(cube_rejects_unrepresentable_dimensions_even_on_a_cache_hit)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    BGFXAdapter adapter;BGFXInitParams init;init.backend=Backend::Noop;
+    const bool ready=adapter.initialize(init);CHECK(ready);if(!ready)return;
+    ayt::shader::ShaderResourcePool pool;RenderResourceManager resources(adapter,pool);
+    struct Cleanup {
+        RenderResourceManager& resources;ayt::shader::ShaderResourcePool& pool;BGFXAdapter& adapter;
+        ~Cleanup(){resources.shutdown();pool.shutdown();adapter.shutdown();}
+    } cleanup{resources,pool,adapter};
+    const std::array<uint8_t,4> pixel{9,27,81,255};
+    const std::string key="cube-admission-existing-cache";
+    const auto original=resources.createTextureFromRgba8(1,1,pixel.data(),key);
+    CHECK(original.isValid());if(!original.isValid())return;
+    // The old code returns the cached handle before narrowing/copying. This
+    // safely reproduces invalid acceptance without requesting a huge buffer.
+    for(uint32_t size:{65536u,UINT32_MAX,4096u}) {
+        CHECK_FALSE(resources.createCubeTextureFromRgba8(size,pixel.data(),key).isValid());
+        CHECK_FALSE(resources.createCubeTextureFromRgba8(size,pixel.data()).isValid());
+        CHECK(resources.textures().size()==1);
+        CHECK(!resources.textures().at(original.id).cube);
+        CHECK(resources.createTextureFromRgba8(1,1,pixel.data(),key).id==original.id);
+    }
+}
+
+TEST_CASE(target_creation_rejects_device_extent_and_bad_format_without_allocating)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    BGFXAdapter adapter;BGFXInitParams init;init.backend=Backend::Noop;
+    const bool ready=adapter.initialize(init);CHECK(ready);if(!ready)return;
+    struct Cleanup {BGFXAdapter& adapter;~Cleanup(){adapter.shutdown();}} cleanup{adapter};
+    for(auto format:{static_cast<bgfx::TextureFormat::Enum>(-1),bgfx::TextureFormat::Count,
+                     bgfx::TextureFormat::Unknown,bgfx::TextureFormat::UnknownDepth}) {
+        CHECK_FALSE(bgfx::isValid(adapter.createFrameBuffer(2,2,format,false)));
+        CHECK_FALSE(bgfx::isValid(adapter.createFrameBuffer(2,2,format,true)));
+    }
+    const auto maximum=bgfx::getCaps()->limits.maxTextureSize;
+    if(maximum<UINT16_MAX) {
+        const auto tooWide=static_cast<uint16_t>(maximum+1u);
+        CHECK_FALSE(bgfx::isValid(adapter.createFrameBuffer(tooWide,1,bgfx::TextureFormat::RGBA8,false)));
+        CHECK_FALSE(bgfx::isValid(adapter.createFrameBuffer(tooWide,1,bgfx::TextureFormat::RGBA8,true)));
+        CHECK_FALSE(bgfx::isValid(adapter.createColorDepthFrameBuffer(tooWide,1)));
+        CHECK_FALSE(bgfx::isValid(adapter.createGbufferFrameBuffer(tooWide,1)));
+        CHECK_FALSE(bgfx::isValid(adapter.createDepthOnlyFrameBuffer(tooWide,1)));
+        CHECK_FALSE(bgfx::isValid(adapter.createBlitDstTexture2D(tooWide,1)));
+    }
+}
+
 TEST_CASE(raw_texture_admission_refuses_truncated_dimensions_and_invalid_format_before_allocation)
 {
     using namespace ayt::render;

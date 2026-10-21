@@ -1,5 +1,17 @@
 # AYRenderer Design
 
+## 2026-10-22 — Cube 与目标创建的接纳边界
+
+`textureExtentValid`集中检查正尺寸和设备maxTextureSize；`textureRequestValid`在调用bgfx前拒绝
+越界/Unknown/UnknownDepth枚举，并按2D/cube验证format/flags。原始cube的字节乘法用UInt64并限制bgfx的UInt32输入。
+各FBO/blit入口先检查尺寸；颜色深度helper将无效/深度首选候选跳过，再使用原RGBA8/float候选序列。
+外层严格格式入口仍拒绝非法格式；withDepth在创建颜色纹理之前转入专用helper。
+
+RRM raw cube先验证16位尺寸与六面RGBA8总量≤256 MiB，再查cache；Noop直接拒绝。
+GPU接纳成功后才保留CPU六面，move入表；CPU留存或缓存登记抛异常时回收此次GPU对象。
+未对设备OOM注入，也未给外来句柄或任意update范围新增承诺。
+真实GPU检查使用独立六色面与逐级旋转颜色，验证raw cube及mutable cube的六面/三层采样和最终纹理/FBO计数。
+
 ## 2026-10-22 — 产品组合与 Pass 工厂归位
 
 当前职责地图以 [docs/architecture.md](docs/architecture.md) 为入口，历史R1–R6切片保留原日期。

@@ -1614,7 +1614,8 @@ TextureHandle RenderResourceManager::createCubeTextureFromRgba8(uint32_t size,
                                                                 const std::string& cacheKey)
 {
     TextureHandle out;
-    if (!_adapter.isInitialized() || size == 0 || rgba8Faces == nullptr) {
+    if (!_adapter.supportsTextureCube(size,bgfx::TextureFormat::RGBA8)
+        || rgba8Faces == nullptr || uint64_t(size)*size*4u*6u > TextureUploadPlan::byteLimit) {
         return out;
     }
 
@@ -1630,18 +1631,24 @@ TextureHandle RenderResourceManager::createCubeTextureFromRgba8(uint32_t size,
     gpuTex.width  = static_cast<uint16_t>(size);
     gpuTex.height = static_cast<uint16_t>(size);
     gpuTex.cube = true;
-    gpuTex.cpuRgba8.assign(
-        rgba8Faces,
-        rgba8Faces + static_cast<size_t>(size) * size * 4u * 6u);
     gpuTex.handle = _adapter.createTextureCube(gpuTex.width, rgba8Faces);
     if (!bgfx::isValid(gpuTex.handle)) {
         return out;
     }
 
+    gpuTex.uploadBytes=static_cast<uint32_t>(uint64_t(size)*size*4u*6u);
+    const bgfx::TextureHandle createdHandle=gpuTex.handle;
     const uint64_t id = _nextTextureId++;
-    _textures.emplace(id, gpuTex);
-    if (!cacheKey.empty()) {
-        _textureCacheByKey.emplace(cacheKey, id);
+    try {
+        // Device admission precedes the retained CPU copy. Move that copy
+        // into the table instead of briefly retaining two full six-face arrays.
+        gpuTex.cpuRgba8.assign(rgba8Faces,rgba8Faces+gpuTex.uploadBytes);
+        _textures.emplace(id,std::move(gpuTex));
+        if (!cacheKey.empty()) _textureCacheByKey.emplace(cacheKey,id);
+    } catch (...) {
+        _textures.erase(id);
+        _adapter.destroy(createdHandle);
+        throw;
     }
     out.id = id;
     return out;

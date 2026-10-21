@@ -180,6 +180,105 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
 
+TEST_CASE(texture_target_admission_preserves_cached_data_and_all_cube_faces)
+{
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f;const bool ready=f.initialize(backend);CHECK(ready);if(!ready)return;
+    RenderResourceManager resources(f.adapter,f.pool);
+    struct Cleanup {RenderResourceManager& resources;~Cleanup(){resources.shutdown();}} cleanup{resources};
+    for(int i=0;i<4;++i) f.adapter.endFrame();
+    const auto fixtureTextures=bgfx::getStats()->numTextures;
+    const auto fixtureFramebuffers=bgfx::getStats()->numFrameBuffers;
+    const std::array<uint8_t,4> pixel{9,27,81,255};
+    const std::string key="device-admission-existing";
+    const auto original=resources.createTextureFromRgba8(1,1,pixel.data(),key);
+    CHECK(original.isValid());if(!original.isValid())return;
+    for(int i=0;i<4;++i) f.adapter.endFrame();
+    const auto admittedTextures=bgfx::getStats()->numTextures;
+    for(uint32_t badSize:{65536u,UINT32_MAX,4096u}) {
+        CHECK_FALSE(resources.createCubeTextureFromRgba8(badSize,pixel.data(),key).isValid());
+        CHECK_FALSE(resources.createCubeTextureFromRgba8(badSize,pixel.data()).isValid());
+        CHECK(resources.textures().size()==1);
+        CHECK(resources.createTextureFromRgba8(1,1,pixel.data(),key).id==original.id);
+    }
+    for(auto bad:{static_cast<bgfx::TextureFormat::Enum>(-1),bgfx::TextureFormat::Count,
+                  bgfx::TextureFormat::Unknown,bgfx::TextureFormat::UnknownDepth}) {
+        CHECK_FALSE(bgfx::isValid(f.adapter.createMutableTextureCube(4,true,bad)));
+        CHECK_FALSE(bgfx::isValid(f.adapter.createFrameBuffer(2,2,bad,false)));
+        CHECK_FALSE(bgfx::isValid(f.adapter.createFrameBuffer(2,2,bad,true)));
+    }
+    const auto maximum=bgfx::getCaps()->limits.maxTextureSize;
+    if(maximum<UINT16_MAX) {
+        const auto tooWide=static_cast<uint16_t>(maximum+1u);
+        CHECK_FALSE(bgfx::isValid(f.adapter.createTextureCube(tooWide,pixel.data())));
+        CHECK_FALSE(bgfx::isValid(f.adapter.createMutableTextureCube(tooWide,false,bgfx::TextureFormat::RGBA8)));
+        CHECK_FALSE(bgfx::isValid(f.adapter.createFrameBuffer(tooWide,1,bgfx::TextureFormat::RGBA8,false)));
+        CHECK_FALSE(bgfx::isValid(f.adapter.createFrameBuffer(tooWide,1,bgfx::TextureFormat::RGBA8,true)));
+        CHECK_FALSE(bgfx::isValid(f.adapter.createColorDepthFrameBuffer(tooWide,1)));
+        CHECK_FALSE(bgfx::isValid(f.adapter.createGbufferFrameBuffer(tooWide,1)));
+        CHECK_FALSE(bgfx::isValid(f.adapter.createDepthOnlyFrameBuffer(tooWide,1)));
+        CHECK_FALSE(bgfx::isValid(f.adapter.createBlitDstTexture2D(tooWide,1)));
+    }
+    for(int i=0;i<4;++i) f.adapter.endFrame();
+    CHECK(bgfx::getStats()->numTextures==admittedTextures);
+    CHECK(bgfx::getStats()->numFrameBuffers==fixtureFramebuffers);
+    for(auto preferred:{static_cast<bgfx::TextureFormat::Enum>(-1),bgfx::TextureFormat::UnknownDepth,
+                        bgfx::TextureFormat::D24S8}) {
+        const auto fallback=f.adapter.createColorDepthFrameBuffer(2,2,preferred);
+        CHECK(bgfx::isValid(fallback));
+        f.adapter.destroy(fallback);
+    }
+
+    const std::array<Pixel,6> colors{{{1,0,0,1},{0,1,0,1},{0,0,1,1},{1,1,0,1},{0,1,1,1},{1,0,1,1}}};
+    const std::array<const char*,6> directions{{"vec3(1.0,0.0,0.0)","vec3(-1.0,0.0,0.0)",
+        "vec3(0.0,1.0,0.0)","vec3(0.0,-1.0,0.0)","vec3(0.0,0.0,1.0)","vec3(0.0,0.0,-1.0)"}};
+    const auto faceBytes=[](uint16_t size,Pixel color) {
+        std::vector<uint8_t> bytes(size_t(size)*size*4u);
+        for(size_t pixel=0;pixel<size_t(size)*size;++pixel)
+            for(size_t channel=0;channel<4;++channel) bytes[pixel*4+channel]=uint8_t(color[channel]*255);
+        return bytes;
+    };
+    std::vector<uint8_t> faces;
+    for(const auto color:colors) {
+        const auto face=faceBytes(2,color);faces.insert(faces.end(),face.begin(),face.end());
+    }
+    auto raw=resources.createCubeTextureFromRgba8(2,faces.data());CHECK(raw.isValid());
+    const auto sample=[&](bgfx::TextureHandle cube,size_t face,unsigned mip) {
+        return f.render("texturecube image;","return sampleLod(image,"+std::string(directions[face])+","
+            +std::to_string(mip)+".0);",[&](const auto& program) {
+                const auto binding=program.getTextureBinding("image");
+                program.setTexture(program.getTextureStage(binding),binding,toShaderTexture(cube));
+            });
+    };
+    if(raw.isValid()) {
+        const auto& entry=resources.textures().at(raw.id);
+        CHECK(entry.cpuRgba8==faces);CHECK(entry.uploadBytes==faces.size());
+        for(size_t face=0;face<6;++face) checkPixels(sample(entry.handle,face,0),colors[face]);
+    }
+    auto mutableCube=f.adapter.createMutableTextureCube(4,true,bgfx::TextureFormat::RGBA8,BGFX_SAMPLER_POINT);
+    CHECK(bgfx::isValid(mutableCube));
+    struct CubeGuard {BGFXAdapter& adapter;bgfx::TextureHandle& handle;~CubeGuard(){adapter.destroy(handle);}}
+        cubeGuard{f.adapter,mutableCube};
+    if(bgfx::isValid(mutableCube)) {
+        for(uint8_t mip=0;mip<3;++mip) for(uint8_t face=0;face<6;++face) {
+            const auto side=uint16_t(4u>>mip);const auto data=faceBytes(side,colors[(face+mip)%6]);
+            f.adapter.updateTextureCube(mutableCube,face,mip,side,data.data(),uint32_t(data.size()));
+        }
+        for(unsigned mip=0;mip<3;++mip) for(size_t face=0;face<6;++face)
+            checkPixels(sample(mutableCube,face,mip),colors[(face+mip)%6]);
+    }
+    f.adapter.destroy(mutableCube);mutableCube=BGFX_INVALID_HANDLE;
+    resources.shutdown();
+    for(int i=0;i<6;++i) f.adapter.endFrame();
+    CHECK(bgfx::getStats()->numTextures==fixtureTextures);
+    CHECK(bgfx::getStats()->numFrameBuffers==fixtureFramebuffers);
+#else
+    SKIP_TEST("Windows real-device fixture required");
+#endif
+}
+
 TEST_CASE(resource_texture_authored_mip_colors_reach_real_gpu_lod_sampling) {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");

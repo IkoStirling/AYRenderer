@@ -183,7 +183,11 @@ public:
     // Full-rect pixel rewrite. Returns false when the handle is invalid,
     // not dynamic, size-mismatched, or pixels is null.
     bool updateTextureFromRgba8(TextureHandle texture, const uint8_t* pixels);
-    // §P5.5 D-upload — host-facing cubemap create (6×RGBA8 faces).
+    /// Advanced Host: six tightly packed RGBA8 faces in +X,-X,+Y,-Y,+Z,-Z order.
+    /// Base level only; the caller supplies size*size*4*6 readable bytes.
+    /// Size must fit uint16 and the device; the six-face upload is at most
+    /// 256 MiB. Invalid requests are rejected before cache lookup or copying.
+    /// Noop returns invalid. Renderer owns the GPU and retained CPU face copy.
     TextureHandle createCubeTextureFromRgba8(uint32_t size,
                                              const uint8_t* rgba8Faces,
                                              const std::string& cacheKey = "");

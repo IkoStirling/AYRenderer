@@ -422,13 +422,19 @@ bgfx::IndexBufferHandle BGFXAdapter::createIndexBuffer(const void* data, uint32_
 }
 
 namespace {
-bool texture2DRequestValid(uint16_t width,uint16_t height,bgfx::TextureFormat::Enum format,uint64_t flags)
+bool textureExtentValid(uint16_t width,uint16_t height)
 {
-    if (!width || !height || static_cast<uint32_t>(format) >= static_cast<uint32_t>(bgfx::TextureFormat::Count)
-        || format == bgfx::TextureFormat::Unknown || format == bgfx::TextureFormat::UnknownDepth) return false;
+    if (!width || !height) return false;
     const auto* caps=bgfx::getCaps();
-    if (!caps || width>caps->limits.maxTextureSize || height>caps->limits.maxTextureSize) return false;
-    return bgfx::isTextureValid(0,false,1,format,flags);
+    return caps && width<=caps->limits.maxTextureSize && height<=caps->limits.maxTextureSize;
+}
+bool textureRequestValid(uint16_t width,uint16_t height,bgfx::TextureFormat::Enum format,
+                         uint64_t flags,bool cube=false)
+{
+    if (static_cast<uint32_t>(format) >= static_cast<uint32_t>(bgfx::TextureFormat::Count)
+        || format == bgfx::TextureFormat::Unknown || format == bgfx::TextureFormat::UnknownDepth
+        || !textureExtentValid(width,height)) return false;
+    return bgfx::isTextureValid(0,cube,1,format,flags);
 }
 } // namespace
 
@@ -437,7 +443,7 @@ bgfx::TextureHandle BGFXAdapter::createTexture2D(uint16_t width, uint16_t height
                                                   uint64_t flags)
 {
     if (!_initialized || rgba8Data == nullptr
-        || !texture2DRequestValid(width,height,bgfx::TextureFormat::RGBA8,flags)
+        || !textureRequestValid(width,height,bgfx::TextureFormat::RGBA8,flags)
         || uint64_t(width)*height*4u > UINT32_MAX) {
         return BGFX_INVALID_HANDLE;
     }
@@ -452,7 +458,7 @@ bgfx::TextureHandle BGFXAdapter::createTexture2D(uint16_t width, uint16_t height
 bgfx::TextureHandle BGFXAdapter::createDynamicTexture2D(uint16_t width, uint16_t height,
                                                          uint64_t flags)
 {
-    if (!_initialized || !texture2DRequestValid(width,height,bgfx::TextureFormat::RGBA8,flags)) {
+    if (!_initialized || !textureRequestValid(width,height,bgfx::TextureFormat::RGBA8,flags)) {
         return BGFX_INVALID_HANDLE;
     }
     // mem=nullptr → mutable texture; mirror BgfxFontAtlas atlas create.
@@ -467,7 +473,7 @@ bgfx::TextureHandle BGFXAdapter::createRenderTargetTexture2D(
     bgfx::TextureFormat::Enum format,
     uint64_t samplerFlags)
 {
-    if (!_initialized || !texture2DRequestValid(width,height,format,BGFX_TEXTURE_RT | samplerFlags)) {
+    if (!_initialized || !textureRequestValid(width,height,format,BGFX_TEXTURE_RT | samplerFlags)) {
         return BGFX_INVALID_HANDLE;
     }
     return bgfx::createTexture2D(
@@ -492,15 +498,22 @@ void BGFXAdapter::updateTexture2D(bgfx::TextureHandle handle,
     bgfx::updateTexture2D(handle, 0, 0, 0, 0, width, height, mem);
 }
 
+bool BGFXAdapter::supportsTextureCube(uint32_t size,bgfx::TextureFormat::Enum format,uint64_t flags) const noexcept
+{
+    return _initialized && !isNoopBackend() && size<=UINT16_MAX
+        && textureRequestValid(static_cast<uint16_t>(size),static_cast<uint16_t>(size),format,flags,true);
+}
+
 bgfx::TextureHandle BGFXAdapter::createTextureCube(uint16_t size,
                                                     const void* rgba8Faces,
                                                     uint64_t flags)
 {
-    if (!_initialized || isNoopBackend() || size == 0 || rgba8Faces == nullptr) {
+    if (rgba8Faces == nullptr || !supportsTextureCube(size,bgfx::TextureFormat::RGBA8,flags)
+        || uint64_t(size)*size*4u*6u > UINT32_MAX) {
         return BGFX_INVALID_HANDLE;
     }
     // 6 faces × size × size × RGBA8
-    const uint32_t bytes = static_cast<uint32_t>(size) * size * 4u * 6u;
+    const uint32_t bytes = static_cast<uint32_t>(uint64_t(size)*size*4u*6u);
     const bgfx::Memory* mem = bgfx::copy(rgba8Faces, bytes);
     return bgfx::createTextureCube(size, false, 1,
                                    bgfx::TextureFormat::RGBA8,
@@ -512,10 +525,7 @@ bgfx::TextureHandle BGFXAdapter::createMutableTextureCube(
     uint16_t size, bool hasMips, bgfx::TextureFormat::Enum format,
     uint64_t flags)
 {
-    if (!_initialized || isNoopBackend() || size == 0
-        || format == bgfx::TextureFormat::Unknown
-        || format == bgfx::TextureFormat::UnknownDepth
-        || !bgfx::isTextureValid(0, true, 1, format, flags)) {
+    if (!supportsTextureCube(size,format,flags)) {
         return BGFX_INVALID_HANDLE;
     }
     return bgfx::createTextureCube(size, hasMips, 1, format, flags, nullptr);
@@ -539,7 +549,7 @@ bgfx::TextureHandle BGFXAdapter::createTexture2DFromData(uint16_t width, uint16_
                                                           const void* data, uint32_t size,
                                                           uint64_t flags, bool hasMips)
 {
-    if (!_initialized || data == nullptr || size == 0 || !texture2DRequestValid(width,height,format,flags)) {
+    if (!_initialized || data == nullptr || size == 0 || !textureRequestValid(width,height,format,flags)) {
         return BGFX_INVALID_HANDLE;
     }
     bgfx::TextureInfo info{};
@@ -590,7 +600,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
     // handle → PostProcessPass::execute skips the frame's post step
     // gracefully instead of crashing on bgfx::createFrameBuffer with
     // no init).
-    if (!_initialized || width == 0 || height == 0) {
+    if (!_initialized || !textureExtentValid(width,height)) {
         return BGFX_INVALID_HANDLE;
     }
     const uint64_t textureFlags = BGFX_TEXTURE_RT
@@ -598,8 +608,11 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
                                 | (pointSampled
                                     ? BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT
                                     : 0u);
-    if (!bgfx::isTextureValid(0, false, 1, colorFormat, textureFlags)) {
+    if (!textureRequestValid(width,height,colorFormat,textureFlags)) {
         return BGFX_INVALID_HANDLE;
+    }
+    if (withDepth) {
+        return createColorDepthFrameBuffer(width,height,colorFormat,pointSampled);
     }
     bgfx::TextureHandle color = bgfx::createTexture2D(
         width, height, /*hasMips=*/false, /*numLayers=*/1,
@@ -607,15 +620,8 @@ bgfx::FrameBufferHandle BGFXAdapter::createFrameBuffer(uint16_t width, uint16_t 
     if (!bgfx::isValid(color)) {
         return BGFX_INVALID_HANDLE;
     }
-    // Third arg historically ignored depth (color-only RT). When the
-    // host asks for depth, build RGBA8+D24S8 so FO depth test works —
-    // color-only scene FBOs draw later meshes over earlier ones
-    // (cube "behind" ground with shadow still on the floor).
-    if (withDepth) {
-        bgfx::destroy(color);
-        return createColorDepthFrameBuffer(width, height, colorFormat,
-                                           pointSampled);
-    }
+    // Depth requests already took the two-attachment path above. This
+    // single-color path transfers ownership only after FBO creation succeeds.
     bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
         /*num=*/1, &color, /*destroyTextures=*/true);
     // color is owned by the framebuffer now — bgfx manages the
@@ -637,7 +643,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createColorDepthFrameBuffer(
     bgfx::TextureFormat::Enum preferredColorFormat,
     bool pointSampled)
 {
-    if (!_initialized || width == 0 || height == 0) {
+    if (!_initialized || !textureExtentValid(width,height)) {
         return BGFX_INVALID_HANDLE;
     }
 
@@ -677,7 +683,10 @@ bgfx::FrameBufferHandle BGFXAdapter::createColorDepthFrameBuffer(
         if (duplicate) {
             continue;
         }
-        if (!bgfx::isTextureValid(0, false, 1, colorFmt, colorFlags)) {
+        // A preferred format is a fallback candidate, never permission to
+        // pass an invalid enum or a second depth attachment to bgfx.
+        if (static_cast<uint32_t>(colorFmt) >= static_cast<uint32_t>(bgfx::TextureFormat::UnknownDepth)
+            || !textureRequestValid(width,height,colorFmt,colorFlags)) {
             continue;
         }
         bgfx::TextureHandle color = bgfx::createTexture2D(
@@ -686,7 +695,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createColorDepthFrameBuffer(
             continue;
         }
         for (bgfx::TextureFormat::Enum depthFmt : depthFormats) {
-            if (!bgfx::isTextureValid(0, false, 1, depthFmt, depthFlags)) {
+            if (!textureRequestValid(width,height,depthFmt,depthFlags)) {
                 continue;
             }
             bgfx::TextureHandle depth = bgfx::createTexture2D(
@@ -719,7 +728,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
     // (iterate RenderScene, bind shader, submit) lands in B4c.
     // Tests (Test_B4_GBufferMRT) exercise this helper + the
     // GBufferPass::ensure plumbing, NOT any GPU draw.
-    if (!_initialized || isNoopBackend() || width == 0 || height == 0) {
+    if (!_initialized || isNoopBackend() || !textureExtentValid(width,height)) {
         return BGFX_INVALID_HANDLE;
     }
 
@@ -748,7 +757,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
     };
     bool ok = true;
     for (uint8_t i = 0; i < kNumColor; ++i) {
-        if (!bgfx::isTextureValid(0, false, 1, colorFmts[i], colorFlags)) {
+        if (!textureRequestValid(width,height,colorFmts[i],colorFlags)) {
             ok = false;
             break;
         }
@@ -762,7 +771,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
 
     bgfx::TextureHandle depth = bgfx::TextureHandle{BGFX_INVALID_HANDLE};
     if (ok) {
-        if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D24S8, depthFlags)) {
+        if (!textureRequestValid(width,height,bgfx::TextureFormat::D24S8,depthFlags)) {
             ok = false;
         } else {
             depth = bgfx::createTexture2D(width, height, false, 1,
@@ -827,7 +836,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createDepthOnlyFrameBuffer(uint16_t width, 
     // hand-rolled Attachment{handle, access} left mip/layer/numLayers
     // uninitialized → bgfx isFrameBufferValid ErrorAssert / debugBreak
     // on first ShadowPass::execute under a Debug build.
-    if (!_initialized || width == 0 || height == 0) {
+    if (!_initialized || !textureExtentValid(width,height)) {
         return BGFX_INVALID_HANDLE;
     }
 
@@ -843,7 +852,7 @@ bgfx::FrameBufferHandle BGFXAdapter::createDepthOnlyFrameBuffer(uint16_t width, 
     };
 
     for (bgfx::TextureFormat::Enum fmt : formats) {
-        if (!bgfx::isTextureValid(0, false, 1, fmt, textureFlags)) {
+        if (!textureRequestValid(width,height,fmt,textureFlags)) {
             continue;
         }
         bgfx::TextureHandle depth = bgfx::createTexture2D(
@@ -1258,13 +1267,13 @@ bool BGFXAdapter::blitTextureRegion(uint8_t viewId,
 
 bgfx::TextureHandle BGFXAdapter::createBlitDstTexture2D(uint16_t width, uint16_t height)
 {
-    if (!_initialized || width == 0 || height == 0) {
+    if (!_initialized || !textureExtentValid(width,height)) {
         return BGFX_INVALID_HANDLE;
     }
     const uint64_t flags = BGFX_TEXTURE_BLIT_DST
                          | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
                          | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
-    if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::RGBA8, flags)) {
+    if (!textureRequestValid(width,height,bgfx::TextureFormat::RGBA8,flags)) {
         return BGFX_INVALID_HANDLE;
     }
     return bgfx::createTexture2D(width, height, false, 1,
