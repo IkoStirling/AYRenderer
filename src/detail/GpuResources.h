@@ -63,6 +63,14 @@ struct GpuTexture {
     std::vector<uint8_t> cpuRgba8;
     // Camera-output framebuffer owns this attachment; resource lookup only borrows it.
     bool borrowed = false;
+    // Immutable resource-upload diagnostics; all levels are initialized before
+    // publishing this entry. Appended to keep earlier field offsets stable.
+    uint8_t mipCount = 1;
+    uint8_t sourceMipCount = 1;
+    uint32_t uploadBytes = 0;
+    uint64_t samplerFlags = BGFX_SAMPLER_NONE;
+    bool partialChainFallback = false;
+    bool samplerFallback = false;
 };
 
 struct GpuMaterial {

@@ -1,5 +1,54 @@
 # AYRenderer 测试维护
 
+## 纹理上传与采样（2026-10-22）
+
+本轮主线完整 CPU 九组990例/16637断言通过，无跳过。
+真实 `AYRenderer_PhoskiaGpu` 两后端各38例/35502断言通过，无跳过；报告为
+`gpu-current-full-d3d11.json`、`gpu-current-full-d3d12.json`。格式检查覆盖4×4、5×3、1×7、7×1、
+8×12、12×4，七种格式、linear/sRGB及完整层级，对独立RGBA8参考逐通道容差1e-6，单例19909断言。
+超过设备尺寸上限的替换输入仍保持旧GPU各层可读，完整生命周期单例1031断言。
+定向准备/解码ASan为13例/440断言，见`texture-safety-asan-current.json`。
+
+`quality-serial-{checker,stripes}-{d3d11,d3d12}/acceptance.json` 是单独串行采集的画质/计时证据；
+两个后端的checker基础级帧间差31.9089、完整三线性0；stripes三线性参考误差123.5074、各向异性16.1246。
+checker的面积均值和stripes的已分辨U信号是不同的判据，不能把条纹运动本身当作闪烁。
+此前`quality-reviewed-*`批次曾与GPU套件尾部重叠，其计时排除；失败与排除证据保留，不重复累计为最终通过。
+空场参考在请求截图前稳定8帧，其他相机输入也先稳定后捕获；这不承诺截图API同步对应请求帧。
+
+Editor实际两后端的AssetReimport、MaterialWorkshop、MaterialPreview均通过，分别在
+`native-current-{AssetReimport,MaterialWorkshop,MaterialPreview}-{d3d11,d3d12}/`。
+本轮未新增GPU OOM、设备丢失、完整Editor默认GameLoop或整引擎ASan验收。
+
+跨模块当前进度/证据入口见[纹理采样任务](../../../AYDocs/RENDER-TEXTURE-SAMPLING-20261021.md)。
+本轮主证据目录为根仓库`out/render-sampling-20261021/`，设备进程串行，CPU/Noop不替代设备证据。
+
+| 边界 | 验证入口 |
+|---|---|
+| 完整/前缀/坏尾部、精确块长、尺寸/预算、采样标志、Alpha裁切 | Contracts分区的TextureUploadPlanTests |
+| RRM原始上传尺寸截断/非法格式拒绝、旧缓存保留 | SceneMaterial分区的RenderAssetBridgeTests |
+| 精确逐级颜色、分数LOD、min/mag、U/V寻址 | Gpu分区AYRenderer_PhoskiaGpu的resource_texture_* |
+| 4×4、5×3、1×7、7×1 × 七格式 × 线性/sRGB | resource_texture_native_compressed_and_srgb_mips_preserve_channel_semantics；逐层对独立RGBA8，容差1e-6 |
+| 真GPU旧数据保留、稳定ID、前缀基础级、销毁计数 | resource_texture_gpu_reload_retains_last_good_mips_and_partial_chain_is_initialized |
+| 当前Editor Apply/Cancel、Scene/预览、保存重开、失败重试 | AYEditor_AssetReimportRenderTest；两后端新目录 |
+| 隐式LOD的摩尔纹/斜视细节及独立计时 | AYRenderer_TextureSamplingRenderTest；输出acceptance.json、PNG序列 |
+
+```powershell
+AYRenderer_GpuTests --suite AYRenderer_PhoskiaGpu --case resource_texture_authored_mip_colors_reach_real_gpu_lod_sampling --report-json mip.json
+# 上述设备测试需在独立进程设置AY_TAA_GPU_TEST=d3d11或d3d12。
+AYRenderer_TextureSamplingRenderTest <新目录> d3d11 checker
+AYRenderer_TextureSamplingRenderTest <另一新目录> d3d12 stripes
+```
+
+checker使用已知面积均值的Nyquist棋盘，检查固定相机轨迹稳定内部区域的相邻帧差。
+stripes只沿U变化，在U信号已分辨的近处ROI对基础级双线性参考比较各向异性与三线性；
+不能把物理条纹随相机移动的差异当作闪烁。无AA、Unlit Forward的受控夹具，不代表全部场景。
+捕获/解码/磁盘IO不计入计时段；报告CPU提交中位/P95、有效GPU样本、设备及编码上传字节。
+上传字节不是驱动实际分配，单设备微计时不作FPS提升保证。
+
+定向ASan检查单独编译TextureUploadPlan、TextureImageLoader、Test_TextureUpload及runner，链接ASan Resource/AYTest；
+外部bimg等未重新插桩，STL容器注解按既有ASan配置关闭。原始编译命令/配置钩子在证据目录，临时钩子验证后移除。
+此前错误路径缺少显式bx::Error曾在普通构建触发Debug断点，失败报告保留；修复后需同时检查大头和截断小图。
+
 ## 材质工具箱与共享 program 生命周期（2026-10-20）
 
 本阶段证据根：`out/material-toolbox-20261020/`。CPU/Noop 只证明句柄、参数和所有权契约；

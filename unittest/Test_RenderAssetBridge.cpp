@@ -119,6 +119,34 @@ struct ForceScScope {
 
 TEST_SUITE(RenderAssetBridgeTests)
 
+TEST_CASE(raw_texture_admission_refuses_truncated_dimensions_and_invalid_format_before_allocation)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    BGFXAdapter adapter;BGFXInitParams init;init.backend=Backend::Noop;CHECK(adapter.initialize(init));
+    ayt::shader::ShaderResourcePool pool;RenderResourceManager resources(adapter,pool);
+    const std::array<uint8_t,4> pixel{1,2,3,255};
+    CHECK_FALSE(resources.createTextureFromRgba8(65536,1,pixel.data()).isValid());
+    CHECK_FALSE(resources.createTextureFromRgba8(16384,4097,pixel.data()).isValid());
+    CHECK_FALSE(resources.createDynamicTextureRgba8(1,65536).isValid());
+    CHECK_FALSE(resources.createTextureFromData(1,1,UINT32_MAX,pixel.data(),4).isValid());
+    CHECK_FALSE(bgfx::isValid(adapter.createTexture2DFromData(1,1,
+        static_cast<bgfx::TextureFormat::Enum>(-1),pixel.data(),4)));
+    CHECK_FALSE(bgfx::isValid(adapter.createTexture2DFromData(1,1,
+        bgfx::TextureFormat::Unknown,pixel.data(),4)));
+    CHECK_FALSE(bgfx::isValid(adapter.createTexture2DFromData(1,1,
+        bgfx::TextureFormat::UnknownDepth,pixel.data(),4)));
+    CHECK(resources.textures().empty());
+    const auto maximum=bgfx::getCaps()->limits.maxTextureSize;
+    if(maximum<UINT16_MAX){
+        const auto tooWide=static_cast<uint16_t>(maximum+1u);
+        CHECK_FALSE(bgfx::isValid(adapter.createTexture2D(tooWide,1,pixel.data())));
+        CHECK_FALSE(bgfx::isValid(adapter.createDynamicTexture2D(tooWide,1)));
+        CHECK_FALSE(bgfx::isValid(adapter.createRenderTargetTexture2D(tooWide,1,bgfx::TextureFormat::RGBA8)));
+    }
+    resources.shutdown();pool.shutdown();adapter.shutdown();
+}
+
 TEST_CASE(vertex_layout_from_cube_mesh)
 {
     ayt::resource::Mesh mesh;

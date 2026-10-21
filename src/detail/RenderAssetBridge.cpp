@@ -2,7 +2,7 @@
 
 #include "detail/RenderResourceManager.h"
 #include "detail/VertexLayoutBridge.h"
-#include "detail/TextureImageLoader.h"
+#include "detail/TextureUploadPlan.h"
 
 #include "AYResource/AssetPath.h"
 #include "AYResource/MeshMorphContract.h"
@@ -770,25 +770,6 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
     return handle;
 }
 
-namespace
-{
-
-bool mapAyTextureFormat(TextureFormat format, bgfx::TextureFormat::Enum& out)
-{
-    switch (format) {
-    case TextureFormat::RGBA8: out = bgfx::TextureFormat::RGBA8; return true;
-    case TextureFormat::RGB8:  out = bgfx::TextureFormat::RGB8;  return true;
-    case TextureFormat::BC1:   out = bgfx::TextureFormat::BC1;   return true;
-    case TextureFormat::BC3:   out = bgfx::TextureFormat::BC3;   return true;
-    case TextureFormat::BC4:   out = bgfx::TextureFormat::BC4;   return true;
-    case TextureFormat::BC5:   out = bgfx::TextureFormat::BC5;   return true;
-    case TextureFormat::BC7:   out = bgfx::TextureFormat::BC7;   return true;
-    default: return false;
-    }
-}
-
-} // namespace
-
 TextureHandle uploadTextureFromResource(RenderResourceManager& mgr,
                                           const ayt::resource::ITexture& texture,
                                           const std::string& cacheKey)
@@ -801,40 +782,8 @@ TextureHandle uploadTextureFromResource(RenderResourceManager& mgr,
                                           const std::string& cacheKey,
                                           bool srgb)
 {
-    if (texture.getMipmapCount() == 0) {
-        return {};
-    }
-
-    const uint8_t* pixels = texture.getMipmapData(0);
-    if (pixels == nullptr) {
-        return {};
-    }
-
-    bgfx::TextureFormat::Enum bgfxFormat = bgfx::TextureFormat::RGBA8;
-    if (!mapAyTextureFormat(texture.getFormat(), bgfxFormat)) {
-        return {};
-    }
-
-    const bool useSrgb = srgb || texture.getSampler().sRGB;
-    if (useSrgb && (texture.getFormat() == ayt::resource::TextureFormat::BC4
-        || texture.getFormat() == ayt::resource::TextureFormat::BC5)) {
-        const auto decoded = decodeUnsignedBcChannels(texture.getWidth(), texture.getHeight(),
-            pixels, texture.getMipmapSize(0),
-            texture.getFormat() == ayt::resource::TextureFormat::BC5);
-        if (!decoded.isValid()) return {};
-        std::fprintf(stderr, "[TextureContract] %s sRGB expands to RGBA8; native sRGB supported=%d\n",
-            texture.getFormat() == ayt::resource::TextureFormat::BC5 ? "BC5" : "BC4",
-            bgfx::isTextureValid(0, false, 1, bgfxFormat, BGFX_TEXTURE_SRGB) ? 1 : 0);
-        return mgr.createTextureFromRgba8(decoded.width, decoded.height,
-            decoded.rgba8.data(), cacheKey, true);
-    }
-    return mgr.createTextureFromData(texture.getWidth(),
-                                     texture.getHeight(),
-                                     static_cast<uint32_t>(bgfxFormat),
-                                     pixels,
-                                     texture.getMipmapSize(0),
-                                     cacheKey,
-                                     useSrgb);
+    const auto plan = prepareTextureUpload(texture, srgb);
+    return mgr.createTextureFromPlan(plan, cacheKey);
 }
 
 } // namespace ayt::render::detail

@@ -1,5 +1,30 @@
 # AYRenderer Design
 
+## 2026-10-22 — 有界纹理上传与采样
+
+`TextureUploadPlan` 是 implementation-only CPU 准备边界：借用 ITexture，校验每层尺寸/负载，
+复制上传字节及采样标志，不修改 L2 对象、不发布缓存、不分配 GPU。
+仅接受完整链或单层；合法前缀链回退基础层并诊断，坏尾部仍拒绝。
+全链字节≤256 MiB；BGFXAdapter 在分配上传 Memory 前再次核对设备格式和 calcTextureSize。
+完整链使用 hasMips=true，所有层在 create 时一并初始化，不留下未初始化的设备层。
+
+RGB8 sRGB 转 RGBA8；BC4/BC5 sRGB 保留 R/RG、缺失颜色0、alpha1；
+非块对齐压缩尺寸也逐层展开 RGBA8，避免设备的块对齐尺寸改变层级/负载契约。
+BC1/3/7 使用完整块 padded 解码后裁切；BC4 继续使用 BC5 red block 配对规避当前 decoder 的单通道问题。
+padded 临时图≤256 MiB；此限值与计划总字节分别核对，不是整个进程的内存上限。
+Raw 文件路径先做容器/栅格头检查，输入和展开图各≤256 MiB，拒绝数组/cube/volume，
+防止先分配巨型图像再由上传器拒绝。2D Host 上传也拒绝16位截断尺寸及非法格式枚举。
+
+sampler 使用纹理创建标志，由 ShaderResource 默认绑定继承；不向共享 program 写入全局采样状态。
+Point/None 为最近邻，Bilinear 使用最近 mip，Trilinear 跨 mip 线性；magnification 支持最近邻/线性。
+各向异性请求>1启用 sampler flag，并由 reset 的 MAXANISOTROPY 使用设备最大值；
+没有逐纹理2x/4x/8x保证。Border回退Clamp，LOD bias回退0，其余不支持/非法值有明确诊断。
+
+RRM 只在创建成功后登记 GpuTexture；诊断保留 sourceMipCount/mipCount/uploadBytes/flags。
+显式重载先创建匿名临时项，再交换既有稳定ID的数据并销毁旧项；失败不触碰旧表项。
+测试直接在 D3D11/12 读取旧/新各层，验证非法驻留 L2 拒绝、合法前缀只采样基础层，以及释放后的纹理计数。
+这不是设备 OOM、纹理流送或独立渲染线程的实现。
+
 ## 2026-10-21 — BC4/BC5 sRGB 安全上传
 
 真实导入回归在 BC4 作为颜色贴图时触发 D3D11 breakpoint，保留 Windows 事件/失败日志。

@@ -17,6 +17,8 @@ struct MeshMorphContract;
 namespace ayt::render::detail
 {
 
+struct TextureUploadPlan;
+
 // L3 owner: GPU maps + opaque Mesh/Material/Texture handles.
 // Upload copies L2 CPU data; RRM does not retain shared_ptr<IResource>.
 // L2 unload/trim does not destroy GPU — only destroy* / shutdown / hot-reload
@@ -121,6 +123,10 @@ public:
                                          const uint8_t* pixels,
                                          const std::string& cacheKey,
                                          bool srgb);
+    // Internal validated, owned CPU upload. Cache publication follows a
+    // successful GPU creation; hot reload uses an anonymous temporary entry.
+    TextureHandle createTextureFromPlan(const TextureUploadPlan& plan,
+                                         const std::string& cacheKey = "");
     // Mutable RGBA8 texture for per-frame CPU uploads (AYVideo V3).
     // Never cached — each call allocates a fresh GPU texture.
     TextureHandle createDynamicTextureRgba8(uint32_t width, uint32_t height);

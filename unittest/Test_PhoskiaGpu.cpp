@@ -30,6 +30,11 @@
 #include "detail/PassExecContext.h"
 #include "detail/BgfxMatrix.h"
 #include "detail/TextureImageLoader.h"
+#include "detail/RenderAssetBridge.h"
+#include "detail/RenderResourceManager.h"
+#include "AYResource/assetsImpl/Texture.h"
+#include "AYResource/ResourceBootstrap.h"
+#include "AYResource/ResourceManager.h"
 #include "../demo/ProceduralGalleryGeometry.h"
 #include "AYMath/MathUtils.h"
 
@@ -39,6 +44,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <chrono>
 #include <functional>
 #include <iostream>
@@ -173,6 +179,317 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+
+TEST_CASE(resource_texture_authored_mip_colors_reach_real_gpu_lod_sampling) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f;
+    const bool initialized = f.initialize(backend);
+    CHECK(initialized);
+    if (!initialized) return;
+    RenderResourceManager resources(f.adapter, f.pool);
+    struct Cleanup { RenderResourceManager& resources; ~Cleanup() { resources.shutdown(); } } cleanup{resources};
+    ayt::resource::Texture source;
+    source._width = source._height = 4;
+    source._format = ayt::resource::TextureFormat::RGBA8;
+    const std::array<Pixel, 3> colors{{{1,0,0,1}, {0,1,0,1}, {0,0,1,1}}};
+    std::vector<uint8_t> bytes;
+    std::vector<uint32_t> offsets, sizes;
+    for (uint32_t level = 0, side = 4; level < 3; ++level, side /= 2) {
+        offsets.push_back(static_cast<uint32_t>(bytes.size()));
+        sizes.push_back(side * side * 4);
+        for (uint32_t pixel = 0; pixel < side * side; ++pixel)
+            for (float value : colors[level]) bytes.push_back(static_cast<uint8_t>(value * 255));
+    }
+    source.setImageData(std::move(bytes));
+    source.setMipmapLayout(std::move(offsets), std::move(sizes));
+    const auto texture = uploadTextureFromResource(resources, source, "");
+    CHECK(texture.isValid());
+    if (!texture.isValid()) return;
+    const auto gpu = resources.textures().at(texture.id).handle;
+    for (int level = 0; level < 3; ++level) {
+        std::cerr << "[TextureMip] backend=" << backend << " level=" << level << '\n';
+        checkPixels(f.render("texture2d image;", "return sampleLod(image, vec2(0.5), "
+            + std::to_string(level) + ".0);", [&](const auto& program) {
+                const auto binding = program.getTextureBinding("image");
+                program.setTexture(program.getTextureStage(binding), binding, toShaderTexture(gpu));
+            }), colors[level]);
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(resource_texture_fractional_lod_obeys_bilinear_and_trilinear_settings) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f; const bool initialized = f.initialize(backend);
+    CHECK(initialized); if (!initialized) return;
+    RenderResourceManager resources(f.adapter, f.pool);
+    struct Cleanup { RenderResourceManager& r; ~Cleanup() { r.shutdown(); } } cleanup{resources};
+    ayt::resource::Texture source;
+    source._width = source._height = 4;
+    std::vector<uint8_t> bytes(84,0);
+    for (size_t i = 0; i < 16; ++i) { bytes[i*4] = 255; bytes[i*4+3] = 255; }
+    for (size_t i = 64; i < 80; i += 4) { bytes[i+1] = 255; bytes[i+3] = 255; }
+    bytes[82] = bytes[83] = 255;
+    source.setImageData(std::move(bytes)); source.setMipmapLayout({0,64,80},{64,16,4});
+    for (bool trilinear : {false,true}) {
+        auto sampler = source.getSampler();
+        sampler.minFilter = trilinear ? ayt::resource::TextureFilter::Trilinear : ayt::resource::TextureFilter::Bilinear;
+        source.setSampler(sampler);
+        const auto texture = uploadTextureFromResource(resources,source,"");
+        CHECK(texture.isValid()); if (!texture.isValid()) continue;
+        for (float lod : {.25f,.75f}) {
+            const Pixel expected = trilinear ? Pixel{1-lod,lod,0,1}
+                : lod < .5f ? Pixel{1,0,0,1} : Pixel{0,1,0,1};
+            checkPixels(f.render("texture2d image;", "return sampleLod(image, vec2(0.5), "
+                + std::to_string(lod) + ");", [&](const auto& shader) {
+                    const auto b = shader.getTextureBinding("image");
+                    shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(resources.textures().at(texture.id).handle));
+                }),expected);
+        }
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(resource_texture_addressing_and_magnification_reach_real_sampler) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f; const bool initialized = f.initialize(backend);
+    CHECK(initialized); if (!initialized) return;
+    RenderResourceManager resources(f.adapter, f.pool);
+    struct Cleanup { RenderResourceManager& r; ~Cleanup() { r.shutdown(); } } cleanup{resources};
+    using namespace ayt::resource;
+    Texture source; source._width = source._height = 2;
+    const std::vector<uint8_t> bytes{255,0,0,255, 0,255,0,255, 0,0,255,255, 255,255,255,255};
+    source.setImageData(bytes.data(),bytes.size()); source.setMipmapLayout({0},{16});
+    for (auto wrap : {TextureWrap::Repeat,TextureWrap::Clamp,TextureWrap::Mirror}) {
+        for (int axis = 0; axis < 2; ++axis) {
+            TextureSampler sampler; sampler.minFilter = sampler.magFilter = TextureFilter::Point;
+            if (axis == 0) sampler.wrapU = wrap; else sampler.wrapV = wrap;
+            source.setSampler(sampler);
+            const auto texture = uploadTextureFromResource(resources,source,"");
+            CHECK(texture.isValid()); if (!texture.isValid()) continue;
+            const auto coordinate = axis == 0 ? "vec2(1.25,0.25)" : "vec2(0.25,1.25)";
+            const Pixel expected = wrap == TextureWrap::Repeat ? Pixel{1,0,0,1}
+                : axis == 0 ? Pixel{0,1,0,1} : Pixel{0,0,1,1};
+            checkPixels(f.render("texture2d image;", std::string("return sampleLod(image, ") + coordinate
+                + ", 0.0);", [&](const auto& shader) {
+                    const auto b = shader.getTextureBinding("image");
+                    shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(resources.textures().at(texture.id).handle));
+                }),expected);
+        }
+    }
+    for (bool linear : {false,true}) {
+        TextureSampler sampler; sampler.minFilter = sampler.magFilter = linear ? TextureFilter::Bilinear : TextureFilter::Point;
+        source.setSampler(sampler);
+        const auto texture = uploadTextureFromResource(resources,source,"");
+        CHECK(texture.isValid()); if (!texture.isValid()) continue;
+        checkPixels(f.render("texture2d image;", "return sampleLod(image, vec2(0.375,0.25), -1.0);",
+            [&](const auto& shader) {
+                const auto b = shader.getTextureBinding("image");
+                shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(resources.textures().at(texture.id).handle));
+            }),linear ? Pixel{.75f,.25f,0,1} : Pixel{1,0,0,1});
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(resource_texture_native_compressed_and_srgb_mips_preserve_channel_semantics) {
+#ifdef _WIN32
+    const char* backend = std::getenv("AY_TAA_GPU_TEST");
+    if (!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f; const bool initialized = f.initialize(backend);
+    CHECK(initialized); if (!initialized) return;
+    RenderResourceManager resources(f.adapter, f.pool);
+    struct Cleanup { RenderResourceManager& r; ~Cleanup() { r.shutdown(); } } cleanup{resources};
+    using namespace ayt::resource;
+    for (auto dimensions : {std::array<uint32_t,2>{4,4},{5,3},{1,7},{7,1},{8,12},{12,4}}) {
+    uint32_t mipCount = 1;
+    for (uint32_t side = std::max(dimensions[0],dimensions[1]); side > 1; side >>= 1) ++mipCount;
+    for (auto format : {TextureFormat::RGBA8,TextureFormat::RGB8,TextureFormat::BC1,TextureFormat::BC3,
+                       TextureFormat::BC4,TextureFormat::BC5,TextureFormat::BC7}) {
+        Texture source; source._width = dimensions[0]; source._height = dimensions[1]; source._format = format;
+        std::vector<uint8_t> bytes; std::vector<uint32_t> offsets,sizes;
+        std::vector<Pixel> expected(mipCount);
+        for (uint32_t level = 0, w = source._width, h = source._height; level < mipCount;
+             ++level, w = std::max(1u,w/2), h = std::max(1u,h/2)) {
+            std::vector<uint8_t> mip(Texture::computeMipSize(w,h,format),0);
+            expected[level] = level%3 == 0 ? Pixel{1,0,0,1} : level%3 == 1 ? Pixel{0,1,0,1} : Pixel{0,0,1,1};
+            if (format == TextureFormat::BC4 || format == TextureFormat::BC5) {
+                const uint8_t red = static_cast<uint8_t>(64 + level * 32);
+                for (size_t block = 0; block < mip.size(); block += format == TextureFormat::BC5 ? 16 : 8) {
+                    mip[block] = mip[block+1] = red;
+                    if (format == TextureFormat::BC5) mip[block+8] = mip[block+9] = 192;
+                }
+                expected[level] = Pixel{red/255.f,format == TextureFormat::BC5 ? 192/255.f : 0,0,1};
+            } else if (format == TextureFormat::BC1 || format == TextureFormat::BC3) {
+                const uint16_t color = level%3 == 0 ? 0xf800 : level%3 == 1 ? 0x07e0 : 0x001f;
+                const size_t rgb = format == TextureFormat::BC3 ? 8 : 0;
+                for (size_t block = 0; block < mip.size(); block += rgb ? 16 : 8) {
+                    if (rgb) mip[block] = mip[block+1] = 255;
+                    mip[block+rgb] = static_cast<uint8_t>(color); mip[block+rgb+1] = static_cast<uint8_t>(color>>8);
+                }
+            } else {
+                std::vector<uint8_t> rgba(w*h*4);
+                for (size_t p = 0; p < w*h; ++p)
+                    for (size_t c = 0; c < 4; ++c) rgba[p*4+c] = static_cast<uint8_t>(expected[level][c]*255);
+                if (format == TextureFormat::BC7) {
+                    // Fixed BC7 mode 6: two identical 7-bit RGBA endpoints,
+                    // one shared p-bit per endpoint, all interpolation indices
+                    // zero. This golden block is independent of any encoder.
+                    size_t bit = 0;
+                    const auto put = [&](uint32_t value, unsigned count) {
+                        for (unsigned i = 0; i < count; ++i, ++bit)
+                            mip[bit/8] |= static_cast<uint8_t>(((value>>i)&1u) << (bit%8));
+                    };
+                    put(64,7);
+                    for (size_t c = 0; c < 4; ++c) { put(rgba[c]>>1,7); put(rgba[c]>>1,7); }
+                    put(1,1); put(1,1);
+                    for (size_t block = 16; block < mip.size(); block += 16)
+                        std::copy_n(mip.begin(),16,mip.begin()+block);
+                    for (size_t c = 0; c < 4; ++c) expected[level][c] = float(rgba[c] | 1u)/255.f;
+                }
+                else if (format == TextureFormat::RGBA8) mip = std::move(rgba);
+                else for (size_t p = 0; p < w*h; ++p)
+                    for (size_t c = 0; c < 3; ++c) mip[p*3+c] = rgba[p*4+c];
+            }
+            CHECK(mip.size() == Texture::computeMipSize(w,h,format));
+            offsets.push_back(static_cast<uint32_t>(bytes.size())); sizes.push_back(static_cast<uint32_t>(mip.size()));
+            bytes.insert(bytes.end(),mip.begin(),mip.end());
+        }
+        source.setImageData(std::move(bytes)); source.setMipmapLayout(std::move(offsets),std::move(sizes));
+        // Independent uncompressed golden source. Compare on the same device
+        // so its sRGB conversion precision is not confused with decode errors.
+        Texture reference; reference._width = source._width; reference._height = source._height;
+        std::vector<uint8_t> referenceBytes;
+        std::vector<uint32_t> referenceOffsets,referenceSizes;
+        for (uint32_t level = 0, w = source._width, h = source._height; level < mipCount;
+             ++level, w = std::max(1u,w/2), h = std::max(1u,h/2)) {
+            referenceOffsets.push_back(static_cast<uint32_t>(referenceBytes.size())); referenceSizes.push_back(w*h*4);
+            for (uint32_t p = 0; p < w*h; ++p)
+                for (float value : expected[level]) referenceBytes.push_back(static_cast<uint8_t>(std::lround(value*255)));
+        }
+        reference.setImageData(std::move(referenceBytes));
+        reference.setMipmapLayout(std::move(referenceOffsets),std::move(referenceSizes));
+        for (bool srgb : {false,true}) {
+            const auto texture = uploadTextureFromResource(resources,source,"",srgb);
+            const auto referenceTexture = uploadTextureFromResource(resources,reference,"",srgb);
+            std::cerr << "[TextureFormatMip] backend=" << backend << " size=" << source._width << 'x' << source._height
+                << " format=" << int(format) << " srgb=" << srgb << '\n';
+            CHECK(texture.isValid()); CHECK(referenceTexture.isValid());
+            if (!texture.isValid() || !referenceTexture.isValid()) continue;
+            for (uint32_t level = 0; level < mipCount; ++level) {
+                const auto readLevel = [&](ayt::render::TextureHandle handle) {
+                    return f.render("texture2d image;", "return sampleLod(image,vec2(0.5),"
+                    + std::to_string(level) + ".0);",[&](const auto& shader) {
+                        const auto b = shader.getTextureBinding("image");
+                        shader.setTexture(shader.getTextureStage(b),b,toShaderTexture(resources.textures().at(handle.id).handle));
+                    });
+                };
+                const auto pixels = readLevel(texture);
+                const auto referencePixels = readLevel(referenceTexture);
+                CHECK(pixels.size() == 16);
+                CHECK(referencePixels.size() == pixels.size());
+                if (!pixels.empty()) std::cerr << "[TextureFormatPixel] level=" << level
+                    << " expected=" << expected[level][0] << ',' << expected[level][1] << ',' << expected[level][2]
+                    << " actual=" << pixels[0][0] << ',' << pixels[0][1] << ',' << pixels[0][2] << ',' << pixels[0][3] << '\n';
+                if (referencePixels.size() != pixels.size()) continue;
+                for (size_t p = 0; p < pixels.size(); ++p) for (size_t c = 0; c < 4; ++c) {
+                    CHECK(std::isfinite(pixels[p][c]) && std::abs(pixels[p][c]-referencePixels[p][c]) < .000001f);
+                }
+            }
+        }
+    }
+    }
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
+TEST_CASE(resource_texture_gpu_reload_retains_last_good_mips_and_partial_chain_is_initialized) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0])SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f;const bool initialized=f.initialize(backend);CHECK(initialized);if(!initialized)return;
+    CHECK(ayt::resource::initializeLoaders());
+    auto& cpu=ayt::resource::ResourceManager::instance();cpu.setAutoWatchLoadedResources(false);cpu.unloadAll();
+    const auto path=std::filesystem::temp_directory_path()/("ay-texture-gpu-reload-"
+        +std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".txr");
+    struct Remove {std::filesystem::path path;~Remove(){std::error_code ec;std::filesystem::remove(path,ec);}} remove{path};
+    const auto bake=[](const std::array<Pixel,3>& colors,uint32_t count){
+        ayt::resource::Texture source;source._width=source._height=4;
+        std::vector<uint8_t> bytes;std::vector<uint32_t> offsets,sizes;
+        for(uint32_t level=0,side=4;level<count;++level,side/=2){
+            offsets.push_back(static_cast<uint32_t>(bytes.size()));sizes.push_back(side*side*4);
+            for(uint32_t p=0;p<side*side;++p)
+                for(float value:colors[level])bytes.push_back(static_cast<uint8_t>(value*255));
+        }
+        source.setImageData(std::move(bytes));source.setMipmapLayout(std::move(offsets),std::move(sizes));return source;
+    };
+    const std::array<Pixel,3> first{{{1,0,0,1},{0,1,0,1},{0,0,1,1}}};
+    const std::array<Pixel,3> second{{{0,0,1,1},{1,0,0,1},{0,1,0,1}}};
+    auto original=bake(first,3);std::vector<uint8_t> binary;CHECK(original.saveToBinary(binary));
+    {std::ofstream stream(path,std::ios::binary);stream.write(reinterpret_cast<const char*>(binary.data()),std::streamsize(binary.size()));CHECK(bool(stream));}
+    for(int i=0;i<3;++i)f.adapter.endFrame();
+    const auto baselineTextures=bgfx::getStats()->numTextures;
+    RenderResourceManager resources(f.adapter,f.pool);
+    struct Cleanup {RenderResourceManager& r;~Cleanup(){r.shutdown();}} cleanup{resources};
+    auto handle=resources.loadTexture(path.string());CHECK(handle.isValid());if(!handle.isValid())return;
+    const auto stableId=handle.id;
+    const auto read=[&](int level){
+        return f.render("texture2d image;","return sampleLod(image,vec2(0.5),"+std::to_string(level)+".0);",[&](const auto& shader){
+            const auto binding=shader.getTextureBinding("image");
+            shader.setTexture(shader.getTextureStage(binding),binding,toShaderTexture(resources.textures().at(stableId).handle));
+        });
+    };
+    for(int level=0;level<3;++level)checkPixels(read(level),first[level]);
+    auto resident=cpu.load<ayt::resource::Texture>(path.string());CHECK(bool(resident));if(!resident)return;
+    const auto oldGpu=resources.textures().at(stableId).handle.idx;
+    // Reject malformed resident L2 input at the actual GPU boundary. This does
+    // not simulate device OOM or disk publication, which have separate checks.
+    resident->setMipmapLayout({0,64,80},{64,8,4});
+    CHECK_FALSE(resources.reloadTextureFromPath(path.string()));
+    CHECK(resources.textures().at(stableId).handle.idx==oldGpu);
+    for(int level=0;level<3;++level)checkPixels(read(level),first[level]);
+    const auto maximum=bgfx::getCaps()->limits.maxTextureSize;
+    if(maximum<UINT16_MAX){
+        ayt::resource::Texture beyondDevice;
+        beyondDevice.createSolidColor(uint32_t(maximum)+1u,1,255,255,255);
+        CHECK(beyondDevice.saveToBinary(binary));
+        CHECK(resident->loadFromBinary(binary.data(),binary.size()));
+        CHECK_FALSE(resources.reloadTextureFromPath(path.string()));
+        CHECK(resources.textures().at(stableId).handle.idx==oldGpu);
+        for(int level=0;level<3;++level)checkPixels(read(level),first[level]);
+    }
+    auto replacement=bake(second,3);CHECK(replacement.saveToBinary(binary));
+    CHECK(resident->loadFromBinary(binary.data(),binary.size()));
+    CHECK(resources.reloadTextureFromPath(path.string()));
+    CHECK(resources.loadTexture(path.string()).id==stableId);
+    CHECK(resources.textures().at(stableId).handle.idx!=oldGpu);
+    for(int level=0;level<3;++level)checkPixels(read(level),second[level]);
+    replacement=bake(first,2);CHECK(replacement.saveToBinary(binary));
+    CHECK(resident->loadFromBinary(binary.data(),binary.size()));
+    CHECK(resources.reloadTextureFromPath(path.string()));
+    CHECK(resources.textures().at(stableId).mipCount==1);
+    CHECK(resources.textures().at(stableId).sourceMipCount==2);
+    CHECK(resources.textures().at(stableId).partialChainFallback);
+    for(int level=0;level<3;++level)checkPixels(read(level),first[0]);
+    resources.destroyTexture(handle);CHECK_FALSE(handle.isValid());CHECK(resident->isLoaded());
+    resources.shutdown();cpu.unloadAll();
+    for(int i=0;i<6;++i)f.adapter.endFrame();
+    CHECK(bgfx::getStats()->numTextures==baselineTextures);
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
 
 TEST_CASE(pbr_mask_uv_and_opacity_channels_match_main_paths_without_cutoff_bleed) {
 #ifdef _WIN32

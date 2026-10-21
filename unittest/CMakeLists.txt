@@ -2,7 +2,7 @@ include(TestGroups.cmake)
 
 if(MSVC)
     # bx half conversion used by production-precision GPU readback tests.
-    set_source_files_properties(Test_TAAGpu.cpp PROPERTIES
+    set_source_files_properties(Test_TAAGpu.cpp Test_PhoskiaGpu.cpp PROPERTIES
         COMPILE_OPTIONS "/Zc:__cplusplus;/Zc:preprocessor")
 endif()
 
@@ -86,3 +86,18 @@ ay_add_test(AYRenderer_SceneMaterialTests NAME AYRenderer_2DEditorOverlayBaselin
     RESOURCE_LOCK renderer-backend-fixtures TIMEOUT 60)
 ay_add_test(AYRenderer_ContractsTests NAME AYRenderer_MixedSceneVisibility
     SUITE RendererSceneVisibilityTests LABELS "2d-3d-mixed;ayrenderer")
+
+if(WIN32)
+    # Explicit real-device visual/temporal acceptance. Fresh output directory
+    # and backend are required; never mixed into portable CPU/Noop statistics.
+    add_executable(AYRenderer_TextureSamplingRenderTest EXCLUDE_FROM_ALL
+        integration/TextureSamplingRenderTest.cpp)
+    target_link_libraries(AYRenderer_TextureSamplingRenderTest PRIVATE
+        AYRenderer AYResource nlohmann_json::nlohmann_json user32)
+    target_include_directories(AYRenderer_TextureSamplingRenderTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+    ay_stage_production_shaders(AYRenderer_TextureSamplingRenderTest)
+    if(MSVC)
+        target_link_options(AYRenderer_TextureSamplingRenderTest PRIVATE /DEBUG:NONE /INCREMENTAL:NO)
+    endif()
+endif()

@@ -14,6 +14,8 @@ struct DecodedImage {
     bool isValid() const noexcept { return width > 0 && height > 0 && !rgba8.empty(); }
 };
 
+// UTF-8 2D image path. Header preflight before pixel expansion; encoded and
+// expanded data are each bounded at 256 MiB. Arrays/cubes/volumes are refused.
 DecodedImage decodeImageFile(const std::string& path);
 
 // BC4/BC5 have no native sRGB view. Expand their unsigned channels without
@@ -21,5 +23,11 @@ DecodedImage decodeImageFile(const std::string& path);
 // dimensions fit the GPU's 16-bit interface, expanded storage is capped at 256 MiB.
 DecodedImage decodeUnsignedBcChannels(uint32_t width, uint32_t height,
     const uint8_t* blocks, uint32_t byteCount, bool twoChannels);
+
+enum class BcColorFormat { BC1, BC3, BC7 };
+// Portable fallback for compressed textures whose top-level dimensions are
+// not block aligned. Decode complete blocks, crop edges, retain straight alpha.
+DecodedImage decodeBcColor(uint32_t width, uint32_t height,
+    const uint8_t* blocks, uint32_t byteCount, BcColorFormat format);
 
 } // namespace ayt::render::detail

@@ -4,6 +4,7 @@
 
 #include "detail/RenderAssetBridge.h"
 #include "detail/TextureImageLoader.h"
+#include "detail/TextureUploadPlan.h"
 #include "detail/VertexLayoutBridge.h"
 #include "detail/WorldLit2DMaterialSource.h"
 
@@ -1482,6 +1483,34 @@ bool RenderResourceManager::setMaterialModel(MaterialHandle material,
     return true;
 }
 
+TextureHandle RenderResourceManager::createTextureFromPlan(const TextureUploadPlan& plan,
+                                                            const std::string& cacheKey)
+{
+    if (!_adapter.isInitialized() || !plan.isValid()
+        || plan.bytes.size() > TextureUploadPlan::byteLimit) return {};
+    if (!cacheKey.empty()) {
+        const auto cached = _textureCacheByKey.find(cacheKey);
+        if (cached != _textureCacheByKey.end()) return TextureHandle{cached->second};
+    }
+    GpuTexture gpu;
+    gpu.width = plan.width; gpu.height = plan.height;
+    gpu.srgb = (plan.flags & BGFX_TEXTURE_SRGB) != 0;
+    gpu.mipCount = plan.mipCount; gpu.sourceMipCount = plan.sourceMipCount;
+    gpu.uploadBytes = static_cast<uint32_t>(plan.bytes.size());
+    gpu.samplerFlags = plan.flags & BGFX_SAMPLER_BITS_MASK;
+    gpu.partialChainFallback = plan.partialChainFallback;
+    gpu.samplerFallback = plan.samplerFallback;
+    gpu.handle = _adapter.createTexture2DFromData(plan.width, plan.height, plan.format,
+        plan.bytes.data(), gpu.uploadBytes, plan.flags, plan.mipCount > 1);
+    if (!bgfx::isValid(gpu.handle)) return {};
+    const uint64_t id = _nextTextureId++;
+    _textures.emplace(id, std::move(gpu));
+    if (!cacheKey.empty()) _textureCacheByKey.emplace(cacheKey, id);
+    if (!plan.diagnostic.empty())
+        std::fprintf(stderr, "[TextureSampling] %s: %s\n", cacheKey.c_str(), plan.diagnostic.c_str());
+    return TextureHandle{id};
+}
+
 TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint32_t height,
                                                             const uint8_t* pixels,
                                                             const std::string& cacheKey)
@@ -1495,7 +1524,8 @@ TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint
                                                             bool srgb)
 {
     TextureHandle out;
-    if (!_adapter.isInitialized() || width == 0 || height == 0 || pixels == nullptr) {
+    if (!_adapter.isInitialized() || width == 0 || height == 0 || pixels == nullptr
+        || width > UINT16_MAX || height > UINT16_MAX || uint64_t(width)*height*4u > TextureUploadPlan::byteLimit) {
         return out;
     }
 
@@ -1530,7 +1560,8 @@ TextureHandle RenderResourceManager::createDynamicTextureRgba8(uint32_t width,
                                                                uint32_t height)
 {
     TextureHandle out;
-    if (!_adapter.isInitialized() || width == 0 || height == 0) {
+    if (!_adapter.isInitialized() || width == 0 || height == 0 || width > UINT16_MAX || height > UINT16_MAX
+        || uint64_t(width)*height*4u > TextureUploadPlan::byteLimit) {
         return out;
     }
 
@@ -1632,7 +1663,9 @@ TextureHandle RenderResourceManager::createTextureFromData(uint32_t width, uint3
                                                            bool srgb)
 {
     TextureHandle out;
-    if (!_adapter.isInitialized() || width == 0 || height == 0 || data == nullptr || size == 0) {
+    if (!_adapter.isInitialized() || width == 0 || height == 0 || data == nullptr || size == 0
+        || width > UINT16_MAX || height > UINT16_MAX || size > TextureUploadPlan::byteLimit
+        || bgfxTextureFormat >= static_cast<uint32_t>(bgfx::TextureFormat::Count)) {
         return out;
     }
 

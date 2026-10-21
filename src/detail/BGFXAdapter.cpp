@@ -121,7 +121,9 @@ bgfx::RendererType::Enum BGFXAdapter::mapBackend(Backend backend)
 
 uint32_t bgfxResetFlags(bool vsync, uint32_t msaa) noexcept
 {
-    uint32_t reset = vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+    // Enables device maximum only for samplers explicitly requesting anisotropy.
+    // bgfx does not expose independent per-texture numeric anisotropy levels.
+    uint32_t reset = (vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE) | BGFX_RESET_MAXANISOTROPY;
     switch (msaa) {
     case 2:  reset |= BGFX_RESET_MSAA_X2;  break;
     case 4:  reset |= BGFX_RESET_MSAA_X4;  break;
@@ -419,11 +421,24 @@ bgfx::IndexBufferHandle BGFXAdapter::createIndexBuffer(const void* data, uint32_
     return bgfx::createIndexBuffer(mem, flags);
 }
 
+namespace {
+bool texture2DRequestValid(uint16_t width,uint16_t height,bgfx::TextureFormat::Enum format,uint64_t flags)
+{
+    if (!width || !height || static_cast<uint32_t>(format) >= static_cast<uint32_t>(bgfx::TextureFormat::Count)
+        || format == bgfx::TextureFormat::Unknown || format == bgfx::TextureFormat::UnknownDepth) return false;
+    const auto* caps=bgfx::getCaps();
+    if (!caps || width>caps->limits.maxTextureSize || height>caps->limits.maxTextureSize) return false;
+    return bgfx::isTextureValid(0,false,1,format,flags);
+}
+} // namespace
+
 bgfx::TextureHandle BGFXAdapter::createTexture2D(uint16_t width, uint16_t height,
                                                   const void* rgba8Data,
                                                   uint64_t flags)
 {
-    if (width == 0 || height == 0 || rgba8Data == nullptr) {
+    if (!_initialized || rgba8Data == nullptr
+        || !texture2DRequestValid(width,height,bgfx::TextureFormat::RGBA8,flags)
+        || uint64_t(width)*height*4u > UINT32_MAX) {
         return BGFX_INVALID_HANDLE;
     }
     const bgfx::Memory* mem = bgfx::copy(rgba8Data,
@@ -437,7 +452,7 @@ bgfx::TextureHandle BGFXAdapter::createTexture2D(uint16_t width, uint16_t height
 bgfx::TextureHandle BGFXAdapter::createDynamicTexture2D(uint16_t width, uint16_t height,
                                                          uint64_t flags)
 {
-    if (!_initialized || width == 0 || height == 0) {
+    if (!_initialized || !texture2DRequestValid(width,height,bgfx::TextureFormat::RGBA8,flags)) {
         return BGFX_INVALID_HANDLE;
     }
     // mem=nullptr → mutable texture; mirror BgfxFontAtlas atlas create.
@@ -452,8 +467,7 @@ bgfx::TextureHandle BGFXAdapter::createRenderTargetTexture2D(
     bgfx::TextureFormat::Enum format,
     uint64_t samplerFlags)
 {
-    if (!_initialized || width == 0 || height == 0
-        || format == bgfx::TextureFormat::Unknown) {
+    if (!_initialized || !texture2DRequestValid(width,height,format,BGFX_TEXTURE_RT | samplerFlags)) {
         return BGFX_INVALID_HANDLE;
     }
     return bgfx::createTexture2D(
@@ -500,6 +514,7 @@ bgfx::TextureHandle BGFXAdapter::createMutableTextureCube(
 {
     if (!_initialized || isNoopBackend() || size == 0
         || format == bgfx::TextureFormat::Unknown
+        || format == bgfx::TextureFormat::UnknownDepth
         || !bgfx::isTextureValid(0, true, 1, format, flags)) {
         return BGFX_INVALID_HANDLE;
     }
@@ -522,15 +537,16 @@ void BGFXAdapter::updateTextureCube(bgfx::TextureHandle handle,
 bgfx::TextureHandle BGFXAdapter::createTexture2DFromData(uint16_t width, uint16_t height,
                                                           bgfx::TextureFormat::Enum format,
                                                           const void* data, uint32_t size,
-                                                          uint64_t flags)
+                                                          uint64_t flags, bool hasMips)
 {
-    if (!_initialized || width == 0 || height == 0 || data == nullptr || size == 0
-        || format >= bgfx::TextureFormat::Count
-        || !bgfx::isTextureValid(0, false, 1, format, flags)) {
+    if (!_initialized || data == nullptr || size == 0 || !texture2DRequestValid(width,height,format,flags)) {
         return BGFX_INVALID_HANDLE;
     }
+    bgfx::TextureInfo info{};
+    bgfx::calcTextureSize(info, width, height, 1, false, hasMips, 1, format);
+    if (info.storageSize != size) return BGFX_INVALID_HANDLE;
     const bgfx::Memory* mem = bgfx::copy(data, size);
-    return bgfx::createTexture2D(width, height, false, 1, format,
+    return bgfx::createTexture2D(width, height, hasMips, 1, format,
                                  static_cast<uint64_t>(flags), mem);
 }
 

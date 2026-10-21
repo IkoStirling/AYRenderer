@@ -131,7 +131,8 @@ public:
     bgfx::TextureHandle createTexture2DFromData(uint16_t width, uint16_t height,
                                               bgfx::TextureFormat::Enum format,
                                               const void* data, uint32_t size,
-                                              uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE);
+                                              uint64_t flags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE,
+                                              bool hasMips = false);
 
     // R5+ (Phase PostProcess, 2026-07-20) — framebuffer abstraction.
     // BGFXAdapter owns FBO handles the same way it owns VB/IB/Texture
