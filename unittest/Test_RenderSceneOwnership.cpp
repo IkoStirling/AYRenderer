@@ -1,5 +1,6 @@
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/SceneVisibility.h"
+#include "AYRenderer/CameraViews.h"
 #include "AYRenderer/RendererSubSystem.h"
 #include "AYTest.h"
 
@@ -176,6 +177,26 @@ TEST_CASE(empty_data_and_self_assignment_preserve_scene_invariants)
     item.particleBatch = &callbackOnly;
     scene.add(item);
     CHECK(scene.hasBorrowedGpuStreams());
+}
+
+TEST_CASE(scene_lighting_snapshot_is_owned_stable_per_packet_and_preserved_by_filters)
+{
+    RenderScene source(RenderScene::DrawDataOwnership::OwnedCpu);SceneLights lights;
+    lights.add(Light::point({1,2,3},10,2,{1,.5f,.2f}));
+    CHECK(source.setSceneLights(lights));CHECK(source.sceneLights()!=&lights);
+    lights.lights[0].intensity=99;CHECK_FLOAT_EQ(source.sceneLights()->lights[0].intensity,2,1e-6f);
+    DrawPayload2D payload;payload.packedSortKey=13;DrawItem item;item.payload=&payload;
+    for(int i=0;i<32;++i)source.add(item);
+    RenderScene copied=source;const auto* original=copied.sceneLights();CHECK(original);
+    SceneLights empty;CHECK(source.setSceneLights(empty));CHECK(source.sceneLights()->count==0);
+    CHECK(copied.sceneLights()==original);CHECK(copied.sceneLights()->count==1);
+    SceneLights oversized;oversized.count=kMaxSceneLights+1;CHECK_FALSE(source.setSceneLights(oversized));
+    CHECK(source.sceneLights()->count==0);source.clearSceneLights();CHECK(source.sceneLights()==nullptr);CHECK(source.items().size()==32);
+    CHECK(source.items()[0].payload->packedSortKey==13);
+    RenderScene visible(RenderScene::DrawDataOwnership::OwnedCpu);copyVisibleSceneForPresentation(copied,visible,{});
+    CHECK(visible.sceneLights()&&visible.sceneLights()->count==1);copied.clear();CHECK(visible.sceneLights()->lights[0].position.x==1);
+    RenderScene camera;copyCameraVisibleScene(visible,camera,0xFFFFFFFFu);visible.clear();
+    CHECK(camera.sceneLights()&&camera.sceneLights()->count==1);camera.clear();CHECK(camera.sceneLights()==nullptr);
 }
 
 TEST_SUITE_END

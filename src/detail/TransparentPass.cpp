@@ -685,7 +685,7 @@ uint32_t TransparentPass::execute(PassExecContext& ctx)
     }
 
     const PackedSceneLighting packedLights =
-        packSceneLighting(ctx.sceneLights, frame);
+        packSceneLighting(ctx.sceneLights, frame, !ctx.scene.sceneLights() || ctx.sceneLights != ctx.scene.sceneLights());
     const PackedShadowAtlas receiverShadows =
         packShadowAtlas(ctx.shadowPass, true);
     const PackedShadowAtlas litFallbackShadows =

@@ -36,6 +36,7 @@ inline void copyVisibleSceneForPresentation(
     const SceneVisibilityFilter& filter)
 {
     destination.clear();
+    if (source.sceneLights()) destination.setSceneLights(*source.sceneLights());
     if (filter.cameraOverlay2D && source.hasOverlayCamera2D()) {
         const OverlayCamera2D& camera = source.overlayCamera2D();
         destination.setOverlayCamera2D(

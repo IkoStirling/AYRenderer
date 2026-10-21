@@ -63,12 +63,12 @@ bool uploadVec4Array(ayt::shader::ShaderResource& shader,
 } // namespace
 
 PackedSceneLighting packSceneLighting(const SceneLights* sceneLights,
-                                      const FrameContext& frame) noexcept
+                                      const FrameContext& frame, bool fallbackWhenEmpty) noexcept
 {
     PackedSceneLighting packed{};
     initializeInactiveSlots(packed);
 
-    if (sceneLights == nullptr || sceneLights->count == 0u) {
+    if (sceneLights == nullptr || (sceneLights->count == 0u && fallbackWhenEmpty)) {
         packed.activeLightCount = 1u;
         packed.dirs[0][0] = -finiteOr(frame.lightDirection.x, 0.0f);
         packed.dirs[0][1] = -finiteOr(frame.lightDirection.y, -1.0f);

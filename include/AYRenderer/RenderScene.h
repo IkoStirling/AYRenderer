@@ -20,6 +20,9 @@ namespace ayt::render
 // state still call Renderer::setDirectionalLight(dir, color) which
 // feeds FrameContext::lightDirection (the existing primitive) — no
 // Light struct ever needed on the render path.
+// 2026-10-21: optional owned SceneLights metadata uses the existing lighting
+// value type. It does not revive RenderScene::Light/addLight or add any
+// FrameContext fields/writeback; absent metadata retains the Host policy.
 // CM-1 (2026-08-11) — per-instance 2D draw data carried by
 // DrawItem.payload (Forward2DOpaquePass lane). Pure POD, no GPU
 // types, no allocators — alignof == 16 (FVector2/FVector4 are
@@ -119,6 +122,8 @@ struct OverlayCamera2D {
 
 // RenderScene crosses static-library boundaries. DrawItem is intentionally a
 // public value type, so every consumer must be rebuilt when its layout changes.
+struct SceneLights;
+
 class RenderScene {
 public:
     enum class DrawDataOwnership {
@@ -158,6 +163,15 @@ public:
     }
 
     void add(const DrawItem& item);
+    /// Copy a bounded, immutable lighting snapshot into this scene packet.
+    /// A present empty snapshot explicitly disables direct lights; no snapshot
+    /// preserves the renderer Host's existing light/fallback policy. Copies of
+    /// RenderScene share this backing safely. Count above capacity is refused.
+    bool setSceneLights(const SceneLights& lights);
+    void clearSceneLights() noexcept;
+    /// Borrowed immutable view, valid until this packet's lighting is replaced
+    /// or cleared, or the packet is destroyed. Never retain across mutations.
+    const SceneLights* sceneLights() const noexcept;
 
     [[nodiscard]] DrawDataOwnership drawDataOwnership() const noexcept {
         return _ownership;
@@ -221,6 +235,9 @@ private:
     OverlayCamera2D _overlayCamera2D{};
     struct OwnedDrawData;
     DrawDataOwnership _ownership = DrawDataOwnership::Borrowed;
+    // Packet lighting, when present, occupies the first immutable CPU backing
+    // record; draw backing follows. This keeps metadata lookup O(1) without
+    // changing RenderScene layout across static-library boundaries.
     std::vector<std::shared_ptr<const OwnedDrawData>> _ownedDrawData;
 };
 

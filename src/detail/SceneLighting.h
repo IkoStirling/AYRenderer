@@ -35,7 +35,8 @@ struct PackedShadowAtlas {
 };
 
 PackedSceneLighting packSceneLighting(const SceneLights* sceneLights,
-                                      const FrameContext& frame) noexcept;
+                                      const FrameContext& frame,
+                                      bool fallbackWhenEmpty = true) noexcept;
 
 PackedShadowAtlas packShadowAtlas(const ShadowPass* shadowPass,
                                   bool receivesShadow) noexcept;

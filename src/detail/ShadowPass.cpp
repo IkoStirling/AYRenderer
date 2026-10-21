@@ -131,7 +131,7 @@ uint32_t ShadowPass::execute(PassExecContext& ctx)
 
     // A populated modern light list with no supported caster must not fall
     // back to the legacy key-light shadow or expose last frame's atlas.
-    if (hasSceneLights && !useAtlas) {
+    if ((hasSceneLights && !useAtlas) || (lightsPtr && !lightsPtr->count && !_fallbackWhenEmpty)) {
         for (uint32_t i = 0; i < lightOrder.lightCount; ++i) {
             const uint32_t sourceIndex = lightOrder.indices[i];
             const ayt::render::Light& light = lightsPtr->lights[sourceIndex];

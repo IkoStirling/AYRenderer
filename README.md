@@ -1,5 +1,17 @@
 # AYRenderer
 
+## Scene 灯光快照（2026-10-21）
+
+高级 Host 可用 `RenderScene::setSceneLights` 为提交包复制最多8盏灯的不可变值快照。
+包副本共享拥有的数据；原输入、World 或另一个包销毁后快照仍有效。
+没有快照时保留既有 Host 灯光；存在且 count=0 时关闭直接照明，不移除环境或自发光。
+`clearSceneLights` 恢复 Host 策略。过滤/多视图派生包保留快照，显式预览灯光设置优先。
+
+游戏侧通过 AYEntity 的 `LightComponent` 和已安装的 RenderIntegration 提取，不逐帧调用
+Renderer setter。Directional / Point / Spot 可编辑；Point 阴影仍不支持，阴影总开关和图集预算不变。
+CPU 所有权、空灯光与旧默认照明测试位于 Contracts / LightingShadow 组；真实两后端灯光创作
+和阴影读回证据位于 AYEditor 的 `AYEditor_LightAuthoringRenderTest`。
+
 ## 作者材质的多资源根着色器解析（2026-10-21）
 
 材质 shader 先按原相邻路径解析，再依挂载顺序检查所有资源根。

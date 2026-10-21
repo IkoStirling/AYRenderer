@@ -277,7 +277,7 @@ uint32_t ForwardOpaquePass::execute(PassExecContext& ctx)
     // state rebuild at the bottom of the loop overrides it on every
     // iteration (doubleSided toggles back-face culling). Removed.
 
-    const auto packedLights = packSceneLighting(ctx.sceneLights, frame);
+    const auto packedLights = packSceneLighting(ctx.sceneLights, frame, !ctx.scene.sceneLights() || ctx.sceneLights != ctx.scene.sceneLights());
     const auto receiverShadows = packShadowAtlas(ctx.shadowPass, true);
     const auto noShadows = packShadowAtlas(nullptr, false);
     uint32_t drawCount = 0;

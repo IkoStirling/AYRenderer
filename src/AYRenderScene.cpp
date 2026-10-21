@@ -9,7 +9,28 @@ struct RenderScene::OwnedDrawData {
     std::vector<uint32_t> remap;
     std::optional<DrawPayload2D> payload;
     std::optional<ParticleDrawData> particles;
+    std::unique_ptr<const SceneLights> lights;
 };
+
+bool RenderScene::setSceneLights(const SceneLights& lights)
+{
+    if (lights.count>kMaxSceneLights) return false;
+    auto backing=std::make_shared<OwnedDrawData>();backing->lights=std::make_unique<const SceneLights>(lights);
+    if (sceneLights()) _ownedDrawData.front()=std::move(backing);
+    else _ownedDrawData.insert(_ownedDrawData.begin(),std::move(backing));
+    return true;
+}
+
+const SceneLights* RenderScene::sceneLights() const noexcept
+{
+    return !_ownedDrawData.empty() && _ownedDrawData.front()->lights
+        ? _ownedDrawData.front()->lights.get() : nullptr;
+}
+
+void RenderScene::clearSceneLights() noexcept
+{
+    if (sceneLights()) _ownedDrawData.erase(_ownedDrawData.begin());
+}
 
 void RenderScene::add(const DrawItem& source)
 {

@@ -33,6 +33,7 @@ inline constexpr uint32_t kMaximumCameraViews = 16;
 inline void copyCameraVisibleScene(const RenderScene& source, RenderScene& output, uint32_t layerMask,
                                    bool runtimeView = false) {
     RenderScene result(source.drawDataOwnership());
+    if (source.sceneLights()) result.setSceneLights(*source.sceneLights());
     if (source.hasOverlayCamera2D()) {
         const auto& camera = source.overlayCamera2D();
         result.setOverlayCamera2D(camera.view,camera.projection,camera.layerMask);

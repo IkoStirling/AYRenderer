@@ -1,5 +1,17 @@
 # AYRenderer Design
 
+## 2026-10-21 — 提交包独立灯光所有权
+
+RenderScene 复用已有私有 CPU backing 容器，首项保留不可变 SceneLights；不增加公开对象布局。
+每个 backing 只有一个可空的 owned pointer，避免把完整8灯数组塞进每份 Sprite/骨骼记录。
+查询/替换灯光为首项操作，复制包共享 backing；draw backing 继续由原 add 路径管理。
+
+主渲染和 preview 分别优先选择本包/显式 preview 参数，不改 Renderer 全局 Host 灯光。
+PassExecContext 仅在同步提交中借用；ShadowPass 的借用指针在范围退出时清空。
+present-empty 关闭旧默认灯和旧 shadow projection；absent 继续旧 fallback，保持原调用者行为。
+CameraViews / SceneVisibility 过滤创建包时复制灯光元数据，灯光不受 Mesh layer 过滤影响。
+GPU 资源仍属于单提交 owner，本改动不建立异步渲染线程或可跨线程 World 访问。
+
 ## 2026-10-21 — 作者材质的 shader 多根回退
 
 RenderAssetBridge 先检查材质相邻引用，再按 assetRoots 的挂载顺序逐根查找。

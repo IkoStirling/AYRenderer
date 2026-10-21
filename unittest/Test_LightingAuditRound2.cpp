@@ -8,6 +8,8 @@
 #include "detail/FgResource.h"
 #include "detail/LightingPass.h"
 #include "detail/ShadowPass.h"
+#include "detail/SceneLighting.h"
+#include "detail/FrameContext.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -167,6 +169,16 @@ TEST_CASE(lighting_source_pins_active_count_safe_normal_and_full_brdf)
           != std::string::npos);
     CHECK(source.find("let oneOverPi = 0.31830988618")
           != std::string::npos);
+}
+
+TEST_CASE(explicit_empty_packet_lighting_disables_direct_lights_without_changing_legacy_fallback)
+{
+    ayt::render::detail::FrameContext frame;frame.lightColor={1,1,1};ayt::render::SceneLights empty;
+    const auto legacy=ayt::render::detail::packSceneLighting(&empty,frame);
+    const auto authored=ayt::render::detail::packSceneLighting(&empty,frame,false);
+    CHECK(legacy.activeLightCount==1);CHECK(authored.activeLightCount==0);
+    for(uint32_t i=0;i<ayt::render::kMaxSceneLights;++i)for(int channel=0;channel<4;++channel)CHECK(authored.colors[i][channel]==0);
+    CHECK(ayt::render::detail::packSceneLighting(nullptr,frame,false).activeLightCount==1);
 }
 
 TEST_SUITE_END

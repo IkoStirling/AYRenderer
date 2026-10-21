@@ -1421,6 +1421,13 @@ void Renderer::render(const RenderScene& scene)
     if (!_impl || !_impl->adapter.isInitialized()) {
         return;
     }
+    const auto* sceneLights = scene.sceneLights() ? scene.sceneLights() : _impl->sceneLights;
+    // ShadowPass borrows this packet's snapshot only during the synchronous call.
+    struct ClearBorrowedLights {
+        detail::ShadowPass* pass;
+        ~ClearBorrowedLights() { if (pass) pass->setSceneLightsRef(nullptr); }
+    } clearBorrowedLights{_impl->pipeline.findPass<detail::ShadowPass>()};
+
 
     _impl->lastSceneItems = static_cast<uint32_t>(scene.items().size());
     _impl->lastDrawCalls  = 0;
@@ -1827,12 +1834,12 @@ void Renderer::render(const RenderScene& scene)
     // the SceneLights instance lifetime (mirror ctx.perLightShadows
     // borrowed ptr lifetime contract).
     //
-    // When `_impl->sceneLights == nullptr` (host on Forward path /
+    // When `sceneLights == nullptr` (host on Forward path /
     // never called setSceneLights), ShadowPass falls back to the
     // pre-C single key-light caster (pre-C byte-equivalent).
     if (detail::ShadowPass* shadow =
             _impl->pipeline.findPass<detail::ShadowPass>()) {
-        shadow->setSceneLightsRef(_impl->sceneLights);
+        shadow->setSceneLightsRef(sceneLights,scene.sceneLights()==nullptr);
     }
 
     // Scene projection may carry TAA jitter, but the post-Present editor
@@ -2079,7 +2086,7 @@ void Renderer::render(const RenderScene& scene)
         // nullptr = B5 single-light path stays active (no behavior
         // change). count == 0 falls through to B5 fallback at
         // LightingPass::execute() side too.
-        _impl->sceneLights,
+        sceneLights,
         // §Skybox0 (2026-07-23) — host-supplied Skybox DataSource
         // mount. Borrowed pointer from Renderer::setSkySource.
         // nullptr = no sky mounted (Forward path / SkySource not
@@ -2102,7 +2109,7 @@ void Renderer::render(const RenderScene& scene)
         // pre-C single-key-light fallback + LightingPass
         // perLightShadowCount=0 upload ⇒ byte-equivalent pre-C
         // key-only shadow multiply on lights[0].
-        _impl->sceneLights,
+        sceneLights,
         // Bloom producer latches; physical textures resolve through FG.
         bloomExtractPassPtr,
         bloomBlurPassPtr,
@@ -2206,9 +2213,9 @@ void Renderer::render(const RenderScene& scene)
     if(_impl->debugCapture) {
         auto& snapshot=_impl->debugSnapshot;++snapshot.frame;
         snapshot.draws=_impl->frameDrawLists.debugDraws;snapshot.dropped=_impl->frameDrawLists.debugDropped;
-        snapshot.lights=_impl->sceneLights?*_impl->sceneLights:SceneLights{};
+        snapshot.lights=sceneLights?*sceneLights:SceneLights{};
         snapshot.lights.count=std::min(snapshot.lights.count,kMaxSceneLights);
-        if(!_impl->sceneLights) snapshot.lights.add(Light::directional(_impl->directionalLightDir,_impl->directionalLightColor));
+        if(!sceneLights) snapshot.lights.add(Light::directional(_impl->directionalLightDir,_impl->directionalLightColor));
         snapshot.homogeneousDepth=_impl->adapter.capsHomogeneousDepth();snapshot.shadowsEnabled=shadowsEnabled();
         snapshot.shadowViewProjections.clear();
         if(auto* shadow=_impl->pipeline.findPass<detail::ShadowPass>();shadow && shadow->hasSampleableShadow()) {
@@ -2278,7 +2285,7 @@ bool Renderer::renderPreviewScene(const RenderScene &scene, const PreviewSceneCa
         static_cast<uint8_t>(firstView + 1u),
         bgfx::FrameBufferHandle{settings.displayTransform ? hdrFramebuffer : framebuffer}};
     ctx.drawLists = &lists;
-    ctx.sceneLights = settings.lights;
+    ctx.sceneLights = settings.lights ? settings.lights : scene.sceneLights();
     detail::ForwardOpaquePass opaque;
     opaque.execute(ctx);
     _impl->adapter.setViewClearRaw(ctx.viewId, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearRgba, 1.0f, 0);

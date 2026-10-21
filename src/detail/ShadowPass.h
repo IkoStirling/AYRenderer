@@ -102,9 +102,10 @@ public:
     // produces one atlas sub-rect per caster. When null (default),
     // execute() publishes the legacy directional caster as slot 0 with a
     // full-texture sample rect, so consumers use one unified array path.
-    void setSceneLightsRef(const ayt::render::SceneLights* lights) noexcept
+    void setSceneLightsRef(const ayt::render::SceneLights* lights, bool fallbackWhenEmpty = true) noexcept
     {
         _sceneLightsRef = lights;
+        _fallbackWhenEmpty = fallbackWhenEmpty;
     }
     const ayt::render::SceneLights* sceneLightsRef() const noexcept
     {
@@ -208,6 +209,7 @@ private:
     ShadowAtlasLayout          _atlasLayout =
         computeShadowAtlasLayout(_atlasConfig);
     const ayt::render::SceneLights* _sceneLightsRef = nullptr;
+    bool _fallbackWhenEmpty = true;
     uint32_t                   _perLightShadowCount = 0;
     float                      _shadowSampleRects[kShadowAtlasMaxSlots][4] = {
         {0,0,1,1}, {0,0,0,0}, {0,0,0,0}, {0,0,0,0},

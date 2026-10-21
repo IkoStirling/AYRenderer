@@ -1756,7 +1756,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     // "FS unrolls 8 lights but UBO has all zero ??black picture"
     // failure mode when the host hasn't called setSceneLights yet.
     const PackedSceneLighting packedLights =
-        packSceneLighting(ctx.sceneLights, frame);
+        packSceneLighting(ctx.sceneLights, frame, !ctx.scene.sceneLights() || ctx.sceneLights != ctx.scene.sceneLights());
     // 4 setUniform calls (one per array), all 128 bytes each.
     // Logged-once message confirms we're on the B field-split path.
     // �P5.5 A ??field name stays `dirs` (xyz = light vector, w = type).
