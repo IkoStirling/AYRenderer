@@ -1028,7 +1028,7 @@ bool RenderResourceManager::reloadMeshFromPath(const std::string& path)
     const uint64_t id = cached->second;
 
     const auto mesh = ayt::resource::ResourceManager::instance().load<ayt::resource::IMesh>(path);
-    if (!mesh) {
+    if (!mesh || !mesh->isLoaded() || ayt::resource::ResourceManager::instance().hasLoadFailed(path)) {
         std::fprintf(stderr, "[RenderResourceManager] reloadMesh L2 miss '%s'\n", path.c_str());
         return false;
     }
@@ -1066,7 +1066,7 @@ bool RenderResourceManager::reloadMaterialFromPath(const std::string& path)
 
     const auto material =
         ayt::resource::ResourceManager::instance().load<ayt::resource::IMaterial>(path);
-    if (!material) {
+    if (!material || !material->isLoaded() || ayt::resource::ResourceManager::instance().hasLoadFailed(path)) {
         std::fprintf(stderr, "[RenderResourceManager] reloadMaterial L2 miss '%s'\n",
                      path.c_str());
         return false;
@@ -1094,31 +1094,73 @@ bool RenderResourceManager::reloadMaterialFromPath(const std::string& path)
 
 bool RenderResourceManager::reloadTextureFromPath(const std::string& path)
 {
+    return reloadTextureFromPathImpl(path, nullptr, 0);
+}
+
+bool RenderResourceManager::reloadTextureFromPathImpl(const std::string& path,
+    std::vector<ayt::resource::ResourceConsumerRefresh>* outcomes, uint64_t contextId)
+{
     if (normalizeAssetPathKey(path).empty()) {
         return false;
     }
 
-    const auto texture =
-        ayt::resource::ResourceManager::instance().load<ayt::resource::ITexture>(path);
+    using ayt::resource::ResourceRefreshState;
+    // A report must not create residency just to describe an unused path.
+    if (!_textureCacheByKey.contains(textureSamplingCacheKey(path, false))
+        && !_textureCacheByKey.contains(textureSamplingCacheKey(path, true))) {
+        if (outcomes) {
+            outcomes->push_back({ResourceRefreshState::NotResident, "linear", 0, contextId, {}});
+            outcomes->push_back({ResourceRefreshState::NotResident, "sRGB", 0, contextId, {}});
+        }
+        return false;
+    }
+    auto& cpu = ayt::resource::ResourceManager::instance();
+    auto texture = cpu.load<ayt::resource::ITexture>(path);
+    if (cpu.hasLoadFailed(path) || (texture && !texture->isLoaded())) texture.reset();
     bool refreshed = false;
     for (const bool srgb : {false, true}) {
         const std::string key = textureSamplingCacheKey(path, srgb);
         const auto cached = _textureCacheByKey.find(key);
+        ayt::resource::ResourceConsumerRefresh* outcome = nullptr;
+        if (outcomes) {
+            outcomes->push_back({ResourceRefreshState::NotResident, srgb ? "sRGB" : "linear",
+                0, contextId, {}});
+            outcome = &outcomes->back();
+        }
         if (cached == _textureCacheByKey.end()) {
             continue;
         }
         const uint64_t id = cached->second;
+        if (outcome) {
+            outcome->resourceId = id;
+            outcome->state = ResourceRefreshState::Retained;
+            outcome->diagnostic = "replacement preparation or device admission failed; previous texture retained";
+        }
         // An anonymous upload avoids both a cache hit on the old variant and
         // publication before preparation succeeds. Each sampling variant keeps
         // its previous texture on failure and its public handle on success.
         TextureHandle fresh;
         if (texture) {
-            fresh = uploadTextureFromResource(*this, *texture, {}, srgb);
+            const auto plan = prepareTextureUpload(*texture, srgb);
+            if (!plan.isValid()) {
+                if (outcome) outcome->diagnostic = "texture preparation rejected: " + plan.diagnostic;
+            } else {
+                fresh = createTextureFromPlan(plan, {});
+                if (!fresh.isValid() && outcome)
+                    outcome->diagnostic = "device texture creation rejected "
+                        + std::to_string(plan.width) + "x" + std::to_string(plan.height)
+                        + " format=" + std::to_string(static_cast<unsigned>(plan.format))
+                        + " mips=" + std::to_string(plan.mipCount) + "; previous texture retained";
+            }
         } else {
             const DecodedImage image = decodeImageFile(path);
             if (image.isValid()) {
                 fresh = createTextureFromRgba8(image.width, image.height,
                                               image.rgba8.data(), {}, srgb);
+                if (!fresh.isValid() && outcome)
+                    outcome->diagnostic = "device RGBA8 texture creation rejected; previous texture retained";
+            } else if (outcome) {
+                outcome->diagnostic = "published texture could not be decoded; previous texture retained";
             }
         }
         if (!fresh.isValid()) {
@@ -1132,6 +1174,10 @@ bool RenderResourceManager::reloadTextureFromPath(const std::string& path)
             destroyTextureGpuOnly(fresh.id);
         }
         _textureCacheByKey[key] = id;
+        if (outcome) {
+            outcome->state = ResourceRefreshState::Updated;
+            outcome->diagnostic.clear();
+        }
         std::fprintf(stderr,
                      "[RenderResourceManager] reloadTexture ok '%s' id=%llu (%s)\n",
                      path.c_str(), static_cast<unsigned long long>(id),
@@ -1143,37 +1189,66 @@ bool RenderResourceManager::reloadTextureFromPath(const std::string& path)
 
 bool RenderResourceManager::onResourceFileChanged(const std::string& path)
 {
+    const auto outcomes = onResourceFileChangedWithReport(path, 0);
+    return std::any_of(outcomes.begin(), outcomes.end(), [](const auto& outcome) {
+        return outcome.state == ayt::resource::ResourceRefreshState::Updated;
+    });
+}
+
+std::vector<ayt::resource::ResourceConsumerRefresh>
+RenderResourceManager::onResourceFileChangedWithReport(const std::string& path, uint64_t contextId)
+{
+    using ayt::resource::ResourceRefreshState;
+    std::vector<ayt::resource::ResourceConsumerRefresh> outcomes;
+    outcomes.reserve(2);
     if (path.empty()) {
-        return false;
+        outcomes.push_back({ResourceRefreshState::NotHandled, {}, 0, contextId, "empty resource path"});
+        return outcomes;
     }
 
     const std::string key = normalizeAssetPathKey(path);
     const auto dot = key.find_last_of('.');
     const std::string ext = (dot == std::string::npos) ? std::string{} : key.substr(dot);
 
+    const auto single = [&](const auto& cache, const char* variant, auto&& reload) {
+        const auto cached = cache.find(key);
+        if (cached == cache.end()) {
+            outcomes.push_back({ResourceRefreshState::NotResident, variant, 0, contextId, {}});
+            return;
+        }
+        const uint64_t id = cached->second;
+        outcomes.push_back({ResourceRefreshState::Retained, variant, id, contextId,
+            "replacement preparation or device admission failed; previous resource retained"});
+        if (reload()) {
+            outcomes.back().state = ResourceRefreshState::Updated;
+            outcomes.back().diagnostic.clear();
+        }
+    };
     if (ayt::asset_format::matchesPath(path, ayt::asset_format::Id::Mesh)) {
-        return reloadMeshFromPath(path);
+        single(_meshCacheByKey, "mesh", [&] { return reloadMeshFromPath(path); });
+        return outcomes;
     }
     if (ayt::asset_format::matchesPath(path, ayt::asset_format::Id::Material)) {
-        return reloadMaterialFromPath(path);
+        single(_materialCacheByKey, "material", [&] { return reloadMaterialFromPath(path); });
+        return outcomes;
     }
     if (ayt::asset_format::matchesPath(path, ayt::asset_format::Id::Texture)
         || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga"
         || ext == ".bmp" || ext == ".hdr") {
-        return reloadTextureFromPath(path);
+        reloadTextureFromPathImpl(path, &outcomes, contextId);
+        return outcomes;
     }
 
     // Unknown extension: try whichever path cache has it.
-    if (_meshCacheByKey.count(key) != 0 && reloadMeshFromPath(path)) {
-        return true;
-    }
-    if (_materialCacheByKey.count(key) != 0 && reloadMaterialFromPath(path)) {
-        return true;
-    }
-    if (_textureCacheByKey.count(key) != 0 && reloadTextureFromPath(path)) {
-        return true;
-    }
-    return false;
+    if (_meshCacheByKey.contains(key))
+        single(_meshCacheByKey, "mesh", [&] { return reloadMeshFromPath(path); });
+    else if (_materialCacheByKey.contains(key))
+        single(_materialCacheByKey, "material", [&] { return reloadMaterialFromPath(path); });
+    else if (_textureCacheByKey.contains(textureSamplingCacheKey(path, false))
+        || _textureCacheByKey.contains(textureSamplingCacheKey(path, true)))
+        reloadTextureFromPathImpl(path, &outcomes, contextId);
+    else outcomes.push_back({ResourceRefreshState::NotHandled, {}, 0, contextId, {}});
+    return outcomes;
 }
 
 MaterialHandle RenderResourceManager::loadMaterial(const std::string& assetReference)

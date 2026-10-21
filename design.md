@@ -1,5 +1,20 @@
 # AYRenderer Design
 
+## 2026-10-22 — 分层刷新确认与注册寿命
+
+RRM的`onResourceFileChangedWithReport`为每个实际纹理采样变体分别准备/交换，返回通用Resource消费者值。
+Mesh/Material报告对应原稳定id，纹理报告linear/sRGB各自id；无驻留项不触发CPU加载或GPU上传。
+旧bool入口仍按是否至少一项Updated返回，不代表整条路径全部成功。
+TextureUploadPlan准备一次后交设备创建，诊断区分准备拒绝与设备创建拒绝；Mesh/Material保持原准备后交换路径。
+失败CPU placeholder或未加载对象不作为新的成功上传来源。结果容器提前reserve，
+普通替换失败保持旧内容；分配异常和设备OOM不因此获得跨变体/跨资源的完整回滚保证。
+
+Renderer注册捕获稳定Impl地址，不捕获可能被移动的外层this；context与注册token都属于Impl。
+shutdown在第一项GPU teardown前禁用旧alive token，按token清理slot；后来注册者不被清掉。
+move constructor保留Impl地址，move assignment先shutdown原目标再接管Impl。
+回调复制及atomic alive flag只保障规定owner线程的失效边界，不支持并发析构或多设备消费者总线。
+真实拒绝/修复与旧层级读回已由两后端定向测试通过；完整阶段门禁另记。
+
 ## 2026-10-22 — 与GPU版本共同发布的提交快照
 
 RenderAssetBridge先用纯CPU准备器构建MeshSubmissionInfo，再创建临时GPU buffers。

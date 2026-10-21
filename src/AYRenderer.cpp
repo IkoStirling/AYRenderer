@@ -437,16 +437,13 @@ struct Renderer::Impl {
     // Rebuild pipeline.passes from pipelineDesc. Preserves UI backend.
     void applyPipelineDesc(const RenderPipelineDesc& desc);
 
-    // §P1 H3 (2026-08-24) — shared alive flag. The ResourceManager
-    // hot-reload lambda captures the shared_ptr by value and checks
-    // `*aliveToken` (atomic load) before touching any Impl member.
-    // shutdown() flips it to false before destroying bgfx resources
-    // so a callback that races past setOnHotReload({}) sees the dead
-    // flag and skips the draw-side work (no UAF on the dying
-    // Renderer). Lifetime is owned by Impl; Renderer is the sole
-    // producer.
+    // Copied callbacks check this flag before touching the stable Impl.
+    // Shutdown permanently disables the old registration before GPU teardown.
+    // Registration, dispatch and destruction still require the submission
+    // owner thread; an atomic flag is not a concurrent destruction fence.
     std::shared_ptr<std::atomic<bool>> aliveToken;
     uint64_t resourceContextId = 0;
+    uint64_t resourceRefreshObserverToken = 0;
 
     // §5.5 cleanup (2026-07-22) — `lastFrameShadowFbo` cache removed.
     // It lived under #if AY_F1_DIAG_FRAME_SHADOW and was used only by
@@ -459,11 +456,7 @@ struct Renderer::Impl {
     Impl()
         : resources(adapter, shaderPool)
     {
-        // §P1 H3 (2026-08-24) — alive token shared with the
-        // ResourceManager hot-reload lambda. shutdown() flips it to
-        // false before destroying bgfx resources so a callback that
-        // races past setOnHotReload({}) sees the dead flag and skips
-        // the draw-side work (no UAF on the dying Renderer).
+        // Each successful reinitialization receives a new live token.
         aliveToken = std::make_shared<std::atomic<bool>>(true);
         // E5 (§5.4, 2026-07-22): makeDefault() mounts Shadow
         // enabled (not disabled) — pre-E4 the canonical default
@@ -743,7 +736,14 @@ Renderer::~Renderer()
 }
 
 Renderer::Renderer(Renderer&&) noexcept = default;
-Renderer& Renderer::operator=(Renderer&&) noexcept = default;
+Renderer& Renderer::operator=(Renderer&& other) noexcept
+{
+    if (this != &other) {
+        shutdown();
+        _impl = std::move(other._impl);
+    }
+    return *this;
+}
 
 bool Renderer::initialize(const InitDesc& desc)
 {
@@ -825,10 +825,6 @@ bool Renderer::initialize(const InitDesc& desc)
     _impl->renderClockOrigin = std::chrono::steady_clock::now();
 
     // P2: L2 file change → L3 GPU re-upload (stable handle ids).
-    // §P1 H3 (2026-08-24) — capture the alive token (shared_ptr) and
-    // check it before dereferencing Impl. If the Renderer was destroyed
-    // and the callback raced past setOnHotReload({}), the token will
-    // be false and we skip silently instead of touching dead memory.
     // A Renderer may be initialized again after shutdown(). Give the new
     // callback its own live token; callbacks copied before shutdown retain
     // the old, permanently-false token and remain safely disabled.
@@ -837,17 +833,21 @@ bool Renderer::initialize(const InitDesc& desc)
         _impl->aliveToken = std::make_shared<std::atomic<bool>>(true);
     }
     auto aliveToken = _impl->aliveToken;
-    ayt::resource::ResourceManager::instance().setOnHotReload(
-        [this, aliveToken](const std::string& path) {
-            if (!aliveToken || !aliveToken->load(std::memory_order_acquire)) {
-                return;
-            }
-            if (_impl) {
-                (void)_impl->resources.onResourceFileChanged(path);
-            }
-        });
     static std::atomic<uint64_t> nextResourceContext{1};
     _impl->resourceContextId=nextResourceContext.fetch_add(1,std::memory_order_relaxed);
+    // Impl has a stable address across Renderer moves. A callback must never
+    // keep the moved-from public wrapper as its resource owner.
+    Impl* owner = _impl.get();
+    _impl->resourceRefreshObserverToken =
+        ayt::resource::ResourceManager::instance().setRefreshObserver("Renderer",
+        [owner, aliveToken](const std::string& path) {
+            if (!aliveToken || !aliveToken->load(std::memory_order_acquire)) {
+                return std::vector<ayt::resource::ResourceConsumerRefresh>{{
+                    ayt::resource::ResourceRefreshState::NotHandled, {}, 0, 0,
+                    "renderer is no longer active"}};
+            }
+            return owner->resources.onResourceFileChangedWithReport(path, owner->resourceContextId);
+        });
     return true;
 }
 
@@ -857,6 +857,9 @@ void Renderer::shutdown()
         return;
     }
     _impl->resourceContextId=0;
+    // Disable any copied registration before the first GPU teardown. This
+    // preserves owner-thread lifetime only; concurrent destruction is unsupported.
+    if (_impl->aliveToken) _impl->aliveToken->store(false, std::memory_order_release);
     for (auto& [id, view] : _impl->runtimeViews) {
         (void)id;
         if (_impl->adapter.isInitialized())
@@ -874,14 +877,6 @@ void Renderer::shutdown()
 
     _impl->invalidateTemporalResources(
         detail::ResourceInvalidationReason::Shutdown);
-
-    // §P1 H3 (2026-08-24) — flip the alive flag FIRST so any hot-reload
-    // callback racing past setOnHotReload({}) sees the dead state. Must
-    // run before any bgfx resource destruction so the callback never
-    // touches a half-torn-down Impl.
-    if (_impl->aliveToken) {
-        _impl->aliveToken->store(false, std::memory_order_release);
-    }
 
     if (detail::TransparentPass* transparentPass =
             _impl->pipeline.findPass<detail::TransparentPass>()) {
@@ -1052,7 +1047,8 @@ void Renderer::shutdown()
         detail::ResourceInvalidationReason::Shutdown);
     _impl->renderTargetPool.shutdown();
 
-    ayt::resource::ResourceManager::instance().setOnHotReload({});
+    ayt::resource::ResourceManager::instance().clearRefreshObserver(_impl->resourceRefreshObserverToken);
+    _impl->resourceRefreshObserverToken = 0;
     _impl->resources.shutdown();
     _impl->shaderPool.shutdown();
     _impl->adapter.shutdown();

@@ -3,6 +3,7 @@
 #include "AYRenderer/RenderTypes.h"
 #include "AYRenderer/PbrSurfaceSettings.h"
 #include "AYShader/ShaderResourcePool.h"
+#include <AYResource/ResourceRefresh.h>
 #include "detail/BGFXAdapter.h"
 #include "detail/GpuResources.h"
 
@@ -90,6 +91,8 @@ public:
     // P2: L2 file changed → drop GPU for that path (keep handle id) and re-upload.
     // No-op when the path was never GPU-cached. Returns true if something refreshed.
     bool onResourceFileChanged(const std::string& path);
+    std::vector<ayt::resource::ResourceConsumerRefresh> onResourceFileChangedWithReport(
+        const std::string& path, uint64_t contextId);
     bool reloadMeshFromPath(const std::string& path);
     bool reloadMaterialFromPath(const std::string& path);
     bool reloadTextureFromPath(const std::string& path);
@@ -206,6 +209,8 @@ private:
     void destroyMeshGpuOnly(uint64_t id);
     void destroyTextureGpuOnly(uint64_t id);
     void destroyMaterialGpuOnly(uint64_t id);
+    bool reloadTextureFromPathImpl(const std::string& path,
+        std::vector<ayt::resource::ResourceConsumerRefresh>* outcomes, uint64_t contextId);
     // ShaderResource copies are pool tokens, not counted references. Only the
     // final material using a token may invalidate its shared GPU program.
     void releaseMaterialShader(GpuMaterial& material);

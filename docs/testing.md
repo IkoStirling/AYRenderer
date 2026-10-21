@@ -1,5 +1,22 @@
 # AYRenderer 测试维护
 
+## 作者刷新确认与注册寿命（2026-10-22）
+
+`refresh-bridge-first.json`23例444断言通过；包含未驻留不加载、两种颜色变体独立结果、
+拒绝保留/修复、Renderer移动及后注册observer保留。`refresh-gpu-first-{d3d11,d3d12}.json`
+各1例1456断言，CPU发布16385×1成功但设备拒绝后旧各级可读，修复后稳定id下更新。
+
+冻结Resource/Renderer实现完整CPU1006例17264断言、两后端完整Gpu各53例44644断言通过，
+无失败/跳过；报告`refresh-cpu-final/`与`refresh-gpu-final-*`。库存1059项无遗漏/重复。
+Entity完整220例2938断言、定向9例153断言和两后端static/skinned实际场景通过。
+六项实际Editor Workshop/AssetReimport/MaterialPreview流程通过；
+该Editor程序是来源隔离补充前的ABI45版本464例12353断言，不验证后补map/预览新断言。
+后补Editor来源隔离及额外预览保持验收独立记录，不改变本轮已冻结Renderer结果。
+
+完整D3D12 suite实测约341秒，先前阶段亦达到351秒；Gpu watchdog改为600秒。
+`refresh-gpu-watchdog-verified.json`核验CTest注册值600；上述完整GPU结果来自直接运行测试程序，
+没有冒充已运行CTest wrapper或把回归耗时当作性能基准。
+
 ## Mesh GPU版本与Entity提取（2026-10-22）
 
 修改前安全复现：`mesh-index-before.json`一例3断言中2失败；
@@ -896,9 +913,11 @@ out/build/windows-debug/AYRuntime/AYRenderer/unittest/AYRenderer_ShaderTests.exe
 
 - 新增 `.cpp` 必须在 TestGroups 清单中出现恰好一次；CMake 配置阶段检查缺失、
   重复与不存在的源文件。新增用例后运行公共清单审计，检查完整层遗漏和重复身份。
-- Contracts 超时 30 秒，integration 组超时 180 秒，Gpu 超时 240 秒。
+- Contracts 超时 30 秒，integration 组超时 180 秒，Gpu 超时 600 秒。
   integration 组及涉及后端的专项门禁共用 `renderer-backend-fixtures` 资源锁；
   外部暂存路径尚未全面审计，不承诺这些组可安全同时运行。Gpu 使用 RUN_SERIAL。
+  完整实机D3D12套件已测到341–352秒，因此将其进程watchdog从240秒调整为600秒；
+  未降低任何画面断言。此超时是门禁保护，不是性能目标；GPU默认仍显式跳过。
 - 每个依赖 GPU 对象的夹具必须自行取得后端生命周期。绑定测试渲染器类型并不等于
   初始化后端；Shader 的 Phoskia 前端回归已补上自己的 Noop Renderer 生命周期，
   避免依赖其他套件先运行。

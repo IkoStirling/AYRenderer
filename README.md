@@ -5,6 +5,19 @@
 [2026-10-22 源码自审](../../AYDocs/RENDERER-ARCHITECTURE-AUDIT-20261022.md)。
 下方带日期的功能增量说明保留；早期 R1–R5 表格已明确标为历史记录。
 
+## 作者资源刷新确认（2026-10-22）
+
+Renderer通过Resource通用报告回调确认已驻留Mesh/Material及linear/sRGB纹理变体。
+成功替换返回Updated和稳定id/当前上下文，拒绝返回Retained并保留原GPU；
+未驻留不为生成报告而强制加载，未知类型NotHandled。纹理诊断区分CPU准备拒绝与设备创建拒绝。
+结果不授予GPU租约，也不把多个资源/颜色变体变成整体原子事务。
+
+回调捕获稳定Impl并跟随Renderer移动；关闭前禁用旧alive token，只清理自己的注册token，
+不移除后来安装的Host回调。move assignment先关闭原目标；所有操作仍要求submission owner线程。
+首批Noop桥接23例/444断言、两后端逐层实机各1例/1456断言及实际Editor拒绝/修复通过。
+完整Renderer CPU1006例/17264断言、两后端Gpu各53例/44644断言与真实Editor/Entity门禁通过。
+最新Editor来源隔离另行验收，最终以[测试维护](docs/testing.md)的阶段结果为准。
+
 ## 与 GPU 一致的网格提交元数据（2026-10-22）
 
 资源网格上传先准备不可变`MeshSubmissionInfo`，随GPU buffers共同入表和替换：范围、材质slot、

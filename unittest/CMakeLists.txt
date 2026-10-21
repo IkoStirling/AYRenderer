@@ -43,7 +43,10 @@ foreach(group IN LISTS AYRENDERER_TEST_GROUPS)
         set(timeout 30)
     elseif(group STREQUAL "Gpu")
         set(tier gpu)
-        set(timeout 240)
+        # The complete opt-in D3D12 suite measured 341-352 seconds locally
+        # (53 cases, no skips). Keep a bounded watchdog without timing out
+        # valid real-device runs; this does not change any pixel assertion.
+        set(timeout 600)
         set(policy RUN_SERIAL)
     else()
         set(tier integration)

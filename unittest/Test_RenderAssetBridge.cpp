@@ -884,4 +884,86 @@ TEST_CASE(material_shader_resolves_all_mounted_roots_and_legacy_flat_fallback)
     renderer.shutdown();
 }
 
+TEST_CASE(texture_refresh_reports_each_variant_without_loading_unused_paths)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    using ayt::resource::ResourceRefreshState;
+    auto& cpu=ayt::resource::ResourceManager::instance();
+    cpu.unloadAll();cpu.setAutoWatchLoadedResources(false);
+    const auto path=tempPath("reported_texture_refresh.txr");
+    ayt::resource::Texture source;source.createSolidColor(4,4,255,127,63);
+    std::vector<ayt::resource::UInt8> bytes;CHECK(source.saveToBinary(bytes));CHECK(writeBinaryFile(path,bytes));
+    BGFXAdapter adapter;BGFXInitParams init;init.backend=Backend::Noop;CHECK(adapter.initialize(init));
+    ayt::shader::ShaderResourcePool pool;RenderResourceManager resources(adapter,pool);
+    auto report=resources.onResourceFileChangedWithReport(path,71);
+    CHECK(report.size()==2);CHECK_FALSE(cpu.isLoaded(path));CHECK(resources.textures().empty());
+    if(report.size()==2)for(const auto& entry:report){CHECK(entry.state==ResourceRefreshState::NotResident);CHECK(entry.contextId==71);CHECK(entry.resourceId==0);}
+    auto linear=resources.loadTexture(path,false);auto srgb=resources.loadTexture(path,true);
+    CHECK(linear.isValid());CHECK(srgb.isValid());
+    auto texture=cpu.load<ayt::resource::Texture>(path);CHECK(texture);
+    if(texture&&linear.isValid()&&srgb.isValid()){
+        const auto oldLinear=resources.textures().at(linear.id).handle.idx;
+        const auto oldSrgb=resources.textures().at(srgb.id).handle.idx;
+        texture->_width=0;report=resources.onResourceFileChangedWithReport(path,71);
+        CHECK(report.size()==2);
+        if(report.size()==2){
+            CHECK(report[0].state==ResourceRefreshState::Retained);CHECK(report[1].state==ResourceRefreshState::Retained);
+            CHECK(report[0].resourceId==linear.id);CHECK(report[1].resourceId==srgb.id);
+            CHECK(report[0].variant=="linear");CHECK(report[1].variant=="sRGB");
+            CHECK(!report[0].diagnostic.empty());CHECK(!report[1].diagnostic.empty());
+        }
+        CHECK(resources.textures().at(linear.id).handle.idx==oldLinear);
+        CHECK(resources.textures().at(srgb.id).handle.idx==oldSrgb);
+        texture->createSolidColor(8,8,63,127,255);
+        resources.destroyTexture(linear);
+        report=resources.onResourceFileChangedWithReport(path,71);CHECK(report.size()==2);
+        if(report.size()==2){
+            CHECK(report[0].state==ResourceRefreshState::NotResident);CHECK(report[0].resourceId==0);
+            CHECK(report[1].state==ResourceRefreshState::Updated);CHECK(report[1].resourceId==srgb.id);
+            CHECK(report[1].contextId==71);CHECK(report[1].diagnostic.empty());
+        }
+        CHECK(resources.textures().at(srgb.id).handle.idx!=oldSrgb);
+    }
+    report=resources.onResourceFileChangedWithReport(tempPath("unsupported_refresh.blob"),71);
+    CHECK(report.size()==1);if(report.size()==1)CHECK(report[0].state==ResourceRefreshState::NotHandled);
+    resources.shutdown();pool.shutdown();adapter.shutdown();cpu.unloadAll();cpu.setAutoWatchLoadedResources(true);removeFile(path);
+}
+
+TEST_CASE(renderer_refresh_registration_follows_moves_and_shutdown_keeps_newer_observers)
+{
+    using namespace ayt::render;
+    using ayt::resource::ResourceRefreshState;
+    auto& cpu=ayt::resource::ResourceManager::instance();cpu.unloadAll();cpu.setAutoWatchLoadedResources(false);
+    const auto path=tempPath("moved_renderer_refresh.msh");
+    ayt::resource::Mesh source;source.createCube();std::vector<ayt::resource::UInt8> bytes;
+    CHECK(source.saveToBinary(bytes));CHECK(writeBinaryFile(path,bytes));
+    Renderer original;InitDesc init;init.backend=Backend::Noop;CHECK(original.initialize(init));
+    const auto context=original.resourceContextId();const auto mesh=original.loadMesh(path);CHECK(mesh.isValid());
+    const auto previous=original.meshSubmissionInfo(mesh);CHECK(previous);
+    Renderer moved(std::move(original));original.shutdown();
+    source.createCube(3);const ayt::resource::IMesh::Submesh sections[]={{0,18,0,0},{18,18,0,0}};
+    source._setForTestSubmeshes(sections,2);CHECK(source.saveToBinary(bytes));CHECK(writeBinaryFile(path,bytes));
+    auto report=cpu.refreshPublishedResourcesWithReport({path});CHECK(report.cpuRefreshed);CHECK_FALSE(report.needsAttention());
+    CHECK(report.paths.size()==1);
+    if(report.paths.size()==1){
+        CHECK(report.paths[0].consumer=="Renderer");CHECK(report.paths[0].outcomes.size()==1);
+        if(report.paths[0].outcomes.size()==1){const auto& entry=report.paths[0].outcomes[0];
+            CHECK(entry.state==ResourceRefreshState::Updated);CHECK(entry.resourceId==mesh.id);CHECK(entry.contextId==context);}
+    }
+    CHECK(moved.meshSubmissionInfo(mesh)!=previous);
+    Renderer destination;destination=std::move(moved);
+    report=cpu.refreshPublishedResourcesWithReport({path});CHECK(report.cpuRefreshed);CHECK_FALSE(report.needsAttention());
+    CHECK(destination.resourceContextId()==context);CHECK(moved.resourceContextId()==0);
+    CHECK(report.paths.size()==1);if(report.paths.size()==1)CHECK(report.paths[0].consumer=="Renderer");
+    int notifications=0;
+    const auto foreign=cpu.setRefreshObserver("later observer",[&](const std::string&){
+        ++notifications;return std::vector<ayt::resource::ResourceConsumerRefresh>{{ResourceRefreshState::NotResident}};
+    });
+    destination.shutdown();report=cpu.refreshPublishedResourcesWithReport({path});
+    CHECK(report.cpuRefreshed);CHECK_FALSE(report.needsAttention());CHECK(notifications==1);
+    CHECK(report.paths.size()==1);if(report.paths.size()==1)CHECK(report.paths[0].consumer=="later observer");
+    CHECK(cpu.clearRefreshObserver(foreign));cpu.unloadAll();cpu.setAutoWatchLoadedResources(true);removeFile(path);
+}
+
 TEST_SUITE_END

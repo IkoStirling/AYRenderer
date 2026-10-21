@@ -542,16 +542,24 @@ TEST_CASE(resource_texture_gpu_reload_retains_last_good_mips_and_partial_chain_i
     RenderResourceManager resources(f.adapter,f.pool);
     struct Cleanup {RenderResourceManager& r;~Cleanup(){r.shutdown();}} cleanup{resources};
     auto handle=resources.loadTexture(path.string());CHECK(handle.isValid());if(!handle.isValid())return;
+    auto srgbHandle=resources.loadTexture(path.string(),true);CHECK(srgbHandle.isValid());if(!srgbHandle.isValid())return;
+    const auto observerToken=cpu.setRefreshObserver("GPU fixture",[&](const std::string& changed){
+        return resources.onResourceFileChangedWithReport(changed,71);
+    });
+    struct ObserverCleanup {ayt::resource::ResourceManager& cpu;uint64_t token;
+        ~ObserverCleanup(){cpu.clearRefreshObserver(token);}} observerCleanup{cpu,observerToken};
     const auto stableId=handle.id;
-    const auto read=[&](int level){
+    const auto readVariant=[&](int level,uint64_t id){
         return f.render("texture2d image;","return sampleLod(image,vec2(0.5),"+std::to_string(level)+".0);",[&](const auto& shader){
             const auto binding=shader.getTextureBinding("image");
-            shader.setTexture(shader.getTextureStage(binding),binding,toShaderTexture(resources.textures().at(stableId).handle));
+            shader.setTexture(shader.getTextureStage(binding),binding,toShaderTexture(resources.textures().at(id).handle));
         });
     };
+    const auto read=[&](int level){return readVariant(level,stableId);};
     for(int level=0;level<3;++level)checkPixels(read(level),first[level]);
     auto resident=cpu.load<ayt::resource::Texture>(path.string());CHECK(bool(resident));if(!resident)return;
     const auto oldGpu=resources.textures().at(stableId).handle.idx;
+    const auto oldSrgb=resources.textures().at(srgbHandle.id).handle.idx;
     // Reject malformed resident L2 input at the actual GPU boundary. This does
     // not simulate device OOM or disk publication, which have separate checks.
     resident->setMipmapLayout({0,64,80},{64,8,4});
@@ -559,21 +567,41 @@ TEST_CASE(resource_texture_gpu_reload_retains_last_good_mips_and_partial_chain_i
     CHECK(resources.textures().at(stableId).handle.idx==oldGpu);
     for(int level=0;level<3;++level)checkPixels(read(level),first[level]);
     const auto maximum=bgfx::getCaps()->limits.maxTextureSize;
+    CHECK(maximum<UINT16_MAX);
     if(maximum<UINT16_MAX){
         ayt::resource::Texture beyondDevice;
         beyondDevice.createSolidColor(uint32_t(maximum)+1u,1,255,255,255);
         CHECK(beyondDevice.saveToBinary(binary));
-        CHECK(resident->loadFromBinary(binary.data(),binary.size()));
-        CHECK_FALSE(resources.reloadTextureFromPath(path.string()));
+        {std::ofstream stream(path,std::ios::binary|std::ios::trunc);stream.write(reinterpret_cast<const char*>(binary.data()),std::streamsize(binary.size()));CHECK(bool(stream));}
+        const auto oldCpu=resident;
+        const auto report=cpu.refreshPublishedResourcesWithReport({path.string()});
+        CHECK(report.cpuRefreshed);CHECK(report.error.empty());CHECK(report.needsAttention());
+        CHECK(report.paths.size()==1);
+        if(report.paths.size()==1){const auto& outcomes=report.paths[0].outcomes;CHECK(outcomes.size()==2);
+            if(outcomes.size()==2){
+                CHECK(outcomes[0].state==ayt::resource::ResourceRefreshState::Retained);
+                CHECK(outcomes[1].state==ayt::resource::ResourceRefreshState::Retained);
+                CHECK(outcomes[0].resourceId==stableId);CHECK(outcomes[1].resourceId==srgbHandle.id);
+                CHECK(outcomes[0].contextId==71);CHECK(outcomes[1].contextId==71);
+                CHECK(outcomes[0].variant=="linear");CHECK(outcomes[1].variant=="sRGB");
+            }
+        }
+        resident=cpu.load<ayt::resource::Texture>(path.string());CHECK(resident!=oldCpu);
+        CHECK(resident&&resident->getWidth()==uint32_t(maximum)+1u);
         CHECK(resources.textures().at(stableId).handle.idx==oldGpu);
-        for(int level=0;level<3;++level)checkPixels(read(level),first[level]);
+        CHECK(resources.textures().at(srgbHandle.id).handle.idx==oldSrgb);
+        for(int level=0;level<3;++level){checkPixels(read(level),first[level]);checkPixels(readVariant(level,srgbHandle.id),first[level]);}
     }
     auto replacement=bake(second,3);CHECK(replacement.saveToBinary(binary));
-    CHECK(resident->loadFromBinary(binary.data(),binary.size()));
-    CHECK(resources.reloadTextureFromPath(path.string()));
+    {std::ofstream stream(path,std::ios::binary|std::ios::trunc);stream.write(reinterpret_cast<const char*>(binary.data()),std::streamsize(binary.size()));CHECK(bool(stream));}
+    const auto repaired=cpu.refreshPublishedResourcesWithReport({path.string()});
+    CHECK(repaired.cpuRefreshed);CHECK_FALSE(repaired.needsAttention());CHECK(repaired.paths.size()==1);
+    if(repaired.paths.size()==1){CHECK(repaired.paths[0].outcomes.size()==2);
+        for(const auto& outcome:repaired.paths[0].outcomes)CHECK(outcome.state==ayt::resource::ResourceRefreshState::Updated);}
+    resident=cpu.load<ayt::resource::Texture>(path.string());CHECK(resident);if(!resident)return;
     CHECK(resources.loadTexture(path.string()).id==stableId);
     CHECK(resources.textures().at(stableId).handle.idx!=oldGpu);
-    for(int level=0;level<3;++level)checkPixels(read(level),second[level]);
+    for(int level=0;level<3;++level){checkPixels(read(level),second[level]);checkPixels(readVariant(level,srgbHandle.id),second[level]);}
     replacement=bake(first,2);CHECK(replacement.saveToBinary(binary));
     CHECK(resident->loadFromBinary(binary.data(),binary.size()));
     CHECK(resources.reloadTextureFromPath(path.string()));
@@ -582,6 +610,7 @@ TEST_CASE(resource_texture_gpu_reload_retains_last_good_mips_and_partial_chain_i
     CHECK(resources.textures().at(stableId).partialChainFallback);
     for(int level=0;level<3;++level)checkPixels(read(level),first[0]);
     resources.destroyTexture(handle);CHECK_FALSE(handle.isValid());CHECK(resident->isLoaded());
+    resources.destroyTexture(srgbHandle);
     resources.shutdown();cpu.unloadAll();
     for(int i=0;i<6;++i)f.adapter.endFrame();
     CHECK(bgfx::getStats()->numTextures==baselineTextures);
