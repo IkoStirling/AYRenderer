@@ -46,6 +46,7 @@ Pass 工厂、FrameGraph、bgfx 句柄及资源表是内部结构，不作为新
 | 分类、静态剔除、连续刚体实例化 | [FrameDrawLists.cpp](../src/detail/FrameDrawLists.cpp)、[RigidInstancing.h](../src/detail/RigidInstancing.h) |
 | L3 缓存和桥接 | [RenderResourceManager.cpp](../src/detail/RenderResourceManager.cpp)、[RenderAssetBridge.cpp](../src/detail/RenderAssetBridge.cpp) |
 | 纹理准备和设备接纳 | [TextureUploadPlan.cpp](../src/detail/TextureUploadPlan.cpp)、[BGFXAdapter.cpp](../src/detail/BGFXAdapter.cpp) |
+| 显式资源表观察、逻辑存储估算 | [ResourceResidency.h](../include/AYRenderer/ResourceResidency.h)、[RenderResourceResidency.cpp](../src/detail/RenderResourceResidency.cpp)、[TextureStorageAccounting.cpp](../src/detail/TextureStorageAccounting.cpp) |
 | UI 统一有序命令与目标池 | [UIRenderBackend.cpp](../src/detail/UIRenderBackend.cpp)、[RenderTargetPool.h](../src/detail/RenderTargetPool.h) |
 
 `RenderPipelineDesc.cpp` 不持有设备或具体 Pass；policy 返回副本，不改原描述。

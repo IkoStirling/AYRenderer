@@ -1,5 +1,26 @@
 # AYRenderer Design
 
+## 2026-10-22 — 显式资源驻留观察
+
+`ResourceResidencySnapshot`是submission owner显式请求的owned值快照，Renderer未初始化时不可用。
+RRM全表统计与最多512行分开：用有界heap保留最低id，再排序；缓存扫描为选中行记录最多4个
+按字典序选择的key，复制最多1024字节并保持合法UTF-8字符边界。未知/遗漏/截断都有显式值。
+只有调用时扫描；没有驻留后台线程、隐式加载、GPU读回或自动驱逐。
+
+`GpuTexture`保存最后成功创建版本的存储格式、mip、初始上传已知标记和来源负载。
+全部owned创建路径填写实际描述：TextureUploadPlan/raw RGBA8/raw format/dynamic/cube；
+borrowed未提供的描述保持未知。失败重载不替换表项，因此不会提前发布CPU候选尺寸。
+Plan在格式展开前记来源格式/提供层数/像素块负载，最终创建描述与展开/base-only回退一致。
+
+`TextureStorageAccounting`依据bimg格式块表按轴、层和六面计算uint64逻辑字节，逐级检查溢出；
+bgfx/bimg格式ABI以count及代表边界编译期核对。它是纯计算，不代替设备接纳校验。
+CPU六面副本独立计量；dynamic初始负载0不等于没有设备存储，更新不改初始负载统计。
+创建采样默认值与逐draw覆盖分离，路径缓存身份不推断Scene引用关系。
+
+范围仅RRM当前表：排除借用底层存储、Pass/RT池/device helper、退休分配、驱动开销和mesh/program字节。
+逻辑估算不是总VRAM，创建负载不是带宽。快照不保活GPU，不是并发访问或plain handle租约方案。
+公开入口的上下文、Doxygen及Agent SDK契约与实现同更；验收记录见`docs/testing.md`。
+
 ## 2026-10-22 — 分层刷新确认与注册寿命
 
 RRM的`onResourceFileChangedWithReport`为每个实际纹理采样变体分别准备/交换，返回通用Resource消费者值。

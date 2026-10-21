@@ -1,5 +1,30 @@
 # AYRenderer 测试维护
 
+## 资源驻留观察冻结门禁（2026-10-22）
+
+纯逻辑存储2例101断言与RRM/Noop6例1147断言通过：矩形/奇数窄轴/块/mip/六面参考，
+未知borrowed、raw R8、dynamic初始零上传和非累计更新、展开/前缀链、采样默认值、
+515项完整总计/512行上限/UTF-8 key边界、拥有值在销毁/关闭/重建context后仍可读。
+原8例1242断言后拆纯计算两例，新增context检查使现合计8例1248断言；不是重复新增两批用例。
+
+`AYRenderer_ResidencySafetyAsan`临时独立target编译纯存储计算、现有TextureUploadPlan/解码器与其测试，
+15例541断言通过，无失败/跳过；`residency-safety-asan.json`。
+不包含RRM GPU表/Editor或整个引擎，第三方bimg未重新插桩。
+临时CMAKE_PROJECT_INCLUDE在finally中清除并重新配置，`restore-residency-safety-profile.log`保留恢复证据。
+
+冻结资源观察版本完整九组CPU1014例18512断言、Editor469例12495断言、Entity定向9例153断言通过。
+两后端完整Gpu各53例44644断言通过，无失败/跳过；`residency-gpu-final-*`。
+两后端Entity实际静态/蒙皮及Editor Workshop/MaterialPreview四项关联流程通过，
+`residency-regression-final-run.log`完整结束。Noop/CPU不能替代这些实机结果。
+SDK128能力/53模块/101搜索例/576文档入口零错零警告；最初新tag抢占texture mipmap查询的失败报告保留，
+随后调整专用tag且恢复原查询首位，通过`sdk-residency-routed.json`。
+
+实际`residency-floating-native-{d3d11,d3d12}`已通过：GPU拒绝时仍是旧GPU尺寸/层级/负载，
+BC1三层8+8+8字节，cube六面96字节和CPU副本分别计量，销毁清除，Scene/预览保留及修复/保存重开。
+截图已检查，浮动控件可见；仍有旧文本后端的LF控制字形问题。
+`residency-frozen-source-hashes.json`固定本阶段源；后续UI段落修复源码已另行开始，
+尚未重编，不混算为这些冻结程序已通过的行为。
+
 ## 作者刷新确认与注册寿命（2026-10-22）
 
 `refresh-bridge-first.json`23例444断言通过；包含未驻留不加载、两种颜色变体独立结果、

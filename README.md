@@ -5,6 +5,20 @@
 [2026-10-22 源码自审](../../AYDocs/RENDERER-ARCHITECTURE-AUDIT-20261022.md)。
 下方带日期的功能增量说明保留；早期 R1–R5 表格已明确标为历史记录。
 
+## 资源驻留观察（2026-10-22）
+
+高级Host持有Renderer时，可在资源提交线程显式调用`resourceResidencySnapshot(maxRows)`，
+配合`AYRenderer/ResourceResidency.h`取得拥有自身字符串和值的报告，不加载或保留GPU资源。
+Mesh/Material/Texture表总计覆盖当前RRM；纹理行最多512、按id排序，每行最多4个1024字节缓存key。
+`maxRows=0`只求总计；行遗漏、key截断与未知描述分别显示。
+
+逻辑存储、当前创建负载、来源像素/块负载、保留CPU图像分开计量；GPU拒绝重载保持旧版本描述。
+borrowed格式未知且排除自有存储，dynamic初始上传为0而不累计后续更新；cube六面与CPU副本独立计量。
+采样值表示创建默认值。此报告不涵盖Pass/目标池/device helper、退休对象或驱动开销，不是全设备显存。
+其拥有值可在shutdown后阅读，opaque id不能用来恢复GPU对象，也不提供并发访问保证。
+编辑器通过现有Resource调试分类按需采集24行和摘要。范围与验收见
+[设计](design.md)、[测试维护](docs/testing.md)和[跨模块边界](../../AYDocs/RENDER-RESOURCE-OBSERVATION-20261022.md)。
+
 ## 作者资源刷新确认（2026-10-22）
 
 Renderer通过Resource通用报告回调确认已驻留Mesh/Material及linear/sRGB纹理变体。

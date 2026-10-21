@@ -4,6 +4,7 @@
 #include "AYRenderer/PbrSurfaceSettings.h"
 #include "AYShader/ShaderResourcePool.h"
 #include <AYResource/ResourceRefresh.h>
+#include <AYRenderer/ResourceResidency.h>
 #include "detail/BGFXAdapter.h"
 #include "detail/GpuResources.h"
 
@@ -183,6 +184,8 @@ public:
     // are O(1) and safe to call from release builds.
     size_t meshCacheSize() const     { return _meshCacheByKey.size(); }
     size_t materialCacheSize() const { return _materialCacheByKey.size(); }
+    ResourceResidencySnapshot resourceResidencySnapshot(uint64_t contextId,
+        uint32_t maxTextureRows) const;
 
 private:
     BGFXAdapter&                 _adapter;

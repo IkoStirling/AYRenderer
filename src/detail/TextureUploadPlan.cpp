@@ -1,5 +1,6 @@
 #include "detail/TextureUploadPlan.h"
 #include "detail/TextureImageLoader.h"
+#include "detail/TextureStorageAccounting.h"
 
 #include <algorithm>
 #include <cmath>
@@ -109,7 +110,7 @@ TextureUploadPlan prepareTextureUpload(const ayt::resource::ITexture& texture, b
     // alpha explicitly, rather than submit unsupported RGB8+sRGB flags.
     const bool expandRgb = useSrgb && texture.getFormat() == TextureFormat::RGB8;
     const uint32_t usedCount = count == fullCount ? count : 1;
-    uint64_t total = 0;
+    uint64_t total = 0, sourcePayload = 0;
     uint32_t w = width, h = height;
     for (uint32_t level = 0; level < count; ++level) {
         const uint64_t expected = blockBytes
@@ -117,6 +118,7 @@ TextureUploadPlan prepareTextureUpload(const ayt::resource::ITexture& texture, b
             : uint64_t(w) * h * pixelBytes;
         if (expected > TextureUploadPlan::byteLimit || expected != texture.getMipmapSize(level)
             || !texture.getMipmapData(level)) return {};
+        sourcePayload += expected;
         if (level < usedCount) {
             total += expand || expandRgb ? uint64_t(w) * h * 4u : expected;
             if (total > TextureUploadPlan::byteLimit) return {};
@@ -154,6 +156,8 @@ TextureUploadPlan prepareTextureUpload(const ayt::resource::ITexture& texture, b
         }
         w = std::max(1u, w / 2u); h = std::max(1u, h / 2u);
     }
+    plan.sourceFormatName = textureStorageFormatName(plan.format);
+    plan.sourcePayloadBytes = sourcePayload;
     if (expand || expandRgb) plan.format = bgfx::TextureFormat::RGBA8;
     return plan;
 }

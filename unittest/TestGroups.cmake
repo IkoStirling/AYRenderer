@@ -3,6 +3,7 @@ set(AYRENDERER_TEST_GROUPS Contracts SceneMaterial Geometry LightingShadow PostP
 
 set(AYRENDERER_TEST_Contracts_SOURCES
     Test_TextureUpload.cpp
+    Test_TextureStorageAccounting.cpp
     Test_MeshSubmissionInfo.cpp
     Test_PbrSurface.cpp
     Test_Ssr.cpp
@@ -37,6 +38,7 @@ set(AYRENDERER_TEST_SceneMaterial_SOURCES
     Test_RenderAssetBridge.cpp
     Test_RendererEventBridge.cpp
     Test_RenderResources.cpp
+    Test_ResourceResidency.cpp
     Test_RenderTargetPool.cpp
     Test_SceneRT_P2.cpp
     Test_SkinWeightUpload.cpp

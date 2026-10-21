@@ -5,6 +5,7 @@
 #include "detail/RenderAssetBridge.h"
 #include "detail/TextureImageLoader.h"
 #include "detail/TextureUploadPlan.h"
+#include "detail/TextureStorageAccounting.h"
 #include "detail/VertexLayoutBridge.h"
 #include "detail/WorldLit2DMaterialSource.h"
 
@@ -37,6 +38,22 @@ std::string textureSamplingCacheKey(const std::string& path, bool srgb)
         key += srgb ? "#srgb" : "#linear";
     }
     return key;
+}
+
+void describeTextureCreation(GpuTexture& texture, bgfx::TextureFormat::Enum format,
+                             uint8_t levels, uint32_t uploadBytes, bool hasSource)
+{
+    texture.storageFormat = format;
+    texture.storageDescriptionKnown = true;
+    texture.mipCount = levels;
+    texture.creationUploadBytesKnown = true;
+    texture.uploadBytes = uploadBytes;
+    texture.sourcePayloadKnown = hasSource;
+    if (hasSource) {
+        texture.sourceFormatName = textureStorageFormatName(format);
+        texture.sourceMipCount = levels;
+        texture.sourcePayloadBytes = uploadBytes;
+    }
 }
 
 uint32_t vertexElementSize(const VertexElement& element) noexcept
@@ -1565,7 +1582,9 @@ TextureHandle RenderResourceManager::createTextureFromPlan(const TextureUploadPl
                                                             const std::string& cacheKey)
 {
     if (!_adapter.isInitialized() || !plan.isValid()
-        || plan.bytes.size() > TextureUploadPlan::byteLimit) return {};
+        || plan.bytes.size() > TextureUploadPlan::byteLimit
+        || static_cast<uint32_t>(plan.format)>=static_cast<uint32_t>(bgfx::TextureFormat::Count)
+        || plan.format==bgfx::TextureFormat::Unknown || plan.format==bgfx::TextureFormat::UnknownDepth) return {};
     if (!cacheKey.empty()) {
         const auto cached = _textureCacheByKey.find(cacheKey);
         if (cached != _textureCacheByKey.end()) return TextureHandle{cached->second};
@@ -1578,6 +1597,12 @@ TextureHandle RenderResourceManager::createTextureFromPlan(const TextureUploadPl
     gpu.samplerFlags = plan.flags & BGFX_SAMPLER_BITS_MASK;
     gpu.partialChainFallback = plan.partialChainFallback;
     gpu.samplerFallback = plan.samplerFallback;
+    const bool sourceKnown=plan.sourceMipCount&&!plan.sourceFormatName.empty()&&plan.sourcePayloadBytes;
+    uint8_t actualLevels=1;
+    if(plan.mipCount>1)for(uint32_t extent=std::max(plan.width,plan.height);extent>1;extent/=2)++actualLevels;
+    describeTextureCreation(gpu,plan.format,actualLevels,static_cast<uint32_t>(plan.bytes.size()),sourceKnown);
+    if(sourceKnown){gpu.sourceFormatName=plan.sourceFormatName;gpu.sourcePayloadBytes=plan.sourcePayloadBytes;}
+    gpu.sourceMipCount=plan.sourceMipCount;
     gpu.handle = _adapter.createTexture2DFromData(plan.width, plan.height, plan.format,
         plan.bytes.data(), gpu.uploadBytes, plan.flags, plan.mipCount > 1);
     if (!bgfx::isValid(gpu.handle)) return {};
@@ -1625,6 +1650,9 @@ TextureHandle RenderResourceManager::createTextureFromRgba8(uint32_t width, uint
         return out;
     }
 
+    describeTextureCreation(gpuTex,bgfx::TextureFormat::RGBA8,1,
+        static_cast<uint32_t>(uint64_t(width)*height*4u),true);
+
     const uint64_t id = _nextTextureId++;
     _textures.emplace(id, gpuTex);
     if (!cacheKey.empty()) {
@@ -1651,6 +1679,8 @@ TextureHandle RenderResourceManager::createDynamicTextureRgba8(uint32_t width,
     if (!bgfx::isValid(gpuTex.handle)) {
         return out;
     }
+
+    describeTextureCreation(gpuTex,bgfx::TextureFormat::RGBA8,1,0,false);
 
     const uint64_t id = _nextTextureId++;
     _textures.emplace(id, gpuTex);
@@ -1715,6 +1745,7 @@ TextureHandle RenderResourceManager::createCubeTextureFromRgba8(uint32_t size,
     }
 
     gpuTex.uploadBytes=static_cast<uint32_t>(uint64_t(size)*size*4u*6u);
+    describeTextureCreation(gpuTex,bgfx::TextureFormat::RGBA8,1,gpuTex.uploadBytes,true);
     const bgfx::TextureHandle createdHandle=gpuTex.handle;
     const uint64_t id = _nextTextureId++;
     try {
@@ -1774,6 +1805,8 @@ TextureHandle RenderResourceManager::createTextureFromData(uint32_t width, uint3
     if (!bgfx::isValid(gpuTex.handle)) {
         return out;
     }
+
+    describeTextureCreation(gpuTex,static_cast<bgfx::TextureFormat::Enum>(bgfxTextureFormat),1,size,true);
 
     const uint64_t id = _nextTextureId++;
     _textures.emplace(id, gpuTex);

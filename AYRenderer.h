@@ -31,6 +31,7 @@ class RendererSubSystem;
 struct PreviewSceneCamera;
 struct PreviewSceneSettings;
 struct MeshSubmissionInfo;
+struct ResourceResidencySnapshot;
 
 namespace detail {
 class BGFXAdapter;
@@ -615,6 +616,12 @@ public:
     bool isWireframeEnabled() const noexcept;
     void resetDebugOverlayStats();
     const RenderFrameStats& getFrameStats() const noexcept;
+    /// Explicit owner-thread observation outside resource mutation. Copies bounded
+    /// diagnostic rows without loading/uploading/evicting or acquiring GPU leases.
+    /// maxTextureRows=0 gives full-table totals only; rows clamp to the public
+    /// ResourceResidency limit and sort by id. Logical bytes are not total VRAM.
+    /// Uninitialized renderers return available=false. Not a gameplay loader.
+    ResourceResidencySnapshot resourceResidencySnapshot(uint32_t maxTextureRows = 128) const;
 
     /// Queue a backbuffer capture for this frame. Call after render(), before endFrame().
     /// The last request before endFrame wins. Returns false for an invalid backend/empty path

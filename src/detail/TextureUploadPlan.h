@@ -22,6 +22,8 @@ struct TextureUploadPlan {
     bool partialChainFallback = false;
     bool samplerFallback = false;
     std::string diagnostic;
+    std::string sourceFormatName;
+    uint64_t sourcePayloadBytes = 0;
     bool isValid() const noexcept { return width && height && mipCount && !bytes.empty(); }
 };
 

@@ -3603,6 +3603,12 @@ const RenderFrameStats& Renderer::getFrameStats() const noexcept
     return _impl ? _impl->debugOverlay.stats() : kEmpty;
 }
 
+ResourceResidencySnapshot Renderer::resourceResidencySnapshot(uint32_t maxTextureRows) const
+{
+    if(!isInitialized())return {};
+    return _impl->resources.resourceResidencySnapshot(_impl->resourceContextId,maxTextureRows);
+}
+
 bool Renderer::captureScreenshot(const std::string& filePath)
 {
     if (!_impl || !_impl->adapter.isInitialized() || filePath.empty()) {

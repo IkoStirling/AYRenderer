@@ -74,6 +74,14 @@ struct GpuTexture {
     uint64_t samplerFlags = BGFX_SAMPLER_NONE;
     bool partialChainFallback = false;
     bool samplerFallback = false;
+    // Observation metadata for the successful GPU version. Borrowed entries
+    // retain unknown format/encoding instead of assuming an RGBA8 allocation.
+    bgfx::TextureFormat::Enum storageFormat = bgfx::TextureFormat::Unknown;
+    bool storageDescriptionKnown = false;
+    bool creationUploadBytesKnown = false;
+    bool sourcePayloadKnown = false;
+    std::string sourceFormatName;
+    uint64_t sourcePayloadBytes = 0;
 };
 
 struct GpuMaterial {
