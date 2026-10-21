@@ -1,5 +1,14 @@
 # AYRenderer
 
+## Decal 目标的设备接纳与附件归属（2026-10-22）
+
+DeferredDecal 的颜色目标和借用深度的 FBO 均经过内部 BGFXAdapter 创建/释放。
+在释放旧目标之前查询尺寸、格式和设备支持；无效描述保留旧目标。
+借用附件 helper 拒绝空列表、数量越界、无效/重复句柄及设备不兼容组合，
+创建的 FBO 不拥有附件；调用者负责同设备有效句柄与寿命。
+这不提供外来句柄鉴权、全局引用计数或 GPU OOM 恢复；实际分配失败仍回收部分目标并回退原 GBuffer。
+实机的附件释放/再次绘制及 Decal 像素验收见 [测试维护](docs/testing.md)。
+
 ## 多行UI文本（2026-10-22）
 
 UIRenderBackend的wrapped文本在塑形前按LF/CRLF/CR和Unicode行/段分隔符分段，保留空行和尾部空行。

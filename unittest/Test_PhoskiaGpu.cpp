@@ -179,6 +179,81 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+TEST_CASE(decal_targets_use_validated_borrowed_attachments_and_reject_before_releasing_live_targets)
+{
+#ifdef _WIN32
+    const auto* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend||!*backend)SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    const auto settle=[&]{for(int frame=0;frame<8;++frame)f.adapter.endFrame();};
+    settle();const auto initialTextures=bgfx::getStats()->numTextures;
+    const auto initialFramebuffers=bgfx::getStats()->numFrameBuffers;
+    constexpr uint64_t sampler=BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP;
+    CHECK(f.adapter.supportsRenderTargetTexture2D(4,4,bgfx::TextureFormat::RGBA8,sampler));
+    CHECK(f.adapter.supportsRenderTargetTexture2D(4,4,bgfx::TextureFormat::RGBA16F,sampler));
+    std::array<bgfx::FrameBufferHandle,3> framebuffers{{BGFX_INVALID_HANDLE,BGFX_INVALID_HANDLE,BGFX_INVALID_HANDLE}};
+    struct Cleanup{BGFXAdapter& adapter;decltype(framebuffers)& values;
+        ~Cleanup(){for(auto value:values)adapter.destroy(value);}} cleanup{f.adapter,framebuffers};
+    framebuffers[0]=f.adapter.createGbufferFrameBuffer(4,4);
+    CHECK(bgfx::isValid(framebuffers[0]));if(!bgfx::isValid(framebuffers[0]))return;
+    std::array<bgfx::TextureHandle,5> attachments;
+    for(uint8_t index=0;index<attachments.size();++index){attachments[index]=bgfx::getTexture(framebuffers[0],index);CHECK(bgfx::isValid(attachments[index]));}
+    settle();CHECK(bgfx::getStats()->numTextures==initialTextures+5);
+    const auto baseTextures=bgfx::getStats()->numTextures;
+    const auto baseFramebuffers=bgfx::getStats()->numFrameBuffers;
+    CHECK(!bgfx::isValid(f.adapter.createBorrowedFrameBuffer({})));
+    auto duplicate=attachments;duplicate[1]=duplicate[0];
+    CHECK(!bgfx::isValid(f.adapter.createBorrowedFrameBuffer(duplicate)));
+    auto invalid=attachments;invalid[3]=BGFX_INVALID_HANDLE;
+    CHECK(!bgfx::isValid(f.adapter.createBorrowedFrameBuffer(invalid)));
+    std::array<bgfx::TextureHandle,256> oversized;
+    oversized.fill(attachments[0]);CHECK(!bgfx::isValid(f.adapter.createBorrowedFrameBuffer(oversized)));
+    settle();CHECK(bgfx::getStats()->numTextures==baseTextures);CHECK(bgfx::getStats()->numFrameBuffers==baseFramebuffers);
+    const auto sample=[&](Pixel expected){
+        const auto pixels=f.render("texture2d image;","return sampleLod(image,vec2(0.5),0.0)",[&](const auto& program){
+            const auto binding=program.getTextureBinding("image");CHECK(binding!=ayt::shader::InvalidBinding);
+            program.setTexture(program.getTextureStage(binding),binding,toShaderTexture(attachments[0]));
+        });
+        CHECK(pixels.size()==PhoskiaGpuFixture::size*PhoskiaGpuFixture::size);
+        for(const auto& pixel:pixels)for(size_t channel=0;channel<4;++channel)
+            CHECK(std::abs(pixel[channel]-expected[channel])<1e-4f);
+    };
+    const auto clear=[&](bgfx::FrameBufferHandle framebuffer,uint32_t color){
+        f.adapter.setViewFrameBuffer(0,framebuffer);f.adapter.setViewRect(0,0,0,4,4);
+        bgfx::setViewClear(0,BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH,color,1,0);bgfx::touch(0);f.adapter.endFrame();
+    };
+    framebuffers[1]=f.adapter.createBorrowedFrameBuffer(attachments);
+    CHECK(bgfx::isValid(framebuffers[1]));if(!bgfx::isValid(framebuffers[1]))return;
+    clear(framebuffers[1],0x336699ff);sample({.2f,.4f,.6f,1});
+    f.adapter.destroy(framebuffers[1]);framebuffers[1]=BGFX_INVALID_HANDLE;settle();
+    CHECK(bgfx::getStats()->numTextures==baseTextures);CHECK(bgfx::getStats()->numFrameBuffers==baseFramebuffers);
+    framebuffers[2]=f.adapter.createBorrowedFrameBuffer(attachments);
+    CHECK(bgfx::isValid(framebuffers[2]));if(!bgfx::isValid(framebuffers[2]))return;
+    clear(framebuffers[2],0xaa5500ff);sample({2.f/3,1.f/3,0,1});
+    f.adapter.destroy(framebuffers[2]);framebuffers[2]=BGFX_INVALID_HANDLE;
+    DeferredDecalPass pass;
+    struct PassCleanup{DeferredDecalPass& pass;BGFXAdapter& adapter;~PassCleanup(){pass.destroyResources(adapter);}} passCleanup{pass,f.adapter};
+    CHECK(pass.prepare(f.adapter,4,4,attachments[4],31));
+    const auto first=pass.output(1),second=pass.output(2);CHECK(bgfx::isValid(first));CHECK(bgfx::isValid(second));
+    settle();const auto preparedTextures=bgfx::getStats()->numTextures;
+    const auto preparedFramebuffers=bgfx::getStats()->numFrameBuffers;
+    CHECK(preparedTextures==baseTextures+8);CHECK(preparedFramebuffers==baseFramebuffers+2);
+    CHECK(pass.prepare(f.adapter,4,4,attachments[4],31));
+    CHECK(!pass.prepare(f.adapter,0,4,attachments[4],31));
+    const auto maximum=bgfx::getCaps()->limits.maxTextureSize;CHECK(maximum<UINT16_MAX);
+    if(maximum<UINT16_MAX)CHECK(!pass.prepare(f.adapter,uint16_t(maximum+1),4,attachments[4],31));
+    CHECK(!f.adapter.supportsRenderTargetTexture2D(UINT32_MAX,4,bgfx::TextureFormat::RGBA8,sampler));
+    CHECK(!f.adapter.supportsRenderTargetTexture2D(4,4,bgfx::TextureFormat::Unknown,sampler));
+    CHECK(pass.output(1).idx==first.idx);CHECK(pass.output(2).idx==second.idx);
+    settle();CHECK(bgfx::getStats()->numTextures==preparedTextures);CHECK(bgfx::getStats()->numFrameBuffers==preparedFramebuffers);
+    pass.destroyResources(f.adapter);settle();
+    CHECK(bgfx::getStats()->numTextures==baseTextures);CHECK(bgfx::getStats()->numFrameBuffers==baseFramebuffers);
+    f.adapter.destroy(framebuffers[0]);framebuffers[0]=BGFX_INVALID_HANDLE;settle();
+    CHECK(bgfx::getStats()->numTextures==initialTextures);CHECK(bgfx::getStats()->numFrameBuffers==initialFramebuffers);
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
 
 TEST_CASE(texture_target_admission_preserves_cached_data_and_all_cube_faces)
 {

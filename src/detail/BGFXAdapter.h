@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <span>
 
 namespace ayt::render::detail
 {
@@ -108,6 +109,10 @@ public:
     // Standalone render-target texture. Unlike createDynamicTexture2D this
     // preserves the caller-selected format and is intended to be borrowed by
     // an FBO shell (for example temporal surface data + GBuffer depth).
+    // Read-only descriptor admission, including uint16/device extent and format
+    // checks; no GPU object or CPU pixel copy is created. Owner thread only.
+    bool supportsRenderTargetTexture2D(uint32_t width, uint32_t height,
+        bgfx::TextureFormat::Enum format, uint64_t samplerFlags = BGFX_SAMPLER_NONE) const noexcept;
     bgfx::TextureHandle createRenderTargetTexture2D(
         uint16_t width, uint16_t height,
         bgfx::TextureFormat::Enum format,
@@ -139,8 +144,9 @@ public:
                                               bool hasMips = false);
 
     // R5+ (Phase PostProcess, 2026-07-20) — framebuffer abstraction.
-    // BGFXAdapter owns FBO handles the same way it owns VB/IB/Texture
-    // handles (single source of truth for GPU resource lifecycle).
+    // BGFXAdapter wraps device operations; RRM/Pass/target-pool callers own
+    // the returned handles and release them through destroy(). This class
+    // does not keep a global ownership/reference-count registry.
     // Reused by R5+ deferred Shadow / GBuffer / Lighting Passes
     // (design.md:457-461) — all of those need offscreen color/depth
     // attachments; building one FBO layer here keeps the ownership
@@ -148,7 +154,7 @@ public:
     //
     // Returns bgfx::kInvalidFrameBufferHandle if not initialized or if
     // creation fails (caller treats that as "skip post-process this
-    // frame"). Tracking is internal — `destroy()` is the public teardown.
+    // frame"). Callers retain ownership — `destroy()` is the teardown.
     bgfx::FrameBufferHandle createFrameBuffer(uint16_t width, uint16_t height,
                                               bgfx::TextureFormat::Enum colorFormat =
                                                   bgfx::TextureFormat::RGBA8,
@@ -198,6 +204,15 @@ public:
     // Public API: NO ── adapter header is src/detail/ (not in include/),
     // 不算 cutsheet §8 public-API 扩面。
     bgfx::FrameBufferHandle createGbufferFrameBuffer(uint16_t width, uint16_t height);
+
+    // Non-owning attachment shell: validates the count, syntactic handles,
+    // duplicates and native framebuffer compatibility before creation. Uses
+    // Write/mip0/layer0/one layer/resolve NONE, and never destroys attachments.
+    // Caller guarantees live handles from this device and keeps them alive
+    // until the shell is destroyed. This is not foreign-handle validation,
+    // a texture lease, or a concurrent destruction fence. Noop is unavailable.
+    bgfx::FrameBufferHandle createBorrowedFrameBuffer(
+        std::span<const bgfx::TextureHandle> attachments);
 
     // R5+ — bind `fb` as the draw target for `viewId`. Pass
     // bgfx::kInvalidFrameBufferHandle to revert to the default

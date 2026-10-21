@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <array>
 
 namespace ayt::render::detail
 {
@@ -468,12 +469,20 @@ bgfx::TextureHandle BGFXAdapter::createDynamicTexture2D(uint16_t width, uint16_t
                                  nullptr);
 }
 
+bool BGFXAdapter::supportsRenderTargetTexture2D(uint32_t width, uint32_t height,
+    bgfx::TextureFormat::Enum format, uint64_t samplerFlags) const noexcept
+{
+    return _initialized && width <= UINT16_MAX && height <= UINT16_MAX
+        && textureRequestValid(static_cast<uint16_t>(width), static_cast<uint16_t>(height),
+            format, BGFX_TEXTURE_RT | samplerFlags);
+}
+
 bgfx::TextureHandle BGFXAdapter::createRenderTargetTexture2D(
     uint16_t width, uint16_t height,
     bgfx::TextureFormat::Enum format,
     uint64_t samplerFlags)
 {
-    if (!_initialized || !textureRequestValid(width,height,format,BGFX_TEXTURE_RT | samplerFlags)) {
+    if (!supportsRenderTargetTexture2D(width, height, format, samplerFlags)) {
         return BGFX_INVALID_HANDLE;
     }
     return bgfx::createTexture2D(
@@ -817,6 +826,27 @@ bgfx::FrameBufferHandle BGFXAdapter::createGbufferFrameBuffer(uint16_t width, ui
     }
 
     return fb;
+}
+
+bgfx::FrameBufferHandle BGFXAdapter::createBorrowedFrameBuffer(
+    std::span<const bgfx::TextureHandle> attachments)
+{
+    if (!_initialized || isNoopBackend() || attachments.empty() || attachments.size() > UINT8_MAX)
+        return BGFX_INVALID_HANDLE;
+    const auto* caps = bgfx::getCaps();
+    if (!caps || attachments.size() > caps->limits.maxFBAttachments) return BGFX_INVALID_HANDLE;
+    // The uint8 API bounds stack scratch. Never allocate or take attachment
+    // ownership on behalf of a caller merely to validate a descriptor.
+    std::array<bgfx::Attachment, UINT8_MAX> descriptions{};
+    for (size_t index = 0; index < attachments.size(); ++index) {
+        if (!bgfx::isValid(attachments[index])) return BGFX_INVALID_HANDLE;
+        for (size_t previous = 0; previous < index; ++previous)
+            if (attachments[previous].idx == attachments[index].idx) return BGFX_INVALID_HANDLE;
+        descriptions[index].init(attachments[index], bgfx::Access::Write, 0, 1, 0, BGFX_RESOLVE_NONE);
+    }
+    const auto count = static_cast<uint8_t>(attachments.size());
+    if (!bgfx::isFrameBufferValid(count, descriptions.data())) return BGFX_INVALID_HANDLE;
+    return bgfx::createFrameBuffer(count, descriptions.data(), false);
 }
 
 void BGFXAdapter::setViewFrameBuffer(uint8_t viewId, bgfx::FrameBufferHandle fb)

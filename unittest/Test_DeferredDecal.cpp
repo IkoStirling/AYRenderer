@@ -9,6 +9,28 @@
 using namespace ayt::render;
 using namespace ayt::render::detail;
 TEST_SUITE(AYRenderer_DeferredDecal)
+TEST_CASE(render_target_descriptor_queries_and_borrowed_shells_fail_closed_without_device_work) {
+ BGFXAdapter adapter;
+ CHECK(!adapter.supportsRenderTargetTexture2D(4,4,bgfx::TextureFormat::RGBA8));
+ CHECK(!BGFXAdapter::isValid(adapter.createBorrowedFrameBuffer({})));
+ BGFXInitParams init;init.backend=Backend::Noop;CHECK(adapter.initialize(init));
+ const auto textures=bgfx::getStats()->numTextures;
+ const auto framebuffers=bgfx::getStats()->numFrameBuffers;
+ for(const auto extent:{0u,uint32_t(UINT16_MAX)+1,UINT32_MAX}) {
+  CHECK(!adapter.supportsRenderTargetTexture2D(extent,4,bgfx::TextureFormat::RGBA8));
+  CHECK(!adapter.supportsRenderTargetTexture2D(4,extent,bgfx::TextureFormat::RGBA8));
+ }
+ CHECK(!adapter.supportsRenderTargetTexture2D(4,4,bgfx::TextureFormat::Unknown));
+ CHECK(!adapter.supportsRenderTargetTexture2D(4,4,bgfx::TextureFormat::UnknownDepth));
+ CHECK(!adapter.supportsRenderTargetTexture2D(4,4,static_cast<bgfx::TextureFormat::Enum>(UINT32_MAX)));
+ CHECK(!BGFXAdapter::isValid(adapter.createBorrowedFrameBuffer({})));
+ const bgfx::TextureHandle invalid[]={BGFX_INVALID_HANDLE};
+ CHECK(!BGFXAdapter::isValid(adapter.createBorrowedFrameBuffer(invalid)));
+ CHECK(bgfx::getStats()->numTextures==textures);CHECK(bgfx::getStats()->numFrameBuffers==framebuffers);
+ DeferredDecalPass pass;CHECK(!pass.prepare(adapter,4,4,bgfx::TextureHandle{1},31));
+ adapter.shutdown();pass.destroyResources(adapter);
+ CHECK(!BGFXAdapter::isValid(pass.output(1)));
+}
 TEST_CASE(host_copy_sanitizes_projectors_and_bounds_capacity) {
  Renderer r;CHECK(!r.deferredDecalsEnabled());DeferredDecal d;
  std::vector<DeferredDecal> source(20,d);r.setDeferredDecals(source);CHECK(r.deferredDecals().size()==16);

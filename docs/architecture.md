@@ -1,6 +1,6 @@
 # AYRenderer 当前架构
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Date:** 2026-10-22
 **Status:** Active
 **Owner:** AYRenderer
@@ -120,7 +120,7 @@ FrameDrawLists 每个同步提交只分类一次，几何 Pass 共享结果。�
 | 资源/行为 | 当前持有和释放者 | 设备操作入口 | 迁移提交owner时必须一起处理 |
 |---|---|---|---|
 | 路径Mesh/Texture、材质实例 | RenderResourceManager的表与稳定id | 通过BGFXAdapter创建buffer/texture，AYShader池提供program | 路径重载交换、显式destroy、context重建、消费者确认 |
-| 主视图/效果的持久附件 | 相应Pass/sidecar；部分目标经FrameGraph/RT池租用 | 大部分通过Adapter；当前DeferredDecal仍直接创建/释放颜色附件和FBO | resize、失败部分回收、借用depth、黑板当前代际与fallback |
+| 主视图/效果的持久附件 | 相应Pass/sidecar；部分目标经FrameGraph/RT池租用 | Adapter；DeferredDecal也使用RT接纳查询与不拥有附件的FBO helper | resize、失败部分回收、借用depth、黑板当前代际与fallback |
 | FrameGraph/retained UI目标 | RenderTargetPool的槽、代际lease和延迟复用规则 | Adapter的目标创建/销毁包装 | lease归还、类别预算、禁止别名和退休判定 |
 | UI批次GPU状态与fallback | UiGpuContext | 该内部设备所有者直接创建程序/uniform/纹理等 | UI主/子窗口、offscreen flush、默认纹理和关闭顺序 |
 | 字形图集 | BgfxFontAtlas与AYFont缓存 | 图集创建/增量更新；实际字体资源来自AYFont | shaping/测量与图集修改区分；首次glyph请求可能上传 |
@@ -132,10 +132,14 @@ Adapter是设备动作封装，不能仅因为函数在Adapter就推断它持有
 当前标准集成按同一提交owner使用这些入口，互斥锁和owned快照不自动证明可跨线程提交/析构。
 
 2026-10-22以`bgfx::create* / destroy / updateTexture* / frame / requestScreenShot / renderFrame`
-做词法定位，Renderer/Shader源码有93个匹配，含AYBGFXConverter的2个注释；
-线索保存在`out/render-sampling-20261021/gpu-lifecycle-lexical-inventory.json`。
+做词法定位，原Renderer/Shader源码有93个匹配，含AYBGFXConverter的2个注释；
+原线索保存在`out/render-sampling-20261021/gpu-lifecycle-lexical-inventory.json`，
+Decal迁移后重新扫描见`gpu-lifecycle-after-decal-inventory.json`。
+后者扩大到`.cpp/.h`共91条，其中90条来自`.cpp`；额外的一条header是RRM的注释。
+原四条Decal直接调用消失，Adapter增加一条借用FBO创建调用；这只是定位范围的变化。
 它不是AST证明，不覆盖宏/别名/第三方实现，也不表示每帧实际分配或调用次数。
-DeferredDecal残余路径是本轮进一步核对的目标；UiGpuContext/FontAtlas/Shader内部直接调用有各自所有者，
+DeferredDecal直接创建/释放已收敛到Adapter，但Pass仍持有和释放其目标。
+UiGpuContext/FontAtlas/Shader内部直接调用有各自所有者，
 不能机械地把所有代码都搬进一个大Adapter后就宣称统一了寿命。
 
 ### 5.2 现有不变量
@@ -158,6 +162,22 @@ DeferredDecal残余路径是本轮进一步核对的目标；UiGpuContext/FontAt
   `RenderFrameStats.resources` 是资源黑板内容摘要，不是路径GPU资产驻留量或VRAM统计。
 - mip 准备校验精确编码大小；完整链上传，合法前缀基础层回退，非法尾部拒绝。
   颜色转换、sampler 回退和256 MiB上传预算见 [设计](../design.md)及 [测试说明](testing.md)。
+
+### 5.3 关闭顺序与外部借用
+
+Host先停止新的Scene/UI记录和预览callback，再结束其UI backend、子窗口等GPU消费者。
+UIPass只借用backend，Renderer的管线销毁不接管UIRenderBackend/字体图集的所有权；
+已初始化backend借用的Renderer、Adapter、shader pool和目标池须保持存活，直到backend完成shutdown。
+Renderer移动同样不自动修正外部保存的Renderer对象地址；资源回调的稳定Impl捕获不是一般借用指针迁移协议。
+
+Renderer自身shutdown先使旧resource context/alive注册失效，释放runtime相机与预览的私有提交状态，
+再清理主Pass；借用GBuffer/Lighting附件的Transparent、Motion、Decal须在附件生产者之前释放。
+随后处理scene FBO、FrameGraph目标/黑板和RT池，清理自己的刷新注册，再依次关闭RRM、shader pool、Adapter。
+最后推进截图sidecar并清除未提交请求；接受过截图请求不等于每个文件已由callback生成。
+
+Adapter只放弃该实例对进程设备的持有：仍有其他实例时不关闭全局bgfx；
+Noop保留进程级sticky设备，最后一个真实GPU实例才走设备shutdown。
+这个进程计数不授予跨线程创建/提交/析构权限，也不保证任意第二窗口可用作独立主backbuffer。
 
 ## 6. 修改与验证路径
 

@@ -1,5 +1,23 @@
 # AYRenderer 测试维护
 
+## Decal附件接纳（2026-10-22）
+
+`decal-admission-first-cpu.json`：DeferredDecal合约8例89断言通过。
+新增用例在未初始化/Noop下检查整数边界、格式、空/无效附件和统计不变。
+两后端`decal-admission-first-{d3d11,d3d12}.json`各1例175断言通过：
+实际五附件借用壳清除/采样，销毁壳不释放颜色/深度，再建壳后第二颜色读回正确；
+空/重复/无效/256附件请求不分配，Decal分配八颜色/两壳、重复prepare不分配，
+无效尺寸保留两个输出与计数，最终先销毁Pass再销毁base GBuffer回到初始计数。
+这些测试没有向旧实现发出危险的大尺寸设备分配，不声称完成旧驱动故障复现。
+四项既有实际Decal测试在两后端分别通过：ping-pong/resize/借用depth531断言、
+culling/parity/整批校验387断言、主Renderer graph/final pixels216断言、材质/normal1390断言。
+本阶段冻结完整九组CPU1019例18580断言、Editor470例12510断言、Entity9例153断言通过；
+两后端完整Gpu各55例44840断言，无失败/跳过；`decal-admission-*-final.*`。
+两后端Entity实际静态/蒙皮与Workshop/AssetReimport/MaterialPreview六项Editor流程通过，
+`decal-admission-regression-final-run.log`完整结束。库存1074项/十分区无遗漏重复，SDK128/53/102/576零错零警告。
+`decal-admission-frozen-source-hashes.json`固定本阶段；Test_PhoskiaGpu的冻结副本另存，
+后补reset后不render的计数断言不在这批二进制或提交中，不能据此外推其已通过。
+
 ## UI段落的独立参考（2026-10-22）
 
 先用新测试独立编译的TU链接冻结旧Renderer库：19例中3失败、108断言中21失败，
@@ -17,8 +35,8 @@
 两后端实际Entity静态/蒙皮，以及Workshop/AssetReimport/MaterialPreview六项Editor流程通过，
 实际资源面板截图已逐图检查，LF控制字形已消除。库存1072项/十分区无遗漏/重复。
 SDK128能力/53模块/102搜索例/576文档入口，0错误0警告。
-冻结源码见`ui-paragraph-frozen-source-hashes.json`；后补Decal附件接纳的Adapter/Pass/测试改动尚未构建，
-与本节冻结门禁和文本提交分开，不能从本节结果外推。
+冻结源码见`ui-paragraph-frozen-source-hashes.json`；后补Decal附件接纳与本节冻结门禁和文本提交分开，
+不能从本节结果外推；其后验证见上节。
 
 ## 资源驻留观察冻结门禁（2026-10-22）
 

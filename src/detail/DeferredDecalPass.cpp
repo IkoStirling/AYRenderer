@@ -8,16 +8,22 @@
 namespace ayt::render::detail {
 bool DeferredDecalPass::prepare(BGFXAdapter& adapter,uint16_t width,uint16_t height,bgfx::TextureHandle depth,uint32_t generation) {
     if(!adapter.isInitialized()||adapter.isNoopBackend()||!width||!height||!BGFXAdapter::isValid(depth))return false;
+    constexpr uint64_t sampler = BGFX_SAMPLER_POINT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
+    // Reject descriptors before releasing current targets or allocating any
+    // replacement. Allocation failure still cleans partial targets and lets
+    // the frame consume its unchanged base GBuffer instead.
+    if (!adapter.supportsRenderTargetTexture2D(width,height,bgfx::TextureFormat::RGBA8,sampler)
+        || !adapter.supportsRenderTargetTexture2D(width,height,bgfx::TextureFormat::RGBA16F,sampler)) return false;
     if(width==_width&&height==_height&&depth.idx==_depth.idx&&generation==_generation&&BGFXAdapter::isValid(_targets[0])&&BGFXAdapter::isValid(_targets[1]))return true;
     destroyResources(adapter);
     for(size_t t=0;t<2;++t) {
         for(size_t i=0;i<4;++i) {
             auto format=i==2?bgfx::TextureFormat::RGBA16F:bgfx::TextureFormat::RGBA8;
-            _colors[t][i]=bgfx::createTexture2D(width,height,false,1,format,BGFX_TEXTURE_RT|BGFX_SAMPLER_POINT|BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP);
+            _colors[t][i]=adapter.createRenderTargetTexture2D(width,height,format,sampler);
             if(!BGFXAdapter::isValid(_colors[t][i])){destroyResources(adapter);return false;}
         }
         bgfx::TextureHandle attachments[5]={_colors[t][0],_colors[t][1],_colors[t][2],_colors[t][3],depth};
-        _targets[t]=bgfx::createFrameBuffer(5,attachments,false); // depth is borrowed, never owned
+        _targets[t]=adapter.createBorrowedFrameBuffer(attachments); // depth is borrowed, never owned
         if(!BGFXAdapter::isValid(_targets[t])){destroyResources(adapter);return false;}
     }
     _width=width;_height=height;_depth=depth;_generation=generation;return true;
@@ -68,8 +74,8 @@ uint32_t DeferredDecalPass::execute(PassExecContext& ctx) {
 }
 void DeferredDecalPass::destroyResources(BGFXAdapter& adapter) {
     _program.reset();_geometry.destroy(adapter);
-    for(auto& f:_targets){if(BGFXAdapter::isValid(f))bgfx::destroy(f);f=BGFX_INVALID_HANDLE;}
-    for(auto& group:_colors)for(auto& h:group){if(BGFXAdapter::isValid(h))bgfx::destroy(h);h=BGFX_INVALID_HANDLE;}
+    for(auto& f:_targets){adapter.destroy(f);f=BGFX_INVALID_HANDLE;}
+    for(auto& group:_colors)for(auto& h:group){adapter.destroy(h);h=BGFX_INVALID_HANDLE;}
     _width=_height=0;_generation=0;_depth=BGFX_INVALID_HANDLE;
 }
 }

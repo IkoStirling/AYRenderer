@@ -309,6 +309,15 @@ constexpr容量与公开上限静态交叉检查，防止布局变更后重用�
 
 ## 2026-10-06 Deferred Decal v1
 
+2026-10-22 创建边界补充：`prepare` 在缓存命中和旧目标释放之前，查询 RGBA8/RGBA16F
+渲染目标的整数范围、设备尺寸与格式支持。颜色通过 Adapter 的 RT helper 创建，
+两组 FBO 通过 `createBorrowedFrameBuffer` 创建；后者检查附件数量、无效/重复句柄、
+设备 FBO 组合支持，固定 Write/mip0/layer0/one layer/resolve NONE、destroyTextures=false。
+附件来自当前设备且仍然存活是调用者前置条件；helper 不是外来句柄验证或租约。
+Pass 仍拥有八张颜色贴图和两个壳，借用原 GBuffer depth；释放先壳再颜色。
+非法尺寸/格式不会拆除原目标。分配失败仍清理部分结果并回退原 GBuffer，
+没有为 OOM 同时保留两套大目标，也没有改变 shader、排序、parity 或黑板发布契约。
+
 slot24；view34..49 在GBuffer7后、Motion3/SSAO14前。Renderer 有界复制16个
 高级Host descriptor，过滤非有限/奇异/镜像/剪切变换和零opacity；正交基正尺度允许非等比。
 只在启用且存在可能可见的项时 prepare 原 GBuffer depth，再创建2组4色MRT并借用depth。
