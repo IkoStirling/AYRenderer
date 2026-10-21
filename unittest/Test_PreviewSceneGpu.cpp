@@ -184,4 +184,82 @@ TEST_CASE(multiple_hdr_previews_keep_display_state_and_survive_resize_release_wi
     SKIP_TEST("Windows D3D device required");
 #endif
 }
+TEST_CASE(wrapped_ui_paragraphs_match_independent_line_draws_across_scale_alignment_and_clipping)
+{
+#ifdef _WIN32
+    const auto* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend||!*backend)SKIP_TEST("Isolated D3D11/12 device required");
+    using namespace ayt::render;
+    using Style=ayt::ui::IRenderBackend::TextStyle;
+    auto window=CreateWindowExW(0,L"STATIC",L"Wrapped paragraph regression",WS_OVERLAPPED,0,0,1024,768,
+        nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window);if(!window)return;
+    struct CloseWindow{HWND value;~CloseWindow(){DestroyWindow(value);}} close{window};
+    Renderer renderer;InitDesc init;init.windowHandle=window;init.width=512;init.height=384;
+    init.msaa=0;init.vsync=false;
+    init.backend=std::string(backend)=="d3d12"?Backend::Direct3D12:Backend::Direct3D11;
+    CHECK(renderer.initialize(init));if(!renderer.isInitialized())return;
+    renderer.setFxaaEnabled(false);renderer.setSmaaEnabled(false);renderer.setTaaEnabled(false);
+    renderer.setPostProcessGamma(1);renderer.setPostProcessExposure(1);
+    renderer.setPostProcessTonemapMode(Renderer::TonemapMode::None);
+    UIRenderBackend ui;CHECK(ui.initialize(renderer));
+    const auto* evidence=std::getenv("AY_UI_PARAGRAPH_CAPTURE_DIRECTORY");
+    const auto directory=evidence?std::filesystem::path(evidence)/backend:
+        std::filesystem::temp_directory_path()/(std::string("ay-ui-paragraph-")+backend+"-"+
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(directory);
+    const std::wstring combined=L"\nAlpha\r\n\rBeta\u2028中文\u2029العربية\n";
+    const std::array<std::wstring,7> reference={L"",L"Alpha",L"",L"Beta",L"中文",L"العربية",L""};
+    const float scales[]={1,1.25f,2};
+    for(unsigned mode=0;mode<3;++mode){
+        const float scale=scales[mode];const uint16_t width=uint16_t(512*scale),height=uint16_t(384*scale);
+        renderer.resize(width,height);ui.setFramebufferSize(width,height);ui.setUiScale(scale);
+        Style style;style.wrapToBounds=true;style.valign=static_cast<Style::VAlign>(mode);
+        style.align=static_cast<Style::Align>(mode);style.lineSpacing=mode?4:0;
+        style.color={.9f,.95f,1,1};
+        if(mode==2){style.outlineWidth=1;style.outlineColor={.1f,.3f,.5f,1};
+            style.shadowOffset={1,2};style.shadowColor={.8f,.1f,.15f,1};}
+        constexpr int fontSize=22;
+        const auto one=ui.measureText(L"M",fontSize,style);CHECK(one.height>0);
+        // Independent reference: the known seven logical lines and explicit
+        // block alignment; the actual paragraph layout/measure API is unused.
+        const float block=one.height*reference.size()+style.lineSpacing*(reference.size()-1);
+        const float unused=std::max(0.f,340-block);
+        const float startY=20+(style.valign==Style::VAlign::Top?0:
+            style.valign==Style::VAlign::Middle?unused*.5f:unused);
+        const auto path=directory/("paragraph-"+std::to_string(mode)+".png");
+        for(int frame=0;frame<18;++frame){
+            ClearDesc clear;clear.r=.025f;clear.g=.035f;clear.b=.05f;
+            renderer.beginCompositeFrame(clear,width,height);renderer.render(RenderScene{});
+            ui.beginFrame();ui.beginCanvas({0,0,512,384});
+            if(mode==2)ui.pushClip({0,16,512,320});
+            ui.drawText({8,20,248,360},combined,fontSize,style);
+            auto manual=style;manual.wrapToBounds=false;manual.valign=Style::VAlign::Top;
+            for(size_t line=0;line<reference.size();++line){
+                const float y=startY+line*(one.height+style.lineSpacing);
+                ui.drawText({264,y,504,y+one.height},reference[line],fontSize,manual);
+            }
+            if(mode==2)ui.popClip();
+            ui.endCanvas();ui.endFrame();
+            if(frame==12)CHECK(renderer.captureScreenshot(path.string()));
+            renderer.endFrame();
+        }
+        const auto image=detail::decodeImageFile(path.string());CHECK(image.width==width);CHECK(image.height==height);
+        if(image.rgba8.size()!=size_t(width)*height*4)continue;
+        const unsigned half=width/2;size_t differences=0,lit=0;
+        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<half;++x){
+            const auto left=(size_t(y)*width+x)*4,right=(size_t(y)*width+x+half)*4;
+            bool differs=false;
+            for(unsigned c=0;c<4;++c)differs|=std::abs(int(image.rgba8[left+c])-int(image.rgba8[right+c]))>1;
+            differences+=differs;lit+=image.rgba8[right]>80&&image.rgba8[right+1]>80;
+        }
+        std::cout<<"[UiParagraph] backend="<<backend<<" scale="<<scale<<" differences="<<differences
+            <<" reference pixels="<<lit<<'\n';
+        CHECK(lit>100);CHECK(differences==0);
+    }
+    ui.shutdown();renderer.shutdown();
+#else
+    SKIP_TEST("Windows D3D device required");
+#endif
+}
 TEST_SUITE_END

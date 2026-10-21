@@ -1,5 +1,25 @@
 # AYRenderer 测试维护
 
+## UI段落的独立参考（2026-10-22）
+
+先用新测试独立编译的TU链接冻结旧Renderer库：19例中3失败、108断言中21失败，
+涉及hard break/空行高度与宽度、lineSpacing、控制字符不应进入glyph批次；`ui-paragraph-before.json`。
+构建输出全部在证据目录，主构建的对象/库/程序没有被覆盖；旧UI源码副本与冻结源hash相同。
+`ui-paragraph-baseline-proof.json`记录旧库、旧源码、新测试摘要，启动/构建失败不算复现。
+
+修复后`ui-paragraph-first.json`19例108断言通过，无跳过。
+两后端`ui-paragraph-gpu-first-*`各1例21断言通过：实际字形对独立七行参考，
+1/1.25/2缩放，Left/Center/Right、Top/Middle/Bottom、空段/CRLF/CR/Unicode分隔、中英文及阿拉伯文，
+附加outline/offset shadow和父裁剪；每组两半RGBA±1差异像素均为0，参考图有实际可见像素。
+`ui-paragraph-native-first`保留真实PNG，不能用相同段落实现再次绘制当唯一oracle。
+新完整冻结回归九组CPU1018例18562断言、Editor470例12510断言、Entity9例153断言通过。
+两后端完整Gpu各54例44665断言，无失败/跳过；`ui-paragraph-*-final.*`。
+两后端实际Entity静态/蒙皮，以及Workshop/AssetReimport/MaterialPreview六项Editor流程通过，
+实际资源面板截图已逐图检查，LF控制字形已消除。库存1072项/十分区无遗漏/重复。
+SDK128能力/53模块/102搜索例/576文档入口，0错误0警告。
+冻结源码见`ui-paragraph-frozen-source-hashes.json`；后补Decal附件接纳的Adapter/Pass/测试改动尚未构建，
+与本节冻结门禁和文本提交分开，不能从本节结果外推。
+
 ## 资源驻留观察冻结门禁（2026-10-22）
 
 纯逻辑存储2例101断言与RRM/Noop6例1147断言通过：矩形/奇数窄轴/块/mip/六面参考，

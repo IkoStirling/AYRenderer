@@ -6,9 +6,12 @@
 #include "AYRenderer.h"
 #include "AYTest.h"
 #include "AYRenderer/UIRenderBackend.h"
+#include "detail/UiTextParagraphs.h"
 
 #include <cstdio>
 #include <vector>
+#include <cmath>
+#include <algorithm>
 
 #if defined(_WIN32)
 #  include <Windows.h>
@@ -61,6 +64,72 @@ struct TextHarness {
 } // namespace
 
 TEST_SUITE(UITextStyleTests)
+
+TEST_CASE(hard_paragraph_boundaries_preserve_empty_ranges_crlf_and_utf_code_units)
+{
+    const std::wstring text=L"\nA\r\n\rB\u2028\u2029\U0001f600\n";
+    std::vector<std::wstring> paragraphs;
+    ayt::render::detail::forEachUiTextParagraph(text,true,[&](auto range){
+        CHECK(range.begin<=range.end);CHECK(range.end<=text.size());
+        paragraphs.push_back(text.substr(range.begin,range.end-range.begin));
+    });
+    const std::vector<std::wstring> expected={L"",L"A",L"",L"B",L"",L"\U0001f600",L""};
+    CHECK(paragraphs==expected);
+    size_t visits=0;
+    ayt::render::detail::forEachUiTextParagraph(text,false,[&](auto range){++visits;
+        CHECK(range.begin==0);CHECK(range.end==text.size());});
+    CHECK(visits==1);
+    visits=0;
+    ayt::render::detail::forEachUiTextParagraph({},true,[&](auto range){++visits;CHECK(range.begin==range.end);});
+    CHECK(visits==1);
+}
+
+TEST_CASE(wrapped_measure_honors_hard_breaks_and_empty_lines_without_control_glyph_width)
+{
+    TextHarness h;CHECK(h.init());
+    const auto one=h.ui.measureText(L"MM",20);CHECK(one.width>0);CHECK(one.height>0);
+    for(const auto* text:{L"MM\nMM",L"MM\r\nMM",L"MM\rMM",L"MM\u2028MM",L"MM\u2029MM"}){
+        const auto measured=h.ui.measureText(text,20,1000);
+        CHECK(std::abs(measured.width-one.width)<.001f);CHECK(measured.height==2*one.height);
+    }
+    CHECK(h.ui.measureText(L"MM\n\nMM\n",20,1000).height==4*one.height);
+    const auto empty=h.ui.measureText(L"\r\n\n",20,1000);
+    CHECK(empty.width==0);CHECK(empty.height==3*one.height);
+    // Default unconstrained measurement keeps its historical single-line domain.
+    CHECK(h.ui.measureText(L"MM\nMM",20).height==one.height);
+}
+
+TEST_CASE(wrapped_styled_measure_counts_paragraph_spacing_and_independent_word_wrap)
+{
+    TextHarness h;CHECK(h.init());
+    ayt::ui::IRenderBackend::TextStyle style;style.wrapToBounds=true;style.lineSpacing=3;
+    const auto one=h.ui.measureText(L"MMMM",20);
+    const auto spaced=h.ui.measureText(L"MMMM\n\nMMMM",20,style,1000);
+    CHECK(spaced.height==3*one.height+6);CHECK(std::abs(spaced.width-one.width)<.001f);
+    style.lineSpacing=0;
+    const auto width=one.width*1.05f;
+    const auto first=h.ui.measureText(L"MMMM",20,style,width);
+    const auto second=h.ui.measureText(L"MMMM MMMM",20,style,width);
+    const auto combined=h.ui.measureText(L"MMMM\nMMMM MMMM",20,style,width);
+    CHECK(combined.height==first.height+second.height);
+    CHECK(std::abs(combined.width-std::max(first.width,second.width))<.001f);
+}
+
+TEST_CASE(wrapped_draw_does_not_emit_hard_separator_control_glyphs)
+{
+    TextHarness h;CHECK(h.init());
+    ayt::ui::IRenderBackend::TextStyle style;style.wrapToBounds=true;
+    style.valign=ayt::ui::IRenderBackend::TextStyle::VAlign::Top;
+    const ayt::math::FRectangle bounds{20,20,780,580};
+    h.ui.beginFrame();h.ui.drawText(bounds,L"MM",20,style);
+    const auto one=h.ui.getPendingUiItemCountForDebug();CHECK(one>0);h.ui.endFrame();
+    for(const auto* text:{L"MM\nMM",L"MM\r\nMM",L"MM\rMM",L"MM\u2028MM",L"MM\u2029MM"}){
+        h.ui.beginFrame();h.ui.drawText(bounds,text,20,style);
+        CHECK(h.ui.getPendingUiItemCountForDebug()==one*2);h.ui.endFrame();
+    }
+    h.ui.beginFrame();h.ui.drawText(bounds,L"\n\r\n\u2028",20,style);
+    CHECK(h.ui.getPendingUiItemCountForDebug()==0);h.ui.endFrame();
+}
 
 TEST_CASE(ui_text_align_x_pure)
 {

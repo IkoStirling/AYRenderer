@@ -162,10 +162,11 @@ public:
                          const ayt::math::FVector4& tint) override;
     void drawText(const ayt::math::FRectangle& bounds, const std::wstring& text, int fontSize,
                   const ayt::math::FVector4& color) override;
-    // Text-style drawText: implements Align + VAlign (outline/shadow/
-    // letterSpacing/lineSpacing are documented as not-yet-implemented —
-    // see .cpp). The simple overload routes through here with default
-    // style (Left + Middle == legacy single-line behavior).
+    /// Styled glyph draw with color, outline, offset shadow (no blur), cluster
+    /// letter spacing, line spacing and per-line/whole-block alignment.
+    /// wrapToBounds splits LF/CRLF/CR/U+2028/U+2029 before shaping and preserves
+    /// empty/trailing lines, then greedily wraps complete shaping clusters.
+    /// Default false retains the legacy single-line route (Left + Middle).
     void drawText(const ayt::math::FRectangle& bounds, const std::wstring& text, int fontSize,
                   const ayt::ui::IRenderBackend::TextStyle& style) override;
     void drawWithAlpha(const ayt::math::FRectangle& bounds, void* textureHandle,
@@ -231,6 +232,10 @@ public:
                        const ayt::math::FRectangle& uvRegion,
                        const ayt::math::FVector4& padding) override;
 
+    /// A positive width enables paragraph/cluster wrapping; nonpositive width
+    /// keeps the legacy single-line domain unless styled wrapToBounds is true.
+    /// Height uses the primary font line height plus inter-line style spacing;
+    /// width is advance width, excluding outline/shadow ink extents.
     TextMetrics measureText(const std::wstring& text, int fontSize,
                             float maxWidth = 0.0f) const override;
     TextMetrics measureText(const std::wstring& text, int fontSize,

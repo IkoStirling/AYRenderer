@@ -1,6 +1,7 @@
 #include "AYRenderer/UIRenderBackend.h"
 #include "detail/RenderViewNamespaces.h"
 #include "detail/PreviewSceneValidation.h"
+#include "detail/UiTextParagraphs.h"
 static_assert(ayt::render::detail::uiViewCapacity() == ayt::render::UIRenderBackend::kMaxOffscreenPaintsPerFrame);
 
 #include "AYRenderer.h"
@@ -3652,104 +3653,63 @@ ayt::ui::IRenderBackend::TextMetrics UIRenderBackend::measureText(
         return out;
     }
 
-    // Glyph advances (px). Shaped path = HB 26.6 fixed-point; fallback =
-    // per-codepoint advance (same default advance the draw path uses).
+    // Split before shaping so paragraph direction and hard separators cannot
+    // leak into a neighboring line. The unconstrained legacy route stays one
+    // span. Reuse the same cluster wrapping helper as drawText.
     const char* language = style.language.empty() ? nullptr : style.language.c_str();
-    const auto shapedRuns = atlas->shapeTextWithFallback(
-        font, rasterSize, text, toFontDirection(style.direction), language);
-    std::vector<ayt::font::ShapedGlyph> shaped;
-    for (const auto& run : shapedRuns) {
-        shaped.insert(shaped.end(), run.glyphs.begin(), run.glyphs.end());
-    }
-    std::vector<float> advances;
-    std::vector<bool>  isSpace;
-    if (!shaped.empty()) {
-        advances.reserve(shaped.size());
-        isSpace.reserve(shaped.size());
-        for (size_t begin = 0; begin < shaped.size();) {
-            size_t end = begin;
-            float advance = 0.0f;
-            do {
-                advance += static_cast<float>(shaped[end].xAdvance) / (64.0f * scale);
-                ++end;
-            } while (end < shaped.size()
-                     && shaped[end].charIndex == shaped[begin].charIndex);
-            advances.push_back(advance + static_cast<float>(style.letterSpacing));
-            const size_t ci = std::min<size_t>(shaped[begin].charIndex, text.size() - 1u);
-            isSpace.push_back(text[ci] == L' ' || text[ci] == L'\t');
-            begin = end;
+    const float lineHeight = out.height;
+    size_t lineCount = 0;
+    detail::forEachUiTextParagraph(text, style.wrapToBounds || maxWidth > 0, [&](auto range) {
+        if (range.begin == range.end) {
+            ++lineCount;
+            return;
         }
-    } else {
-        const auto analysis = ayt::ui::analyzeUnicodeText(text, style.direction);
-        advances.reserve(analysis.clusters.size());
-        isSpace.reserve(analysis.clusters.size());
-        for (const auto& cluster : analysis.clusters) {
-            float advance = 0.0f;
-            size_t index = cluster.textStart;
-            const size_t end = cluster.textStart + cluster.textLength;
-            while (index < end) {
-                ayt::font::GlyphInfo* glyph = font->getGlyph(nextTextCodePoint(text, index));
-                advance += (glyph != nullptr)
-                    ? static_cast<float>(glyph->metrics.advance) / scale
-                    : out.height * 0.25f;
+        std::wstring ownedParagraph;
+        const auto& paragraph = range.begin == 0 && range.end == text.size() ? text
+            : (ownedParagraph = text.substr(range.begin, range.end - range.begin));
+        const auto shapedRuns = atlas->shapeTextWithFallback(
+            font, rasterSize, paragraph, toFontDirection(style.direction), language);
+        std::vector<float> advances;
+        std::vector<bool> spaces;
+        for (const auto& run : shapedRuns) {
+            for (size_t begin = 0; begin < run.glyphs.size();) {
+                size_t end = begin;
+                float advance = 0;
+                do {
+                    advance += static_cast<float>(run.glyphs[end].xAdvance) / (64.f * scale);
+                    ++end;
+                } while (end < run.glyphs.size()
+                    && run.glyphs[end].charIndex == run.glyphs[begin].charIndex);
+                const auto index = std::min<size_t>(run.glyphs[begin].charIndex, paragraph.size() - 1);
+                advances.push_back(advance + style.letterSpacing);
+                spaces.push_back(paragraph[index] == L' ' || paragraph[index] == L'\t');
+                begin = end;
             }
-            advances.push_back(advance + static_cast<float>(style.letterSpacing));
-            isSpace.push_back(cluster.whitespace);
         }
-    }
-    const size_t n = advances.size();
-
-    if (maxWidth <= 0.0f) {
-        // No wrap constraint: single line, full span.
-        for (float a : advances) {
-            out.width += a;
-        }
-        return out;
-    }
-
-    // Greedy word wrap (maxWidth px): break at the last space that fits;
-    // a word wider than maxWidth hard-breaks per glyph (CJK has no
-    // spaces, so it degrades to per-glyph breaking naturally).
-    const float lh = out.height > 0.0f ? out.height : static_cast<float>(fontSize);
-    std::vector<float> prefix(n + 1, 0.0f);
-    for (size_t i = 0; i < n; ++i) {
-        prefix[i + 1] = prefix[i] + advances[i];
-    }
-
-    int    lines     = 1;
-    float  lineW     = 0.0f;
-    float  maxLineW  = 0.0f;
-    size_t lineStart = 0;
-    size_t lastBreak = n;  // index of the last space that fit in the line; n = none
-    for (size_t i = 0; i < n; ++i) {
-        const float w = advances[i];
-        if (lineW + w <= maxWidth || lineW <= 0.0f) {
-            lineW += w;
-            if (isSpace[i]) {
-                lastBreak = i;
+        if (advances.empty()) {
+            const auto analysis = ayt::ui::analyzeUnicodeText(paragraph, style.direction);
+            for (const auto& cluster : analysis.clusters) {
+                float advance = 0;
+                size_t index = cluster.textStart;
+                const size_t end = cluster.textStart + cluster.textLength;
+                while (index < end) {
+                    auto* glyph = font->getGlyph(nextTextCodePoint(paragraph, index));
+                    advance += glyph ? float(glyph->metrics.advance) / scale : lineHeight * .25f;
+                }
+                advances.push_back(advance + style.letterSpacing);
+                spaces.push_back(cluster.whitespace);
             }
+        }
+        std::vector<UiTextLineRange> lines;
+        uiTextWrapToLines(advances.data(), spaces, static_cast<int>(advances.size()), maxWidth, 0, lines);
+        if (lines.empty()) {
+            ++lineCount;
         } else {
-            // Line full. Break after the last fitting space when one is in
-            // this line; the space itself stays on the old line, so the new
-            // line's width = glyphs (lastBreak+1 .. i]. Else hard-break.
-            if (lastBreak != n && lastBreak >= lineStart) {
-                lineW = prefix[i + 1] - prefix[lastBreak + 1];
-                lineStart = lastBreak + 1;
-                lastBreak = n;
-            } else {
-                lineW     = w;
-                lineStart = i;
-            }
-            if (isSpace[i]) {
-                lastBreak = i;
-            }
-            ++lines;
+            lineCount += lines.size();
+            for (const auto& line : lines) out.width = std::max(out.width, line.width);
         }
-        maxLineW = std::max(maxLineW, lineW);
-    }
-
-    out.width  = maxLineW;
-    out.height = static_cast<float>(lines) * lh;
+    });
+    if (lineCount) out.height = lineHeight + (lineCount - 1) * (lineHeight + style.lineSpacing);
     return out;
 }
 
@@ -3882,7 +3842,7 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
 
     // This implementation honors color / outline / shadow / letterSpacing /
     // lineSpacing / align / valign. wrapToBounds enables multi-line layout
-    // (greedy word wrap to the bounds width); without it text stays
+    // (hard paragraphs followed by greedy word wrap); without it text stays
     // single-line and clips at the bounds — the legacy behavior.
 
     ayt::math::FRectangle clippedBounds = bounds;
@@ -3906,24 +3866,6 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         return;
     }
 
-    const char* language = style.language.empty() ? nullptr : style.language.c_str();
-    const auto shapedFontRuns = _fontAtlas->shapeTextWithFallback(
-        font, rasterSize, text, toFontDirection(style.direction), language);
-    std::vector<ayt::font::ShapedGlyph> shaped;
-    for (const auto& run : shapedFontRuns) {
-        shaped.insert(shaped.end(), run.glyphs.begin(), run.glyphs.end());
-    }
-    const bool useShaped = !shapedFontRuns.empty();
-    if (useShaped) {
-        for (const auto& run : shapedFontRuns) {
-            _fontAtlas->prepareShapedGlyphs(run.font, rasterSize, run.glyphs);
-            syncTextAtlasIfNeeded(run.font);
-        }
-    } else {
-        _fontAtlas->prepareGlyphs(font, rasterSize, text);
-        syncTextAtlasIfNeeded(font);
-    }
-
     const ayt::font::FontMetrics& metrics = font->getMetrics();
     const float boundsW = bounds.maxX - bounds.minX;
     const float boundsH = bounds.maxY - bounds.minY;
@@ -3941,38 +3883,50 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         bool  clusterEnd;
     };
     std::vector<GlyphRun> runs;
-    if (useShaped) {
-        runs.reserve(shaped.size());
-        for (const auto& fontRun : shapedFontRuns) {
-            const uint16_t runAtlas = _fontAtlas->atlasTextureIdx(fontRun.font);
-            for (size_t index = 0; index < fontRun.glyphs.size(); ++index) {
-                const ayt::font::ShapedGlyph& sg = fontRun.glyphs[index];
-                const size_t ci = std::min<size_t>(sg.charIndex, text.size() - 1);
-                runs.push_back({fontRun.font->getGlyphByIndex(sg.glyphIndex), runAtlas,
-                                static_cast<float>(sg.xOffset) / (64.0f * scale),
-                                static_cast<float>(sg.yOffset) / (64.0f * scale),
-                                static_cast<float>(sg.xAdvance) / (64.0f * scale),
-                                text[ci] == L' ' || text[ci] == L'\t',
-                                index + 1u == fontRun.glyphs.size()
-                                    || fontRun.glyphs[index + 1u].charIndex != sg.charIndex});
+    runs.reserve(text.size());
+    std::vector<detail::UiTextParagraphRange> paragraphRuns;
+    const char* language = style.language.empty() ? nullptr : style.language.c_str();
+    detail::forEachUiTextParagraph(text, style.wrapToBounds, [&](auto range) {
+        const size_t begin = runs.size();
+        if (range.begin != range.end) {
+            std::wstring ownedParagraph;
+            const auto& paragraph = range.begin == 0 && range.end == text.size() ? text
+                : (ownedParagraph = text.substr(range.begin, range.end - range.begin));
+            const auto shapedFontRuns = _fontAtlas->shapeTextWithFallback(
+                font, rasterSize, paragraph, toFontDirection(style.direction), language);
+            if (!shapedFontRuns.empty()) {
+                for (const auto& fontRun : shapedFontRuns) {
+                    _fontAtlas->prepareShapedGlyphs(fontRun.font, rasterSize, fontRun.glyphs);
+                    syncTextAtlasIfNeeded(fontRun.font);
+                    const uint16_t runAtlas = _fontAtlas->atlasTextureIdx(fontRun.font);
+                    for (size_t index = 0; index < fontRun.glyphs.size(); ++index) {
+                        const auto& sg = fontRun.glyphs[index];
+                        const size_t ci = std::min<size_t>(sg.charIndex, paragraph.size() - 1);
+                        runs.push_back({fontRun.font->getGlyphByIndex(sg.glyphIndex), runAtlas,
+                            float(sg.xOffset) / (64.f * scale), float(sg.yOffset) / (64.f * scale),
+                            float(sg.xAdvance) / (64.f * scale), paragraph[ci] == L' ' || paragraph[ci] == L'\t',
+                            index + 1 == fontRun.glyphs.size()
+                                || fontRun.glyphs[index + 1].charIndex != sg.charIndex});
+                    }
+                }
+            } else {
+                _fontAtlas->prepareGlyphs(font, rasterSize, paragraph);
+                syncTextAtlasIfNeeded(font);
+                const auto analysis = ayt::ui::analyzeUnicodeText(paragraph, style.direction);
+                for (const auto& cluster : analysis.clusters) {
+                    size_t index = cluster.textStart;
+                    const size_t end = cluster.textStart + cluster.textLength;
+                    while (index < end) {
+                        auto* glyph = font->getGlyph(nextTextCodePoint(paragraph, index));
+                        runs.push_back({glyph, _fontAtlas->atlasTextureIdx(font), 0, 0,
+                            glyph ? float(glyph->metrics.advance) / scale : (metrics.lineHeight / scale) * .25f,
+                            cluster.whitespace, index == end});
+                    }
+                }
             }
         }
-    } else {
-        const auto analysis = ayt::ui::analyzeUnicodeText(text, style.direction);
-        runs.reserve(text.size());
-        for (const auto& cluster : analysis.clusters) {
-            size_t index = cluster.textStart;
-            const size_t end = cluster.textStart + cluster.textLength;
-            while (index < end) {
-                ayt::font::GlyphInfo* glyph = font->getGlyph(nextTextCodePoint(text, index));
-                runs.push_back({glyph, _fontAtlas->atlasTextureIdx(font), 0.0f, 0.0f,
-                                (glyph != nullptr)
-                                    ? static_cast<float>(glyph->metrics.advance) / scale
-                                    : (metrics.lineHeight / scale) * 0.25f,
-                                cluster.whitespace, index == end});
-            }
-        }
-    }
+        paragraphRuns.push_back({begin, runs.size()});
+    });
     const size_t n = runs.size();
     if (n == 0) {
         return;
@@ -3989,45 +3943,45 @@ void UIRenderBackend::drawText(const ayt::math::FRectangle& bounds, const std::w
         float width = 0.0f;
         bool space = false;
     };
-    std::vector<TextClusterRun> clusters;
-    for (size_t begin = 0; begin < n;) {
-        size_t end = begin;
-        float width = 0.0f;
-        do {
-            width += runs[end].xAdv;
-            ++end;
-        } while (end < n && !runs[end - 1u].clusterEnd);
-        width += ls;
-        clusters.push_back({static_cast<int>(begin), static_cast<int>(end),
-                            width, runs[begin].space});
-        begin = end;
-    }
-    std::vector<float> clusterAdvances;
-    std::vector<bool> clusterSpaces;
-    clusterAdvances.reserve(clusters.size());
-    clusterSpaces.reserve(clusters.size());
-    for (const TextClusterRun& cluster : clusters) {
-        clusterAdvances.push_back(cluster.width);
-        clusterSpaces.push_back(cluster.space);
-    }
     std::vector<UiTextLineRange> lines;
-    if (style.wrapToBounds && boundsW > 0.0f
-        && uiTextLineWidth(clusterAdvances.data(), static_cast<int>(clusters.size()), 0.0f)
-            > boundsW) {
-        std::vector<UiTextLineRange> clusterLines;
-        uiTextWrapToLines(clusterAdvances.data(), clusterSpaces,
-                          static_cast<int>(clusters.size()), boundsW, 0.0f,
-                          clusterLines);
-        lines.reserve(clusterLines.size());
-        for (const UiTextLineRange& line : clusterLines) {
-            lines.push_back({clusters[static_cast<size_t>(line.begin)].begin,
-                             clusters[static_cast<size_t>(line.end - 1)].end,
-                             line.width});
+    for (const auto& paragraph : paragraphRuns) {
+        if (paragraph.begin == paragraph.end) {
+            lines.push_back({int(paragraph.begin), int(paragraph.end), 0});
+            continue;
         }
-    } else {
-        lines.push_back({0, static_cast<int>(n),
-                         uiTextLineWidth(clusterAdvances.data(),
-                                         static_cast<int>(clusters.size()), 0.0f)});
+        std::vector<TextClusterRun> clusters;
+        for (size_t begin = paragraph.begin; begin < paragraph.end;) {
+            size_t end = begin;
+            float width = 0.0f;
+            do {
+                width += runs[end].xAdv;
+                ++end;
+            } while (end < paragraph.end && !runs[end - 1u].clusterEnd);
+            width += ls;
+            clusters.push_back({static_cast<int>(begin), static_cast<int>(end), width, runs[begin].space});
+            begin = end;
+        }
+        std::vector<float> clusterAdvances;
+        std::vector<bool> clusterSpaces;
+        clusterAdvances.reserve(clusters.size());
+        clusterSpaces.reserve(clusters.size());
+        for (const TextClusterRun& cluster : clusters) {
+            clusterAdvances.push_back(cluster.width);
+            clusterSpaces.push_back(cluster.space);
+        }
+        if (style.wrapToBounds && boundsW > 0.0f
+            && uiTextLineWidth(clusterAdvances.data(), static_cast<int>(clusters.size()), 0.0f) > boundsW) {
+            std::vector<UiTextLineRange> clusterLines;
+            uiTextWrapToLines(clusterAdvances.data(), clusterSpaces,
+                static_cast<int>(clusters.size()), boundsW, 0.0f, clusterLines);
+            for (const UiTextLineRange& line : clusterLines) {
+                lines.push_back({clusters[static_cast<size_t>(line.begin)].begin,
+                    clusters[static_cast<size_t>(line.end - 1)].end, line.width});
+            }
+        } else {
+            lines.push_back({static_cast<int>(paragraph.begin), static_cast<int>(paragraph.end),
+                uiTextLineWidth(clusterAdvances.data(), static_cast<int>(clusters.size()), 0.0f)});
+        }
     }
 
     // Block layout: lines sit at lineHeight + lineSpacing stride; VAlign

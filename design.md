@@ -1,5 +1,23 @@
 # AYRenderer Design
 
+## 2026-10-22 — wrapped文本段落与度量一致性
+
+资源诊断面板的真实截图暴露旧drawText把LF送入shaper并画成控制字符。
+私有`UiTextParagraphs.h`以不分配的range visitor识别LF/CRLF/CR/U+2028/U+2029，
+CRLF合为一个分隔，空段/尾段保留，UTF代码单元不被改写。非多行路径只访问原始整段一次。
+分段在shape/fallback之前，避免把跨行RTL/上下文塑形的结果在glyph阶段强行拆开。
+
+drawText保存每段对应的全局glyph范围，在各段内按shaping cluster计算advance、letterSpacing、
+贪心宽度换行，然后按主字体行高/lineSpacing统一定位整个行块。
+measureText采用同一分段和既有uiTextWrapToLines，消除原来第二套独立的宽度换行实现，
+高度计空行/尾部空行和行间距；无正宽度且未启用style.wrapToBounds保持旧单行域。
+单段直接借用输入wstring，多段才复制分段给既有shaper接口；返回glyph仍使用原font/atlas所有权。
+
+度量不扩展到outline/shadow墨迹边界，不把fallback最大字形高度当主字体行高；
+独立shapeText接口不改成多行。这里不是完整Unicode断行，软换行不会重新逐行塑形。
+旧库独立链接19例中3失败/21失败断言已保存；新实现同19例108断言和两后端独立逐行像素参考通过。
+完整冻结门禁另见docs/testing.md；没有增加UI/Renderer对象布局或新的公共游戏API。
+
 ## 2026-10-22 — 显式资源驻留观察
 
 `ResourceResidencySnapshot`是submission owner显式请求的owned值快照，Renderer未初始化时不可用。

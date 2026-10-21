@@ -1,5 +1,13 @@
 # AYRenderer
 
+## 多行UI文本（2026-10-22）
+
+UIRenderBackend的wrapped文本在塑形前按LF/CRLF/CR和Unicode行/段分隔符分段，保留空行和尾部空行。
+正宽度度量或styled wrapToBounds进入同一段落域，行间距、逐行水平对齐和整块垂直对齐一致。
+默认无约束的单行路径保持兼容；outline和offset shadow可用，shadow blur仍未实现。
+空段不会上传分隔符字形。源级独立分段、真实Noop度量/批次及两后端逐行像素参考见
+[测试维护](docs/testing.md)。此实现是cluster级贪心换行，不是完整Unicode断行或每软行重新塑形。
+
 当前结构与源码定位见 [架构入口](docs/architecture.md)；后续工作见
 [根渲染路线](../../AYDocs/AYRendering-Architecture-Roadmap.md)与
 [2026-10-22 源码自审](../../AYDocs/RENDERER-ARCHITECTURE-AUDIT-20261022.md)。

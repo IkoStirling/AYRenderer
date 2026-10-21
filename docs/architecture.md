@@ -79,6 +79,27 @@ GBufferDebug 挂载但默认关闭，调试消费者仍必须检查当前内容�
 
 ## 4. 三种顺序与每帧数据
 
+```mermaid
+flowchart LR
+    W[World / Scene] --> E[Presentation extractor]
+    E --> S[RenderScene / OwnedCpu backing]
+    S --> D[FrameDrawLists shared classifications]
+    P[Product description and compatibility policy] --> F[Pass factory]
+    C[Static pass contracts] --> F
+    F --> R[RenderPipeline dispatch]
+    D --> R
+    G[Per-frame graph eligibility and dependencies] --> L[FrameGraph target leases]
+    L --> R
+    B[Current-content blackboard] --> R
+    R --> V[Explicit bgfx View remap]
+    V --> GPU[Device execution]
+    U[UI ordered items / retained targets] --> GPU
+```
+
+图中箭头表示数据/装配依赖，不代表线程间队列或全图CPU执行时间线。
+产品描述、静态合约、当帧资格/资源图和设备View顺序是不同表示；不存在一张图自动替代另外三者。
+UI与主视图通过既有Composite/Present边界复合，独立预览/相机输出仍各自遵守其范围。
+
 静态合约在拆除旧管线之前校验槽、重复项、必需输入和可选生产者顺序。
 Renderer 结合实际设备、开关与历史状态构建 `PostProcessGraphPlanInput`；纯图计划声明资源和边。
 FrameGraph 编译和裁枝决定带槽节点是否 live，RenderPipeline 按注册顺序 dispatch。
@@ -93,6 +114,31 @@ FrameDrawLists 每个同步提交只分类一次，几何 Pass 共享结果。�
 刚体实例化合并连续兼容的 GBuffer/solid Shadow 项，不对任意材质和变形对象承诺合批。
 
 ## 5. 资源与线程不变量
+
+### 5.1 设备操作封装与真正所有者
+
+| 资源/行为 | 当前持有和释放者 | 设备操作入口 | 迁移提交owner时必须一起处理 |
+|---|---|---|---|
+| 路径Mesh/Texture、材质实例 | RenderResourceManager的表与稳定id | 通过BGFXAdapter创建buffer/texture，AYShader池提供program | 路径重载交换、显式destroy、context重建、消费者确认 |
+| 主视图/效果的持久附件 | 相应Pass/sidecar；部分目标经FrameGraph/RT池租用 | 大部分通过Adapter；当前DeferredDecal仍直接创建/释放颜色附件和FBO | resize、失败部分回收、借用depth、黑板当前代际与fallback |
+| FrameGraph/retained UI目标 | RenderTargetPool的槽、代际lease和延迟复用规则 | Adapter的目标创建/销毁包装 | lease归还、类别预算、禁止别名和退休判定 |
+| UI批次GPU状态与fallback | UiGpuContext | 该内部设备所有者直接创建程序/uniform/纹理等 | UI主/子窗口、offscreen flush、默认纹理和关闭顺序 |
+| 字形图集 | BgfxFontAtlas与AYFont缓存 | 图集创建/增量更新；实际字体资源来自AYFont | shaping/测量与图集修改区分；首次glyph请求可能上传 |
+| Shader program/uniform、计算资源 | ShaderResourcePool的handle表/实现 | AYShader内部直接建立/销毁bgfx对象 | CPU编译与GPU安装分离；token失效、临时pin、最终析构及owner线程 |
+| 截图 | 请求由Renderer侧队列管理，设备callback写TGA，sidecar生成PNG | Adapter请求设备截图，后续帧推进队列 | 请求/完成关系、回调结束、最终排空；接受请求不等于文件已完成 |
+
+Adapter是设备动作封装，不能仅因为函数在Adapter就推断它持有全部对象或提供全局引用计数。
+`RenderResourceManager`、Pass、目标池、UI及Shader所有者仍分别负责何时释放。
+当前标准集成按同一提交owner使用这些入口，互斥锁和owned快照不自动证明可跨线程提交/析构。
+
+2026-10-22以`bgfx::create* / destroy / updateTexture* / frame / requestScreenShot / renderFrame`
+做词法定位，Renderer/Shader源码有93个匹配，含AYBGFXConverter的2个注释；
+线索保存在`out/render-sampling-20261021/gpu-lifecycle-lexical-inventory.json`。
+它不是AST证明，不覆盖宏/别名/第三方实现，也不表示每帧实际分配或调用次数。
+DeferredDecal残余路径是本轮进一步核对的目标；UiGpuContext/FontAtlas/Shader内部直接调用有各自所有者，
+不能机械地把所有代码都搬进一个大Adapter后就宣称统一了寿命。
+
+### 5.2 现有不变量
 
 - OwnedCpu 包持有复制的数据，GPU 粒子 stream/callback 和资源 ID 仍可能借用。
   包独立于 World 生命周期不等于 GPU 驻留、线程安全或任意异步提交已经成立。
