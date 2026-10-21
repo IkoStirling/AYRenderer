@@ -30,6 +30,7 @@ class UIRenderBackend;
 class RendererSubSystem;
 struct PreviewSceneCamera;
 struct PreviewSceneSettings;
+struct MeshSubmissionInfo;
 
 namespace detail {
 class BGFXAdapter;
@@ -75,6 +76,10 @@ public:
     bool initialize(const InitDesc& desc);
     void shutdown();
     bool isInitialized() const noexcept;
+    /// Advanced integration cache identity, unique across successful device contexts.
+    /// Zero while uninitialized; changes after shutdown/reinitialize and follows moves.
+    /// This is neither a resource content revision nor a GPU lease. Owner-thread only.
+    uint64_t resourceContextId() const noexcept;
 
     /// Clear RGB is a finite, clamped scene-linear background on both main
     /// pipelines; tone mapping and color effects include uncovered pixels.
@@ -132,6 +137,15 @@ public:
                             uint32_t indexCount,
                             bool buildWireframe);
     MeshHandle loadMesh(const std::string& path);
+    /// Submission-owner query for the metadata published with this uploaded mesh.
+    /// Reload success replaces GPU buffers and this immutable snapshot together;
+    /// failure preserves both. Null for missing handles and raw/procedural meshes.
+    /// A retained snapshot owns CPU metadata only; it never keeps GPU buffers alive.
+    std::shared_ptr<const MeshSubmissionInfo> meshSubmissionInfo(MeshHandle mesh) const noexcept;
+    /// Submission-owner table-presence query for a handle from the current
+    /// resource context. Does not validate foreign numeric ids, shader readiness,
+    /// or acquire a GPU lease. Use resourceContextId before reusing cached handles.
+    bool isMaterialResident(MaterialHandle material) const noexcept;
     bool hasMorphTargets(MeshHandle mesh) const noexcept;
     uint32_t morphTargetCount(MeshHandle mesh) const noexcept;
     std::string morphTargetName(MeshHandle mesh, uint32_t targetIndex) const;

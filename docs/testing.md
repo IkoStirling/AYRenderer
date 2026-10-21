@@ -1,5 +1,34 @@
 # AYRenderer 测试维护
 
+## Mesh GPU版本与Entity提取（2026-10-22）
+
+修改前安全复现：`mesh-index-before.json`一例3断言中2失败；
+`entity-submission-skinned-before.json`五例53断言中18失败，涉及重导入范围/palette、destroy和Renderer重启。
+当前定向资源桥`mesh-bridge-residency-cache.json`为21例380断言；
+Entity冻结契约`entity-submission-freeze.json`为9例153断言，均无失败/跳过。
+纯准备器及定向ASan各8例137断言通过；ASan只覆盖准备器/测试与所链Resource，不代表整引擎GPU生命周期插桩。
+
+`entity-mesh-frozen-{d3d11,d3d12}`各含static/skinned两个实际设备场景：
+对独立范围/slot/palette参考RGB±1比较；扩展3→6索引分别变化7242/9238像素；
+L2-only、CPU新版但GPU桥拒绝、旧快照/画面保留、修复重试、显式mesh/material destroy与新Renderer实例均通过。
+新实例先加载blue材质占用低数值id，验证旧context的同数值handle不能污染red/blue画面。
+30次额外提取的设备纹理、VB/IB及program数稳定。临时几何为测试输入，没有新增引擎资产包。
+
+72次串行Debug/Noop提取对照在`submission-benchmark-final/`，源/二进制摘要及无干扰记录齐备。
+每组120帧、三独立进程；静态4096/128路径约93.04→15.78ms，蒙皮约59.37→59.41ms。
+小组多路径的蒙皮仍有检查成本；冷加载、上传、编译、渲染及写盘不计。不能作Release/GPU FPS保证。
+早期smoke/path-review只用于定位问题，不与最终样本混用。完整模块回归另按最终结果登记。
+
+冻结阶段完整CPU九组1004例/17200断言、Entity完整220例/2938断言、定向Entity9例/153断言、
+Editor463例/12308断言均通过。两后端完整Gpu各53例/44219断言通过，库存1057项无遗漏/重复。
+报告为`metadata-cpu-final/`、`entity-{full-,}metadata-final.*`、`editor-metadata-final.*`及
+`metadata-gpu-final-{d3d11,d3d12}.*`。这些程序基于Resource`0c56907`与Editor`91ffba6`构建，
+不包含后续通用刷新报告/ABI45原型。D3D12回归期间存在后续Resource编译，耗时不能用于性能结论；
+性能仍只引用先前无干扰的72组提取与独立串行画质记录。
+`metadata-native-{MaterialWorkshop,AssetReimport,MaterialPreview}-{d3d11,d3d12}`六项实际Editor验收均通过，
+覆盖Scene/预览隔离、重导入、Cancel/Apply、坏源保留/重试及保存重开。SDK最终127能力/53模块/
+97搜索例/569文档入口，0错0警告；132个本地文档目标存在，锚点未由该检查器验证。
+
 ## Cube 与渲染目标创建接纳（2026-10-22）
 
 先以已有1×1缓存key请求65536/UINT32_MAX cube，安全复现旧路径在尺寸检查前返回缓存项。

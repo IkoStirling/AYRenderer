@@ -101,6 +101,9 @@ FrameDrawLists 每个同步提交只分类一次，几何 Pass 共享结果。�
   absent 使用原策略；present 且空集合表示关闭直接光，不能退回旧默认灯。
 - 文件发布、驻留 L2 替换、L3 GPU 更新是不同边界。Mesh/Texture 重载先创建临时 GPU，
   成功再交换稳定 ID；失败保留旧图。两个颜色变体和多资源没有整体 GPU 原子提交承诺。
+- 资源网格的不可变提交元数据与GPU buffers共同发布；范围、slot、中心和palette不再取自另一个L2版本。
+  `resourceContextId`区分资源上下文，`meshSubmissionInfo`与`isMaterialResident`是提交owner的CPU查询。
+  表中存在不代表shader就绪；CPU快照与plain handle均不产生GPU租约。Entity派生缓存随上下文和当前快照核对。
 - 材质快照与 Scene 路径实例分离，共享 shader token 和路径纹理仍遵守各自所有权。
   AYShader token 副本不是自动引用计数，不能任意 release 一个借来的副本。
 - RT 池具有代际租约、类别预算和延迟复用；路径纹理缓存没有因此获得同样的自动回收策略。

@@ -5,6 +5,7 @@
 #include "detail/RenderPass.h"
 #include "detail/TextureImageLoader.h"
 #include "AYRenderer/PbrShaderSources.h"
+#include "AYRenderer/MeshSubmissionInfo.h"
 
 #include "AYResource/assetsImpl/Material.h"
 #include "AYResource/assetsImpl/Mesh.h"
@@ -118,6 +119,57 @@ struct ForceScScope {
 } // namespace
 
 TEST_SUITE(RenderAssetBridgeTests)
+
+TEST_CASE(public_mesh_metadata_is_cpu_owned_and_context_identity_follows_device_lifetime)
+{
+    using namespace ayt::render;
+    ayt::resource::Mesh source;source.createCube();std::vector<uint8_t> bytes;
+    CHECK(source.saveToBinary(bytes));const auto path=tempPath("metadata_public_context.msh");
+    CHECK(writeBinaryFile(path,bytes));
+    auto& manager=ayt::resource::ResourceManager::instance();manager.unloadAll();
+    Renderer renderer;CHECK(renderer.resourceContextId()==0);
+    InitDesc init;init.backend=Backend::Noop;
+    const bool ready=renderer.initialize(init);CHECK(ready);if(!ready){removeFile(path);return;}
+    const auto context=renderer.resourceContextId();CHECK(context!=0);
+    CHECK(renderer.initialize(init));CHECK(renderer.resourceContextId()==context);
+    CHECK(!renderer.meshSubmissionInfo({}));
+    CHECK_FALSE(renderer.isMaterialResident({}));
+    auto material=renderer.createMaterialFromPhoskia(kBridgeMaterialShader,"metadata-resident-material");
+    CHECK(material.isValid());CHECK(renderer.isMaterialResident(material));
+    const auto raw=renderer.createUnitCube();CHECK(raw.isValid());CHECK(!renderer.meshSubmissionInfo(raw));
+    const auto handle=renderer.loadMesh(path);CHECK(handle.isValid());
+    const auto metadata=renderer.meshSubmissionInfo(handle);CHECK(metadata);
+    if(metadata){CHECK(metadata->indexCount==36);CHECK(metadata->sections.size()==1);}
+    Renderer moved(std::move(renderer));CHECK(renderer.resourceContextId()==0);
+    CHECK(moved.resourceContextId()==context);CHECK(moved.meshSubmissionInfo(handle)==metadata);
+    CHECK(moved.isMaterialResident(material));const auto oldMaterial=material;
+    moved.destroyMaterial(material);CHECK_FALSE(moved.isMaterialResident(oldMaterial));
+    auto destroyed=handle;moved.destroyMesh(destroyed);CHECK(!moved.meshSubmissionInfo(handle));
+    if(metadata)CHECK(metadata->indexCount==36);
+    moved.shutdown();CHECK(moved.resourceContextId()==0);CHECK(!moved.meshSubmissionInfo(handle));
+    Renderer next;CHECK(next.initialize(init));CHECK(next.resourceContextId()!=0);
+    CHECK(next.resourceContextId()!=context);next.shutdown();manager.unloadAll();removeFile(path);
+}
+
+TEST_CASE(resource_mesh_rejects_out_of_range_indices_before_uint16_narrowing)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    BGFXAdapter adapter;BGFXInitParams init;init.backend=Backend::Noop;
+    const bool ready=adapter.initialize(init);CHECK(ready);if(!ready)return;
+    ayt::shader::ShaderResourcePool pool;RenderResourceManager resources(adapter,pool);
+    struct Cleanup {
+        RenderResourceManager& resources;ayt::shader::ShaderResourcePool& pool;BGFXAdapter& adapter;
+        ~Cleanup(){resources.shutdown();pool.shutdown();adapter.shutdown();}
+    } cleanup{resources,pool,adapter};
+    ayt::resource::Mesh source;source.createCube();
+    const uint32_t indices[]={0,1,UINT32_MAX};
+    source._setForTestIndices(indices,3);
+    const ayt::resource::IMesh::Submesh section{0,3,0,0};
+    source._setForTestSubmeshes(&section,1);
+    CHECK_FALSE(uploadMeshFromResource(resources,source).isValid());
+    CHECK(resources.meshes().empty());
+}
 
 TEST_CASE(cube_rejects_unrepresentable_dimensions_even_on_a_cache_hit)
 {
@@ -296,6 +348,8 @@ TEST_CASE(mesh_reload_failure_retains_resident_gpu_buffers_and_retry_keeps_the_h
     if (handle.isValid() && cpu) {
         const auto vertex = resources.meshes().at(handle.id).vertexBuffer;
         const auto index = resources.meshes().at(handle.id).indexBuffer;
+        const auto metadata=resources.meshes().at(handle.id).submissionInfo;
+        CHECK(metadata);if(metadata){CHECK(metadata->indexCount==36);CHECK(metadata->sections.size()==1);}
         // An unusable resident replacement exercises bridge admission failure;
         // this is not a claim to simulate GPU memory exhaustion.
         cpu->unload();
@@ -305,13 +359,26 @@ TEST_CASE(mesh_reload_failure_retains_resident_gpu_buffers_and_retry_keeps_the_h
         if (resources.meshes().contains(handle.id)) {
             CHECK(resources.meshes().at(handle.id).vertexBuffer.idx == vertex.idx);
             CHECK(resources.meshes().at(handle.id).indexBuffer.idx == index.idx);
+            CHECK(resources.meshes().at(handle.id).submissionInfo==metadata);
         }
         cpu->createCube(3);
+        const ayt::resource::IMesh::Submesh sections[]={{0,18,0,0},{18,18,0,0}};
+        cpu->_setForTestSubmeshes(sections,2);
         CHECK(resources.reloadMeshFromPath(path));
         CHECK(resources.loadMesh(path).id == handle.id);
         CHECK(resources.meshes().contains(handle.id));
         if (resources.meshes().contains(handle.id))
             CHECK(resources.meshes().at(handle.id).vertexBuffer.idx != vertex.idx);
+        const auto replacement=resources.meshes().at(handle.id).submissionInfo;
+        CHECK(replacement);CHECK(replacement!=metadata);
+        if(replacement){
+            CHECK(replacement->sections.size()==2);
+            if(replacement->sections.size()==2){
+                CHECK(replacement->sections[0].indexCount==18);
+                CHECK(replacement->sections[1].firstIndex==18);
+            }
+        }
+        if(metadata)CHECK(metadata->sections.size()==1);
     }
     resources.shutdown();
     pool.shutdown();

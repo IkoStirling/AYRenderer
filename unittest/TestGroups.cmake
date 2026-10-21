@@ -3,6 +3,7 @@ set(AYRENDERER_TEST_GROUPS Contracts SceneMaterial Geometry LightingShadow PostP
 
 set(AYRENDERER_TEST_Contracts_SOURCES
     Test_TextureUpload.cpp
+    Test_MeshSubmissionInfo.cpp
     Test_PbrSurface.cpp
     Test_Ssr.cpp
     Test_Volumetric.cpp

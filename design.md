@@ -1,5 +1,24 @@
 # AYRenderer Design
 
+## 2026-10-22 — 与GPU版本共同发布的提交快照
+
+RenderAssetBridge先用纯CPU准备器构建MeshSubmissionInfo，再创建临时GPU buffers。
+GpuMesh保留shared_ptr<const MeshSubmissionInfo>，成功reload共同swap到原稳定id；
+失败不修改旧GpuMesh/快照。L2-only unload不会改变这份L3描述；raw/procedural上传可没有资产快照。
+快照保存范围、原始slot、索引均值中心、palette和source vertexOffset，不固定整份IMesh。
+vertexOffset仍为描述值，不改变当前全局索引解释。空section保留序号，legacy ordinal-slot策略在Entity层处理。
+
+准备器验证非空数据、float3位置位于stride内、全部索引/分段/palette范围及有限位置。
+源顶点+32位索引计费输入≤256MiB；section/slot记录及字符串/palette计费负载≤16MiB；
+slot≤65536、单slot字符串≤65536字节，分段中心累计索引访问≤64Mi次。
+64位临时运算先检查预算，不以回绕的加法通过输入；源数组可读长度仍遵循IMesh的C++契约。
+预算不包含allocator/control-block开销、L2其他驻留、副本/repack/wireframe峰值或驱动分配，亦非全局VRAM上限。
+
+资源上下文id在成功initialize后生成，shutdown后为0；移动保留Impl对应上下文，新实例/重建获得新id。
+meshSubmissionInfo查询当前表中的CPU快照；isMaterialResident只查询材质表项，不证明shader可用。
+消费者结合上下文与当前快照/驻留检查，才可复用plain handle缓存；单独数值id不区分外来上下文。
+提取和GPU变更仍由同一submission owner串行；共享CPU快照不是异步帧的GPU lease。
+
 ## 2026-10-22 — Cube 与目标创建的接纳边界
 
 `textureExtentValid`集中检查正尺寸和设备maxTextureSize；`textureRequestValid`在调用bgfx前拒绝

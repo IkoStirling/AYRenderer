@@ -53,7 +53,8 @@ public:
                                           const uint32_t* indices,
                                           uint32_t indexCount,
                                           bool hasSkinWeights = false,
-                                          const MeshMorphContractDesc& morph = {});
+                                          const MeshMorphContractDesc& morph = {},
+                                          std::shared_ptr<const MeshSubmissionInfo> submissionInfo = {});
     MeshHandle loadMesh(const std::string& path);
     MeshHandle createUnitCube();
     MeshHandle createTexturedUnitCube();
@@ -221,7 +222,8 @@ private:
                                   uint32_t indexCount,
                                   bool use32BitIndices,
                                   bool hasSkinWeights = false,
-                                  const MeshMorphContractDesc& morph = {}, bool buildWireframe = true);
+                                  const MeshMorphContractDesc& morph = {}, bool buildWireframe = true,
+                                  std::shared_ptr<const MeshSubmissionInfo> submissionInfo = {});
 };
 
 } // namespace ayt::render::detail

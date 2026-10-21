@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYRenderer/RenderTypes.h"
+#include "AYRenderer/MeshSubmissionInfo.h"
 #include "AYShader/ShaderResource.h"
 
 #include <bgfx/bgfx.h>
@@ -44,6 +45,8 @@ struct GpuMesh {
     ayt::math::FVector3 localBoundsMin{-0.5f, -0.5f, -0.5f};
     ayt::math::FVector3 localBoundsMax{ 0.5f,  0.5f,  0.5f};
     bool localBoundsValid = false;
+    // Published atomically with this GPU version; no retained L2 vertex arrays.
+    std::shared_ptr<const MeshSubmissionInfo> submissionInfo;
 };
 
 struct GpuTexture {

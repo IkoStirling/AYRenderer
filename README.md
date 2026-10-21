@@ -5,6 +5,17 @@
 [2026-10-22 源码自审](../../AYDocs/RENDERER-ARCHITECTURE-AUDIT-20261022.md)。
 下方带日期的功能增量说明保留；早期 R1–R5 表格已明确标为历史记录。
 
+## 与 GPU 一致的网格提交元数据（2026-10-22）
+
+资源网格上传先准备不可变`MeshSubmissionInfo`，随GPU buffers共同入表和替换：范围、材质slot、
+局部中心及骨骼palette来自同一成功上传版本。非法输入拒绝时保留旧GPU和旧快照；L2-only卸载不改变L3。
+快照不持有完整L2顶点/索引，不延长GPU寿命。Raw/procedural mesh仍可没有资产元数据。
+
+高级提取器通过`meshSubmissionInfo`查询；`resourceContextId`区分关闭重建/替换后的资源上下文，
+`isMaterialResident`仅查当前材质表。缓存须先核对上下文；这些查询不是foreign-id校验、shader就绪证明或GPU lease。
+游戏侧仍使用MeshComponent和已安装的RenderIntegration。准备接纳预算和实际验收见
+[设计](design.md)、[测试维护](docs/testing.md)与[跨模块设计](../../AYDocs/RENDER-MESH-SUBMISSION-METADATA-RFC-20261022.md)。
+
 ## Cube 与渲染目标创建接纳（2026-10-22）
 
 原始六面RGBA8 cube上传在查缓存前拒绝不可表示尺寸/超256 MiB负载，Noop不支持该入口。

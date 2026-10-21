@@ -1,4 +1,5 @@
 #include "detail/RenderAssetBridge.h"
+#include "detail/MeshSubmissionInfoBuilder.h"
 
 #include "detail/RenderResourceManager.h"
 #include "detail/VertexLayoutBridge.h"
@@ -420,6 +421,15 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
     s_uploadCount.fetch_add(1, std::memory_order_relaxed);
     const uint64_t callIdx = s_uploadCount.load(std::memory_order_relaxed);
 
+    MeshSubmissionInfo submission;
+    std::string submissionError;
+    if(!buildMeshSubmissionInfo(mesh,submission,&submissionError)) {
+        std::fprintf(stderr,"[RenderAssetBridge] mesh submission rejected '%s': %s\n",
+            mesh.getPath().c_str(),submissionError.c_str());
+        return {};
+    }
+    auto submissionInfo=std::make_shared<const MeshSubmissionInfo>(std::move(submission));
+
     VertexLayoutDesc layout;
     bgfx::VertexLayout bgfxLayout;
     if (!buildBgfxVertexLayoutFromMesh(mesh, layout, bgfxLayout)) {
@@ -521,7 +531,7 @@ MeshHandle uploadMeshFromResource(RenderResourceManager& mgr,
                                           mesh.getIndexData(),
                                           mesh.getIndexCount(),
                                           meshHasSkin,
-                                          morphDesc);
+                                          morphDesc,std::move(submissionInfo));
 
     // Diag closure: print once per ~256 calls so a runaway
     // upload is loud but a stable scene is silent.

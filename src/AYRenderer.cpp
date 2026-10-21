@@ -446,6 +446,7 @@ struct Renderer::Impl {
     // Renderer). Lifetime is owned by Impl; Renderer is the sole
     // producer.
     std::shared_ptr<std::atomic<bool>> aliveToken;
+    uint64_t resourceContextId = 0;
 
     // §5.5 cleanup (2026-07-22) — `lastFrameShadowFbo` cache removed.
     // It lived under #if AY_F1_DIAG_FRAME_SHADOW and was used only by
@@ -845,6 +846,8 @@ bool Renderer::initialize(const InitDesc& desc)
                 (void)_impl->resources.onResourceFileChanged(path);
             }
         });
+    static std::atomic<uint64_t> nextResourceContext{1};
+    _impl->resourceContextId=nextResourceContext.fetch_add(1,std::memory_order_relaxed);
     return true;
 }
 
@@ -853,6 +856,7 @@ void Renderer::shutdown()
     if (!_impl) {
         return;
     }
+    _impl->resourceContextId=0;
     for (auto& [id, view] : _impl->runtimeViews) {
         (void)id;
         if (_impl->adapter.isInitialized())
@@ -1060,6 +1064,11 @@ void Renderer::shutdown()
 bool Renderer::isInitialized() const noexcept
 {
     return _impl && _impl->adapter.isInitialized();
+}
+
+uint64_t Renderer::resourceContextId() const noexcept
+{
+    return isInitialized()?_impl->resourceContextId:0;
 }
 
 void Renderer::beginFrame(const ClearDesc& clear)
@@ -2315,6 +2324,19 @@ MeshHandle Renderer::loadMesh(const std::string& path)
         return {};
     }
     return _impl->resources.loadMesh(path);
+}
+
+std::shared_ptr<const MeshSubmissionInfo> Renderer::meshSubmissionInfo(MeshHandle mesh) const noexcept
+{
+    if(!isInitialized())return {};
+    const auto& meshes=_impl->resources.meshes();
+    const auto found=meshes.find(mesh.id);
+    return found==meshes.end()?nullptr:found->second.submissionInfo;
+}
+
+bool Renderer::isMaterialResident(MaterialHandle material) const noexcept
+{
+    return isInitialized()&&_impl->resources.materials().contains(material.id);
 }
 
 MeshHandle Renderer::createMesh32(const void* vertices, uint32_t vertexCount,
