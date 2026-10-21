@@ -3,6 +3,7 @@
 #include "detail/VertexLayoutBridge.h"
 #include "detail/RenderResourceManager.h"
 #include "detail/RenderPass.h"
+#include "detail/TextureImageLoader.h"
 #include "AYRenderer/PbrShaderSources.h"
 
 #include "AYResource/assetsImpl/Material.h"
@@ -293,6 +294,82 @@ TEST_CASE(texture_reload_failure_retains_linear_and_srgb_gpu_variants_and_retry_
     manager.unloadAll();
     manager.setAutoWatchLoadedResources(true);
     removeFile(path);
+}
+
+TEST_CASE(unsigned_bc_color_expansion_preserves_channels_and_crops_partial_blocks)
+{
+    using ayt::render::detail::decodeUnsignedBcChannels;
+    for (const bool twoChannels : {false, true}) {
+        std::vector<uint8_t> blocks(twoChannels ? 32u : 16u, 0);
+        const size_t blockSize = twoChannels ? 16u : 8u;
+        blocks[0] = 96;
+        blocks[blockSize] = 240;
+        if (twoChannels) { blocks[8] = 200; blocks[blockSize + 8] = 20; }
+        const auto decoded = decodeUnsignedBcChannels(5, 3, blocks.data(),
+            static_cast<uint32_t>(blocks.size()), twoChannels);
+        CHECK(decoded.isValid());
+        CHECK(decoded.width == 5 && decoded.height == 3);
+        CHECK(decoded.rgba8.size() == 60u);
+        if (decoded.rgba8.size() == 60u) {
+            std::fprintf(stderr, "[BC channels] two=%d first=%u,%u,%u,%u last=%u,%u,%u,%u\n",
+                twoChannels ? 1 : 0, decoded.rgba8[0], decoded.rgba8[1], decoded.rgba8[2], decoded.rgba8[3],
+                decoded.rgba8[16], decoded.rgba8[17], decoded.rgba8[18], decoded.rgba8[19]);
+            for (size_t pixel = 0; pixel < 15u; ++pixel) {
+                const bool lastColumn = pixel % 5u == 4u;
+                CHECK(decoded.rgba8[pixel * 4u] == (lastColumn ? 240u : 96u));
+                CHECK(decoded.rgba8[pixel * 4u + 1u] == (twoChannels ? lastColumn ? 20u : 200u : 0u));
+                CHECK(decoded.rgba8[pixel * 4u + 2u] == 0u);
+                CHECK(decoded.rgba8[pixel * 4u + 3u] == 255u);
+            }
+        }
+        CHECK_FALSE(decodeUnsignedBcChannels(5, 3, blocks.data(),
+            static_cast<uint32_t>(blocks.size() - 1u), twoChannels).isValid());
+        CHECK_FALSE(decodeUnsignedBcChannels(5, 3, blocks.data(),
+            static_cast<uint32_t>(blocks.size() + 1u), twoChannels).isValid());
+        const auto single = decodeUnsignedBcChannels(1, 1, blocks.data(),
+            static_cast<uint32_t>(blockSize), twoChannels);
+        CHECK(single.isValid() && single.rgba8.size() == 4u && single.rgba8[0] == 96u);
+    }
+    uint8_t block[8]{};
+    CHECK_FALSE(decodeUnsignedBcChannels(0, 4, block, 8, false).isValid());
+    CHECK_FALSE(decodeUnsignedBcChannels(4, 4, nullptr, 8, false).isValid());
+    CHECK_FALSE(decodeUnsignedBcChannels(65536, 4, block, 8, false).isValid());
+    CHECK_FALSE(decodeUnsignedBcChannels(16384, 16384, block, 8, false).isValid());
+}
+
+TEST_CASE(bc4_and_bc5_color_uploads_use_srgb_rgba_while_data_uploads_stay_linear)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    BGFXAdapter adapter;
+    BGFXInitParams init; init.backend = Backend::Noop;
+    CHECK(adapter.initialize(init));
+    ayt::shader::ShaderResourcePool pool;
+    RenderResourceManager resources(adapter, pool);
+    for (const bool twoChannels : {false, true}) {
+        ayt::resource::Texture texture;
+        texture._width = 4; texture._height = 4;
+        texture._format = twoChannels ? ayt::resource::TextureFormat::BC5
+            : ayt::resource::TextureFormat::BC4;
+        std::vector<uint8_t> blocks(twoChannels ? 16u : 8u, 0);
+        blocks[0] = 96; if (twoChannels) blocks[8] = 200;
+        texture.setImageData(blocks.data(), blocks.size());
+        texture.setMipmapLayout({0}, {static_cast<uint32_t>(blocks.size())});
+        auto sampler = texture.getSampler(); sampler.sRGB = false; texture.setSampler(sampler);
+        const auto linear = uploadTextureFromResource(resources, texture, {}, false);
+        const auto color = uploadTextureFromResource(resources, texture, {}, true);
+        CHECK(linear.isValid() && color.isValid() && linear.id != color.id);
+        if (linear.isValid() && color.isValid()) {
+            CHECK_FALSE(resources.textures().at(linear.id).srgb);
+            CHECK(resources.textures().at(color.id).srgb);
+        }
+        CHECK(texture.getImageDataSize() == blocks.size());
+        CHECK(texture.getImageDataBytes()[0] == 96u);
+    }
+    const uint8_t invalidData[16]{};
+    CHECK_FALSE(bgfx::isValid(adapter.createTexture2DFromData(4, 4,
+        bgfx::TextureFormat::Count, invalidData, sizeof(invalidData))));
+    resources.shutdown(); pool.shutdown(); adapter.shutdown();
 }
 
 TEST_CASE(create_mesh32_uploads_large_indices)

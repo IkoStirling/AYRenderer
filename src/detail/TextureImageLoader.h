@@ -16,4 +16,10 @@ struct DecodedImage {
 
 DecodedImage decodeImageFile(const std::string& path);
 
+// BC4/BC5 have no native sRGB view. Expand their unsigned channels without
+// inventing blue/alpha values, for an RGBA8 sRGB upload. Input is one exact mip;
+// dimensions fit the GPU's 16-bit interface, expanded storage is capped at 256 MiB.
+DecodedImage decodeUnsignedBcChannels(uint32_t width, uint32_t height,
+    const uint8_t* blocks, uint32_t byteCount, bool twoChannels);
+
 } // namespace ayt::render::detail

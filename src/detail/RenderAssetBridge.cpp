@@ -2,6 +2,7 @@
 
 #include "detail/RenderResourceManager.h"
 #include "detail/VertexLayoutBridge.h"
+#include "detail/TextureImageLoader.h"
 
 #include "AYResource/AssetPath.h"
 #include "AYResource/MeshMorphContract.h"
@@ -815,6 +816,18 @@ TextureHandle uploadTextureFromResource(RenderResourceManager& mgr,
     }
 
     const bool useSrgb = srgb || texture.getSampler().sRGB;
+    if (useSrgb && (texture.getFormat() == ayt::resource::TextureFormat::BC4
+        || texture.getFormat() == ayt::resource::TextureFormat::BC5)) {
+        const auto decoded = decodeUnsignedBcChannels(texture.getWidth(), texture.getHeight(),
+            pixels, texture.getMipmapSize(0),
+            texture.getFormat() == ayt::resource::TextureFormat::BC5);
+        if (!decoded.isValid()) return {};
+        std::fprintf(stderr, "[TextureContract] %s sRGB expands to RGBA8; native sRGB supported=%d\n",
+            texture.getFormat() == ayt::resource::TextureFormat::BC5 ? "BC5" : "BC4",
+            bgfx::isTextureValid(0, false, 1, bgfxFormat, BGFX_TEXTURE_SRGB) ? 1 : 0);
+        return mgr.createTextureFromRgba8(decoded.width, decoded.height,
+            decoded.rgba8.data(), cacheKey, true);
+    }
     return mgr.createTextureFromData(texture.getWidth(),
                                      texture.getHeight(),
                                      static_cast<uint32_t>(bgfxFormat),

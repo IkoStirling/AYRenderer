@@ -1,5 +1,20 @@
 # AYRenderer Design
 
+## 2026-10-21 — BC4/BC5 sRGB 安全上传
+
+真实导入回归在 BC4 作为颜色贴图时触发 D3D11 breakpoint，保留 Windows 事件/失败日志。
+缺口是未经能力校验对 BC4/BC5 提交 sRGB 标志。Adapter 现在先验证格式/标志，失败不分配 GPU 上传内存；
+资源桥在颜色请求下展开为 RGBA8 并保留 sRGB 采样语义，数据请求继续原生线性 R/RG。
+
+所用 bimg 版本的 BC4 RGBA/R8 路径未得到原生 red 值，精确 CPU 断言先失败；
+BC4 block 可作为 BC5 的 red block，与零 green block 配对后复用已验证的 BC5 decoder。
+为避免 partial block 写越界，先解码 padded 4x4 block 矩形，再裁切；检查精确输入大小、
+16位 GPU 尺寸和 padded RGBA≤256 MiB。显式写缺失通道0/alpha255，不猜测法线 Z。
+两后端在同一真实 Scene 中用独立 RGBA8 资源对照（tolerance2、变化像素0），再恢复 BC1，
+不能用占位色或“有变化”替代正确采样。CPU 两例148断言涵盖 odd/1x1、坏长度与大尺寸拒绝。
+另对新 decoder 和回归 TU 定向启用 MSVC ASan；依赖库仍未插桩，STL annotation 与其匹配，
+不将这项检查描述成整个 Renderer/bgfx/bimg 的完整 ASan 验收。
+
 ## 2026-10-21 — 网格/贴图重载的准备与发布
 
 旧实现在上传前销毁 Mesh/Texture GPU 数据，失败后留下失效稳定句柄；新增两条回归先复现。

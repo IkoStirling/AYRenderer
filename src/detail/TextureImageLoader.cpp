@@ -28,6 +28,51 @@ bx::DefaultAllocator& bimgAllocator()
 
 } // namespace
 
+DecodedImage decodeUnsignedBcChannels(uint32_t width, uint32_t height,
+    const uint8_t* blocks, uint32_t byteCount, bool twoChannels)
+{
+    if (!blocks || !width || !height || width > UINT16_MAX || height > UINT16_MAX)
+        return {};
+    const uint32_t paddedWidth = (width + 3u) & ~3u;
+    const uint32_t paddedHeight = (height + 3u) & ~3u;
+    const uint64_t expandedBytes = uint64_t(paddedWidth) * paddedHeight * 4u;
+    const uint64_t expectedBlocks = uint64_t(paddedWidth / 4u) * (paddedHeight / 4u)
+        * (twoChannels ? 16u : 8u);
+    if (expandedBytes > 256ull * 1024u * 1024u || expectedBlocks != byteCount)
+        return {};
+    // Decode complete blocks into padded storage before cropping odd dimensions;
+    // a block decoder must never write beyond a tightly sized partial edge row.
+    std::vector<uint8_t> padded(static_cast<size_t>(expandedBytes));
+    std::vector<uint8_t> pairedBlocks;
+    const uint8_t* decodeBlocks = blocks;
+    if (!twoChannels) {
+        // This bimg version's BC4 RGBA/R8 path does not decode native red
+        // values. BC5 stores two BC4 blocks: pair each red block with zero
+        // green and use its supported two-channel decoder instead.
+        pairedBlocks.resize(size_t(byteCount) * 2u, 0);
+        for (size_t offset = 0; offset < byteCount; offset += 8u)
+            std::memcpy(pairedBlocks.data() + offset * 2u, blocks + offset, 8u);
+        decodeBlocks = pairedBlocks.data();
+    }
+    bimg::imageDecodeToRgba8(&bimgAllocator(), padded.data(), decodeBlocks,
+        paddedWidth, paddedHeight, paddedWidth * 4u, bimg::TextureFormat::BC5);
+    DecodedImage out;
+    out.width = width;
+    out.height = height;
+    out.rgba8.resize(size_t(width) * height * 4u);
+    for (uint32_t y = 0; y < height; ++y) {
+        const auto* source = padded.data() + size_t(y) * paddedWidth * 4u;
+        auto* destination = out.rgba8.data() + size_t(y) * width * 4u;
+        for (uint32_t x = 0; x < width; ++x) {
+            destination[x * 4u] = source[x * 4u];
+            destination[x * 4u + 1u] = twoChannels ? source[x * 4u + 1u] : 0;
+            destination[x * 4u + 2u] = 0;
+            destination[x * 4u + 3u] = 255;
+        }
+    }
+    return out;
+}
+
 DecodedImage decodeImageFile(const std::string& path)
 {
     DecodedImage out;

@@ -524,7 +524,9 @@ bgfx::TextureHandle BGFXAdapter::createTexture2DFromData(uint16_t width, uint16_
                                                           const void* data, uint32_t size,
                                                           uint64_t flags)
 {
-    if (width == 0 || height == 0 || data == nullptr || size == 0) {
+    if (!_initialized || width == 0 || height == 0 || data == nullptr || size == 0
+        || format >= bgfx::TextureFormat::Count
+        || !bgfx::isTextureValid(0, false, 1, format, flags)) {
         return BGFX_INVALID_HANDLE;
     }
     const bgfx::Memory* mem = bgfx::copy(data, size);
