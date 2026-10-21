@@ -45,6 +45,8 @@
 #include "detail/Forward2DOpaquePass.h"  // CM-1 (2026-08-11) — 2D lane pass factory.
 #include "detail/RenderPassContract.h"
 #include "detail/RenderPipeline.h"
+#include "detail/RenderPipelineFactory.h"
+#include "detail/RenderPipelinePolicy.h"
 #include "detail/RenderTargetPool.h"
 #include "detail/RenderViewOrder.h"
 #include "detail/RenderViewNamespaces.h"
@@ -88,51 +90,6 @@ std::size_t detailDiagSizeofFrameContext()
     return sizeof(detail::FrameContext);
 }
 
-RenderPipelineDesc RenderPipelineDesc::makeDefault()
-{
-    // E5 (§5.4, 2026-07-22): default pipeline now mounts Shadow at
-    // slot 0 *enabled* (RenderPass base default _enabled == true).
-    // Hosts that want shadows get them out of the box; hosts that
-    // want to opt out pass a custom desc that omits the Shadow slot.
-    // E4's "canonical default ⇒ Shadow disabled" override is removed
-    // — its std::equal detection was a no-op distinction anyway
-    // (makeDefault() and makeForwardWithShadows() were byte-identical)
-    // and the resulting behavior contradicted the test comments.
-    return RenderPipelineDesc{{
-        RenderPassSlot::Shadow,
-        RenderPassSlot::ForwardOpaque,
-        // Forward has no GBuffer, so DepthHaze remains a zero-cost no-op. Its
-        // position matches the deferred dependency order for custom pipelines.
-        RenderPassSlot::DepthHaze,
-        RenderPassSlot::Transparent,
-        // Camera-overlay 2D composes after all 3D surfaces and before the HDR
-        // post chain. Zero payload items remain a zero-draw fast path.
-        RenderPassSlot::Forward2DOpaque,
-        RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
-        RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
-        RenderPassSlot::AutoExposure,
-        RenderPassSlot::PostProcess,
-        RenderPassSlot::FXAA,
-        RenderPassSlot::SMAA,
-        RenderPassSlot::StylizedOutline,
-        RenderPassSlot::ColorGrading,
-        RenderPassSlot::ColorStylization,
-        RenderPassSlot::TemporalFeedback,
-        RenderPassSlot::AnalogDisplay,
-        RenderPassSlot::Present,
-        RenderPassSlot::UI,
-    }};
-}
-
-RenderPipelineDesc RenderPipelineDesc::makeForwardWithShadows()
-{
-    // E5: alias for makeDefault() — both expose Shadow enabled. Kept
-    // for source compatibility with hosts / Editor that explicitly
-    // assemble the shadow-forward pipeline (see
-    // AYEditorPlayRuntime.cpp:applyEditorRenderPipeline).
-    return makeDefault();
-}
-
 namespace {
 
 template<class Visitor>
@@ -142,253 +99,6 @@ void visitStylePasses(detail::RenderPipeline& pipeline,Visitor&& visitor)
     if(auto* p=pipeline.findPass<detail::StylizedOutlinePass>())visitor(*p);
     if(auto* p=pipeline.findPass<detail::TemporalFeedbackPass>())visitor(*p);
     if(auto* p=pipeline.findPass<detail::AnalogDisplayPass>())visitor(*p);
-}
-
-void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
-{
-    auto ppIt = std::find(desc.passes.begin(), desc.passes.end(),
-                          RenderPassSlot::PostProcess);
-    const auto presentIt = std::find(desc.passes.begin(), desc.passes.end(),
-                                     RenderPassSlot::Present);
-    if (ppIt != desc.passes.end() && presentIt == desc.passes.end()) {
-        auto insertAfter = ppIt;
-        const auto fxaaIt = std::find(desc.passes.begin(), desc.passes.end(),
-                                      RenderPassSlot::FXAA);
-        if (fxaaIt != desc.passes.end() && fxaaIt > insertAfter) {
-            insertAfter = fxaaIt;
-        }
-        const auto feedbackIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::TemporalFeedback);
-        if(feedbackIt!=desc.passes.end() && feedbackIt>insertAfter)insertAfter=feedbackIt;
-        const auto displayIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::AnalogDisplay);
-        if(displayIt!=desc.passes.end() && displayIt>insertAfter)insertAfter=displayIt;
-        const auto outlineIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::StylizedOutline);
-        if(outlineIt!=desc.passes.end() && outlineIt>insertAfter)insertAfter=outlineIt;
-        const auto gradingIt = std::find(desc.passes.begin(), desc.passes.end(),
-                                         RenderPassSlot::ColorGrading);
-        if (gradingIt != desc.passes.end() && gradingIt > insertAfter) {
-            insertAfter = gradingIt;
-        }
-        const auto styleIt = std::find(desc.passes.begin(), desc.passes.end(),
-                                        RenderPassSlot::ColorStylization);
-        if (styleIt != desc.passes.end() && styleIt > insertAfter) {
-            insertAfter = styleIt;
-        }
-        const auto smaaIt = std::find(desc.passes.begin(), desc.passes.end(),
-                                      RenderPassSlot::SMAA);
-        if (smaaIt != desc.passes.end() && smaaIt > insertAfter) {
-            insertAfter = smaaIt;
-        }
-        const auto taaIt = std::find(desc.passes.begin(), desc.passes.end(),
-                                     RenderPassSlot::TAA);
-        if (taaIt != desc.passes.end() && taaIt > insertAfter) {
-            insertAfter = taaIt;
-        }
-        desc.passes.insert(insertAfter + 1, RenderPassSlot::Present);
-    }
-}
-
-void insertEditorOverlayAfterPresent(RenderPipelineDesc& desc)
-{
-    auto presentIt = std::find(desc.passes.begin(), desc.passes.end(),
-                               RenderPassSlot::Present);
-    if (presentIt != desc.passes.end()) {
-        desc.passes.insert(presentIt + 1, RenderPassSlot::EditorOverlay);
-    } else {
-        desc.passes.push_back(RenderPassSlot::EditorOverlay);
-    }
-}
-
-} // namespace
-
-RenderPipelineDesc RenderPipelineDesc::makeEditorForward()
-{
-    RenderPipelineDesc desc = makeForwardWithShadows();
-    insertEditorOverlayAfterPresent(desc);
-    return desc;
-}
-
-RenderPipelineDesc RenderPipelineDesc::makeEditorDeferred()
-{
-    RenderPipelineDesc desc = makeDeferred();
-    insertEditorOverlayAfterPresent(desc);
-    return desc;
-}
-
-RenderPipelineDesc RenderPipelineDesc::makeDeferred()
-{
-    // §P5 B3 (2026-07-22) — actual Deferred pipeline. 6 slots
-    // (Shadow + GBuffer + Lighting + Transparent + PostProcess + UI).
-    // ForwardOpaque OMITTED from this list per cutsheet §4.1 red line
-    // #4 (no FO re-render after Lighting — Lighting owns the
-    // opaque-pass equivalent in Deferred path). Shadow + Trans +
-    // PostProcess + UI are shared with Forward. Path = Deferred
-    // tag is for hosts / observers that want to query the path.
-    // B4 wires real GBuffer MRT on view 7; B5 wires LightingPass
-    // fullscreen triangle on view 8.
-    //
-    // §Skybox0 (2026-07-23) — extended to 7 slots. Skybox added
-    // at slot 1, between Shadow and GBuffer. SkyboxPass writes an
-    // independent RGBA8 FBO (skyFbo) that LightingPass samples as
-    // a backdrop via `texture2d gbufferSky`. The Skybox slot is
-    // OPT-IN — `makeDefault()` (Forward) does NOT include it, so
-    // Forward hosts that call `setSkySource()` see 0 behavior
-    // change (cutsheet §5.3 red line #4). View-id allocation
-    // per cutsheet §5.1: SkyboxPass claims the reserved view 6.
-    return RenderPipelineDesc{{
-        RenderPassSlot::Shadow,
-        RenderPassSlot::Skybox,         // §Skybox0 (2026-07-23)
-        RenderPassSlot::GBuffer,
-        RenderPassSlot::DeferredDecal,
-        RenderPassSlot::MotionVector,
-        RenderPassSlot::SSAO,
-        RenderPassSlot::Lighting,
-        RenderPassSlot::SSR,
-        RenderPassSlot::DepthHaze,
-        RenderPassSlot::Volumetric,
-        RenderPassSlot::Transparent,
-        // The same camera-overlay 2D stage is available in Deferred. It writes
-        // the current Lighting/Haze color producer without entering GBuffer.
-        RenderPassSlot::Forward2DOpaque,
-        RenderPassSlot::BloomExtract,   // S1a (2026-07-23) — half-res bright extract; bloomStrength=0 default ⇒ zero write.
-        RenderPassSlot::BloomBlur,      // S1b (2026-07-23) — half-res separable-Gaussian blur ping-pong; bloomStrength=0 default ⇒ zero write.
-        RenderPassSlot::AutoExposure,
-        RenderPassSlot::PostProcess,
-        RenderPassSlot::TAA,
-        RenderPassSlot::FXAA,
-        RenderPassSlot::SMAA,
-        RenderPassSlot::StylizedOutline,
-        RenderPassSlot::ColorGrading,
-        RenderPassSlot::ColorStylization,
-        RenderPassSlot::TemporalFeedback,
-        RenderPassSlot::AnalogDisplay,
-        RenderPassSlot::Present,
-        RenderPassSlot::UI,
-        // Fullscreen attachment overlay on view 250. It is mounted only in
-        // Deferred, defaults off, and executes before editor UI (view 255).
-        RenderPassSlot::GBufferDebug,
-    }, RenderPath::Deferred};
-}
-
-bool RenderPipelineDesc::contains(RenderPassSlot slot) const noexcept
-{
-    for (const RenderPassSlot s : passes) {
-        if (s == slot) {
-            return true;
-        }
-    }
-    return false;
-}
-
-namespace {
-
-std::unique_ptr<detail::RenderPass> makePassForSlot(RenderPassSlot slot)
-{
-    switch (slot) {
-    case RenderPassSlot::Shadow:
-        return std::make_unique<detail::ShadowPass>();
-    case RenderPassSlot::ForwardOpaque:
-        return std::make_unique<detail::ForwardOpaquePass>();
-    case RenderPassSlot::Transparent:
-        return std::make_unique<detail::TransparentPass>();
-    case RenderPassSlot::PostProcess:
-        return std::make_unique<detail::PostProcessPass>();
-    case RenderPassSlot::FXAA:
-        return std::make_unique<detail::FXAAPass>();
-    case RenderPassSlot::SMAA:
-        return std::make_unique<detail::SMAAPass>();
-    case RenderPassSlot::TAA:
-        return std::make_unique<detail::TAAPass>();
-    case RenderPassSlot::MotionVector:
-        return std::make_unique<detail::MotionVectorPass>();
-    case RenderPassSlot::AutoExposure:
-        return std::make_unique<detail::AutoExposurePass>();
-    case RenderPassSlot::ColorStylization:
-        return std::make_unique<detail::ColorStylizationPass>();
-    case RenderPassSlot::StylizedOutline:
-        return std::make_unique<detail::StylizedOutlinePass>();
-    case RenderPassSlot::AnalogDisplay:
-        return std::make_unique<detail::AnalogDisplayPass>();
-    case RenderPassSlot::TemporalFeedback:
-        return std::make_unique<detail::TemporalFeedbackPass>();
-    case RenderPassSlot::ColorGrading:
-        return std::make_unique<detail::ColorGradingPass>();
-    case RenderPassSlot::Present:
-        return std::make_unique<detail::PresentPass>();
-    case RenderPassSlot::EditorOverlay:
-        return std::make_unique<detail::EditorOverlayPass>();
-    case RenderPassSlot::UI:
-        return std::make_unique<detail::UIPass>();
-    // §P5 B3 (2026-07-22) — Deferred-only slots. Both shells are
-    // empty (B2 GBufferPass empty, B3 LightingPass empty). Real GPU
-    // work lands in B4 / B5. Until then they Noop-gate on adapter
-    // state and return 0 draws. Default `_enabled = true` from
-    // RenderPass base; `applyPipelineDesc` never `setEnabled(false)`
-    // — semantics of "Forward path doesn't see this pass" comes
-    // from the factory omitting the slot, not from a runtime gate.
-    //
-    // §Skybox0 (2026-07-23) — Skybox slot maps to SkyboxPass. Only
-    // mounted when `makeDeferred()` (or a custom desc) includes
-    // the Skybox slot — Forward `makeDefault()` does NOT include
-    // it, so Forward hosts see 0 behavior change.
-    case RenderPassSlot::GBuffer:
-        return std::make_unique<detail::GBufferPass>();
-    case RenderPassSlot::Lighting:
-        return std::make_unique<detail::LightingPass>();
-    case RenderPassSlot::Skybox:
-        return std::make_unique<detail::SkyboxPass>();
-    // S1a (2026-07-23, short-term-plan §S1) — half-resolution
-    // bright-extract pass. Default-enabled in both Forward and
-    // Deferred pipelines. View 5 claim. K1 invariant #2: when
-    // host keeps the default bloomStrength=0, the pass writes
-    // zeros — visually identical to pre-S1 renders.
-    case RenderPassSlot::BloomExtract:
-        return std::make_unique<detail::BloomExtractPass>();
-    // S1b (2026-07-23, short-term-plan §S1 sub-cut 2) — half-
-    // resolution separable-Gaussian blur ping-pong. Default-
-    // enabled in both Forward and Deferred pipelines. Views 12
-    // (horizontal) + 13 (vertical) claim. K2 invariant #1: when
-    // ctx.bloomExtractPass is absent (custom desc omits Extract)
-    // or producer FBO is invalid, the pass early-returns 0 —
-    // visually identical to pre-S1 renders.
-    case RenderPassSlot::BloomBlur:
-        return std::make_unique<detail::BloomBlurPass>();
-    // S4b (2026-07-23, short-term-plan §S4 sub-cut 2) — half-
-    // resolution exponential depth-aware haze pass. Default-
-    // enabled in both Forward and Deferred pipelines. View 14
-    // claim (cutsheet §S4 view map lock). K3 invariant #2:
-    // frame.hazeEnabled=false ⇒ execute() early-returns BEFORE
-    // ensureFbo ⇒ no FBO allocation ⇒ zero cost when the host
-    // has not opted in. Mirrors BloomExtractPass / BloomBlurPass
-    // per-cutsheet slot-table reservation philosophy.
-    case RenderPassSlot::DepthHaze:
-        return std::make_unique<detail::DepthHazePass>();
-    case RenderPassSlot::SSR:
-        return std::make_unique<detail::SsrPass>();
-    case RenderPassSlot::Volumetric:
-        return std::make_unique<detail::VolumetricPass>();
-    case RenderPassSlot::DeferredDecal:
-        return std::make_unique<detail::DeferredDecalPass>();
-    // §A1 SSAO MVP (2026-07-24) — SSAO pass factory. Only mounted
-    // when the pipeline desc includes RenderPassSlot::SSAO (i.e.
-    // a Deferred desc or a custom desc that opts in). makeDefault()
-    // does NOT include this slot ⇒ Forward hosts see 0 behavior
-    // change (cutsheet §S2 hard line). render() central
-    // `ssaoPassEnabled` further gates the FG resource add/addPass
-    // — when ssaoEnabled=false (default), the FG compile culls
-    // SSAOTexture and SSAOPass::execute returns 0.
-    case RenderPassSlot::SSAO:
-        return std::make_unique<detail::SSAOPass>();
-    // Deferred-only GBuffer attachment overlay. Default-off execution gates
-    // before allocating its fullscreen triangle or shader program.
-    case RenderPassSlot::GBufferDebug:
-        return std::make_unique<detail::GBufferDebugPass>();
-    // Camera-overlay 2D lane. Both canonical pipelines mount it after 3D
-    // transparency; custom pipelines may omit the slot. Zero payload items
-    // return zero draws.
-    case RenderPassSlot::Forward2DOpaque:
-        return std::make_unique<detail::Forward2DOpaquePass>();
-    }
-    return nullptr;
 }
 
 } // namespace
@@ -420,7 +130,7 @@ struct Renderer::Impl {
     // §4.1 red line #4 — never re-rendered after Lighting.
     // `applyPipelineDesc` for-loop 0 changes (走工厂层决策);
     // `RenderPassSlot::GBuffer` / `::Lighting` enum values + the
-    // matching `makePassForSlot` switch cases land in this PR.
+    // matching `makeRenderPass` factory entries land in this PR.
     // B4 / B5 wire real GPU on top.
     detail::RenderPipeline        pipeline;
     RenderPipelineDesc            pipelineDesc = RenderPipelineDesc::makeDefault();
@@ -772,13 +482,7 @@ struct Renderer::Impl {
 
 void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
 {
-    RenderPipelineDesc resolved = desc.passes.empty()
-                                      ? RenderPipelineDesc::makeDefault()
-                                      : desc;
-    // Presentation is a mandatory boundary for any pipeline containing
-    // PostProcess. Auto-insert it for source compatibility with custom
-    // descriptors created before RenderPassSlot::Present was appended.
-    ensurePresentAfterPostProcess(resolved);
+    RenderPipelineDesc resolved = detail::resolveRenderPipelineDesc(desc);
 
     // R6-3b — reject malformed mount orders before tearing down the current
     // pipeline. This keeps a known-good pipeline live when a custom descriptor
@@ -1009,7 +713,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     // (§5.3 red lines): Shadow runs, but writes nothing back through
     // FrameContext.
     for (const RenderPassSlot slot : resolved.passes) {
-        if (auto pass = makePassForSlot(slot)) {
+        if (auto pass = detail::makeRenderPass(slot)) {
             pipeline.addPass(slot, std::move(pass));
         }
     }

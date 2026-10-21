@@ -1,0 +1,125 @@
+# AYRenderer 当前架构
+
+**Version:** 1.0.0
+**Date:** 2026-10-22
+**Status:** Active
+**Owner:** AYRenderer
+
+本文是模块当前结构入口。历史切片和当时验收保留在 [R6 记录](render-architecture-r6.md)、
+[执行计划](execution-plan.md)及各 Pass 专题；后续提案见
+[根渲染路线](../../../AYDocs/AYRendering-Architecture-Roadmap.md)和
+[源码自审](../../../AYDocs/RENDERER-ARCHITECTURE-AUDIT-20261022.md)。历史的阶段禁令不替代本页现状。
+
+## 1. 使用入口与职责
+
+游戏侧按 Agent SDK 通过 Entity 组件、World 相机/灯光和已安装的渲染集成提取。
+`Renderer`、`RenderPipelineDesc` 的直接操作属于高级 Host/工具集成。
+Pass 工厂、FrameGraph、bgfx 句柄及资源表是内部结构，不作为新增游戏 API 推荐。
+
+| 层 | 负责 | 不负责 |
+|---|---|---|
+| RendererSubSystem | Presentation 提取、World 相机覆盖、Scene/UI 复合入口 | 游戏规则、离线转换 |
+| RenderScene | 同步提交包、可选 OwnedCpu backing、SceneLights 值快照 | GPU 驻留租约、设备调度 |
+| RenderPipelineDesc / Policy | 产品默认槽位、Editor 覆盖槽、旧描述的 Present 兼容边界 | GPU 分配、Pass 执行 |
+| RenderPipelineFactory | 每槽新建独立 Pass 实例，未知槽拒绝 | 默认产品选择、资源准备 |
+| Renderer::Impl | 设备生命周期、实际功能资格、帧装配、主/预览/多视图入口 | 重新解析一套资源格式 |
+| RenderPipeline | 持有 Pass、按顺序 dispatch、记录结果 | 产品列表、设备 View 分配 |
+| 静态合约 / 图计划 / 黑板 | 分别验证装配、声明逐帧依赖、记录当前内容有效性 | 把有效 handle 当成已写内容 |
+| RRM / 资源桥 | L2 到 L3 转换、路径缓存、稳定 ID、失败重载保留 | CPU 文件发布事务 |
+| AYShader / BGFXAdapter | 程序与绑定；设备、上传和提交封装 | ECS/Editor 作者状态 |
+| UIRenderBackend / RT 池 | UI 有序记录和批次；目标租约、预算和延迟复用 | UI 控件布局和交互规则 |
+
+## 2. 源码地图
+
+| 关注点 | 实际文件 |
+|---|---|
+| 产品组合、纯兼容策略 | [RenderPipelineDesc.cpp](../src/RenderPipelineDesc.cpp)、[RenderPipelinePolicy.h](../src/detail/RenderPipelinePolicy.h) |
+| 具体 Pass 构建 | [RenderPipelineFactory.cpp](../src/detail/RenderPipelineFactory.cpp) |
+| 主帧协调与生命周期 | [AYRenderer.cpp](../src/AYRenderer.cpp) |
+| 标准提取和复合窗口 | [AYRendererSubSystem.cpp](../src/AYRendererSubSystem.cpp) |
+| 提交包与 CPU 数据所有权 | [RenderScene.h](../include/AYRenderer/RenderScene.h)、`src/AYRenderScene.cpp` |
+| 装配时必需/可选资源验证 | [RenderPassContract.cpp](../src/detail/RenderPassContract.cpp) |
+| 每帧后处理图声明 | [PostProcessGraphPlan.cpp](../src/detail/PostProcessGraphPlan.cpp) |
+| 图编译、目标解析和 liveness | [FgResource.h](../src/detail/FgResource.h)、`FgResource.cpp` |
+| 资源内容、代际与失效原因 | [RenderResourceBlackboard.h](../src/detail/RenderResourceBlackboard.h) |
+| GPU View 顺序和命名空间 | [RenderViewOrder.h](../src/detail/RenderViewOrder.h)、[RenderViewNamespaces.h](../src/detail/RenderViewNamespaces.h) |
+| 分类、静态剔除、连续刚体实例化 | [FrameDrawLists.cpp](../src/detail/FrameDrawLists.cpp)、[RigidInstancing.h](../src/detail/RigidInstancing.h) |
+| L3 缓存和桥接 | [RenderResourceManager.cpp](../src/detail/RenderResourceManager.cpp)、[RenderAssetBridge.cpp](../src/detail/RenderAssetBridge.cpp) |
+| 纹理准备和设备接纳 | [TextureUploadPlan.cpp](../src/detail/TextureUploadPlan.cpp)、[BGFXAdapter.cpp](../src/detail/BGFXAdapter.cpp) |
+| UI 统一有序命令与目标池 | [UIRenderBackend.cpp](../src/detail/UIRenderBackend.cpp)、[RenderTargetPool.h](../src/detail/RenderTargetPool.h) |
+
+`RenderPipelineDesc.cpp` 不持有设备或具体 Pass；policy 返回副本，不改原描述。
+空描述恢复产品默认，有 PostProcess 但缺 Present 的旧描述补入最终边界；
+已经显式存在但顺序错误的边界不偷偷重排，仍由静态合约拒绝并保留当前有效管线。
+
+## 3. 产品默认链
+
+下面表示描述中的槽顺序。挂载不等于实际启用；每帧资格、功能设置和 liveness 仍决定执行。
+
+```text
+Forward:
+  Shadow → ForwardOpaque → DepthHaze(no-op) → Transparent → CameraOverlay2D
+  → BloomExtract → BloomBlur → AutoExposure → PostProcess → FXAA/SMAA
+  → StylizedOutline → ColorGrading → ColorStylization → TemporalFeedback
+  → AnalogDisplay → Present → UI
+
+Deferred:
+  Shadow → Skybox → GBuffer → DeferredDecal → MotionVector → SSAO → Lighting
+  → SSR → DepthHaze → Volumetric → Transparent → CameraOverlay2D
+  → BloomExtract → BloomBlur → AutoExposure → PostProcess → TAA/FXAA/SMAA
+  → StylizedOutline → ColorGrading → ColorStylization → TemporalFeedback
+  → AnalogDisplay → Present → UI → GBufferDebug
+```
+
+Forward 默认；Deferred 显式选择。`makeForwardWithShadows` 是 `makeDefault` 的兼容别名。
+Editor 描述仅在 Present 之后插入 EditorOverlay。空间/时间 AA 实际互斥；Motion 按消费者需求生产。
+Deferred 不再次挂载 ForwardOpaque。独立预览和运行时相机输出不因此获得整个主后处理链。
+GBufferDebug 挂载但默认关闭，调试消费者仍必须检查当前内容有效性。
+
+## 4. 三种顺序与每帧数据
+
+静态合约在拆除旧管线之前校验槽、重复项、必需输入和可选生产者顺序。
+Renderer 结合实际设备、开关与历史状态构建 `PostProcessGraphPlanInput`；纯图计划声明资源和边。
+FrameGraph 编译和裁枝决定带槽节点是否 live，RenderPipeline 按注册顺序 dispatch。
+黑板要求当前生产状态，防止残留 handle 绕过失效门禁。
+
+bgfx 设备执行另由完整 View remap 排序，不能用 CPU 调用先后替代。
+新增 Pass 同时核对产品装配、静态合约、逐帧图、黑板发布、View 顺序及相机/UI 区间。
+这些结构共同工作；当前没有自动多队列调度、全帧任意重排或通用 barrier 合成。
+
+FrameDrawLists 每个同步提交只分类一次，几何 Pass 共享结果。透明保持距离稳定排序；
+可靠静态 3D bounds 使用保守视锥，屏幕外 Shadow caster 保留。
+刚体实例化合并连续兼容的 GBuffer/solid Shadow 项，不对任意材质和变形对象承诺合批。
+
+## 5. 资源与线程不变量
+
+- OwnedCpu 包持有复制的数据，GPU 粒子 stream/callback 和资源 ID 仍可能借用。
+  包独立于 World 生命周期不等于 GPU 驻留、线程安全或任意异步提交已经成立。
+- 当前 Renderer/Pass/UI/GPU 生命周期属于同一提交 owner；Editor 独立提交线程尚未启用。
+  `PassExecContext` 的引用和指针只在同步 dispatch 中借用。
+- SceneLights 优先使用本包快照，再使用旧 Host 来源；显式预览设置可覆盖。
+  absent 使用原策略；present 且空集合表示关闭直接光，不能退回旧默认灯。
+- 文件发布、驻留 L2 替换、L3 GPU 更新是不同边界。Mesh/Texture 重载先创建临时 GPU，
+  成功再交换稳定 ID；失败保留旧图。两个颜色变体和多资源没有整体 GPU 原子提交承诺。
+- 材质快照与 Scene 路径实例分离，共享 shader token 和路径纹理仍遵守各自所有权。
+  AYShader token 副本不是自动引用计数，不能任意 release 一个借来的副本。
+- RT 池具有代际租约、类别预算和延迟复用；路径纹理缓存没有因此获得同样的自动回收策略。
+  按帧隔离不等于已经对每个设备资源建立显式完成 fence。
+  `RenderFrameStats.resources` 是资源黑板内容摘要，不是路径GPU资产驻留量或VRAM统计。
+- mip 准备校验精确编码大小；完整链上传，合法前缀基础层回退，非法尾部拒绝。
+  颜色转换、sampler 回退和256 MiB上传预算见 [设计](../design.md)及 [测试说明](testing.md)。
+
+## 6. 修改与验证路径
+
+新增或修改 Pass：先明确产品开关、资源格式/尺寸/寿命和失败行为；更新静态合约、图/黑板及 View 表；
+跑 CPU 合约、生产 shader 构建、Noop 生命周期以及实际两后端的输出/关闭重开/resize。
+修改共享私有布局时完整重建依赖，禁止用旧对象布局解释销毁崩溃。
+
+资源改动需覆盖驻留句柄、Scene/预览隔离、失败保留、修复重试与最终回收。
+计时进程串行，捕获与写盘分离；字节估算不能当作驱动分配量，单一夹具不代表全场景帧率。
+当前具体证据和复现命令在 [testing.md](testing.md)。
+
+职责拆分优先移动现有实现，保持默认、公开数值和画面顺序。工厂/合约一致性测试负责检查定义域和实例边界；
+CPU 不能替代真实 GPU 顺序与生命周期验收。推荐公开行为改变时同改 SDK、邻近 Doxygen 与契约。
+
+新增 Pass、改变主/预览边界、资源所有权或提交线程时同步本文；历史阶段结果继续保留原日期。

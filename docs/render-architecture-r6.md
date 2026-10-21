@@ -1,5 +1,9 @@
 # AYRenderer R6 架构收口计划
 
+> **历史阶段记录**：本页保留R6当时的设计与验收。当前结构见 [architecture.md](architecture.md)，
+> 后续优先级见 [根渲染路线](../../../AYDocs/AYRendering-Architecture-Roadmap.md)。
+> 本页的旧缺口、最小门禁及阶段开工限制不代表2026-10-22的完整实现状态。
+
 > 日期：2026-09-09
 > 状态：R6-0、R6-1、R6-2、R6-3、R6-4 已落地；R6-5 第一阶段已落地；R6-6 已完成。
 > 范围：在不重写 bgfx/RHI、不改变 Forward/Deferred 画面顺序的前提下，收口 Pass 描述、资源依赖、诊断和场景提交。

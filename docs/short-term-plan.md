@@ -1,5 +1,8 @@
 # AYRenderer 短期执行计划（Short-Term）
 
+> **历史 cutsheet（2026-07）**：当时的唯一清单与禁令只适用于该阶段。
+> 当前源码入口为 [architecture.md](architecture.md)，下一步以 [根渲染路线](../../../AYDocs/AYRendering-Architecture-Roadmap.md) 为准。
+
 > **唯一开工清单。** 不在本文件「本周/下周」条目里的事 → 默认不做。  
 > 配套：[`deferred-acceptance.md`](deferred-acceptance.md) · [`frame-graph-mvp.md`](frame-graph-mvp.md) · [`post-process.md`](post-process.md)  
 > 日期：2026-07-23 · 基线：Deferred 已绿（`lighting_v26` + ACES Final PP）

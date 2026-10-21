@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdlib>
 #include <iostream>
+#include <string>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -17,15 +18,23 @@ namespace {
 TEST_SUITE(CameraViewsGpu)
 TEST_CASE(independent_camera_layers_outputs_and_resize_are_verified_by_gpu_readback) {
 #ifdef _WIN32
-    if (!std::getenv("AY_CAMERA_GPU_TEST")) SKIP_TEST("Requires an isolated Windows D3D11 device");
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) {
+        if(!std::getenv("AY_CAMERA_GPU_TEST")) SKIP_TEST("Requires isolated D3D11/12 device");
+        backend="d3d11"; // Preserve the original explicit opt-in.
+    }
+    const bool d3d12=std::string(backend)=="d3d12";
+    if(!d3d12 && std::string(backend)!="d3d11") SKIP_TEST("Choose d3d11 or d3d12 explicitly");
     HWND window=CreateWindowExW(0,L"STATIC",L"Camera view acceptance",WS_OVERLAPPED,
         0,0,128,128,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     CHECK(window!=nullptr); if(!window) return;
     ayt::render::Renderer renderer;
-    ayt::render::InitDesc desc; desc.windowHandle=window; desc.backend=ayt::render::Backend::Direct3D11;
+    ayt::render::InitDesc desc; desc.windowHandle=window;
+    desc.backend=d3d12?ayt::render::Backend::Direct3D12:ayt::render::Backend::Direct3D11;
     desc.width=128; desc.height=128; desc.vsync=false; desc.msaa=0;
     CHECK(renderer.initialize(desc));
     if (!renderer.isInitialized()) { DestroyWindow(window); return; }
+    std::cerr<<"[CameraViewsGpu] backend="<<bgfx::getRendererName(bgfx::getRendererType())<<'\n';
     auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(renderer);
     const uint64_t required=BGFX_CAPS_TEXTURE_READ_BACK | BGFX_CAPS_TEXTURE_BLIT;
     CHECK((bgfx::getCaps()->supported & required)==required);

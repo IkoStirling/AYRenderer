@@ -1,5 +1,26 @@
 # AYRenderer 测试维护
 
+## 管线职责归位与设备门禁收敛（2026-10-22）
+
+产品描述/纯兼容策略与具体Pass工厂从主Renderer移出，默认链、公开布局与shader键不变。
+八个纯函数去除注释/空白后相同，29个槽/类型映射相同，证据为
+`out/render-sampling-20261021/assembly-mechanical-review.json`。
+九组CPU992例/16989断言通过；`assembly-cpu/`。库存1044项、十分区无遗漏/重复。
+
+完整Gpu分区在D3D11、D3D12各52例/42566断言通过，无跳过；
+`assembly-gpu-aligned-{d3d11,d3d12}.json`。现在统一使用`AY_TAA_GPU_TEST=d3d11|d3d12`，
+相机和调试线测试也按该值选择设备；旧`AY_CAMERA_GPU_TEST`与`AY_PHYSICS_DEBUG_GPU_TEST`仍兼容D3D11。
+新增工厂/合约检查遍历256个字节取值，并检查独立实例；纯策略另测原输入不变、幂等和保留显式错误。
+
+首次扩大Gpu分区时，旧SkyOutput用例对失效天空仍默认期待黑色，出现9个断言失败。
+该用例直接构建Pass，未经过新工厂；生产Lighting本来回退配置的清屏色，本轮未改该生产代码。
+用例现显式验证黑色及两组非黑色/alpha回退，并按已存在的RGBA8清屏截断计算独立参考，仍用原1e-3容差。
+Sky恢复/禁用/无源/缺图各阶段继续检查当前生产状态，不能只因缓存RT存在就采样旧天空。
+
+两后端`assembly-native-{MaterialWorkshop,AssetReimport}-*`通过，保持Scene/预览隔离、
+实际Apply/Cancel、失败保留、修复重试与保存重开。四个`assembly-quality-*`报告也通过，设备采集串行。
+初次失败报告`assembly-gpu-full-d3d11.json`保留，不能当作通过或与最终结果重复累计。
+
 ## 纹理上传与采样（2026-10-22）
 
 本轮主线完整 CPU 九组990例/16637断言通过，无跳过。

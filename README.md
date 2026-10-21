@@ -1,5 +1,10 @@
 # AYRenderer
 
+当前结构与源码定位见 [架构入口](docs/architecture.md)；后续工作见
+[根渲染路线](../../AYDocs/AYRendering-Architecture-Roadmap.md)与
+[2026-10-22 源码自审](../../AYDocs/RENDERER-ARCHITECTURE-AUDIT-20261022.md)。
+下方带日期的功能增量说明保留；早期 R1–R5 表格已明确标为历史记录。
+
 ## 纹理层级与采样（2026-10-22）
 
 资源桥上传完整 mip 链；单层保持单层；合法前缀链明确回退基础层，仍校验所有尾部。
@@ -308,7 +313,10 @@ GPU 粒子 stream/callback 仍借用；mesh/material id 也不等于 GPU 资源�
 
 ---
 
-## 状态
+## 早期 R1–R5 开发状态（历史记录）
+
+本节及随后2026-07-21产品定位记录当时阶段，不定义当前能力和默认管线。
+当前已经有Deferred、完整Bloom链、共享DrawList、刚体实例化和统一UI命令；以本页顶部更新及架构入口为准。
 
 **R1 已落地** — 公开 API 不含 bgfx；`ForwardOpaquePass` + Noop 测试通过。
 
@@ -331,11 +339,11 @@ GPU 粒子 stream/callback 仍借用；mesh/material id 也不等于 GPU 资源�
 
 ---
 
-## 当前定位（产品角度，2026-07-21 反映 PR-F3）
+## 2026-07-21 产品定位（历史快照）
 
-**适合当前能做的：** Editor / Demo 的前向场景 + UI 合成 + 资源加载 + 蒙皮（bone UBO 已 wire,在 FO 与 ShadowPass 两端均 ship）+ 真 bloom/exposure/tonemap post-process + **带 skinned caster 的方向光 shadow**（硬边,bias acne 可调）。
+**当时可用：** Editor / Demo 的前向场景 + UI 合成 + 资源加载 + 蒙皮（bone UBO 已 wire,在 FO 与 ShadowPass 两端均 ship）+ 真 bloom/exposure/tonemap post-process + **带 skinned caster 的方向光 shadow**（硬边,bias acne 可调）。
 
-**还不能当完整渲染器当的：** 延迟渲染、复杂后处理（真 bloom chain / DOF / SSR）、产品级 PCF / VSM shadow 滤波。
+**当时尚未覆盖（不是当前待办表）：** 延迟渲染、复杂后处理（真 bloom chain / DOF / SSR）、产品级 PCF / VSM shadow 滤波。
 
 ### 唯一"差一步能 demo"的:**PR-F2** ✅ 已 ship(2026-07-21,commit `8a646ae`)
 

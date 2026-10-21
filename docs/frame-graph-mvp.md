@@ -1,5 +1,8 @@
 # FrameGraph MVP Cutsheet（中期）
 
+> **历史 cutsheet（2026-07）**：FrameGraph MVP已经落地；下方“只写契约”等措辞保留当时语境。
+> 当前结构见 [architecture.md](architecture.md)，不再据此禁止已完成的图与画质功能。
+
 > 与 [`short-term-plan.md`](short-term-plan.md)、[`renderer-pass-roadmap.md`](renderer-pass-roadmap.md)、[`post-process.md`](post-process.md) 配套。  
 > 日期：2026-07-23 · **现在只写契约，不写实现**。短期计划禁止开工本文件范围外的代码。
 

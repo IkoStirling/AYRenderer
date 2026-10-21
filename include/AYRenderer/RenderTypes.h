@@ -539,39 +539,28 @@ inline constexpr float kEditorTransformGizmoDistanceExponent = 0.90f;
 inline constexpr float kEditorTransformGizmoMinWorldScale = 0.12f;
 inline constexpr float kEditorTransformGizmoMaxWorldScale = 120.0f;
 
-// §P5 B1 (2026-07-22) — pipeline path selection. B1 ship was
-// plumbing only: `RenderPipelineDesc::path` field (default Forward)
-// + `makeDeferred()` stub returning the same 5-slot Forward list.
-// §P5 B3 (2026-07-22) — `makeDeferred()` is now actual: 6-slot
-// pipeline {Shadow, GBuffer, Lighting, Trans, PP, UI} with
-// ForwardOpaque OMITTED per cutsheet §4.1 red line #4. The path
-// enum itself stays unchanged; only the slot list returned by
-// `makeDeferred()` differs from `makeDefault()`.
-//
-// Forward path remains opt-out (host passes a custom desc that
-// omits GBuffer/Lighting, or sticks with `makeDefault()`). Deferred
-// path remains opt-in via `configurePipeline(makeDeferred())`;
-// default Forward behavior is unchanged.
+/// Advanced Host product selection. Forward is the default; Deferred is
+/// explicit opt-in and uses GBuffer/Lighting instead of ForwardOpaque.
+/// Existing enum values are stable. Scene components use the installed
+/// rendering integration rather than assembling a pipeline per object.
 enum class RenderPath : uint8_t {
     Forward  = 0,
     Deferred = 1,
 };
 
 struct RenderPipelineDesc {
+    /// Ordered CPU pass assembly. Runtime feature gates and FrameGraph
+    /// liveness may skip mounted stages; GPU View order is managed internally.
     std::vector<RenderPassSlot> passes;
-    // §P5 B1 (2026-07-22) — pipeline path. Default Forward keeps the
-    // current 5-slot behavior intact; Deferred becomes meaningful
-    // from B3 onwards (GBuffer + Lighting slots, view 7/8).
     RenderPath path = RenderPath::Forward;
 
+    /// Forward scene, shadow, overlay and post/presentation chain.
+    /// Optional effect stages remain controlled by their runtime settings.
     static RenderPipelineDesc makeDefault();
+    /// Source-compatible alias of makeDefault(), including the Shadow slot.
     static RenderPipelineDesc makeForwardWithShadows();
-    // §P5 B1 stub — same 5-slot Forward pipeline but tagged
-    // `path=Deferred`. Actual Deferred behavior lands in B3; until
-    // then, a host that calls `configurePipeline(makeDeferred())`
-    // sees no behavioral difference (intentional — the B1 commit
-    // pre-wires the plumbing without touching dispatch order or
-    // GPU resources).
+    /// Deferred geometry/lighting and optional depth/temporal effects,
+    /// followed by the shared overlay and post/presentation stages.
     static RenderPipelineDesc makeDeferred();
     // Editor pipelines — same as makeForwardWithShadows() / makeDeferred()
     // but insert RenderPassSlot::EditorOverlay immediately after Present

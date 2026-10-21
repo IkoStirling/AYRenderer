@@ -1,5 +1,21 @@
 # AYRenderer Design
 
+## 2026-10-22 — 产品组合与 Pass 工厂归位
+
+当前职责地图以 [docs/architecture.md](docs/architecture.md) 为入口，历史R1–R6切片保留原日期。
+`RenderPipelineDesc.cpp` 集中定义产品默认、Editor覆盖槽、contains及纯兼容策略；
+`RenderPipelinePolicy.h` 的 resolve 返回独立副本，仅处理空描述与旧描述缺Present的边界。
+已经显式存在的错误顺序不重排，仍由静态合约拒绝并保留原有效管线。
+
+`RenderPipelineFactory.cpp` 只把槽位映射为新建Pass，不选择产品、不准备GPU资源；
+未知槽返回空。`Renderer::Impl` 在旧管线拆除前验证归一后的描述，再调用工厂装配，
+原有资源拆除、feature设置、运行时资格、图计划、黑板和View remap归属不变。
+`RenderPipeline` 继续拥有实例与dispatch结果。公开枚举、结构布局、默认槽顺序和shader键不变。
+
+合约回归遍历全部256个字节值，比对工厂与静态合约的接纳范围、实例名称和独立所有权；
+另验证兼容归一不改原输入、幂等、保留path以及不掩盖显式错误顺序。
+CPU检查不能代替实际两后端的画面/生命周期回归，具体结果在 [testing.md](docs/testing.md)。
+
 ## 2026-10-22 — 有界纹理上传与采样
 
 `TextureUploadPlan` 是 implementation-only CPU 准备边界：借用 ITexture，校验每层尺寸/负载，

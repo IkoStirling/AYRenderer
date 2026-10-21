@@ -234,26 +234,12 @@ struct PassExecContext {
     // gbufferPass).
     const LightingPass*       lightingPass   = nullptr;
 
-    // §P5 B7+ (2026-07-22) — borrowed, non-owning pointer to the
-    // host-supplied multi-light DataSource (ayt::render::SceneLights).
-    // Drives the LightingPass's accumulation loop (B7 multi-light
-    // cut). Mirror shadowPass / gbufferPass / lightingPass borrowed
-    // pointer pattern; lifetime contract: pointer must remain valid
-    // for the duration of pipeline::executeAll(ctx).
-    //
-    // Why this lives here (not on FrameContext / RenderScene): both
-    // are forbidden per cutsheet §5.3 red lines #1 (RenderScene::Light
-    // permanently retired per §5.5 cleanup) and #2 (FrameContext must
-    // not grow light data fields). Per-frame per-light data sits on
-    // the *host* as SceneLights { DirectionalLight[kMaxSceneLights];
-    // count; }, and the renderer reads via this borrowed pointer.
-    //
-    // Default-init = nullptr ⇒ B5 single-light path still works
-    // (LightingPass falls back to FrameContext::lightDirection /
-    // lightColor when sceneLights is null). All existing 16-field
-    // brace-init test sites (Test_B5_LightingDirectional,
-    // Test_B6_PostProcessSourceFbo, ...) keep compiling without edits
-    // via C++14 trailing-default behavior.
+    // Borrowed for this synchronous dispatch. Renderer selects the packet's
+    // owned SceneLights snapshot before the legacy Host source; preview
+    // settings may override that selection. The selected owner outlives
+    // executeAll(). No mutable light collection is added to FrameContext.
+    // nullptr retains legacy single-light fallback. A present, empty snapshot
+    // explicitly disables direct lighting instead of requesting that fallback.
     const ayt::render::SceneLights* sceneLights = nullptr;
 
     // §Skybox0 (2026-07-23) — borrowed, non-owning pointer to the

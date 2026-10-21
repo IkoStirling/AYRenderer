@@ -30,24 +30,18 @@ struct PassExecutionOutcome {
 
 // U1+ — owns the ordered list of RenderPass subclasses and dispatches
 // them via executeAll(). Renderer::render iterates pipeline.passes()
-// and calls execute() on each enabled pass. Today the default
-// pipeline (built by RenderPipelineDesc::makeDefault) mounts the Forward
-// scene chain followed by PostProcess, FXAA, ColorGrading, Present and UI,
-// with Shadow
-// enabled at slot 0. See
-// `docs/execution-plan.md` §1.1 + §附录 B + 附录 A row E5. The E4
-// "canonical default ⇒ Shadow disabled" override is removed.
-// §5.3 still forbids default-on Shadow *combined with* a Light
-// struct or FrameContext shadow writeback — both DIAG flags remain
-// OFF, so neither forbidden combination is live.
+// and calls execute() on each enabled, live pass. Product composition is in
+// RenderPipelineDesc.cpp and instance construction in RenderPipelineFactory.
+// This class owns dispatch and observations, not product defaults or GPU View
+// remapping. Shadow is mounted in both canonical product pipelines.
 //
-// Non-ownership semantics: passes are owned via unique_ptr. The
+// Ownership: passes are owned via unique_ptr. The
 // pipeline outlives every render() call so dispatch is safe to
 // re-enter; per-frame state (binding caches on GpuMaterial) lives on
 // the resources map, not on the passes themselves.
 //
 // Threading: executeAll() is called from the render thread (currently
-// main thread; multiplayer deferred to Phase 5). Matches the
+// main thread). Matches the
 // RenderPass::execute contract.
 //
 // P1 (PR-C, 2026-07-20): executeAll() now takes a single
@@ -66,7 +60,7 @@ public:
     // must destroyResources() first when the adapter is live.
     void clear();
 
-    // Name lookup (O(N), N typically ≤ 7). Returns nullptr when absent.
+    // Name lookup is linear in mounted passes. Returns nullptr when absent.
     RenderPass*       findPass(std::string_view name) noexcept;
     const RenderPass* findPass(std::string_view name) const noexcept;
 

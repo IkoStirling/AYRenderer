@@ -418,7 +418,7 @@ TEST_SUITE_END
 
 TEST_SUITE(AYRenderer_SkyOutputGpu)
 
-TEST_CASE(sky_output_is_current_frame_only_and_lighting_falls_back_to_black)
+TEST_CASE(sky_output_is_current_frame_only_and_inactive_sky_uses_authored_clear)
 {
 #ifdef _WIN32
     const char* backend = std::getenv("AY_TAA_GPU_TEST");
@@ -440,8 +440,9 @@ TEST_CASE(sky_output_is_current_frame_only_and_lighting_falls_back_to_black)
     lighting.setOutputSize(kSize, kSize);
     ayt::render::SkySource source;
     source.equirect.id = 1;
+    const Pixel skyColor{1,0,1,1};
     textures[1].handle = fixture.input(
-        std::vector<Pixel>(kSize*kSize, Pixel{1,.25f,.5f,1}), true, true);
+        std::vector<Pixel>(kSize*kSize, skyColor), true, true);
     PassExecContext ctx{fixture.adapter, fixture.pool, scene, meshes, textures,
                         materials, 0, 0, kSize, kSize, frame, 0};
     ctx.skySource = &source;
@@ -462,6 +463,19 @@ TEST_CASE(sky_output_is_current_frame_only_and_lighting_falls_back_to_black)
         const bool expectedSky = phase == 0 || phase == 2 || phase == 4;
         CHECK(sky.producedThisFrame() == expectedSky);
         CHECK(bgfx::isValid(sky.skyRt()));
+        ayt::render::ClearDesc clear;
+        clear.r=clear.g=clear.b=0;
+        Pixel fallback{0,0,0,1}; // Preserve an explicit black-fallback phase.
+        if (phase==3) {
+            clear.r=.25f;clear.g=.5f;clear.b=.75f;
+            fallback={63/255.f,127/255.f,191/255.f,1};
+        } else if (phase==5) {
+            clear.r=.75f;clear.g=.25f;clear.b=.5f;clear.a=.5f;
+            fallback={191/255.f,63/255.f,127/255.f,127/255.f};
+        }
+        // Background uses the same packed RGBA8 truncation as setViewClear.
+        // The oracle uses authored constants, not the pass's private state.
+        lighting.setSceneClear(clear);
         gbuffer.execute(ctx);
         CHECK(gbuffer.producedThisFrame());
         CHECK(lighting.execute(ctx) == 1u);
@@ -469,13 +483,15 @@ TEST_CASE(sky_output_is_current_frame_only_and_lighting_falls_back_to_black)
         fixture.targetTexture = fixture.adapter.getFboAttachment(lighting.lightingOutputFbo(), 0);
         const auto pixels = fixture.readTarget(200);
         fixture.targetTexture = originalTarget;
+        CHECK(pixels.size()==kSize*kSize);
+        if(pixels.size()!=kSize*kSize) break;
         const auto& center = pixels[(kSize/2)*kSize+kSize/2];
-        if (expectedSky) CHECK(center[0] > .9f);
-        else {
-            CHECK(std::abs(center[0]) < .001f);
-            CHECK(std::abs(center[1]) < .001f);
-            CHECK(std::abs(center[2]) < .001f);
-        }
+        const Pixel expected=expectedSky?skyColor:fallback;
+        std::cerr<<"[SkyOutputGpu] backend="<<backend<<" phase="<<phase
+            <<" expected="<<expected[0]<<','<<expected[1]<<','<<expected[2]<<','<<expected[3]
+            <<" actual="<<center[0]<<','<<center[1]<<','<<center[2]<<','<<center[3]<<'\n';
+        for(size_t channel=0;channel<4;++channel)
+            CHECK(std::abs(center[channel]-expected[channel]) < .001f);
     }
     lighting.destroyResources(fixture.adapter);
     gbuffer.destroyResources(fixture.adapter);

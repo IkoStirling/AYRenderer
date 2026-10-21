@@ -3,6 +3,9 @@
 #include "AYRenderer.h"
 #include "AYRenderer/RenderTypes.h"
 #include "detail/RenderPassContract.h"
+#include "detail/RenderPass.h"
+#include "detail/RenderPipelineFactory.h"
+#include "detail/RenderPipelinePolicy.h"
 
 #include <algorithm>
 #include <array>
@@ -32,6 +35,46 @@ const ayt::render::detail::RenderPassResourceWrite* findWrite(
 } // namespace
 
 TEST_SUITE(AYRenderer_RenderPassContracts_R6)
+
+TEST_CASE(pass_factory_accepts_exactly_the_static_contract_inventory)
+{
+    // Compare independent assembly boundaries, including every unknown byte
+    // value; adding a contract without a factory must not silently omit a pass.
+    for (uint16_t raw = 0; raw < 256; ++raw) {
+        const auto slot = static_cast<RenderPassSlot>(raw);
+        const auto* contract = renderPassContract(slot);
+        auto pass = ayt::render::detail::makeRenderPass(slot);
+        CHECK(bool(pass) == bool(contract));
+        if (!pass || !contract) continue;
+        CHECK(pass->name() == contract->name);
+        auto second = ayt::render::detail::makeRenderPass(slot);
+        CHECK(second != nullptr);
+        CHECK(second.get() != pass.get());
+    }
+}
+
+TEST_CASE(legacy_normalization_is_pure_idempotent_and_preserves_explicit_errors)
+{
+    const RenderPipelineDesc legacy{{RenderPassSlot::PostProcess,
+        RenderPassSlot::ColorGrading, RenderPassSlot::TemporalFeedback,
+        RenderPassSlot::AnalogDisplay, RenderPassSlot::UI}, ayt::render::RenderPath::Deferred};
+    const auto original = legacy.passes;
+    const auto resolved = ayt::render::detail::resolveRenderPipelineDesc(legacy);
+    CHECK(legacy.passes == original);
+    CHECK(resolved.path == legacy.path);
+    CHECK(validateRenderPipelineContracts(resolved.passes).valid());
+    CHECK(resolved.passes.size() == legacy.passes.size()+1);
+    if (resolved.passes.size() < 2) return;
+    CHECK(resolved.passes[resolved.passes.size()-2] == RenderPassSlot::Present);
+    CHECK(resolved.passes.back() == RenderPassSlot::UI);
+    CHECK(ayt::render::detail::resolveRenderPipelineDesc(resolved).passes == resolved.passes);
+
+    const RenderPipelineDesc misordered{{RenderPassSlot::PostProcess,
+        RenderPassSlot::Present, RenderPassSlot::FXAA}};
+    const auto stillMisordered = ayt::render::detail::resolveRenderPipelineDesc(misordered);
+    CHECK(stillMisordered.passes == misordered.passes);
+    CHECK_FALSE(validateRenderPipelineContracts(stillMisordered.passes).valid());
+}
 
 TEST_CASE(every_public_slot_has_one_static_contract)
 {

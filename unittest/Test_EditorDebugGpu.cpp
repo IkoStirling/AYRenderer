@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <string>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -12,17 +13,25 @@
 #endif
 
 TEST_SUITE(AYRenderer_PhysicsDebugGpu)
-TEST_CASE(real_d3d11_overlay_pixels_show_both_colors_and_clear) {
+TEST_CASE(real_device_overlay_pixels_show_both_colors_and_clear) {
 #ifdef _WIN32
-    if(!std::getenv("AY_PHYSICS_DEBUG_GPU_TEST")) SKIP_TEST("Requires isolated D3D11 device");
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) {
+        if(!std::getenv("AY_PHYSICS_DEBUG_GPU_TEST")) SKIP_TEST("Requires isolated D3D11/12 device");
+        backend="d3d11"; // Preserve the original explicit opt-in.
+    }
+    const bool d3d12=std::string(backend)=="d3d12";
+    if(!d3d12 && std::string(backend)!="d3d11") SKIP_TEST("Choose d3d11 or d3d12 explicitly");
     HWND window=CreateWindowExW(0,L"STATIC",L"Physics debug acceptance",WS_OVERLAPPED,
         0,0,256,256,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     CHECK(window!=nullptr); if(!window) return;
     struct WindowGuard { HWND h; ~WindowGuard(){DestroyWindow(h);} } guard{window};
     ayt::render::Renderer renderer;
-    ayt::render::InitDesc init; init.windowHandle=window; init.backend=ayt::render::Backend::Direct3D11;
+    ayt::render::InitDesc init; init.windowHandle=window;
+    init.backend=d3d12?ayt::render::Backend::Direct3D12:ayt::render::Backend::Direct3D11;
     init.width=256; init.height=256; init.vsync=false; init.msaa=0;
     CHECK(renderer.initialize(init)); if(!renderer.isInitialized()) return;
+    std::cerr<<"[PhysicsDebugGpu] backend="<<backend<<'\n';
     renderer.configurePipeline(ayt::render::RenderPipelineDesc::makeEditorForward());
     renderer.setMainCamera(ayt::math::Float4x4::identity(),ayt::math::Float4x4::identity());
     CHECK(renderer.setEditorDebugLines({
@@ -81,7 +90,7 @@ TEST_CASE(real_d3d11_overlay_pixels_show_both_colors_and_clear) {
     CHECK(cleared.first==0 && cleared.second==0);
     renderer.shutdown();
 #else
-    SKIP_TEST("Windows D3D11 fixture required");
+    SKIP_TEST("Windows D3D11/12 fixture required");
 #endif
 }
 TEST_SUITE_END
