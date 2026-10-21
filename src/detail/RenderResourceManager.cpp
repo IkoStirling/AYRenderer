@@ -1029,7 +1029,8 @@ bool RenderResourceManager::reloadMeshFromPath(const std::string& path)
         return false;
     }
 
-    destroyMeshGpuOnly(id);
+    // Prepare the replacement while the last good GPU buffers remain resident.
+    // A rejected upload must leave the stable handle usable by existing draws.
     const MeshHandle fresh = uploadMeshFromResource(*this, *mesh);
     if (!fresh.isValid()) {
         std::fprintf(stderr, "[RenderResourceManager] reloadMesh upload failed '%s'\n",
@@ -1038,8 +1039,8 @@ bool RenderResourceManager::reloadMeshFromPath(const std::string& path)
     }
 
     if (fresh.id != id) {
-        _meshes[id] = std::move(_meshes.at(fresh.id));
-        _meshes.erase(fresh.id);
+        std::swap(_meshes.at(id), _meshes.at(fresh.id));
+        destroyMeshGpuOnly(fresh.id);
     }
     _meshCacheByKey[key] = id;
     std::fprintf(stderr, "[RenderResourceManager] reloadMesh ok '%s' id=%llu\n",
@@ -1103,12 +1104,19 @@ bool RenderResourceManager::reloadTextureFromPath(const std::string& path)
             continue;
         }
         const uint64_t id = cached->second;
-        destroyTextureGpuOnly(id);
-        _textureCacheByKey.erase(cached);
-
-        const TextureHandle fresh = texture
-            ? uploadTextureFromResource(*this, *texture, key, srgb)
-            : createTextureFromFile(path, key, srgb);
+        // An anonymous upload avoids both a cache hit on the old variant and
+        // publication before preparation succeeds. Each sampling variant keeps
+        // its previous texture on failure and its public handle on success.
+        TextureHandle fresh;
+        if (texture) {
+            fresh = uploadTextureFromResource(*this, *texture, {}, srgb);
+        } else {
+            const DecodedImage image = decodeImageFile(path);
+            if (image.isValid()) {
+                fresh = createTextureFromRgba8(image.width, image.height,
+                                              image.rgba8.data(), {}, srgb);
+            }
+        }
         if (!fresh.isValid()) {
             std::fprintf(stderr,
                          "[RenderResourceManager] reloadTexture upload failed '%s' (%s)\n",
@@ -1116,10 +1124,10 @@ bool RenderResourceManager::reloadTextureFromPath(const std::string& path)
             continue;
         }
         if (fresh.id != id) {
-            _textures[id] = std::move(_textures.at(fresh.id));
-            _textures.erase(fresh.id);
-            _textureCacheByKey[key] = id;
+            std::swap(_textures.at(id), _textures.at(fresh.id));
+            destroyTextureGpuOnly(fresh.id);
         }
+        _textureCacheByKey[key] = id;
         std::fprintf(stderr,
                      "[RenderResourceManager] reloadTexture ok '%s' id=%llu (%s)\n",
                      path.c_str(), static_cast<unsigned long long>(id),

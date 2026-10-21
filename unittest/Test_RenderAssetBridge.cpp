@@ -191,6 +191,110 @@ TEST_CASE(load_mesh_from_aymesh_file)
     removeFile(path);
 }
 
+TEST_CASE(mesh_reload_failure_retains_resident_gpu_buffers_and_retry_keeps_the_handle)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    ayt::resource::Mesh source;
+    source.createCube(1);
+    std::vector<ayt::resource::UInt8> bytes;
+    CHECK(source.saveToBinary(bytes));
+    const auto path = tempPath("reload_mesh_transaction.msh");
+    CHECK(writeBinaryFile(path, bytes));
+    auto& manager = ayt::resource::ResourceManager::instance();
+    manager.unloadAll();
+    manager.setAutoWatchLoadedResources(false);
+    BGFXAdapter adapter;
+    BGFXInitParams init;
+    init.backend = Backend::Noop;
+    CHECK(adapter.initialize(init));
+    ayt::shader::ShaderResourcePool pool;
+    RenderResourceManager resources(adapter, pool);
+    const auto handle = resources.loadMesh(path);
+    CHECK(handle.isValid());
+    auto cpu = manager.load<ayt::resource::Mesh>(path);
+    CHECK(cpu);
+    if (handle.isValid() && cpu) {
+        const auto vertex = resources.meshes().at(handle.id).vertexBuffer;
+        const auto index = resources.meshes().at(handle.id).indexBuffer;
+        // An unusable resident replacement exercises bridge admission failure;
+        // this is not a claim to simulate GPU memory exhaustion.
+        cpu->unload();
+        CHECK_FALSE(resources.reloadMeshFromPath(path));
+        CHECK(resources.meshes().contains(handle.id));
+        CHECK(resources.loadMesh(path).id == handle.id);
+        if (resources.meshes().contains(handle.id)) {
+            CHECK(resources.meshes().at(handle.id).vertexBuffer.idx == vertex.idx);
+            CHECK(resources.meshes().at(handle.id).indexBuffer.idx == index.idx);
+        }
+        cpu->createCube(3);
+        CHECK(resources.reloadMeshFromPath(path));
+        CHECK(resources.loadMesh(path).id == handle.id);
+        CHECK(resources.meshes().contains(handle.id));
+        if (resources.meshes().contains(handle.id))
+            CHECK(resources.meshes().at(handle.id).vertexBuffer.idx != vertex.idx);
+    }
+    resources.shutdown();
+    pool.shutdown();
+    adapter.shutdown();
+    manager.unloadAll();
+    manager.setAutoWatchLoadedResources(true);
+    removeFile(path);
+}
+
+TEST_CASE(texture_reload_failure_retains_linear_and_srgb_gpu_variants_and_retry_keeps_handles)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    ayt::resource::Texture source;
+    source.createSolidColor(4, 4, 255, 128, 64);
+    std::vector<ayt::resource::UInt8> bytes;
+    CHECK(source.saveToBinary(bytes));
+    const auto path = tempPath("reload_texture_transaction.txr");
+    CHECK(writeBinaryFile(path, bytes));
+    auto& manager = ayt::resource::ResourceManager::instance();
+    manager.unloadAll();
+    manager.setAutoWatchLoadedResources(false);
+    BGFXAdapter adapter;
+    BGFXInitParams init;
+    init.backend = Backend::Noop;
+    CHECK(adapter.initialize(init));
+    ayt::shader::ShaderResourcePool pool;
+    RenderResourceManager resources(adapter, pool);
+    const auto linear = resources.loadTexture(path, false);
+    const auto srgb = resources.loadTexture(path, true);
+    CHECK(linear.isValid() && srgb.isValid());
+    auto cpu = manager.load<ayt::resource::Texture>(path);
+    CHECK(cpu);
+    if (linear.isValid() && srgb.isValid() && cpu) {
+        const auto oldLinear = resources.textures().at(linear.id).handle;
+        const auto oldSrgb = resources.textures().at(srgb.id).handle;
+        cpu->_width = 0;
+        CHECK_FALSE(resources.reloadTextureFromPath(path));
+        CHECK(resources.textures().contains(linear.id) && resources.textures().contains(srgb.id));
+        CHECK(resources.loadTexture(path, false).id == linear.id);
+        CHECK(resources.loadTexture(path, true).id == srgb.id);
+        if (resources.textures().contains(linear.id))
+            CHECK(resources.textures().at(linear.id).handle.idx == oldLinear.idx);
+        if (resources.textures().contains(srgb.id))
+            CHECK(resources.textures().at(srgb.id).handle.idx == oldSrgb.idx);
+        cpu->createSolidColor(8, 8, 64, 128, 255);
+        CHECK(resources.reloadTextureFromPath(path));
+        CHECK(resources.loadTexture(path, false).id == linear.id);
+        CHECK(resources.loadTexture(path, true).id == srgb.id);
+        if (resources.textures().contains(linear.id))
+            CHECK(resources.textures().at(linear.id).handle.idx != oldLinear.idx);
+        if (resources.textures().contains(srgb.id))
+            CHECK(resources.textures().at(srgb.id).handle.idx != oldSrgb.idx);
+    }
+    resources.shutdown();
+    pool.shutdown();
+    adapter.shutdown();
+    manager.unloadAll();
+    manager.setAutoWatchLoadedResources(true);
+    removeFile(path);
+}
+
 TEST_CASE(create_mesh32_uploads_large_indices)
 {
     struct PosVertex {
