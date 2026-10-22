@@ -1,5 +1,13 @@
 # AYRenderer
 
+## GPU计时的固定View归属（2026-10-22）
+
+现有RenderFrameStats/DebugOverlay汇总全部Bloom金字塔、自动曝光、SSR、Volumetric、
+16个Decal View及Transparent的稳定选择mask；不再遗漏这些已实现阶段的非零设备样本。
+CPU行来自当前dispatch，GPU值来自已完成backend查询；动态相机/预览/UI离屏不归入相邻主Pass。
+View计时可能包含clear/resolve，0可能表示无有效timer，不能当作精确的当前CPU帧或纯kernel预算。
+实现未增加新的分析器、设备查询或GPU提交；独立非零fixture见[测试维护](docs/testing.md)。
+
 ## 同池UI程序与失败初始化（2026-10-22）
 
 UI后端的flat/SDF程序借用ShaderResourcePool缓存，与内置Pass采用同一归属方式。

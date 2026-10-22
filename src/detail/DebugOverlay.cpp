@@ -115,6 +115,8 @@ namespace {
 std::string_view passNameForView(uint16_t view,
                                  const std::vector<RenderPassFrameStats>& passes)
 {
+    // Canonical main-pipeline views only. Dynamic camera/preview/UI paints and
+    // particle compute have no fixed main RenderPass owner in this summary.
     switch (view) {
     case 1: case 2:
     case 18: case 19: case 20: case 21:
@@ -129,9 +131,16 @@ std::string_view passNameForView(uint16_t view,
     case 6:           return "Skybox";
     case 7:           return "GBuffer";
     case 8:           return "Lighting";
-    case 9: case 253: case 254: return "Transparent";
+    case 9: case 244: case 253: case 254: return "Transparent";
     case 10:          return "BloomExtract";
-    case 11: case 12: return "BloomBlur";
+    case 11: case 12:
+    case 26: case 27: case 28: case 29: case 30: return "BloomBlur";
+    case 31:         return "AutoExposure";
+    case 32:         return "SSR";
+    case 33:         return "Volumetric";
+    case 34: case 35: case 36: case 37: case 38: case 39:
+    case 40: case 41: case 42: case 43: case 44: case 45:
+    case 46: case 47: case 48: case 49: return "DeferredDecal";
     case 13:          return "DepthHaze";
     case 14:          return "SSAO";
     case 15:          return "PostProcess";

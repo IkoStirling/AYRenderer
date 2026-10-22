@@ -615,6 +615,12 @@ public:
     void setWireframeEnabled(bool enabled);
     bool isWireframeEnabled() const noexcept;
     void resetDebugOverlayStats();
+    /// Borrowed owner-thread diagnostics; copy values to retain a fixed sample
+    /// across frames or Renderer teardown. CPU rows describe current dispatch;
+    /// GPU values describe completed backend queries identified by gpuFrameNumber.
+    /// Pass GPU time attributes canonical fixed Views (including clear/resolve),
+    /// not dynamic camera/preview/UI-offscreen work or a pure kernel budget.
+    /// Zero can mean no valid timer sample; this is not a same-input-frame fence.
     const RenderFrameStats& getFrameStats() const noexcept;
     /// Explicit owner-thread observation outside resource mutation. Copies bounded
     /// diagnostic rows without loading/uploading/evicting or acquiring GPU leases.

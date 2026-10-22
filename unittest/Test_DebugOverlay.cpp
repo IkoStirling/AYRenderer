@@ -260,4 +260,36 @@ TEST_CASE(architecture_diagnostics_track_graph_resources_and_peak_targets)
     CHECK(overlay.stats().graph.peakTransientTargets == 0u);
 }
 
+// design reference: design.md, fixed View attribution in RenderFrameStats.
+TEST_CASE(all_fixed_decal_volume_reflection_exposure_and_bloom_views_contribute_gpu_time)
+{
+    ayt::render::detail::DebugOverlay overlay;
+    std::vector<ayt::render::RenderPassFrameStats> cpu;
+    for(const auto* name:{"BloomBlur","AutoExposure","SSR","Volumetric","DeferredDecal","Transparent"})
+        cpu.push_back({name,3u,1.5f,99.f});
+    std::vector<uint16_t> ids={11,12,26,27,28,29,30,31,32,33,9,244,253,254};
+    for(uint16_t view=34;view<=49;++view)ids.push_back(view);
+    // Dynamic camera/UI/preview views and GPU particle compute have no
+    // fixed RenderPass owner here; do not fold them into a nearby effect.
+    ids.insert(ids.end(),{64,111,112,242,243});
+    std::vector<bgfx::ViewStats> views(ids.size());
+    for(size_t index=0;index<ids.size();++index){
+        views[index].view=ids[index];views[index].gpuTimeBegin=100;
+        views[index].gpuTimeEnd=102;views[index].gpuFrameNum=7;
+    }
+    bgfx::Stats gpu{};gpu.gpuTimerFreq=1000;gpu.gpuFrameNum=7;
+    gpu.numViews=static_cast<uint16_t>(views.size());gpu.viewStats=views.data();
+    overlay.updateFrameStats(18,10,cpu,&gpu);
+    const float expected[]={14,2,2,2,32,8};
+    for(size_t index=0;index<cpu.size();++index){
+        CHECK(overlay.stats().passes[index].gpuTimeMs==expected[index]);
+        CHECK(overlay.stats().passes[index].cpuTimeMs==1.5f);
+        CHECK(overlay.stats().passes[index].drawCalls==3u);
+    }
+    // Samples belonging to absent passes do not create synthetic CPU rows.
+    overlay.updateFrameStats(0,0,{},&gpu);CHECK(overlay.stats().passes.empty());
+    overlay.updateFrameStats(18,10,cpu,nullptr);
+    for(const auto& pass:overlay.stats().passes)CHECK(pass.gpuTimeMs==0);
+}
+
 TEST_SUITE_END

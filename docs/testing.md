@@ -1,5 +1,21 @@
 # AYRenderer 测试维护
 
+## 固定View GPU计时归属（2026-10-22）
+
+`timing-ack-before-timing.json`在原Renderer库下1例25断言中6失败，非零fixture每View独立2ms：
+Bloom期望14ms、曝光/SSR/体积各2ms、16个Decal合计32ms、透明与三种选择mask合计8ms。
+CPU时间/draw仍保留；动态相机/UI离屏与GPU粒子不归入这些主Pass，不存在的CPU行不新增。
+`timing-ack-baseline-valid-proof.json`核对测试加入前后两个实现库hash均未变。
+测试归属SceneMaterial分区；修复后同1例25断言通过，`timing-ack-first-timing.json`。
+完整消费方172步构建通过，最终冻结回归`render-final-*`全部结束：
+九组CPU1020例18581断言、Editor主入口471例12538断言及独立装配1例13断言、
+Entity提交专项9例153断言通过；两后端完整Gpu各58例45072断言、Shader原生移动各42断言通过，
+无失败/跳过。两后端Entity静态/蒙皮及Workshop/AssetReimport/MaterialPreview六项实际流程通过。
+总日志`render-final-regression-run.log`确认冻结的五模块CPP/H摘要未变，
+`render-final-frozen-source-hashes.json`固定来源；清单Renderer1078/10、Editor472/2、Shader498/3无遗漏重复。
+最终SDK128能力/53模块/102搜索例/576文档入口，零错零警告，见`sdk-render-final.json`。
+这些是当前版本的最终门禁，不与下文历史阶段重复累计；纯计时fixture仍不能证明设备查询的帧来源已改变。
+
 ## 同池UI程序与部分初始化（2026-10-22）
 
 旧Renderer `7247994`只加入两个真实GPU探针并重链测试，库hash未变，

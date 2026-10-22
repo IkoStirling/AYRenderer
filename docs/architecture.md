@@ -1,6 +1,6 @@
 # AYRenderer 当前架构
 
-**Version:** 1.2.1
+**Version:** 1.2.2
 **Date:** 2026-10-22
 **Status:** Active
 **Owner:** AYRenderer
@@ -114,6 +114,11 @@ FrameDrawLists 每个同步提交只分类一次，几何 Pass 共享结果。�
 可靠静态 3D bounds 使用保守视锥，屏幕外 Shadow caster 保留。
 刚体实例化合并连续兼容的 GBuffer/solid Shadow 项，不对任意材质和变形对象承诺合批。
 
+现有帧统计保留CPU当前dispatch与GPU已完成样本的不同来源。固定View归属包含全部Bloom阶段、
+曝光、SSR、Volumetric、Decal和选择mask；动态相机/预览/UI离屏不按邻近数字归入主Pass。
+View计时包含对应clear/resolve，0可能是无有效timer。汇总没有新增query或改变设备顺序，
+也未新增每Pass查询一致性或当前管线epoch的证明；固定样本须从借用统计中复制值保留。
+
 ## 5. 资源与线程不变量
 
 ### 5.1 设备操作封装与真正所有者
@@ -123,7 +128,8 @@ FrameDrawLists 每个同步提交只分类一次，几何 Pass 共享结果。�
 | 路径Mesh/Texture、材质实例 | RenderResourceManager的表与稳定id | 通过BGFXAdapter创建buffer/texture，AYShader池提供program | 路径重载交换、显式destroy、context重建、消费者确认 |
 | 主视图/效果的持久附件 | 相应Pass/sidecar；部分目标经FrameGraph/RT池租用 | Adapter；DeferredDecal也使用RT接纳查询与不拥有附件的FBO helper | resize、失败部分回收、借用depth、黑板当前代际与fallback |
 | FrameGraph/retained UI目标 | RenderTargetPool的槽、代际lease和延迟复用规则 | Adapter的目标创建/销毁包装 | lease归还、类别预算、禁止别名和退休判定 |
-| UI批次GPU状态与fallback | UiGpuContext | 该内部设备所有者直接创建程序/uniform/纹理等 | UI主/子窗口、offscreen flush、默认纹理和关闭顺序 |
+| UI私有white与fallback VB/IB | UiGpuContext | 直接创建/提交这些私有对象；flat/SDF程序和uniform由Shader池拥有，context只借用token | UI主/子窗口、offscreen flush、私有对象回收、共享程序失效规则和关闭顺序 |
+| UI上传纹理登记 | UIRenderBackend的FrameState纹理表和引用计数 | UiGpuContext提供BGRA8上传/释放辅助；登记表决定显式release和关闭时回收 | fake handle、逐项释放和backend关闭；与RT/字体图集登记分开 |
 | 字形图集 | BgfxFontAtlas与AYFont缓存 | 图集创建/增量更新；实际字体资源来自AYFont | shaping/测量与图集修改区分；首次glyph请求可能上传 |
 | Shader program/uniform、计算资源 | ShaderResourcePool的handle表/实现 | AYShader内部直接建立/销毁bgfx对象 | CPU编译与GPU安装分离；token失效、临时pin、最终析构及owner线程 |
 | 截图 | 请求由Renderer侧队列管理，设备callback写TGA，sidecar生成PNG | Adapter请求设备截图，后续帧推进队列 | 请求/完成关系、回调结束、最终排空；接受请求不等于文件已完成 |

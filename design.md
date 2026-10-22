@@ -1,5 +1,15 @@
 # AYRenderer Design
 
+## 2026-10-22 — 已实现效果的GPU计时归属
+
+DebugOverlay继续使用既有bgfx统计样本，不新增设备query或改变执行顺序。
+补齐Bloom26–30、AutoExposure31、SSR32、Volumetric33、Decal34–49及Transparent244的名称归属，
+与既有11/12、9/253/254共同汇入对应主Pass行；不存在的CPU行不新建。
+动态相机64–111、普通UI/预览离屏区及GPU粒子compute不硬塞进相邻主Pass。
+旧库独立非零fixture25断言中6项汇总失败，保留同库hash证明；修复门禁另记。
+CPU为本次dispatch、GPU为backend已完成样本，View含clear/resolve且可能延迟；
+本轮不新增每View/每Pass样本来源一致性、当前管线epoch或纯kernel计时合同。
+
 ## 2026-10-22 — UI共享程序与部分初始化回滚
 
 UiGpuContext的raw source acquire会按池缓存去重，两个backend可取得相同flat/SDF token。
