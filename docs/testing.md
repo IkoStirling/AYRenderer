@@ -1,5 +1,29 @@
 # AYRenderer 测试维护
 
+## 同池UI程序与部分初始化（2026-10-22）
+
+旧Renderer `7247994`只加入两个真实GPU探针并重链测试，库hash未变，
+`ui-pool-baseline-valid-proof.json`记录摘要；两后端所有基线进程均正常完成。
+`ui-pool-before-pixels-*`各1例58断言中9失败：第二backend关闭/重开关闭/重建后关闭的
+六条flat/SDF像素检查失败，每个内域3456个通道差异；三条原生program计数失败，CPU draw计数仍为2。
+`ui-pool-before-partial-*`各1例15断言中3失败：white索引未清空、已借用flat token失效、program计数减少。
+探针在旧white索引残留时安全提前返回，未故意执行重复destroy，不把潜在双释放写成已获崩溃堆栈。
+
+新实现`ui-pool-first-pixels-{d3d11,d3d12}.json`各58断言全过，七阶段的两类内域与独立颜色参考无差异，
+包含反向关闭、同对象重新初始化，program复用与临时纹理回收稳定。
+`ui-pool-first-partial-*`各48断言全过：缺SDF包失败、三次失败重试、重复shutdown，
+补装SDF包后同context初始化成功，关闭UI保留池缓存，最后pool shutdown后原生program/uniform/texture计数归设备基线。
+两个backend按同一owner顺序使用，没有验收并发绘制；自有white和借用程序分别管理。
+真实修复图在`ui-pool-first-native/`，已检查D3D11关闭第二backend后的flat/SDF仍可见。
+完整消费方门禁另行记录，不能混入前一阶段56例的冻结结果。
+
+完整消费方42步构建通过；`ui-pool-cpu-final/`九组1019例18556断言、
+Editor470例12510断言、Entity9例153断言通过。两后端完整Gpu各58例45072断言，
+Shader原生移动各42断言，无失败/跳过；两后端Entity静态/蒙皮及六项实际Editor流程通过。
+`ui-pool-regression-final-run.log`完整结束并复核冻结源未变，记录`ui-pool-frozen-source-hashes.json`。
+清单1077项/十分区无遗漏重复；SDK128/53/102/576零错零警告，最终根文档仍需统一校验。
+该批次未包含后续GPU计时归属或混合确认提示的新探针。
+
 ## 设备保持存活时的管线清理（2026-10-22）
 
 `renderer-keeper-first-valid-{d3d11,d3d12}.json`两后端各1例36断言通过。

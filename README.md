@@ -1,5 +1,14 @@
 # AYRenderer
 
+## 同池UI程序与失败初始化（2026-10-22）
+
+UI后端的flat/SDF程序借用ShaderResourcePool缓存，与内置Pass采用同一归属方式。
+关闭一个backend或初始化失败只reset它的token，不全局release共享程序；其他同池backend可继续绘制。
+私有white贴图仍释放，索引和全部binding一起清空，重复shutdown及同设备失败重试可用。
+池的正常驱逐/shutdown仍可能使借用token失效；这没有新增引用计数、永久驻留或并发关闭保证。
+程序、字体图集和私有贴图的拥有者分别保留，Host仍须先关闭UI再销毁Renderer。
+真实双backend像素与缺SDF包的部分初始化证据见[测试维护](docs/testing.md)。
+
 ## 管线GPU清理边界（2026-10-22）
 
 内部RenderPipelineLifecycle集中管理内置Pass的清理：管线替换/关闭使用完整清理，
@@ -85,6 +94,7 @@ cube、单色/带深度/GBuffer/depth-only与blit目标统一检查设备尺寸�
 资源桥上传完整 mip 链；单层保持单层；合法前缀链明确回退基础层，仍校验所有尾部。
 `.txr` v2 保存过滤/寻址，v1 读取采用历史默认值；作者通过导入设置 Apply 显式发布和刷新。
 CPU 修改 sampler 不会自动改动已驻留 GPU 纹理。准备总字节上限256 MiB，不生成缺失层级。
+ITexture桥的sRGB取调用端请求与资源标记的或；传false不强制覆盖资源标记为linear。
 RGB8/BC4/BC5 的 sRGB 请求逐级展开 RGBA8；非4倍数尺寸的压缩纹理也展开，保持精确尺寸和层级。
 其他接受的压缩数据保留原编码；BC4/BC5 保持 R/RG、缺失颜色0、alpha1，不隐式重建法线 Z。
 过滤及 Repeat/Clamp/Mirror 到达 GPU 创建端；各向异性>1采用设备最大值，Border用Clamp、LOD bias用0并诊断。

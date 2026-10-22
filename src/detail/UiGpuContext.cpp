@@ -424,103 +424,48 @@ void main()
 
 
 bool UiGpuContext::initialize(shader::ShaderResourcePool& shaderPool, BGFXAdapter& adapter)
-
 {
-
-    if (_initialized) {
-
-        return true;
-
-    }
-
+    if (_initialized) return true;
     if (!adapter.isInitialized()) {
-
         std::fprintf(stderr, "[UiGpuContext] renderer adapter not ready\n");
-
         return false;
-
     }
-
-
+    const auto fail = [&] {
+        shutdown(shaderPool, adapter);
+        return false;
+    };
 
     _shader = shaderPool.acquireFromBgfxSc(kVsUi, kFsUi, kVaryingDef, "editor_ui_flat");
-
     if (!_shader.isValid()) {
-
-        const auto& errors = shaderPool.lastCompileErrors();
-
         std::fprintf(stderr, "[UiGpuContext] UI shader acquire failed\n");
-
-        for (const std::string& err : errors) {
-
-            std::fprintf(stderr, "  %s\n", err.c_str());
-
-        }
-
-        return false;
-
+        for (const auto& error : shaderPool.lastCompileErrors())
+            std::fprintf(stderr, "  %s\n", error.c_str());
+        return fail();
     }
-
-
-
     _texColorBinding = _shader.getTextureBinding("s_texColor");
-
     if (_texColorBinding == shader::InvalidBinding) {
-
         std::fprintf(stderr, "[UiGpuContext] s_texColor binding missing\n");
-
-        shaderPool.release(_shader);
-
-        return false;
-
+        return fail();
     }
-
-
 
     const uint32_t whitePixel = 0xffffffffu;
-
-    const bgfx::TextureHandle whiteHandle = bgfx::createTexture2D(
-
-        1, 1, false, 1, bgfx::TextureFormat::BGRA8,
-
+    const auto white = bgfx::createTexture2D(1, 1, false, 1, bgfx::TextureFormat::BGRA8,
         BGFX_TEXTURE_NONE | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
-
         bgfx::copy(&whitePixel, sizeof(whitePixel)));
-
-    if (!bgfx::isValid(whiteHandle)) {
-
+    if (!bgfx::isValid(white)) {
         std::fprintf(stderr, "[UiGpuContext] white texture creation failed\n");
-
-        shaderPool.release(_shader);
-
-        _shader.reset();
-
-        return false;
-
+        return fail();
     }
+    _whiteTexture = white.idx;
 
-
-
-    _whiteTexture = whiteHandle.idx;
-
-    // P2 — SDF program for rounded-rect borders/shadows. Same pool/cacheKey
-    // pattern as the flat shader; any missing binding fails init so callers
-    // (and tests) see initialize() == false instead of a silently wrong shader.
     _sdfShader = shaderPool.acquireFromBgfxSc(kVsUiSdf, kFsUiSdf, kVaryingDefUiSdf, "editor_ui_sdf_cw");
     if (!_sdfShader.isValid()) {
-        const auto& errors = shaderPool.lastCompileErrors();
         std::fprintf(stderr, "[UiGpuContext] UI SDF shader acquire failed\n");
-        for (const std::string& err : errors) {
-            std::fprintf(stderr, "  %s\n", err.c_str());
-        }
-        adapter.destroy(bgfx::TextureHandle{_whiteTexture});
-        shaderPool.release(_shader);
-        _shader.reset();
-        return false;
+        for (const auto& error : shaderPool.lastCompileErrors())
+            std::fprintf(stderr, "  %s\n", error.c_str());
+        return fail();
     }
-    std::fprintf(stderr, "[UiGpuContext] UI SDF shader OK (editor_ui_sdf_cw = constant-width stroke)\n");
-
-    _sdfTexBinding    = _sdfShader.getTextureBinding("s_texColor");
+    _sdfTexBinding = _sdfShader.getTextureBinding("s_texColor");
     _sdfRadiusBinding = _sdfShader.getUniformBinding("u_radius");
     _sdfStrokeBinding = _sdfShader.getUniformBinding("u_stroke");
     _sdfStrokeWidBind = _sdfShader.getUniformBinding("u_strokeWidth");
@@ -531,71 +476,34 @@ bool UiGpuContext::initialize(shader::ShaderResourcePool& shaderPool, BGFXAdapte
         || _sdfStrokeWidBind == shader::InvalidBinding || _sdfShadowBinding == shader::InvalidBinding
         || _sdfShadowOffBind == shader::InvalidBinding) {
         std::fprintf(stderr, "[UiGpuContext] SDF shader bindings missing\n");
-        adapter.destroy(bgfx::TextureHandle{_whiteTexture});
-        shaderPool.release(_sdfShader);
-        shaderPool.release(_shader);
-        _shader.reset();
-        return false;
+        return fail();
     }
-
-    _initialized  = true;
-
+    std::fprintf(stderr, "[UiGpuContext] UI SDF shader OK (editor_ui_sdf_cw = constant-width stroke)\n");
+    _initialized = true;
     return true;
-
 }
 
-
-
-void UiGpuContext::shutdown(shader::ShaderResourcePool& shaderPool, BGFXAdapter& adapter)
-
+void UiGpuContext::shutdown(shader::ShaderResourcePool& /*shaderPool*/, BGFXAdapter& adapter)
 {
+    if (bgfx::getRendererType() != bgfx::RendererType::Count && _whiteTexture != kInvalidIdx)
+        adapter.destroy(bgfx::TextureHandle{_whiteTexture});
+    _whiteTexture = kInvalidIdx;
 
-    if (bgfx::getRendererType() != bgfx::RendererType::Count) {
-
-        if (_whiteTexture != kInvalidIdx) {
-
-            adapter.destroy(bgfx::TextureHandle{_whiteTexture});
-
-        }
-
-    }
-
-
-
-    if (_shader.isValid()) {
-
-        shaderPool.release(_shader);
-
-    }
-
-    if (_sdfShader.isValid()) {
-
-        shaderPool.release(_sdfShader);
-
-    }
-
-
-
-    _whiteTexture      = kInvalidIdx;
-
-    _texColorBinding   = shader::InvalidBinding;
-
-    _sdfTexBinding     = shader::InvalidBinding;
-
-    _sdfRadiusBinding  = shader::InvalidBinding;
-
-    _sdfStrokeBinding  = shader::InvalidBinding;
-
-    _sdfStrokeWidBind  = shader::InvalidBinding;
-
-    _sdfShadowBinding  = shader::InvalidBinding;
-
-    _sdfShadowOffBind  = shader::InvalidBinding;
-
-    _initialized       = false;
-
+    // Source/raw acquires deduplicate pool-owned tokens. Invalidating either
+    // program here also invalidates another live UI backend (including when
+    // this context only partly initialized). Borrow the cache like the Passes;
+    // the pool owns cache eviction and final program destruction.
+    _shader.reset();
+    _sdfShader.reset();
+    _texColorBinding = shader::InvalidBinding;
+    _sdfTexBinding = shader::InvalidBinding;
+    _sdfRadiusBinding = shader::InvalidBinding;
+    _sdfStrokeBinding = shader::InvalidBinding;
+    _sdfStrokeWidBind = shader::InvalidBinding;
+    _sdfShadowBinding = shader::InvalidBinding;
+    _sdfShadowOffBind = shader::InvalidBinding;
+    _initialized = false;
 }
-
 
 
 void UiGpuContext::beginView(uint8_t viewId, uint16_t width, uint16_t height)

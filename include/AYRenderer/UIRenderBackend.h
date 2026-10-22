@@ -90,6 +90,9 @@ public:
     /// The Host stops UI/preview callbacks and shuts this backend down before
     /// the Renderer is destroyed or its device context is replaced. Moving the
     /// Renderer does not rebind these borrowed pointers. No concurrent teardown.
+    /// Flat/SDF programs stay in the shared pool cache when this backend closes;
+    /// other same-pool backends keep their programs. Failed bool initialization
+    /// rolls back private UI GPU state and permits retry on the same live owner.
     bool initialize(Renderer& renderer);
     void shutdown();
     bool isInitialized() const { return _initialized; }

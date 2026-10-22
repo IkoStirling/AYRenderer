@@ -1,5 +1,22 @@
 # AYRenderer Design
 
+## 2026-10-22 — UI共享程序与部分初始化回滚
+
+UiGpuContext的raw source acquire会按池缓存去重，两个backend可取得相同flat/SDF token。
+旧shutdown及初始化失败路径调用pool.release，移除共享表项，导致另一个已初始化backend的CPU
+draw计数仍为2而真实普通/圆角矩形消失。两后端旧库独立测试各58断言中9失败，
+包括六条像素和三条原生program计数；Renderer库hash在加入测试前后相同。
+
+当前UI与内置Pass一样借用池缓存：shutdown只reset两个token，不建立第二份全局引用表。
+程序由池的缓存策略与最终shutdown管理，仍有既有LRU/显式失效边界，不能当成完整GPU lease。
+white贴图由context独占，字体图集仍由BgfxFontAtlas、UI目标仍由原目标池拥有。
+
+初始化的bool失败统一进入相同shutdown，清理white并立即置invalid、清空全部bindings/token。
+旧缺SDF包探针各15断言中3失败：stale white索引、既有flat token失效和program计数变化；
+在检测到旧索引后安全返回，没有主动重复销毁。当前回滚允许外层再次shutdown和同设备重试，
+不改变shader源码、生产包语义/缓存身份、UI ABI或设备owner规则；异常与设备丢失恢复未增加。
+修复门禁以测试维护记录为准，不将旧失败探针的提前结束路径写成完整重试验收。
+
 ## 2026-10-22 — 内置Pass清理与reset边界
 
 主Renderer的管线替换/关闭原来重复列举清理对象，resize/MSAA另维护子集并漏了Decal。
@@ -131,6 +148,7 @@ CPU检查不能代替实际两后端的画面/生命周期回归，具体结果�
 完整链使用 hasMips=true，所有层在 create 时一并初始化，不留下未初始化的设备层。
 
 RGB8 sRGB 转 RGBA8；BC4/BC5 sRGB 保留 R/RG、缺失颜色0、alpha1；
+ITexture桥的实际sRGB为调用请求与资源sampler.sRGB的或，false只表示不额外请求，不能强制linear。
 非块对齐压缩尺寸也逐层展开 RGBA8，避免设备的块对齐尺寸改变层级/负载契约。
 BC1/3/7 使用完整块 padded 解码后裁切；BC4 继续使用 BC5 red block 配对规避当前 decoder 的单通道问题。
 padded 临时图≤256 MiB；此限值与计划总字节分别核对，不是整个进程的内存上限。

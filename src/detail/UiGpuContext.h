@@ -15,6 +15,10 @@ namespace ayt::render::detail {
 class BGFXAdapter;
 
 // Internal UI GPU resources via ShaderResourcePool (same shaderc path as engine).
+// Flat/SDF program tokens borrow the pool cache, like built-in Pass tokens.
+// Closing or failed initialization resets these tokens; it never globally
+// releases a program another same-pool UI context may still use. The white
+// texture is private and is destroyed/reset on every shutdown or bool failure.
 class UiGpuContext {
 public:
     // U1++ — kDefaultViewId = 1 removed (grep confirmed zero callers

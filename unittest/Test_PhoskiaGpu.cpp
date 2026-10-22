@@ -32,6 +32,7 @@
 #include "detail/TextureImageLoader.h"
 #include "detail/RenderAssetBridge.h"
 #include "detail/RenderResourceManager.h"
+#include "detail/UiGpuContext.h"
 #include "AYResource/assetsImpl/Texture.h"
 #include "AYResource/ResourceBootstrap.h"
 #include "AYResource/ResourceManager.h"
@@ -179,6 +180,71 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+// design reference: design.md, UI program ownership and failed initialization.
+TEST_CASE(ui_context_missing_sdf_package_cleans_white_texture_and_preserves_existing_flat_borrower)
+{
+#ifdef _WIN32
+    const auto* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend||!*backend)SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture f;CHECK(f.initialize(backend));if(!f.adapter.isInitialized())return;
+    const auto settle=[&]{for(int frame=0;frame<8;++frame)f.adapter.endFrame();};
+    settle();
+    const auto initialPrograms=bgfx::getStats()->numPrograms;
+    const auto initialUniforms=bgfx::getStats()->numUniforms;
+    const auto initialTextures=bgfx::getStats()->numTextures;
+    std::vector<ayt::shader::ShaderBuildJob> jobs;appendUiGpuContextShaders(jobs);
+    CHECK(jobs.size()==2);if(jobs.size()!=2)return;
+    CHECK(jobs[0].name=="ui_flat");CHECK(jobs[1].name=="ui_sdf");
+    ayt::shader::ShaderBuildManifest manifest;
+    manifest.target={AY_SHADER_SHADERC_HINT,"windows","s_5_0",{AY_SHADER_BGFX_COMMON_HINT,AY_SHADER_BGFX_SRC_HINT}};
+    manifest.jobs={jobs[0]};
+    ayt::shader::ShaderBuildSession session;ayt::shader::ShaderBuildReport flatReport;
+    session.build(manifest,flatReport);CHECK(flatReport.success);if(!flatReport.success)return;
+    std::vector<std::string> errors;
+    CHECK(f.pool.installPrecompiled(flatReport,errors));if(!errors.empty())return;
+    f.pool.setRuntimeCompilationEnabled(false);
+    auto flat=f.pool.acquireFromBgfxSc(jobs[0].vertexSc,jobs[0].fragmentSc,jobs[0].varyingSc);
+    CHECK(flat.isValid());if(!flat.isValid())return;
+    settle();const auto flatPrograms=bgfx::getStats()->numPrograms;
+    const auto flatUniforms=bgfx::getStats()->numUniforms;
+    CHECK(flatPrograms==initialPrograms+1);
+    UiGpuContext partial;
+    CHECK(!partial.initialize(f.pool,f.adapter));CHECK(!partial.isInitialized());
+    CHECK(partial.whiteTextureIdx()==UiGpuContext::kInvalidIdx);
+    CHECK(flat.isValid());
+    settle();CHECK(bgfx::getStats()->numTextures==initialTextures);
+    CHECK(bgfx::getStats()->numPrograms==flatPrograms);
+    CHECK(bgfx::getStats()->numUniforms==flatUniforms);
+    // The old implementation already freed this texture but retained its idx.
+    // Stop safely here on that baseline; do not deliberately double-destroy it.
+    if(partial.whiteTextureIdx()!=UiGpuContext::kInvalidIdx)return;
+    for(int retry=0;retry<3;++retry){
+        CHECK(!partial.initialize(f.pool,f.adapter));
+        partial.shutdown(f.pool,f.adapter);partial.shutdown(f.pool,f.adapter);
+        CHECK(partial.whiteTextureIdx()==UiGpuContext::kInvalidIdx);CHECK(flat.isValid());
+        settle();CHECK(bgfx::getStats()->numTextures==initialTextures);
+        CHECK(bgfx::getStats()->numPrograms==flatPrograms);
+        CHECK(bgfx::getStats()->numUniforms==flatUniforms);
+    }
+    manifest.jobs={jobs[1]};ayt::shader::ShaderBuildReport sdfReport;
+    session.build(manifest,sdfReport);CHECK(sdfReport.success);if(!sdfReport.success)return;
+    CHECK(f.pool.installPrecompiled(sdfReport,errors));if(!errors.empty())return;
+    CHECK(partial.initialize(f.pool,f.adapter));CHECK(partial.isInitialized());
+    CHECK(partial.whiteTextureIdx()!=UiGpuContext::kInvalidIdx);CHECK(flat.isValid());
+    settle();CHECK(bgfx::getStats()->numTextures==initialTextures+1);
+    CHECK(bgfx::getStats()->numPrograms==initialPrograms+2);
+    partial.shutdown(f.pool,f.adapter);partial.shutdown(f.pool,f.adapter);settle();
+    CHECK(bgfx::getStats()->numTextures==initialTextures);CHECK(flat.isValid());
+    CHECK(bgfx::getStats()->numPrograms==initialPrograms+2);
+    f.pool.shutdown();settle();CHECK(!flat.isValid());
+    CHECK(bgfx::getStats()->numTextures==initialTextures);
+    CHECK(bgfx::getStats()->numPrograms==initialPrograms);
+    CHECK(bgfx::getStats()->numUniforms==initialUniforms);
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
+
 TEST_CASE(renderer_pipeline_cleanup_and_reinitialize_reclaim_objects_while_device_remains_alive)
 {
 #ifdef _WIN32

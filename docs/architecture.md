@@ -1,6 +1,6 @@
 # AYRenderer 当前架构
 
-**Version:** 1.2.0
+**Version:** 1.2.1
 **Date:** 2026-10-22
 **Status:** Active
 **Owner:** AYRenderer
@@ -170,6 +170,10 @@ Host先停止新的Scene/UI记录和预览callback，再结束其UI backend、�
 UIPass只借用backend，Renderer的管线销毁不接管UIRenderBackend/字体图集的所有权；
 已初始化backend借用的Renderer、Adapter、shader pool和目标池须保持存活，直到backend完成shutdown。
 Renderer移动同样不自动修正外部保存的Renderer对象地址；资源回调的稳定Impl捕获不是一般借用指针迁移协议。
+UI的flat/SDF token与内置Pass一样借用池缓存，关闭/初始化bool失败时只reset，不全局release。
+多个同池backend按同一owner顺序使用时，关闭一方不移除另一方的程序表项；
+private white贴图与binding统一回滚、置invalid，外层重复shutdown及失败后重试不会再次释放旧索引。
+这保留池自身驱逐/显式失效/shutdown规则，不是永久GPU持有协议，也未开放并发UI记录。
 
 Renderer自身shutdown先使旧resource context/alive注册失效，释放runtime相机与预览的私有提交状态，
 再清理主Pass；借用GBuffer/Lighting附件的Transparent、Motion、Decal须在附件生产者之前释放。

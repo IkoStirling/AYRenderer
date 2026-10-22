@@ -1,6 +1,7 @@
 #include <AYRenderer.h>
 #include <AYRenderer/UIRenderBackend.h>
 #include <AYTest.h>
+#include <bgfx/bgfx.h>
 #include "detail/TextureImageLoader.h"
 #include <array>
 #include <chrono>
@@ -262,4 +263,95 @@ TEST_CASE(wrapped_ui_paragraphs_match_independent_line_draws_across_scale_alignm
     SKIP_TEST("Windows D3D device required");
 #endif
 }
+// design reference: design.md, UI program ownership and backend shutdown.
+TEST_CASE(closing_one_ui_backend_keeps_other_same_pool_flat_and_sdf_pixels_alive)
+{
+#ifdef _WIN32
+    const auto* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend||!*backend)SKIP_TEST("Isolated D3D11/12 device required");
+    using namespace ayt::render;
+    constexpr uint16_t width=176,height=64;
+    const auto window=CreateWindowExW(0,L"STATIC",L"Shared UI pool lifecycle",WS_OVERLAPPED,
+        0,0,256,144,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window!=nullptr);if(!window)return;
+    struct CloseWindow{HWND value;~CloseWindow(){DestroyWindow(value);}} close{window};
+    Renderer renderer;InitDesc init;init.windowHandle=window;init.width=width;init.height=height;
+    init.msaa=0;init.vsync=false;
+    init.backend=std::string(backend)=="d3d12"?Backend::Direct3D12:Backend::Direct3D11;
+    CHECK(renderer.initialize(init));if(!renderer.isInitialized())return;
+    renderer.setFxaaEnabled(false);renderer.setSmaaEnabled(false);renderer.setTaaEnabled(false);
+    renderer.setPostProcessGamma(1);renderer.setPostProcessExposure(1);
+    renderer.setPostProcessTonemapMode(Renderer::TonemapMode::None);
+    UIRenderBackend survivor,visitor;
+    CHECK(survivor.initialize(renderer));if(!survivor.isInitialized())return;
+    survivor.setFramebufferSize(width,height);
+    const auto* output=std::getenv("AY_UI_SHARED_POOL_CAPTURE_DIRECTORY");
+    const auto root=output?std::filesystem::path(output)/backend:
+        std::filesystem::temp_directory_path()/(std::string("ay-ui-shared-pool-")+backend+"-"+
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    const auto capture=[&](UIRenderBackend& ui,const std::string& name){
+        const auto path=root/(name+".png");
+        for(int frame=0;frame<18;++frame){
+            ClearDesc clear;clear.r=.025f;clear.g=.035f;clear.b=.05f;
+            renderer.beginCompositeFrame(clear,width,height);renderer.render(RenderScene{});
+            ui.beginFrame();ui.beginCanvas({0,0,float(width),float(height)});
+            ui.drawRect({8,8,80,56},{.8f,.2f,.1f,1});
+            ui.drawRoundedRect({88,8,160,56},{.1f,.7f,.3f,1},8);
+            ui.endCanvas();ui.endFrame();
+            if(frame==12)CHECK(renderer.captureScreenshot(path.string()));
+            renderer.endFrame();
+        }
+        CHECK(ui.getDrawCallCount()==2);
+        const auto image=detail::decodeImageFile(path.string());
+        CHECK(image.width==width);CHECK(image.height==height);
+        if(image.rgba8.size()!=size_t(width)*height*4)return;
+        const std::array<std::array<int,4>,2> expected={{{204,51,26,255},{26,179,77,255}}};
+        for(int region=0;region<2;++region){
+            size_t mismatches=0;
+            for(unsigned y=20;y<44;++y)for(unsigned x=20+region*80;x<68+region*80;++x){
+                const auto offset=(size_t(y)*width+x)*4;
+                for(unsigned channel=0;channel<4;++channel)
+                    mismatches+=std::abs(int(image.rgba8[offset+channel])-expected[region][channel])>1;
+            }
+            std::cout<<"[SharedUiPool] backend="<<backend<<" phase="<<name<<" region="<<region
+                <<" mismatches="<<mismatches<<'\n';
+            CHECK(mismatches==0);
+        }
+    };
+    capture(survivor,"survivor-only");
+    const auto warmPrograms=bgfx::getStats()->numPrograms;
+    const auto warmTextures=bgfx::getStats()->numTextures;
+    CHECK(visitor.initialize(renderer));if(!visitor.isInitialized())return;
+    visitor.setFramebufferSize(width,height);
+    capture(survivor,"both-initialized");
+    CHECK(bgfx::getStats()->numPrograms==warmPrograms);
+    visitor.shutdown();
+    CHECK(!visitor.isInitialized());CHECK(survivor.isInitialized());
+    capture(survivor,"visitor-closed");
+    CHECK(bgfx::getStats()->numPrograms==warmPrograms);
+    CHECK(bgfx::getStats()->numTextures==warmTextures);
+    CHECK(visitor.initialize(renderer));if(!visitor.isInitialized())return;
+    visitor.shutdown();
+    capture(survivor,"visitor-reopened-and-closed");
+    CHECK(bgfx::getStats()->numPrograms==warmPrograms);
+    CHECK(bgfx::getStats()->numTextures==warmTextures);
+    // Reverse the roles too: a new backend must survive closing the original.
+    CHECK(visitor.initialize(renderer));if(!visitor.isInitialized())return;
+    visitor.setFramebufferSize(width,height);
+    survivor.shutdown();
+    capture(visitor,"original-survivor-closed");
+    CHECK(survivor.initialize(renderer));if(!survivor.isInitialized())return;
+    survivor.setFramebufferSize(width,height);
+    capture(survivor,"survivor-rebuilt");
+    visitor.shutdown();
+    capture(survivor,"rebuilt-survivor-after-visitor-close");
+    CHECK(bgfx::getStats()->numPrograms==warmPrograms);
+    CHECK(bgfx::getStats()->numTextures==warmTextures);
+    survivor.shutdown();renderer.shutdown();
+#else
+    SKIP_TEST("Windows D3D device required");
+#endif
+}
+
 TEST_SUITE_END
