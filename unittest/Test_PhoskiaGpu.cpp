@@ -179,6 +179,78 @@ void checkPixels(const std::vector<Pixel>& pixels, Pixel expected) {
 #endif
 
 TEST_SUITE(AYRenderer_PhoskiaGpu)
+TEST_CASE(renderer_pipeline_cleanup_and_reinitialize_reclaim_objects_while_device_remains_alive)
+{
+#ifdef _WIN32
+    const auto* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend||!*backend)SKIP_TEST("Isolated D3D11/12 device required");
+    PhoskiaGpuFixture keeper;CHECK(keeper.initialize(backend));if(!keeper.adapter.isInitialized())return;
+    const auto settle=[&]{for(int frame=0;frame<8;++frame)keeper.adapter.endFrame();};
+    const auto counts=[] {
+        const auto* stats=bgfx::getStats();
+        return std::array<uint32_t,5>{stats->numTextures,stats->numVertexBuffers,
+            stats->numIndexBuffers,stats->numFrameBuffers,stats->numPrograms};
+    };
+    settle();const auto deviceBaseline=counts();
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc init;init.windowHandle=keeper.window;init.width=init.height=64;
+    init.msaa=0;init.vsync=false;
+    init.backend=std::string(backend)=="d3d12"?ayt::render::Backend::Direct3D12:ayt::render::Backend::Direct3D11;
+    CHECK(renderer.initialize(init));if(!renderer.isInitialized())return;
+    const auto firstContext=renderer.resourceContextId();CHECK(firstContext!=0);
+    const auto prepare=[&] {
+        renderer.configurePipeline(ayt::render::RenderPipelineDesc::makeDeferred());
+        renderer.setShadowsEnabled(false);renderer.setFxaaEnabled(false);
+        renderer.setSmaaEnabled(false);renderer.setTaaEnabled(false);
+        renderer.setSsaoEnabled(true);renderer.setSsaoStrength(1);
+        renderer.setMainCamera(ayt::math::Float4x4::identity(),ayt::math::Float4x4::identity());
+    };
+    const auto sceneFor=[&] {
+        auto material=renderer.createMaterialFromPhoskia(
+            "material KeeperReceiver { property baseColor=vec4(0.2,0.4,0.6,1.0) "
+            "vertex { in pos:position return modelViewProjection*vec4(pos,1.0) } fragment { return baseColor } }",
+            "keeper_receiver");
+        auto mesh=renderer.createUnitCube();CHECK(material.isValid());CHECK(mesh.isValid());
+        ayt::render::RenderScene scene;ayt::render::DrawItem item;item.mesh=mesh;item.material=material;
+        item.world=ayt::math::translate(0,0,.5f)*ayt::math::scale(.6f,.6f,.2f);scene.add(item);
+        return scene;
+    };
+    const auto render=[&](const ayt::render::RenderScene& scene) {
+        for(int frame=0;frame<8;++frame){renderer.beginFrame();renderer.render(scene);renderer.endFrame();}
+        bool ssao=false,post=false;
+        for(const auto& pass:renderer.getFrameStats().passes){
+            if(pass.name=="SSAO")ssao=pass.drawCalls>0;
+            if(pass.name=="PostProcess")post=pass.drawCalls>0;
+        }
+        CHECK(renderer.getFrameStats().graph.compileSucceeded);CHECK(ssao);CHECK(post);
+        settle();
+    };
+    prepare();auto scene=sceneFor();settle();const auto assetsOnly=counts();
+    render(scene);const auto rendered=counts();
+    CHECK(rendered[0]>assetsOnly[0]);CHECK(rendered[1]>assetsOnly[1]);CHECK(rendered[2]>assetsOnly[2]);
+    renderer.configurePipeline(ayt::render::RenderPipelineDesc::makeDefault());settle();
+    const auto cleared=counts();
+    CHECK(cleared[1]==assetsOnly[1]);CHECK(cleared[2]==assetsOnly[2]);
+    // Pass tokens are borrowed: replacement clears geometry while the same
+    // shader pool continues to own its program cache and RRM material.
+    CHECK(cleared[4]==rendered[4]);
+    prepare();render(scene); // Leave real GPU state in the retained pass objects.
+    renderer.shutdown();settle();CHECK(keeper.adapter.isInitialized());
+    const auto firstShutdown=counts();
+    for(size_t index=0;index<deviceBaseline.size();++index)CHECK(firstShutdown[index]==deviceBaseline[index]);
+    CHECK(renderer.initialize(init));if(!renderer.isInitialized())return;
+    CHECK(renderer.resourceContextId()!=0);CHECK(renderer.resourceContextId()!=firstContext);
+    // initialize reuses this Renderer and its retained pipeline; no configure
+    // call can hide a stale raw VB/IB/attachment in those pass instances.
+    auto reopenedScene=sceneFor();render(reopenedScene);
+    renderer.shutdown();settle();const auto secondShutdown=counts();
+    for(size_t index=0;index<deviceBaseline.size();++index)CHECK(secondShutdown[index]==deviceBaseline[index]);
+#else
+    SKIP_TEST("Windows real-device fixture");
+#endif
+}
+
+
 TEST_CASE(decal_targets_use_validated_borrowed_attachments_and_reject_before_releasing_live_targets)
 {
 #ifdef _WIN32

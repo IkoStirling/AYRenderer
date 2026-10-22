@@ -1,5 +1,23 @@
 # AYRenderer 测试维护
 
+## 设备保持存活时的管线清理（2026-10-22）
+
+`renderer-keeper-first-valid-{d3d11,d3d12}.json`两后端各1例36断言通过。
+独立Adapter保持真实设备运行，Renderer执行Deferred/SSAO/PostProcess→Forward→Deferred，
+原生VB/IB在切换后回到资产基线，程序缓存仍归同池；关闭后纹理/VB/IB/FBO/program均回到设备基线。
+随后同一Renderer实例重新初始化，不额外configure掩盖旧Pass句柄，实际SSAO/PostProcess再次提交，
+上下文id更新，第二次shutdown后五项计数仍回到基线。这不是设备shutdown强制回收后的观察。
+keeper只维持同一设备，不同时绘制第二套主管线，不能据此宣称多Renderer并发提交/多窗口切换已验收。
+本用例在`7e75f7b`之后补充；不能混入此前55例的冻结统计，当前完整门禁另行记录。
+
+Shader `3d5412c`修复池移动赋值后，完整消费方构建通过；
+`shader-move-cpu-final/`九组1019例18556断言、Editor470例12510断言、Entity9例153断言通过。
+两后端完整Gpu各56例44966断言、Shader原生移动各1例42断言，无失败/跳过；
+两后端Entity实际静态/蒙皮及Workshop/AssetReimport/MaterialPreview六项流程通过。
+总日志`shader-move-regression-final-run.log`完整结束并复核冻结源码未变；
+清单1075项/十分区无遗漏重复，SDK128/53/102/576零错零警告。
+本批冻结文件为`shader-move-frozen-source-hashes.json`；后续UI共享池探针尚未加入本阶段二进制。
+
 ## 管线清理/reset边界（2026-10-22）
 
 `reset-lifecycle-before-{d3d11,d3d12}.json`：两后端各1例306断言，4项失败。
