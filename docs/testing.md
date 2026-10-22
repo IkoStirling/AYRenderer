@@ -1,5 +1,28 @@
 # AYRenderer 测试维护
 
+## 管线清理/reset边界（2026-10-22）
+
+`reset-lifecycle-before-{d3d11,d3d12}.json`：两后端各1例306断言，4项失败。
+同一Renderer以关闭Decal作对照，reset后只推进设备帧、不render；resize纹理/FBO期望3/0、实际12/2，
+MSAA期望5/2、实际14/4。其余302断言通过，包括原先的实际像素、culling/parity和再渲染检查。
+编译只增加GPU测试断言，Renderer库hash前后相同；`reset-lifecycle-baseline-proof.json`记录旧库与新测试摘要，
+基线实现为`6c211f5`。这是reset当场回收边界的复现，不是永久泄漏或驱动崩溃证明。
+
+新实现`reset-lifecycle-first-{d3d11,d3d12}.json`各1例306断言全过：两种reset的实际计数均等于对照，
+随后重新render仍正确。首批完整Contracts167例1966断言通过；之后补充disabled producer断言，需以最终门禁为准。
+29种工厂类型/26种GPU cleanup的源码归属已机械核对，无遗漏或额外类型；这不替代实机生命周期证据。
+完整消费方构建（含EditorShell/MaterialDemo/SampleTool）通过。
+最终九组CPU1019例18556断言、Editor470例12510断言、Entity9例153断言通过；
+两后端完整Gpu各55例44930断言，无失败/跳过；两后端Entity静态/蒙皮及六项实际Editor流程通过。
+报告为`reset-lifecycle-wired-*-final.*`，总日志完整结束，库存1074项/十分区无遗漏重复；
+SDK128/53/102/576零错零警告。
+
+首批全量在PostProcess两项旧内联位置断言失败，随后在Audit另有一项同类断言失败；
+它们改为检查清理边界先于clear/shader pool/adapter，运行期资源断言不变。
+最后只重建Audit测试TU：其余八个已通过分区的源码和执行文件经hash逐项核对未变，
+复用原报告并新跑Audit，`reset-lifecycle-wired-reused-cpu-proofs.json`、`reset-lifecycle-pre-audit-runtime-hashes.json`
+和两次冻结源摘要记录来源。没有用旧实现的GPU结果验证新helper，所有最终GPU/Editor流程均重新执行。
+
 ## Decal附件接纳（2026-10-22）
 
 `decal-admission-first-cpu.json`：DeferredDecal合约8例89断言通过。

@@ -1778,6 +1778,36 @@ TEST_CASE(deferred_decal_main_renderer_graph_bypass_resize_and_final_pixels) {
     renderer.notifyCameraCut(); renderFrames(0);
     renderer.setMainCamera(ayt::math::Float4x4::identity(),ayt::math::Float4x4::identity());
     renderer.notifyCameraCut(); renderFrames(1);
+
+    // Compare the same renderer with and without Decal ownership. Advance
+    // device frames after reset, but do not render a Scene: the next prepare
+    // must not be required to retire an old borrowed-depth shell.
+    const auto settleWithoutScene = [&] {
+        for (int frame=0;frame<8;++frame) { renderer.beginFrame(); renderer.endFrame(); }
+    };
+    const auto textureCount = [] { return bgfx::getStats()->numTextures; };
+    const auto framebufferCount = [] { return bgfx::getStats()->numFrameBuffers; };
+    renderer.setDeferredDecalsEnabled(false); renderFrames(0);
+    renderer.resize(320,192); settleWithoutScene();
+    const auto resizeTextures = textureCount(), resizeFramebuffers = framebufferCount();
+    renderFrames(0);
+    renderer.setDeferredDecalsEnabled(true); renderFrames(1);
+    renderer.resize(320,192); settleWithoutScene();
+    std::cout << "[ResetResourceBoundary] resize expected=" << resizeTextures << ',' << resizeFramebuffers
+        << " actual=" << textureCount() << ',' << framebufferCount() << '\n';
+    CHECK(textureCount()==resizeTextures); CHECK(framebufferCount()==resizeFramebuffers);
+
+    renderer.setDeferredDecalsEnabled(false); renderFrames(0);
+    renderer.setMsaaSampleCount(2); CHECK(renderer.msaaSampleCount()==2); settleWithoutScene();
+    const auto msaaTextures = textureCount(), msaaFramebuffers = framebufferCount();
+    renderFrames(0);
+    renderer.setDeferredDecalsEnabled(true); renderFrames(1);
+    renderer.setMsaaSampleCount(4); CHECK(renderer.msaaSampleCount()==4); settleWithoutScene();
+    std::cout << "[ResetResourceBoundary] msaa expected=" << msaaTextures << ',' << msaaFramebuffers
+        << " actual=" << textureCount() << ',' << framebufferCount() << '\n';
+    CHECK(textureCount()==msaaTextures); CHECK(framebufferCount()==msaaFramebuffers);
+    // Actual output must still rebuild after both reset-only observations.
+    renderFrames(1);
     renderer.shutdown();
 #else
     SKIP_TEST("Windows device fixture required");

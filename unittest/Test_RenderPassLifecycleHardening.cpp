@@ -1,12 +1,27 @@
 #include "AYTest.h"
+#include "AYRenderer/UIRenderBackend.h"
+#include "detail/DeferredDecalPass.h"
+#include "detail/GBufferPass.h"
+#include "detail/RenderPipeline.h"
+#include "detail/RenderPipelineFactory.h"
+#include "detail/RenderPipelineLifecycle.h"
+#include "detail/UIPass.h"
 
 #include <array>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace
 {
+
+class DiagnosticGbufferName final : public ayt::render::detail::RenderPass {
+public:
+    std::string_view name() const override { return "GBuffer"; }
+    uint32_t execute(ayt::render::detail::PassExecContext&) override { return 0; }
+};
 
 std::string readRendererSource(const char* relativePath)
 {
@@ -20,33 +35,50 @@ std::string readRendererSource(const char* relativePath)
 
 TEST_SUITE(RenderPassLifecycleHardening)
 
-TEST_CASE(shutdown_releases_every_pass_owned_gpu_resource_before_adapter)
+TEST_CASE(pipeline_cleanup_preserves_instances_settings_and_borrowed_ui_without_name_casts)
 {
-    const std::string source = readRendererSource("src/AYRenderer.cpp");
-    const std::size_t shutdown = source.find("void Renderer::shutdown()");
-    const std::size_t adapterShutdown =
-        source.find("_impl->adapter.shutdown()", shutdown);
-    CHECK(shutdown != std::string::npos);
-    CHECK(adapterShutdown != std::string::npos);
-
-    constexpr std::array<const char*, 14> passTypes = {
-        "TransparentPass", "ShadowPass", "GBufferPass", "LightingPass",
-        "SkyboxPass", "BloomExtractPass", "BloomBlurPass", "DepthHazePass",
-        "GBufferDebugPass", "PostProcessPass", "FXAAPass",
-        "ColorGradingPass", "PresentPass", "SSAOPass",
-    };
-    for (const char* passType : passTypes) {
-        const std::string lookupText =
-            std::string("_impl->pipeline.findPass<detail::")
-            + passType + ">()";
-        const std::size_t lookup = source.find(lookupText, shutdown);
-        const std::size_t destroy = source.find(
-            "->destroyResources(_impl->adapter)", lookup);
-        CHECK(lookup != std::string::npos);
-        CHECK(destroy != std::string::npos);
-        CHECK(lookup < destroy);
-        CHECK(destroy < adapterShutdown);
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    BGFXAdapter adapter;
+    struct Cleanup { BGFXAdapter& adapter; ~Cleanup() { adapter.shutdown(); } } cleanup{adapter};
+    RenderPipeline pipeline;
+    pipeline.addPass(std::make_unique<DiagnosticGbufferName>());
+    for (auto slot : {RenderPassSlot::GBuffer, RenderPassSlot::DeferredDecal,
+        RenderPassSlot::MotionVector, RenderPassSlot::Transparent,
+        RenderPassSlot::Lighting, RenderPassSlot::Shadow, RenderPassSlot::UI}) {
+        pipeline.addPass(slot, makeRenderPass(slot));
     }
+    auto* gbuffer = pipeline.findPass<GBufferPass>(); CHECK(gbuffer != nullptr);
+    auto* ui = pipeline.findPass<UIPass>(); CHECK(ui != nullptr);
+    if (!gbuffer || !ui) return;
+    CHECK(pipeline.findPass("GBuffer") != gbuffer);
+    UIRenderBackend backend; ui->setBackend(&backend);
+    std::vector<RenderPass*> instances;
+    std::vector<bool> enabled;
+    for (const auto& pass : pipeline.passes()) {
+        pass->setEnabled(instances.size()%2 == 0);
+        instances.push_back(pass.get()); enabled.push_back(pass->isEnabled());
+    }
+    gbuffer->setGbufferSize(512,256);
+    CHECK(!gbuffer->isEnabled()); // Disabled producers still require cleanup.
+    destroyPipelineGpuResources(pipeline,adapter); // No live device: no cleanup.
+    CHECK(gbuffer->gbufferWidth()==512); CHECK(gbuffer->gbufferHeight()==256);
+    BGFXInitParams init; init.backend=Backend::Noop; init.width=init.height=16;
+    const bool ready=adapter.initialize(init); CHECK(ready); if(!ready)return;
+    destroyAttachmentBorrowerResources(pipeline,adapter);
+    CHECK(gbuffer->gbufferWidth()==512); // Borrowers do not destroy the producer.
+    destroyPipelineGpuResources(pipeline,adapter);
+    CHECK(gbuffer->gbufferWidth()==0); CHECK(gbuffer->gbufferHeight()==0);
+    CHECK(!bgfx::isValid(gbuffer->gbufferFbo()));
+    CHECK(!bgfx::isValid(pipeline.findPass<DeferredDecalPass>()->output(1)));
+    CHECK(pipeline.passes().size()==instances.size());
+    for(size_t index=0;index<instances.size();++index) {
+        CHECK(pipeline.passes()[index].get()==instances[index]);
+        CHECK(pipeline.passes()[index]->isEnabled()==enabled[index]);
+    }
+    CHECK(ui->backend()==&backend); CHECK(!backend.isInitialized());
+    destroyPipelineGpuResources(pipeline,adapter); // Idempotent, still mounted.
+    CHECK(pipeline.passes().size()==instances.size()); CHECK(ui->backend()==&backend);
 }
 
 TEST_CASE(reinitialize_replaces_the_shutdown_hot_reload_token)

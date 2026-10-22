@@ -86,6 +86,10 @@ public:
     // UIRenderBackend-typed callers can use the BorderStyle form too.
     using ayt::ui::IRenderBackend::drawRect;
 
+    /// Borrows the Renderer, device adapter, shader pool and target pool.
+    /// The Host stops UI/preview callbacks and shuts this backend down before
+    /// the Renderer is destroyed or its device context is replaced. Moving the
+    /// Renderer does not rebind these borrowed pointers. No concurrent teardown.
     bool initialize(Renderer& renderer);
     void shutdown();
     bool isInitialized() const { return _initialized; }

@@ -260,9 +260,9 @@ void BloomExtractPass::destroyResources(BGFXAdapter& adapter)
         // carries no back-pointer to its pool; Renderer::Impl owns
         // the pool and outlives this pass (see AYRenderer.cpp:160
         // shutdown order: resources → shaderPool → adapter).
-        // ShaderResource::reset decrements the refcount; the pool
-        // dtor releases the underlying GPU program when the
-        // refcount hits zero.
+        // reset only clears this borrowed token. It does not decrement a
+        // reference count or release a shared GPU program; the pool controls
+        // invalidation and final implementation cleanup.
         _program.reset();
     }
     _uBloomThreshold = ayt::shader::InvalidBinding;

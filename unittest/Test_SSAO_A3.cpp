@@ -172,30 +172,32 @@ TEST_CASE(a3_cache_keys_and_latch_are_current)
     CHECK_FALSE(pass.producedThisFrame());
 }
 
-TEST_CASE(a3_ssao_resources_are_destroyed_before_pipeline_or_adapter_teardown)
+TEST_CASE(a3_pipeline_cleanup_boundary_precedes_replacement_and_adapter_teardown)
 {
     const std::string source = readRendererSource("src/AYRenderer.cpp");
     CHECK_FALSE(source.empty());
 
     const size_t reconfigure =
         source.find("void Renderer::Impl::applyPipelineDesc");
-    const size_t reconfigureSsao =
-        source.find("pipeline.findPass<detail::SSAOPass>()", reconfigure);
+    // Check the lifecycle boundary, not an inline list of individual passes.
+    // Compiled Noop state and actual GPU ownership checks cover its behavior.
+    const size_t reconfigureCleanup = source.find(
+        "detail::destroyPipelineGpuResources(pipeline, adapter)", reconfigure);
     const size_t pipelineClear = source.find("pipeline.clear();", reconfigure);
     CHECK(reconfigure != std::string::npos);
-    CHECK(reconfigureSsao != std::string::npos);
+    CHECK(reconfigureCleanup != std::string::npos);
     CHECK(pipelineClear != std::string::npos);
-    CHECK(reconfigureSsao < pipelineClear);
+    CHECK(reconfigureCleanup < pipelineClear);
 
     const size_t shutdown = source.find("void Renderer::shutdown()");
-    const size_t shutdownSsao =
-        source.find("_impl->pipeline.findPass<detail::SSAOPass>()", shutdown);
+    const size_t shutdownCleanup = source.find(
+        "detail::destroyPipelineGpuResources(_impl->pipeline, _impl->adapter)", shutdown);
     const size_t adapterShutdown =
         source.find("_impl->adapter.shutdown()", shutdown);
     CHECK(shutdown != std::string::npos);
-    CHECK(shutdownSsao != std::string::npos);
+    CHECK(shutdownCleanup != std::string::npos);
     CHECK(adapterShutdown != std::string::npos);
-    CHECK(shutdownSsao < adapterShutdown);
+    CHECK(shutdownCleanup < adapterShutdown);
 }
 
 TEST_SUITE_END

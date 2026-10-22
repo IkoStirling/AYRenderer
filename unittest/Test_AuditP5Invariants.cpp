@@ -257,19 +257,18 @@ TEST_CASE(post_process_cache_key_tracks_sanitized_parameter_abi) {
           == "postprocess_tonemap_aces_v13_auto_exposure_fs");
 }
 
-TEST_CASE(post_process_renderer_owns_teardown_before_pipeline_clear) {
+TEST_CASE(renderer_pipeline_cleanup_precedes_pipeline_clear) {
     const std::string source = readEntireFile(
         rendererSourcePath("src/AYRenderer.cpp"));
     CHECK(!source.empty());
-    const std::size_t passLookup = source.find(
-        "pipeline.findPass<detail::PostProcessPass>()");
-    const std::size_t destroyCall = source.find(
-        "->destroyResources(adapter)", passLookup);
-    const std::size_t pipelineClear = source.find("pipeline.clear()", passLookup);
-    CHECK(passLookup != std::string::npos);
-    CHECK(destroyCall != std::string::npos);
+    const std::size_t reconfigure = source.find("void Renderer::Impl::applyPipelineDesc");
+    const std::size_t cleanup = source.find(
+        "detail::destroyPipelineGpuResources(pipeline, adapter)", reconfigure);
+    const std::size_t pipelineClear = source.find("pipeline.clear()", reconfigure);
+    CHECK(reconfigure != std::string::npos);
+    CHECK(cleanup != std::string::npos);
     CHECK(pipelineClear != std::string::npos);
-    CHECK(destroyCall < pipelineClear);
+    CHECK(cleanup < pipelineClear);
 }
 
 TEST_SUITE_END

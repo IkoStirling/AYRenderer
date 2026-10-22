@@ -391,33 +391,18 @@ inline void rateLimitedEarlyReturn(const char* passName, const char* reason)
     }
 }
 
-// U0 (Phase 2 Pass scaffold) — abstract base for one rendering pass.
-// One subclass = one logical draw on one bgfx view. The pipeline
-// (implemented in U1+ at detail/RenderPipeline.{h,cpp}) calls
-// execute() in registration order; today the single call site is
-// Renderer::render via RenderPipeline::executeAll.
+// One logical built-in/custom pass in RenderPipeline's ordered synchronous
+// dispatch. A pass may submit several GPU views; device execution follows the
+// explicit View remap rather than C++ dispatch order alone.
 //
-// Design ref: `design.md:431-471` (RenderPass class + RenderPipeline
-// + kFullPipelineOrder default table).
+// The virtual destructor releases CPU state. Built-in GPU state is explicitly
+// cleaned through RenderPipelineLifecycle before pipeline replacement or device
+// shutdown; attachment borrowers precede their producers. Custom pass owners
+// provide corresponding cleanup. ShaderResource tokens and borrowed UI backends
+// do not become owning merely because a pass stores them.
 //
-// Why a base class NOW: design.md promises polymorphic passes but
-// live code has zero of them — ForwardOpaquePass is a free-standing
-// concrete class with a single execute() called directly by
-// Renderer::render. Adding Transparent / PostProcess / Shadow / UIPass
-// today means duplicating dispatch wiring in Renderer::render for each
-// one. A 55-line abstract base eliminates that; every subclass then
-// fits into one registry vector (deferred to RenderPipeline in U1+).
-//
-// Non-goals in U0:
-//   - No RenderPipeline / PassManager / FrameGraph (U1+).
-//   - No PipelineState / RenderTargetHandle abstraction (bgfx owns RTs;
-//     public headers must not include <bgfx/bgfx.h>; see Test_PublicHeaderSurface).
-//   - Subclasses own their viewId + viewportRect internally via the
-//     last two execute() args — no automatic sub-rect assignment.
-//   - No `addToRegistry()` API on the base; that lives in U1+.
-//
-// Threading: execute() is called from the render thread (currently
-// main thread; multiplayer deferred to Phase 5).
+// execute() and cleanup run on the submission owner (currently the main thread).
+// PassExecContext references are borrowed for that synchronous call only.
 class RenderPass {
 public:
     virtual ~RenderPass() = default;

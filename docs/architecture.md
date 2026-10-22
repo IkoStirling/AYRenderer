@@ -1,6 +1,6 @@
 # AYRenderer 当前架构
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Date:** 2026-10-22
 **Status:** Active
 **Owner:** AYRenderer
@@ -35,6 +35,7 @@ Pass 工厂、FrameGraph、bgfx 句柄及资源表是内部结构，不作为新
 |---|---|
 | 产品组合、纯兼容策略 | [RenderPipelineDesc.cpp](../src/RenderPipelineDesc.cpp)、[RenderPipelinePolicy.h](../src/detail/RenderPipelinePolicy.h) |
 | 具体 Pass 构建 | [RenderPipelineFactory.cpp](../src/detail/RenderPipelineFactory.cpp) |
+| 内置Pass清理与附件依赖 | [RenderPipelineLifecycle.cpp](../src/detail/RenderPipelineLifecycle.cpp) |
 | 主帧协调与生命周期 | [AYRenderer.cpp](../src/AYRenderer.cpp) |
 | 标准提取和复合窗口 | [AYRendererSubSystem.cpp](../src/AYRendererSubSystem.cpp) |
 | 提交包与 CPU 数据所有权 | [RenderScene.h](../include/AYRenderer/RenderScene.h)、`src/AYRenderScene.cpp` |
@@ -172,6 +173,8 @@ Renderer移动同样不自动修正外部保存的Renderer对象地址；资源�
 
 Renderer自身shutdown先使旧resource context/alive注册失效，释放runtime相机与预览的私有提交状态，
 再清理主Pass；借用GBuffer/Lighting附件的Transparent、Motion、Decal须在附件生产者之前释放。
+管线替换/关闭共用完整Pass清理；resize/MSAA共用主附件清理，包含借用方，并先于scene FBO销毁。
+reset后暂不render也须完成该边界，不能靠下一帧prepare补做回收。FrameGraph/RT池仍由原owner处理。
 随后处理scene FBO、FrameGraph目标/黑板和RT池，清理自己的刷新注册，再依次关闭RRM、shader pool、Adapter。
 最后推进截图sidecar并清除未提交请求；接受过截图请求不等于每个文件已由callback生成。
 

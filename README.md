@@ -1,5 +1,16 @@
 # AYRenderer
 
+## 管线GPU清理边界（2026-10-22）
+
+内部RenderPipelineLifecycle集中管理内置Pass的清理：管线替换/关闭使用完整清理，
+窗口尺寸/MSAA重建使用共同的主附件边界。Transparent/选择遮罩、Motion、Decal先于
+其借用的scene/GBuffer/Lighting附件释放，reset后暂不render也不会保留旧Decal目标。
+清理函数本身保留Pass对象、开关/作者参数和UIPass借用的UI backend；
+管线替换随后仍由调用者clear并按描述重建，关闭/resize/MSAA按原策略保留实例。
+FrameGraph/目标池和主scene FBO仍由原所有者清理。自定义内部Pass仍负责自身资源。
+Host应先停止UI/预览callback并关闭借用Renderer的UI backend，再替换设备上下文或销毁Renderer。
+编译/实机门禁记录见[测试维护](docs/testing.md)；这不提供全局GPU引用计数或异步退休协议。
+
 ## Decal 目标的设备接纳与附件归属（2026-10-22）
 
 DeferredDecal 的颜色目标和借用深度的 FBO 均经过内部 BGFXAdapter 创建/释放。

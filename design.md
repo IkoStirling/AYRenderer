@@ -1,5 +1,26 @@
 # AYRenderer Design
 
+## 2026-10-22 — 内置Pass清理与reset边界
+
+主Renderer的管线替换/关闭原来重复列举清理对象，resize/MSAA另维护子集并漏了Decal。
+真实两后端以同一Renderer关闭Decal的状态为对照，reset后只推进设备帧、暂不render，
+复现各四条断言失败：resize期望纹理/FBO 3/0、实际12/2，MSAA期望5/2、实际14/4。
+残留包含借用的原depth，不能简单把差额全部解释为Decal拥有的颜色贴图；连续render能触发后续prepare回收。
+
+内部RenderPipelineLifecycle提供借用方、主附件、完整Pass三层清理。
+Transparent的composite/selection、Motion、Decal先释放，再释放Shadow/GBuffer/Lighting；
+完整清理覆盖其余Pass的私有GPU状态，两个原完整清理入口共用；resize/MSAA使用共同的主附件边界。
+resize仍清TAA，MSAA仍保留原Bloom/曝光额外清理策略。场景FBO在借用方之后销毁，
+FrameGraph归还lease后目标池reset，最后设备reset。集中函数只清GPU，不清CPU列表/开关/作者参数；
+applyPipelineDesc随后照旧重建Pass并回写Renderer设置，shutdown保留实例用于同Renderer重启，
+resize/MSAA保留当前实例。产品默认链和UI借用策略不变。
+29种内置工厂类型中26种提供GPU清理；ForwardOpaque/Forward2DOpaque无私有GPU，UIPass只借用backend。
+私有自定义Pass仍由其所有者清理，不能据此宣称任意插件自动获得GPU寿命管理。
+
+原仅搜索源码字符串的shutdown测试改为实际Noop行为：未初始化门禁、同名异类Pass、
+借用方不销毁producer、完整清理重置资源尺寸、保留对象/enable和UI pointer、重复清理。
+GPU的独立reset计数和已有像素/重建验证另行运行；当前门禁状态以测试维护记录为准。
+
 ## 2026-10-22 — wrapped文本段落与度量一致性
 
 资源诊断面板的真实截图暴露旧drawText把LF送入shaper并画成控制字符。

@@ -56,8 +56,9 @@ public:
     void addPass(std::unique_ptr<RenderPass> pass);
     void addPass(RenderPassSlot slot, std::unique_ptr<RenderPass> pass);
 
-    // Drop all owned passes. Callers that hold ShadowPass GPU resources
-    // must destroyResources() first when the adapter is live.
+    // Drop the owned CPU pass objects. Built-in GPU state must first be cleaned
+    // through RenderPipelineLifecycle while its adapter is live; custom pass
+    // owners provide their cleanup. A borrowed UI backend is not destroyed.
     void clear();
 
     // Name lookup is linear in mounted passes. Returns nullptr when absent.

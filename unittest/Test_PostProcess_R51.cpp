@@ -215,16 +215,19 @@ TEST_CASE(r51_public_setters_frame_bridge_and_lifecycle_are_hardened)
           != std::string::npos);
 
     const std::size_t shutdown = source.find("void Renderer::shutdown()");
-    const std::size_t post = source.find(
-        "_impl->pipeline.findPass<detail::PostProcessPass>()", shutdown);
+    // This guards the Host boundary, independent of where a concrete pass's
+    // cleanup is implemented. Real resource retirement is checked on device.
+    const std::size_t cleanup = source.find(
+        "detail::destroyPipelineGpuResources(_impl->pipeline, _impl->adapter)", shutdown);
     const std::size_t shaderPool = source.find(
         "_impl->shaderPool.shutdown()", shutdown);
     const std::size_t adapter = source.find("_impl->adapter.shutdown()", shutdown);
-    CHECK(post != std::string::npos);
+    CHECK(shutdown != std::string::npos);
+    CHECK(cleanup != std::string::npos);
     CHECK(shaderPool != std::string::npos);
     CHECK(adapter != std::string::npos);
-    CHECK(post < shaderPool);
-    CHECK(post < adapter);
+    CHECK(cleanup < shaderPool);
+    CHECK(cleanup < adapter);
 }
 
 TEST_CASE(r51_forward_clear_is_touched_before_draw_iteration)

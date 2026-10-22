@@ -46,6 +46,7 @@
 #include "detail/RenderPassContract.h"
 #include "detail/RenderPipeline.h"
 #include "detail/RenderPipelineFactory.h"
+#include "detail/RenderPipelineLifecycle.h"
 #include "detail/RenderPipelinePolicy.h"
 #include "detail/RenderTargetPool.h"
 #include "detail/RenderViewOrder.h"
@@ -517,184 +518,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
         retainedUi = uiPass->backend();
     }
 
-    // Transparent's deferred composite FBO borrows Lighting color + GBuffer
-    // depth. Release the FBO shell before either producer rotates handles.
-    if (detail::TransparentPass* transparentPass =
-            pipeline.findPass<detail::TransparentPass>()) {
-        if (adapter.isInitialized()) {
-            transparentPass->destroyResources(adapter);
-        }
-    }
-
-    // MotionVector's FBO shell borrows GBuffer depth. Release the shell and
-    // its independently-owned RG16F texture before GBuffer rotates handles.
-    if (detail::MotionVectorPass* motionPass =
-            pipeline.findPass<detail::MotionVectorPass>()) {
-        if (adapter.isInitialized()) {
-            motionPass->destroyResources(adapter);
-        }
-    }
-
-    if (detail::ShadowPass* shadowPass =
-            pipeline.findPass<detail::ShadowPass>()) {
-        if (adapter.isInitialized()) {
-            shadowPass->destroyResources(adapter);
-        }
-    }
-
-    // §P5 B4a (2026-07-22) — GBuffer destroyResources mirror (mirror
-    // Shadow destroy block above). Cutsheet §5.2 + P2 sceneFbo closure
-    // pattern. Runs BEFORE pipeline.clear() so the FBO handle survives
-    // the rebuild (matches Shadow mirror — bgfx handle table rotates
-    // between pipeline rebuilds, post-clear destroy would race with
-    // new-pass FBO allocation).
-    if (detail::GBufferPass* gbufferPass =
-            pipeline.findPass<detail::GBufferPass>()) {
-        if (auto* decal = pipeline.findPass<detail::DeferredDecalPass>()) {
-            if (adapter.isInitialized()) decal->destroyResources(adapter);
-        }
-        if (adapter.isInitialized()) {
-            gbufferPass->destroyResources(adapter);
-        }
-    }
-
-    // §P5 B5 (2026-07-22) — LightingPass destroyResources mirror
-    // (mirror GBuffer destroy block above). LightingPass owns a
-    // 1× RGBA16F LightingOutput FBO + fullscreen triangle VB/IB +
-    // Phoskia Lighting program; all three must be released BEFORE
-    // pipeline.clear() for the same handle-rotation reason as
-    // Shadow/GBuffer. cutsheet `pass-lessons-from-deferred.md:151,
-    // 161, 169` lock the LightingOutput FBO lifetime to the
-    // LightingPass owner.
-    if (detail::LightingPass* lightingPass =
-            pipeline.findPass<detail::LightingPass>()) {
-        if (adapter.isInitialized()) {
-            lightingPass->destroyResources(adapter);
-        }
-    }
-
-    // §Skybox0 (2026-07-23) — SkyboxPass destroyResources mirror
-    // (mirror LightingPass destroy block above). SkyboxPass owns a
-    // 1× RGBA8 SkyOutput FBO + fullscreen triangle VB/IB + Phoskia
-    // Skybox program; all three must be released BEFORE
-    // pipeline.clear() for the same handle-rotation reason.
-    if (detail::SkyboxPass* skyboxPass =
-            pipeline.findPass<detail::SkyboxPass>()) {
-        if (adapter.isInitialized()) {
-            skyboxPass->destroyResources(adapter);
-        }
-    }
-
-    // S1a (2026-07-23, short-term-plan §S1) — BloomExtractPass
-    // destroyResources mirror (mirror SkyboxPass destroy block
-    // above). BloomExtractPass owns a half-resolution RGBA16F FBO
-    // (no depth) + fullscreen-triangle VB/IB + Phoskia extract
-    // program; all three must be released BEFORE pipeline.clear()
-    // for the same handle-rotation reason.
-    if (detail::BloomExtractPass* bloomExtractPass =
-            pipeline.findPass<detail::BloomExtractPass>()) {
-        if (adapter.isInitialized()) {
-            bloomExtractPass->destroyResources(adapter);
-        }
-    }
-
-    // S1b (2026-07-23, short-term-plan §S1 sub-cut 2) —
-    // BloomBlurPass destroyResources mirror (mirror
-    // BloomExtractPass destroy block above). BloomBlurPass owns
-    // two half-resolution RGBA16F ping-pong FBOs (no depth) +
-    // fullscreen-triangle VB/IB + Phoskia blur program; all four
-    // must be released BEFORE pipeline.clear() for the same
-    // handle-rotation reason.
-    if (detail::BloomBlurPass* bloomBlurPass =
-            pipeline.findPass<detail::BloomBlurPass>()) {
-        if (adapter.isInitialized()) {
-            bloomBlurPass->destroyResources(adapter);
-        }
-    }
-    if (detail::AutoExposurePass* autoExposurePass =
-            pipeline.findPass<detail::AutoExposurePass>()) {
-        if (adapter.isInitialized()) {
-            autoExposurePass->destroyResources(adapter);
-        }
-    }
-
-    // DepthHaze owns only fullscreen geometry and its Phoskia program; the
-    if (auto* ssr = pipeline.findPass<detail::SsrPass>()) {
-        if (adapter.isInitialized()) ssr->destroyResources(adapter);
-    }
-    if (auto* fog = pipeline.findPass<detail::VolumetricPass>()) {
-        if (adapter.isInitialized()) fog->destroyResources(adapter);
-    }
-    // DepthHaze owns only fullscreen geometry and its Phoskia program; the
-    // full-resolution HazeColor target is FrameGraph-owned. Release the
-    // pass-local GPU objects before pipeline.clear().
-    if (detail::DepthHazePass* depthHazePass =
-            pipeline.findPass<detail::DepthHazePass>()) {
-        if (adapter.isInitialized()) {
-            depthHazePass->destroyResources(adapter);
-        }
-    }
-
-    if (detail::SSAOPass* ssaoPass = pipeline.findPass<detail::SSAOPass>()) {
-        if (adapter.isInitialized()) {
-            ssaoPass->destroyResources(adapter);
-        }
-    }
-
-    if (detail::GBufferDebugPass* debugPass =
-            pipeline.findPass<detail::GBufferDebugPass>()) {
-        if (adapter.isInitialized()) {
-            debugPass->destroyResources(adapter);
-        }
-    }
-
-    if (detail::PostProcessPass* postProcessPass =
-            pipeline.findPass<detail::PostProcessPass>()) {
-        if (adapter.isInitialized()) {
-            postProcessPass->destroyResources(adapter);
-        }
-    }
-
-    if (detail::FXAAPass* fxaaPass = pipeline.findPass<detail::FXAAPass>()) {
-        if (adapter.isInitialized()) {
-            fxaaPass->destroyResources(adapter);
-        }
-    }
-
-    if (detail::SMAAPass* smaaPass = pipeline.findPass<detail::SMAAPass>()) {
-        if (adapter.isInitialized()) {
-            smaaPass->destroyResources(adapter);
-        }
-    }
-
-    if (detail::TAAPass* taaPass = pipeline.findPass<detail::TAAPass>()) {
-        if (adapter.isInitialized()) {
-            taaPass->destroyResources(adapter);
-        }
-    }
-
-    if (detail::ColorGradingPass* gradingPass =
-            pipeline.findPass<detail::ColorGradingPass>()) {
-        if (adapter.isInitialized()) {
-            gradingPass->destroyResources(adapter);
-        }
-    }
-
-    if(adapter.isInitialized())visitStylePasses(pipeline,[&](auto& pass){pass.destroyResources(adapter);});
-
-    if (detail::PresentPass* presentPass =
-            pipeline.findPass<detail::PresentPass>()) {
-        if (adapter.isInitialized()) {
-            presentPass->destroyResources(adapter);
-        }
-    }
-
-    if (detail::EditorOverlayPass* editorOverlayPass =
-            pipeline.findPass<detail::EditorOverlayPass>()) {
-        if (adapter.isInitialized()) {
-            editorOverlayPass->destroyResources(adapter);
-        }
-    }
+    detail::destroyPipelineGpuResources(pipeline, adapter);
 
     pipeline.clear();
     // E5 (§5.4, 2026-07-22): default pipeline now mounts EVERY slot
@@ -878,159 +702,12 @@ void Renderer::shutdown()
     _impl->invalidateTemporalResources(
         detail::ResourceInvalidationReason::Shutdown);
 
-    if (detail::TransparentPass* transparentPass =
-            _impl->pipeline.findPass<detail::TransparentPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            transparentPass->destroyResources(_impl->adapter);
-        }
-    }
-    if (detail::MotionVectorPass* motionPass =
-            _impl->pipeline.findPass<detail::MotionVectorPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            motionPass->destroyResources(_impl->adapter);
-        }
-    }
+    // Pass instances survive shutdown/reinitialize. Clear GPU state while the
+    // device and shader pool are alive, with attachment borrowers first.
+    detail::destroyPipelineGpuResources(_impl->pipeline, _impl->adapter);
 
-    // Pipeline instances survive shutdown() so the same Renderer can be
-    // initialized again. Reset every Pass-owned GPU handle before bgfx shuts
-    // down; bgfx::isValid only checks the numeric handle sentinel and cannot
-    // distinguish a stale handle from one allocated by the next context.
-    if (detail::ShadowPass* shadowPass =
-            _impl->pipeline.findPass<detail::ShadowPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            shadowPass->destroyResources(_impl->adapter);
-        }
-    }
-    if (detail::GBufferPass* gbufferPass =
-            _impl->pipeline.findPass<detail::GBufferPass>()) {
-        if (auto* decal = _impl->pipeline.findPass<detail::DeferredDecalPass>()) {
-            if (_impl->adapter.isInitialized()) decal->destroyResources(_impl->adapter);
-        }
-        if (_impl->adapter.isInitialized()) {
-            gbufferPass->destroyResources(_impl->adapter);
-        }
-    }
-    if (detail::LightingPass* lightingPass =
-            _impl->pipeline.findPass<detail::LightingPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            lightingPass->destroyResources(_impl->adapter);
-        }
-    }
-    if (detail::SkyboxPass* skyboxPass =
-            _impl->pipeline.findPass<detail::SkyboxPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            skyboxPass->destroyResources(_impl->adapter);
-        }
-    }
-    if (detail::BloomExtractPass* bloomExtractPass =
-            _impl->pipeline.findPass<detail::BloomExtractPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            bloomExtractPass->destroyResources(_impl->adapter);
-        }
-    }
-    if (detail::BloomBlurPass* bloomBlurPass =
-            _impl->pipeline.findPass<detail::BloomBlurPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            bloomBlurPass->destroyResources(_impl->adapter);
-        }
-    }
-    if (detail::AutoExposurePass* autoExposurePass =
-            _impl->pipeline.findPass<detail::AutoExposurePass>()) {
-        if (_impl->adapter.isInitialized()) {
-            autoExposurePass->destroyResources(_impl->adapter);
-        }
-    }
-    if (auto* ssr = _impl->pipeline.findPass<detail::SsrPass>()) {
-        if (_impl->adapter.isInitialized()) ssr->destroyResources(_impl->adapter);
-    }
-    if (auto* fog = _impl->pipeline.findPass<detail::VolumetricPass>()) {
-        if (_impl->adapter.isInitialized()) fog->destroyResources(_impl->adapter);
-    }
-    if (detail::DepthHazePass* depthHazePass =
-            _impl->pipeline.findPass<detail::DepthHazePass>()) {
-        if (_impl->adapter.isInitialized()) {
-            depthHazePass->destroyResources(_impl->adapter);
-        }
-    }
-    if (detail::GBufferDebugPass* debugPass =
-            _impl->pipeline.findPass<detail::GBufferDebugPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            debugPass->destroyResources(_impl->adapter);
-        }
-    }
-
-    // PostProcess owns raw fullscreen geometry and a ShaderResource. Clear
-    // both while the adapter and shader pool are still alive so a later
-    // initialize() cannot mistake stale numeric handles for live objects.
-    if (detail::PostProcessPass* postProcessPass =
-            _impl->pipeline.findPass<detail::PostProcessPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            postProcessPass->destroyResources(_impl->adapter);
-        }
-    }
-
-    if (detail::FXAAPass* fxaaPass =
-            _impl->pipeline.findPass<detail::FXAAPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            fxaaPass->destroyResources(_impl->adapter);
-        }
-    }
-
-    if (detail::SMAAPass* smaaPass =
-            _impl->pipeline.findPass<detail::SMAAPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            smaaPass->destroyResources(_impl->adapter);
-        }
-    }
-
-    if (detail::TAAPass* taaPass =
-            _impl->pipeline.findPass<detail::TAAPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            taaPass->destroyResources(_impl->adapter);
-        }
-    }
-
-    if (detail::ColorGradingPass* gradingPass =
-            _impl->pipeline.findPass<detail::ColorGradingPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            gradingPass->destroyResources(_impl->adapter);
-        }
-    }
-
-    if(_impl->adapter.isInitialized())visitStylePasses(_impl->pipeline,[&](auto& pass){pass.destroyResources(_impl->adapter);});
-
-    if (detail::PresentPass* presentPass =
-            _impl->pipeline.findPass<detail::PresentPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            presentPass->destroyResources(_impl->adapter);
-        }
-    }
-
-    if (detail::EditorOverlayPass* editorOverlayPass =
-            _impl->pipeline.findPass<detail::EditorOverlayPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            editorOverlayPass->destroyResources(_impl->adapter);
-        }
-    }
-
-    // SSAO keeps raw fullscreen geometry handles in the pass instance. Reset
-    // them before adapter shutdown so initialize() on the same Renderer never
-    // mistakes stale numeric handles for live resources.
-    if (detail::SSAOPass* ssaoPass =
-            _impl->pipeline.findPass<detail::SSAOPass>()) {
-        if (_impl->adapter.isInitialized()) {
-            ssaoPass->destroyResources(_impl->adapter);
-        }
-    }
-
-    // P2 (PR-D) — release the scene FBO before tearing down the
-    // adapter. Mirrors the PostProcessPass FBO destroy pattern:
-    // bgfx::destroy on a stale handle after bgfx::shutdown() is the
-    // documented safe sequence (Adapter's destroy() gates on
-    // isInitialized but doesn't tear down the bgfx handle mapping —
-    // it just calls bgfx::destroy, which is a no-op on the dying
-    // handle map). Doing it here guarantees Impl ctor / shutdown
-    // pairs are balanced across the ProcessBgfxAlive sticky window.
+    // The scene target is owned here. Destroy it before Adapter shutdown;
+    // numeric bgfx handles cannot identify a later device context.
     if (detail::BGFXAdapter::isValid(_impl->sceneFbo)) {
         _impl->adapter.destroy(_impl->sceneFbo);
         _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
@@ -2152,60 +1829,20 @@ void Renderer::resize(uint32_t width, uint32_t height)
     _impl->resourceBlackboard.invalidateFrameOutputs(
         detail::ResourceInvalidationReason::Resize);
 
-    // Destroy offscreen RTs before bgfx::reset. Orphaning handles
-    // (INVALID without destroy) leaks memory; deferred GBuffer/Lighting
-    // also need a forced rebuild (see ensure() allocated-size fix).
+    // Borrowed framebuffer shells must retire before their scene/GBuffer/
+    // Lighting producers. A later render/prepare is not the reset boundary.
+    detail::destroyMainAttachmentResources(_impl->pipeline, _impl->adapter);
     if (detail::BGFXAdapter::isValid(_impl->sceneFbo)) {
         _impl->adapter.destroy(_impl->sceneFbo);
         _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
     _impl->sceneFboW = 0;
     _impl->sceneFboH = 0;
-    if (detail::TransparentPass* transparentPass =
-            _impl->pipeline.findPass<detail::TransparentPass>()) {
-        transparentPass->destroyResources(_impl->adapter);
+    if (auto* taa = _impl->pipeline.findPass<detail::TAAPass>()) {
+        taa->destroyResources(_impl->adapter);
     }
-    if (detail::MotionVectorPass* motionPass =
-            _impl->pipeline.findPass<detail::MotionVectorPass>()) {
-        motionPass->destroyResources(_impl->adapter);
-    }
-    // Full destroyResources also drops Phoskia programs — fine on
-    // rare window resize; MSAA change already does the same.
-    if (detail::GBufferPass* gbufferPass =
-            _impl->pipeline.findPass<detail::GBufferPass>()) {
-        gbufferPass->destroyResources(_impl->adapter);
-    }
-    if (detail::LightingPass* lightingPass =
-            _impl->pipeline.findPass<detail::LightingPass>()) {
-        lightingPass->destroyResources(_impl->adapter);
-    }
-    if (detail::ShadowPass* shadowPass =
-            _impl->pipeline.findPass<detail::ShadowPass>()) {
-        shadowPass->destroyResources(_impl->adapter);
-    }
-    if (detail::TAAPass* taaPass =
-            _impl->pipeline.findPass<detail::TAAPass>()) {
-        taaPass->destroyResources(_impl->adapter);
-    }
-    // §F6 (2026-07-24, mid-term FG MVP sub-cut 6) — PostProcessPass
-    // FBO destroy block removed. PostProcessPass is a thin blit pass
-    // and FBO lifecycle was historical (pre-P2 the pass had its own
-    // color+depth FBO). Today (P2 + B6 closure) it samples the
-    // LightingOutputFbo / sceneFbo directly and no longer maintains
-    // a private RT. F6 confirms that pattern by removing the
-    // destroyResources call.
-    // (S1a / S1b / S4b individual passes' destroyResources blocks
-    // also removed ── those passes no longer own FBOs in F2/F3/F4,
-    // so calling destroyResources would be a no-op-but-noisy. F6
-    // consolidates: only VB/IB + program cleanup, no RT destroy.)
-    //
-    // §F6 — centralized FrameGraph resize. All post-process chain
-    // transient RTs (BloomBright / BloomBlurA / BloomBlurB /
-    // HazeColor / SSAOTexture) live on the FrameGraph now; resize() destroys
-    // owned FG RTs, leaves externals alone (mirror sceneFbo
-    // block above). Passes (BloomExtract / BloomBlur / DepthHaze
-    // / PostProcess) get a single fg.resize() call instead of
-    // four individual destroyResources blocks.
+    // FrameGraph returns its leases before the pool invalidates retained
+    // UI/other leases, and both complete before the device reset below.
     _impl->frameGraph.resize(width, height);
     // A bgfx reset invalidates retained framebuffer storage. FrameGraph has
     // returned its leases above; invalidate UI/other leases before reset.
@@ -2760,80 +2397,22 @@ void Renderer::setMsaaSampleCount(uint32_t samples)
             detail::ResourceInvalidationReason::BackendReset);
         _impl->resourceBlackboard.invalidateFrameOutputs(
             detail::ResourceInvalidationReason::BackendReset);
+        detail::destroyMainAttachmentResources(_impl->pipeline, _impl->adapter);
         if (detail::BGFXAdapter::isValid(_impl->sceneFbo)) {
             _impl->adapter.destroy(_impl->sceneFbo);
             _impl->sceneFbo = bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
         }
         _impl->sceneFboW = 0;
         _impl->sceneFboH = 0;
-        if (detail::RenderPass* transparentPass =
-                _impl->pipeline.findPass("Transparent")) {
-            if (_impl->adapter.isInitialized()) {
-                static_cast<detail::TransparentPass*>(transparentPass)
-                    ->destroyResources(_impl->adapter);
-            }
-        }
-        if (detail::RenderPass* motionPass =
-                _impl->pipeline.findPass("MotionVector")) {
-            if (_impl->adapter.isInitialized()) {
-                static_cast<detail::MotionVectorPass*>(motionPass)
-                    ->destroyResources(_impl->adapter);
-            }
-        }
-        if (detail::RenderPass* shadowPass = _impl->pipeline.findPass("Shadow")) {
-            if (_impl->adapter.isInitialized()) {
-                static_cast<detail::ShadowPass*>(shadowPass)
-                    ->destroyResources(_impl->adapter);
-            }
-        }
-        // §P5 B4a (2026-07-22) — GBuffer destroyResources mirror.
-        // `bgfx::reset` (triggered by msaa change at the `before != new`
-        // branch) drops view attachments, so the GBuffer FBO must
-        // rebuild on next execute(). Matches Shadow destroy mirror
-        // above — Shadow re-ensures via _mapResources.ensure(); GBuffer
-        // re-ensures via this class's `ensure()` in execute().
-        if (detail::RenderPass* gbufferPass = _impl->pipeline.findPass("GBuffer")) {
-            if (_impl->adapter.isInitialized()) {
-                static_cast<detail::GBufferPass*>(gbufferPass)
-                    ->destroyResources(_impl->adapter);
-            }
-        }
-        // §P5 B5 (2026-07-22) — LightingPass destroyResources mirror.
-        // LightingPass owns LightingOutput FBO + fullscreen triangle
-        // VB/IB + Phoskia Lighting program; all three must be released
-        // before bgfx::reset invalidates the attachments. Same handle-
-        // rotation reasoning as GBuffer.
-        if (detail::RenderPass* lightingPass = _impl->pipeline.findPass("Lighting")) {
-            if (_impl->adapter.isInitialized()) {
-                static_cast<detail::LightingPass*>(lightingPass)
-                    ->destroyResources(_impl->adapter);
-            }
-        }
-        // §S1a (2026-07-23) — BloomExtractPass destroyResources
-        // mirror. bgfx::reset (triggered by MSAA change at the
-        // `before != new` branch) drops view attachments, so the
-        // half-res FBO must rebuild on next execute().
-        if (detail::RenderPass* bloomExtractPass = _impl->pipeline.findPass("BloomExtract")) {
-            if (_impl->adapter.isInitialized()) {
-                static_cast<detail::BloomExtractPass*>(bloomExtractPass)
-                    ->destroyResources(_impl->adapter);
-            }
-        }
-        // §S1b (2026-07-23) — BloomBlurPass destroyResources
-        // mirror. Both ping-pong FBOs must release before
-        // bgfx::reset invalidates the attachments.
-        if (detail::RenderPass* bloomBlurPass = _impl->pipeline.findPass("BloomBlur")) {
-            if (_impl->adapter.isInitialized()) {
-                static_cast<detail::BloomBlurPass*>(bloomBlurPass)
-                    ->destroyResources(_impl->adapter);
-            }
-        }
-        if (detail::RenderPass* autoExposurePass =
-                _impl->pipeline.findPass("AutoExposure")) {
-            if (_impl->adapter.isInitialized()) {
-                static_cast<detail::AutoExposurePass*>(autoExposurePass)
-                    ->destroyResources(_impl->adapter);
-            }
+        // Preserve the existing MSAA reset policy for post-process geometry
+        // and exposure history; the full pipeline remains mounted.
+        if (_impl->adapter.isInitialized()) {
+            if (auto* pass = _impl->pipeline.findPass<detail::BloomExtractPass>())
+                pass->destroyResources(_impl->adapter);
+            if (auto* pass = _impl->pipeline.findPass<detail::BloomBlurPass>())
+                pass->destroyResources(_impl->adapter);
+            if (auto* pass = _impl->pipeline.findPass<detail::AutoExposurePass>())
+                pass->destroyResources(_impl->adapter);
         }
         _impl->frameGraph.resize(_impl->initDesc.width, _impl->initDesc.height);
         _impl->renderTargetPool.reset();
