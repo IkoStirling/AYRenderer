@@ -1,6 +1,6 @@
 #pragma once
 namespace ayt::render {
-inline constexpr char kSsrCacheKey[] = "ssr_v3_explicit_scene_matrices";
+inline constexpr char kSsrCacheKey[] = "ssr_v5_single_diffuse_bounce";
 inline constexpr char kSsrPhoskiaSource[] = R"PHOSKIA(
 material ScreenSpaceReflection {
     texture2d sceneColor
@@ -18,6 +18,8 @@ material ScreenSpaceReflection {
     uniform vec4 traceParams
     uniform vec4 materialParams
     uniform vec4 iblParams
+    uniform vec4 indirectParams
+    uniform vec4 indirectSamples
     uniform vec4 ssaoParams
     vertex {
         in pos : position
@@ -34,7 +36,7 @@ material ScreenSpaceReflection {
         let albedo = sample(albedoMetallic, uv)
         let model = floor(wp.a * 0.5 + 0.0001)
         let result = raw
-        if (surface.a >= 0.5 && model < 0.5 && nr.a < materialParams.y) {
+        if (traceParams.x > 0.0 && surface.a >= 0.5 && model < 0.5 && nr.a < materialParams.y) {
         let N = normalize(nr.xyz * 2.0 - vec3(1.0))
         let V = normalize(cameraPosition.xyz - wp.xyz)
         let R = reflect(V * -1.0, N)
@@ -112,10 +114,88 @@ material ScreenSpaceReflection {
         let weight = confidence * traceParams.x
         // Replace precisely the existing split-sum IBL specular on valid hits;
         // preserve direct light, diffuse, emissive, AO and miss fallback.
+        // Screen radiance already includes illumination; ambient strength only
+        // scales the environment term being replaced, never the reflected hit.
         if (materialParams.z > 1.5) { result = vec4(hitColor * confidence, raw.a) }
         else if (materialParams.z > 0.5) { result = vec4(vec3(confidence), raw.a) }
-        else { result = vec4(max(raw.rgb + (hitColor - oldSpecular) * brdfWeight * iblParams.x * ambientAo * weight, vec3(0.0)), raw.a) }
+        else { result = vec4(max(raw.rgb + (hitColor - oldSpecular * iblParams.x) * brdfWeight * ambientAo * weight, vec3(0.0)), raw.a) }
         } else if (materialParams.z > 0.5) { result = vec4(0.0, 0.0, 0.0, raw.a) }
+        if (indirectParams.x > 0.0 && materialParams.z < 0.5 && surface.a >= 0.5 && model < 0.5 && albedo.a < 0.999) {
+            let bounceN=normalize(nr.xyz*2.0-vec3(1.0))
+            let reference=vec3(0.0,1.0,0.0)
+            if(abs(bounceN.y)>0.95){reference=vec3(0.0,0.0,1.0)}
+            let bounceTangent=normalize(cross(reference,bounceN))
+            let bounceBitangent=cross(bounceN,bounceTangent)
+            let gathered=vec3(0.0)
+            for(bounceIndex in range(int(indirectSamples.x),4)) {
+                // Deterministic cosine quadrature. No frame noise or history feedback.
+                let radius=sqrt((float(bounceIndex)+0.5)/indirectSamples.x)
+                let angle=float(bounceIndex)*2.39996323
+                let bounceDirection=normalize(bounceTangent*(cos(angle)*radius)+bounceBitangent*(sin(angle)*radius)+bounceN*sqrt(max(1.0-radius*radius,0.0)))
+        let bounce_origin = (ssrViewMatrix * vec4(wp.xyz + bounceN * indirectParams.z, 1.0)).xyz
+        let bounce_direction = normalize((ssrViewMatrix * vec4(bounceDirection, 0.0)).xyz)
+        let bounce_stride = indirectParams.y / indirectParams.w
+        let bounce_found = 0.0
+        let bounce_confidence = 0.0
+        let bounce_hitColor = vec3(0.0)
+        let bounce_previousDelta = -indirectParams.z
+        for (bounce_i in range(int(indirectParams.w), 32)) {
+            let bounce_ray = bounce_origin + bounce_direction * (float(bounce_i + 1) * bounce_stride)
+            let bounce_clip = ssrProjectionMatrix * vec4(bounce_ray, 1.0)
+            if (bounce_found < 0.5 && bounce_clip.w > 0.0001 && bounce_ray.z > 0.0) {
+                let bounce_ndc = bounce_clip.xy / bounce_clip.w
+                let bounce_hitUv = vec2(bounce_ndc.x * 0.5 + 0.5, 0.5 - bounce_ndc.y * 0.5)
+                if (bounce_hitUv.x > 0.0 && bounce_hitUv.x < 1.0 && bounce_hitUv.y > 0.0 && bounce_hitUv.y < 1.0) {
+                    let bounce_hitCoverage = sampleLod(geometryCoverage, bounce_hitUv, 0.0).a
+                    let bounce_hitWorld = sampleLod(worldPosition, bounce_hitUv, 0.0).xyz
+                    let bounce_sceneZ = (ssrViewMatrix * vec4(bounce_hitWorld, 1.0)).z
+                    let bounce_delta = bounce_ray.z - bounce_sceneZ
+                    // Bracket crossings only, with a finite thickness. Never accept
+                    // a bounce_ray already behind the first sampled surface or a sky texel.
+                    if (bounce_hitCoverage > 0.5 && bounce_previousDelta < 0.0 && bounce_delta >= 0.0 && bounce_delta < indirectParams.z + abs(bounce_direction.z) * bounce_stride) {
+                        let bounce_low = max(float(bounce_i) * bounce_stride, 0.0)
+                        let bounce_high = float(bounce_i + 1) * bounce_stride
+                        let bounce_refinedUv = bounce_hitUv
+                        for (bounce_j in range(4)) {
+                            let bounce_mid = (bounce_low + bounce_high) * 0.5
+                            let bounce_refinedRay = bounce_origin + bounce_direction * bounce_mid
+                            let bounce_refinedClip = ssrProjectionMatrix * vec4(bounce_refinedRay, 1.0)
+                            let bounce_q = bounce_refinedClip.xy / max(bounce_refinedClip.w, 0.0001)
+                            bounce_refinedUv = vec2(bounce_q.x * 0.5 + 0.5, 0.5 - bounce_q.y * 0.5)
+                            let bounce_refinedWorld = sampleLod(worldPosition, bounce_refinedUv, 0.0).xyz
+                            let bounce_refinedZ = (ssrViewMatrix * vec4(bounce_refinedWorld, 1.0)).z
+                            if (bounce_refinedRay.z >= bounce_refinedZ) { bounce_high = bounce_mid } else { bounce_low = bounce_mid }
+                        }
+                        let bounce_hitNormal = normalize(sampleLod(normalRoughness, bounce_refinedUv, 0.0).xyz * 2.0 - vec3(1.0))
+                        let bounce_finalWorld = sampleLod(worldPosition, bounce_refinedUv, 0.0).xyz
+                        let bounce_finalCoverage = sampleLod(geometryCoverage, bounce_refinedUv, 0.0).a
+                        let bounce_finalRay = bounce_origin + bounce_direction * bounce_high
+                        let bounce_finalZ = (ssrViewMatrix * vec4(bounce_finalWorld, 1.0)).z
+                        let bounce_validHit = step(0.5, bounce_finalCoverage)
+                                     * (1.0 - step(indirectParams.z, abs(bounce_finalRay.z - bounce_finalZ)))
+                                     * step(indirectParams.z * 2.0, length(bounce_finalWorld - wp.xyz))
+                        let bounce_border = min(min(bounce_refinedUv.x, 1.0 - bounce_refinedUv.x), min(bounce_refinedUv.y, 1.0 - bounce_refinedUv.y))
+                        let bounce_facing = smoothstep(0.0, 0.2, dot(bounce_hitNormal, bounceDirection * -1.0))
+                        bounce_confidence = smoothstep(0.0, 0.08, bounce_border) * bounce_facing * bounce_validHit
+                                   * (1.0 - float(bounce_i + 1) / indirectParams.w)
+
+                        bounce_hitColor = sampleLod(sceneColor, bounce_refinedUv, 0.0).rgb
+                        // A rejected self hit must not terminate the bounce_ray before
+                        // it reaches a different receiver farther along the screen.
+                        bounce_found = bounce_validHit
+                    }
+                    bounce_previousDelta = bounce_delta
+                } else { bounce_found = 1.0 }
+            }
+        }
+
+                gathered=gathered+bounce_hitColor*bounce_confidence
+            }
+            let diffuseWeight=clamp(albedo.rgb,vec3(0.0),vec3(1.0))*(1.0-clamp(albedo.a,0.0,1.0))*0.96
+            // Cosine sampling cancels Lambert's 1/pi. Each ray contributes at most
+            // one non-recursive screen hit; missing samples contribute zero.
+            result=vec4(result.rgb+gathered*diffuseWeight*(indirectParams.x/indirectSamples.x),raw.a)
+        }
         return result
     }
 }

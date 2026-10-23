@@ -1,3 +1,4 @@
+#include "detail/GpuPointState.h"
 #include "detail/DebugOverlay.h"
 
 #include <bgfx/bgfx.h>
@@ -14,7 +15,7 @@ namespace ayt::render::detail
 void DebugOverlay::applyDebugMode()
 {
     uint32_t flags = BGFX_DEBUG_NONE;
-    if (_enabled) flags |= BGFX_DEBUG_TEXT;
+    if (_enabled) flags |= BGFX_DEBUG_TEXT | BGFX_DEBUG_PROFILER;
     bgfx::setDebug(flags);
 }
 
@@ -37,6 +38,7 @@ void DebugOverlay::onBeginFrame()
     _stats.graph = {};
     _stats.graph.peakTransientTargets = _peakTransientTargets;
     _stats.resources = {};
+    _stats.volumetric = {};
     setVisibilityStats(0, 0, 0);
     const auto now = std::chrono::steady_clock::now();
     if (_lastFrameStart.time_since_epoch().count() != 0) {
@@ -136,13 +138,13 @@ std::string_view passNameForView(uint16_t view,
     case 11: case 12:
     case 26: case 27: case 28: case 29: case 30: return "BloomBlur";
     case 31:         return "AutoExposure";
-    case 32:         return "SSR";
-    case 33:         return "Volumetric";
     case 54:         return "Clouds";
     case 34: case 35: case 36: case 37: case 38: case 39:
     case 40: case 41: case 42: case 43: case 44: case 45:
     case 46: case 47: case 48: case 49: return "DeferredDecal";
     case 13:          return "DepthHaze";
+    case 32:          return "SSR";
+    case 33: case 240: case 241: case 242: return "Volumetric";
     case 14:          return "SSAO";
     case 15:          return "PostProcess";
     case 16:         return "Present";
@@ -183,6 +185,7 @@ void DebugOverlay::updateFrameStats(
     _stats.sceneItems = sceneItems;
     _stats.passes = passStats;
     _stats.gpuFrameTimeMs = 0.0f;
+    _stats.pointGpuTimeMs=0;_stats.pointGpuReadbackTimeMs=0;
     _stats.backendDrawCalls = 0;
     _stats.backendBlitCalls = 0;
     _stats.gpuFrameNumber = 0;
@@ -208,6 +211,10 @@ void DebugOverlay::updateFrameStats(
 
     for (uint16_t i = 0; i < bgfxStats->numViews; ++i) {
         const bgfx::ViewStats& view = bgfxStats->viewStats[i];
+        if(view.view>=kPointMarkView&&view.view<=kPointCompactView){
+            _stats.pointGpuTimeMs+=ticksToMs(view.gpuTimeBegin,view.gpuTimeEnd,bgfxStats->gpuTimerFreq);continue;
+        }
+        if(view.view==kPointReadbackView){_stats.pointGpuReadbackTimeMs+=ticksToMs(view.gpuTimeBegin,view.gpuTimeEnd,bgfxStats->gpuTimerFreq);continue;}
         const std::string_view passName = passNameForView(view.view, _stats.passes);
         if (passName.empty()) {
             continue;

@@ -72,7 +72,7 @@ TEST_CASE(canonical_order_and_reserved_view)
     }
     auto view=std::find(kRenderViewOrder.begin(),kRenderViewOrder.end(),ColorStylizationPass::kViewId);
     CHECK(view!=kRenderViewOrder.end()); CHECK(*(view-1)==4); CHECK(*(view+1)==53);
-    CHECK(nextUiViewRange(50,1)==54);
+    CHECK(nextUiViewRange(50,1)==60);
     CHECK(static_cast<uint8_t>(RenderPassSlot::StylizedOutline)==26);
     Renderer renderer;
     renderer.configurePipeline({{RenderPassSlot::PostProcess,RenderPassSlot::ColorStylization,RenderPassSlot::UI}});

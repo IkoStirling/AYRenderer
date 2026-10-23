@@ -6,10 +6,14 @@
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/RenderTypes.h"
 #include "AYRenderer/SsrSettings.h"
+#include "AYRenderer/ScreenSpaceIndirect.h"
+#include "AYRenderer/LensEffects.h"
 #include "AYRenderer/VolumetricSettings.h"
 #include "AYRenderer/CloudSettings.h"
+#include "AYRenderer/VolumetricDensity.h"
 #include "AYRenderer/DeferredDecal.h"
 #include "AYRenderer/CameraViews.h"
+#include "AYRenderer/PerformanceLighting.h"
 
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathUtils.h"
@@ -37,6 +41,8 @@ struct ResourceResidencySnapshot;
 namespace detail {
 class BGFXAdapter;
 class RenderTargetPool;
+class GpuPointContext;
+class GpuPointState;
 struct CameraViewsTestAccess;
 }
 
@@ -303,6 +309,17 @@ public:
     // light via FrameContext — see setDirectionalLight above).
     void setSceneLights(const SceneLights* lights);
 
+    /// Owned Spot/surface-only Point packet for the main Deferred view. Replaces direct
+    /// scene lighting while active; ambient/IBL is retained. Empty clears it.
+    /// Copy/validate before publication, max256; false preserves old state.
+    /// Texture-pattern lights require a live Renderer-owned goboTexture; keep
+    /// it alive through render. shadowSoftness optionally filters atlas edges.
+    /// Owner thread only; priority then input order determines budget admission.
+    /// Shadows, surface and volume costs are separately bounded. Forward views ignore it.
+    bool setPerformanceLights(std::span<const PerformanceLight> lights,
+                              PerformanceLightBudget budget = {}, std::string* error = nullptr);
+    PerformanceLightStats performanceLightStats() const noexcept;
+
     // §Skybox0 (2026-07-23) — host-facing Skybox DataSource.
     // Drives the Deferred SkyboxPass's equirect-panorama blit.
     // Default Forward pipeline (RenderPipelineDesc::makeDefault())
@@ -430,6 +447,12 @@ public:
     void setPostProcessBloomThreshold(float threshold);
     void setPostProcessBloomSoftKnee(float softKnee);
     void setPostProcessExposure(float exposure);
+    /// Camera glare from current, depth-occluded HDR highlights. Defaults off;
+    /// sanitized controls apply before exposure/tonemap, shared Bloom extraction
+    /// can run with Bloom strength0. Does not trace a physical camera lens.
+    void setLensEffects(const LensEffectsSettings& settings);
+    /// Stored sanitized camera glare settings; Renderer owns the copy.
+    LensEffectsSettings lensEffects() const noexcept;
     // GPU scene-luminance metering with a persistent 1x1 adaptation history.
     // Manual exposure remains as an artistic compensation multiplier.
     void setAutoExposureEnabled(bool enabled);
@@ -524,13 +547,34 @@ public:
     /// Owner-thread settings are sanitized; disabled/zero strength allocates nothing.
     void setSsrSettings(const SsrSettings& settings);
     SsrSettings ssrSettings() const noexcept;
+    /// Copy/sanitize bounded screen-space diffuse bounce settings on the owner thread.
+    /// Main Deferred only; requires current opaque Lighting/GBuffer. No offscreen GI.
+    void setScreenSpaceIndirectSettings(const ScreenSpaceIndirectSettings& settings);
+    ScreenSpaceIndirectSettings screenSpaceIndirectSettings() const noexcept;
+
     /// Deferred-only medium, owner-thread setter; copied finite settings, default off.
+    /// Optional noiseStrength/Scale/Time vary density consistently for extinction
+    /// and scattering; the host supplies time each frame when animation is wanted.
+    /// downsample1/2/4 changes scattering only; full-resolution extinction and
+    /// depth-aware reconstruction retain scene RGB/alpha and avoid depth-edge bleeding.
+    /// Optional froxel uses a bounded coefficient grid instead of per-ray steps;
+    /// tile/slice/cell caps and device fallback are reported by frame statistics.
     void setVolumetricSettings(const VolumetricSettings& settings);
     VolumetricSettings volumetricSettings() const noexcept;
     /// Advanced host: single-layer raymarched clouds on the main Deferred view, default off.
     /// Owner-thread sanitized value copy; borrowed atlas/map textures remain host-owned through endFrame.
     void setCloudSettings(const CloudSettings& settings);
     CloudSettings cloudSettings() const noexcept;
+    /// Owner-thread: discard only volume history after seek/scene replacement.
+    /// Safe before initialization; automatic cuts/resize/gaps also invalidate it.
+    void resetVolumetricHistory();
+    /// Owner-thread: pair an immutable density grid with its live Renderer atlas.
+    /// Both empty clears; invalid/unpaired bindings preserve the previous medium.
+    /// Active grids enforce local=true; numeric settings refreshes preserve binding.
+    /// Texture destruction/shutdown clears the pair and history; no ECS serialization.
+    bool setVolumetricDensityField(VolumetricDensityBinding binding,std::string* error=nullptr);
+    /// Value snapshot; profile is shared, atlas remains borrowed from this Renderer.
+    VolumetricDensityBinding volumetricDensityField() const noexcept;
     /// Owner-thread, copies up to16 positive-scale projectors in stable order.
     /// Texture resources must remain alive through rendering. No ECS serialization yet.
     /// Main Deferred rendering conservatively skips offscreen projectors; the
@@ -615,8 +659,11 @@ public:
         const EditorSelectionOutline2DState& state);
     EditorSelectionOutline2DState editorSelectionOutline2DState() const noexcept;
 
+    /// Enable the text HUD and backend per-view GPU timestamps; default off.
+    /// Profiler queries have a cost and require a supported native backend.
     void setDebugOverlayEnabled(bool enabled);
     bool isDebugOverlayEnabled() const noexcept;
+    /// Hide HUD text while retaining enabled per-view GPU profiling.
     void setDebugOverlaySuppressed(bool suppressed);
     bool isDebugOverlaySuppressed() const noexcept;
     // Editor presentation aid. bgfx applies this to submitted geometry while
@@ -672,6 +719,10 @@ public:
 
 private:
     friend class UIRenderBackend;
+    friend class EmissivePointCloud;
+    void beginMainPresentation();
+    void endMainPresentation();
+    std::shared_ptr<detail::GpuPointState> createGpuPointState(std::string* error);
     bool cameraOutputMatches(CameraOutputHandle output, uint16_t width, uint16_t height) const noexcept;
     bool renderPreviewScene(const RenderScene& scene, const PreviewSceneCamera& camera,
                             uint16_t framebuffer, uint16_t width, uint16_t height,

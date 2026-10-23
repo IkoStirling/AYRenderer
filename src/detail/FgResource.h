@@ -123,7 +123,11 @@ enum class FgResourceId : uint8_t {
     TemporalColor = 34,
     FeedbackHistory = 35,
     CloudColor = 36,
-    Count        = 37,
+    VolumetricIntegration = 37,
+    FroxelField = 38,
+    FroxelHistoryRead = 39,
+    FroxelHistoryWrite = 40,
+    Count        = 41,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。
@@ -152,6 +156,8 @@ struct FgTextureDesc {
     bool                      withDepth = false;
     // Edge/mask resources must not interpolate adjacent classifications.
     bool                      pointSampled = false;
+    // Optional absolute internal atlas extent. Zero retains the scaled viewport axis.
+    uint16_t absoluteWidth = 0, absoluteHeight = 0;
 };
 
 // Pass 声明 ── 描述一个 logical pass 读哪些资源、写哪些资源、

@@ -50,6 +50,7 @@
 
 #include "detail/BGFXAdapter.h"
 #include "detail/IblPrecompute.h"
+#include "detail/PerformanceLightPass.h"
 #include "detail/PassExecContext.h"
 #include "detail/RenderPass.h"
 #include "detail/SkyboxPass.h"
@@ -256,6 +257,7 @@ private:
     IblResources _iblResources;
     bool _iblActiveThisFrame = false;
     ClearDesc _sceneClear{};
+    PerformanceLightPass _performance;
 };
 
 // §P5.5 B (2026-07-23) — Bug fix #3: externalize the cache-key

@@ -133,7 +133,22 @@ struct RenderResourceFrameStats {
     uint16_t persistentHistoryResources = 0;
 };
 
+/// Current CPU-submitted volume integration layout. Empty when no volume result
+/// was produced; cell counts describe allocation, not GPU visibility/readback.
+struct VolumetricFrameStats {
+    bool froxel=false;
+    /// Frame-level reprojection eligibility; individual cells may reject history.
+    bool historyUsed=false;
+    uint16_t integrationWidth=0,integrationHeight=0;
+    uint8_t depthSlices=0;
+    uint32_t froxelCells=0;
+};
+
+/// Renderer-owned diagnostics snapshot: CPU cadence, backend GPU timing,
+/// pass submissions and resource/visibility counts. getFrameStats() borrows it;
+/// copy before retaining across frames or shutdown. GPU results may lag CPU.
 struct RenderFrameStats {
+    VolumetricFrameStats volumetric;
     // Wall-clock cadence between consecutive beginFrame calls. Unlike the
     // old render-only timer this includes simulation, event polling, VSync,
     // hot-reload polling and host sleeps, so fps is the rate users see.
@@ -171,6 +186,10 @@ struct RenderFrameStats {
     // Geometry submissions (including repeated shadow cascades), not unique entities.
     uint32_t instancedDrawCalls = 0;
     uint32_t instancedObjects = 0;
+    /// Optional completed-frame GPU intervals for point mark/count/prefix/
+    /// compact and diagnostic blit. Same gpuFrameNumber/zero rules as above;
+    /// readback time excludes CPU mapping and asynchronous queue latency.
+    float pointGpuTimeMs=0,pointGpuReadbackTimeMs=0;
 };
 
 struct ClearDesc {

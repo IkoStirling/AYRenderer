@@ -24,7 +24,7 @@ uint32_t BGFXAdapter::availableInstances(uint32_t requested, uint16_t stride) co
 
 bool BGFXAdapter::bindInstances(const void* data, uint32_t count, uint16_t stride)
 {
-    if (!data || count < 2 || availableInstances(count, stride) < count) return false;
+    if (!data || !count || availableInstances(count, stride) < count) return false;
     bgfx::InstanceDataBuffer buffer{};
     bgfx::allocInstanceDataBuffer(&buffer, count, stride);
     if (!buffer.data || buffer.num < count) return false;
@@ -946,6 +946,15 @@ bool BGFXAdapter::bindParticleBatch(const ParticleDrawData& batch)
 void BGFXAdapter::setState(uint64_t state)
 {
     bgfx::setState(state);
+}
+
+void BGFXAdapter::setDrawScissor(uint16_t x,uint16_t y,uint16_t w,uint16_t h)
+{
+    if (_initialized && !isNoopBackend()) bgfx::setScissor(x,y,w,h);
+}
+void BGFXAdapter::resetDrawScissor()
+{
+    if (_initialized && !isNoopBackend()) bgfx::setScissor(UINT16_MAX);
 }
 
 void BGFXAdapter::setTransformIdentity()

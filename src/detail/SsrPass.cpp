@@ -8,19 +8,36 @@
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/SceneColorPipeline.h"
 #include "detail/BgfxMatrix.h"
+#include "detail/IblPrecompute.h"
+#include <array>
 namespace ayt::render::detail {
 uint32_t SsrPass::execute(PassExecContext& ctx) {
     auto& adapter = ctx.adapter;
     const auto s = sanitizeSsrSettings(ctx.frame.ssr);
-    if (!s.enabled || s.strength <= 0 || !adapter.isInitialized() || adapter.isNoopBackend()
+    const auto gi = sanitizeScreenSpaceIndirect(ctx.frame.screenIndirect);
+    if ((!s.enabled || s.strength <= 0) && (!gi.enabled || gi.strength <= 0)) return 0;
+    if (!adapter.isInitialized() || adapter.isNoopBackend()
         || !ctx.frameGraph || !ctx.resourceBlackboard || !ctx.lightingPass
         || !ctx.viewportWidth || !ctx.viewportHeight) return 0;
     BlackboardGBufferView gb;
     if (!ctx.resourceBlackboard->resolveGBuffer(gb)
         || !ctx.resourceBlackboard->findProduced(BlackboardResourceId::LightingColor)) return 0;
-    if (!ctx.lightingPass->iblActiveThisFrame()) return 0;
-    auto cube = ctx.lightingPass->iblPrefilteredSpecularTexture();
-    auto lut = ctx.lightingPass->iblBrdfLutTexture();
+    const bool hasIbl = ctx.lightingPass->iblActiveThisFrame();
+    auto cube = hasIbl ? ctx.lightingPass->iblPrefilteredSpecularTexture() : _blackCube;
+    auto lut = hasIbl ? ctx.lightingPass->iblBrdfLutTexture() : _fallbackBrdf;
+    if (!hasIbl && (!BGFXAdapter::isValid(cube) || !BGFXAdapter::isValid(lut))) {
+        // Reuse the same split-sum integration as IBL; no environment asset is
+        // required to reflect already illuminated screen-space receivers.
+        const std::array<uint8_t, 24> black{};
+        if (!BGFXAdapter::isValid(_blackCube)) _blackCube = adapter.createTextureCube(1, black.data());
+        if (!BGFXAdapter::isValid(_fallbackBrdf)) {
+            const auto data = buildIblCpuSet(black.data(), 1, 1, 1, 64, 64);
+            _fallbackBrdf = adapter.createTexture2DFromData(data.brdfLutSize, data.brdfLutSize,
+                bgfx::TextureFormat::RGBA8, data.brdfLutRgba8.data(),
+                static_cast<uint32_t>(data.brdfLutRgba8.size()), BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP);
+        }
+        cube = _blackCube; lut = _fallbackBrdf;
+    }
     if (!BGFXAdapter::isValid(cube) || !BGFXAdapter::isValid(lut)) return 0;
     auto input = adapter.getFboAttachment(selectSceneColorSourceFbo(ctx), 0);
     auto target = ctx.frameGraph->resolve(FgResourceId::SsrColor);
@@ -42,9 +59,11 @@ uint32_t SsrPass::execute(PassExecContext& ctx) {
     };
     const auto* ao = ctx.resourceBlackboard->findProduced(BlackboardResourceId::SsaoOcclusion);
     const float camera[4] = {ctx.frame.cameraPosition.x, ctx.frame.cameraPosition.y, ctx.frame.cameraPosition.z, 0};
-    const float trace[4] = {s.strength, s.maxDistance, s.thickness, float(s.steps)};
-    const float material[4] = {0, s.maxRoughness, float(s.debugView), 0};
-    const float ibl[4] = {ctx.lightingPass->ambientStrength(), ctx.lightingPass->iblMaxSpecularLod(), 0, 0};
+    const float trace[4] = {s.enabled ? s.strength : 0.0f, s.maxDistance, s.thickness, float(s.steps)};
+    const float material[4] = {0, s.maxRoughness, s.enabled ? float(s.debugView) : 0.0f, 0};
+    const float indirect[4] = {gi.enabled ? gi.strength : 0.0f, gi.maxDistance, gi.thickness, float(gi.steps)};
+    const float indirectSamples[4] = {float(gi.rays), 0, 0, 0};
+    const float ibl[4] = {hasIbl ? ctx.lightingPass->ambientStrength() : 0.0f, hasIbl ? ctx.lightingPass->iblMaxSpecularLod() : 0.0f, 0, 0};
     const float ssao[4] = {ao ? ctx.frame.ssaoStrength : 0, 1.0f / ctx.viewportWidth, 1.0f / ctx.viewportHeight, 0};
     float view[16], projection[16];
     toBgfxColumnMajor(ctx.frame.view, view);
@@ -56,7 +75,8 @@ uint32_t SsrPass::execute(PassExecContext& ctx) {
         || !uniform("ssrViewMatrix", view, 64) || !uniform("ssrProjectionMatrix", projection, 64)
         || !uniform("cameraPosition", camera, 16) || !uniform("traceParams", trace, 16)
         || !uniform("materialParams", material, 16) || !uniform("iblParams", ibl, 16)
-        || !uniform("ssaoParams", ssao, 16)) return 0;
+        || !uniform("ssaoParams", ssao, 16) || !uniform("indirectParams", indirect, 16)
+        || !uniform("indirectSamples", indirectSamples, 16)) return 0;
     configureFullscreenPassView(adapter, kViewId, target, 0, 0, ctx.viewportWidth, ctx.viewportHeight);
     _geometry.bind(adapter); adapter.setStateDepthTestAlways();
     shader::DrawCallContext submit; submit.viewId = kViewId; submit.state = 0;
@@ -66,5 +86,10 @@ uint32_t SsrPass::execute(PassExecContext& ctx) {
         target, output, ctx.viewportWidth, ctx.viewportHeight, 0);
     return 1;
 }
-void SsrPass::destroyResources(BGFXAdapter& adapter) { _program.reset(); _geometry.destroy(adapter); }
+void SsrPass::destroyResources(BGFXAdapter& adapter) {
+    _program.reset(); _geometry.destroy(adapter);
+    if (BGFXAdapter::isValid(_blackCube)) adapter.destroy(_blackCube);
+    if (BGFXAdapter::isValid(_fallbackBrdf)) adapter.destroy(_fallbackBrdf);
+    _blackCube = BGFX_INVALID_HANDLE; _fallbackBrdf = BGFX_INVALID_HANDLE;
+}
 }

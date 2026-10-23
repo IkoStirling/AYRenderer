@@ -1,3 +1,4 @@
+#include "detail/GpuPointState.h"
 #include "AYRenderer.h"
 #include "AYRenderer/PortalSurfaceShaderSources.h"
 #include "detail/RenderAssetBridge.h"
@@ -109,6 +110,7 @@ void visitStylePasses(detail::RenderPipeline& pipeline,Visitor&& visitor)
 struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
     ayt::shader::ShaderResourcePool    shaderPool;
+    std::shared_ptr<detail::GpuPointContext> gpuPoints;
     detail::RenderTargetPool      renderTargetPool{adapter};
     // Product default = RenderPipelineDesc::makeDefault()
     // (Shadow → FO → Transparent → PostProcess → UI), Shadow enabled
@@ -242,6 +244,7 @@ struct Renderer::Impl {
 
     // R5+ (Phase PostProcess) — per-host post-process knobs.
     // Defaults = no effect (bloom=0, exposure=1, ripple=0, tonemap=None).
+    LensEffectsSettings            lensEffects;
     float                          postProcessBloomStrength  = 0.0f;
     float                          postProcessBloomThreshold = 1.0f;
     float                          postProcessBloomSoftKnee  = 0.5f;
@@ -267,8 +270,11 @@ struct Renderer::Impl {
     // §S2 v1 — SSAO host knobs (FrameContext defaults stay off).
     bool                           ssaoEnabled  = false;
     SsrSettings                    ssr;
+    ScreenSpaceIndirectSettings    screenIndirect;
     VolumetricSettings             volumetric;
     CloudSettings                  clouds;
+    VolumetricDensityBinding densityField;
+    bool requestedVolumetricLocal=false;
     bool                          decalsEnabled = false;
     std::vector<DeferredDecal>     decals;
     float                          ssaoStrength = 0.0f;
@@ -332,6 +338,7 @@ struct Renderer::Impl {
     {
         resourceBlackboard.invalidateTemporal(reason);
         if(auto* feedback=pipeline.findPass<detail::TemporalFeedbackPass>())feedback->invalidateHistory(reason);
+        if(auto* fog=pipeline.findPass<detail::VolumetricPass>())fog->invalidateHistory();
         if (detail::TAAPass* taa = pipeline.findPass<detail::TAAPass>()) {
             taa->invalidateHistory(reason);
         }
@@ -402,6 +409,7 @@ struct Renderer::Impl {
     // this in host app code (e.g. AppState::lights populate by
     // editor / game logic; renderer just consumes).
     const ayt::render::SceneLights* sceneLights = nullptr;
+    PerformanceLighting performance;
 
     // P0 (2026-07-20) — wall-clock origin for FrameContext.timeSeconds.
     // std::chrono::steady_clock is monotonic (immune to wall-clock
@@ -418,6 +426,56 @@ struct Renderer::Impl {
     uint16_t                      viewportY = 0;
     uint16_t                      viewportW = 0;
     uint16_t                      viewportH = 0;
+
+    struct MainPresentationState {
+        RenderPipelineDesc pipeline;
+        bool overlayEnabled=false,overlaySuppressed=false;
+        decltype(Impl::depthHazeEnabled) depthHazeEnabled;
+        decltype(Impl::ssaoEnabled) ssaoEnabled;
+        decltype(Impl::gbufferDebugEnabled) gbufferDebugEnabled;
+        decltype(Impl::decalsEnabled) decalsEnabled;
+        decltype(Impl::colorGradingEnabled) colorGradingEnabled;
+        decltype(Impl::fxaaEnabled) fxaaEnabled;
+        decltype(Impl::smaaEnabled) smaaEnabled;
+        decltype(Impl::taaEnabled) taaEnabled;
+        decltype(Impl::mainView) mainView;
+        decltype(Impl::mainProjection) mainProjection;
+        decltype(Impl::mainCameraValid) mainCameraValid;
+        decltype(Impl::mainCameraPosition) mainCameraPosition;
+        decltype(Impl::performance) performance;
+        decltype(Impl::sceneLights) sceneLights;
+        decltype(Impl::skySource) skySource;
+        decltype(Impl::skyCubeTexture) skyCubeTexture;
+        decltype(Impl::ambientStrength) ambientStrength;
+        decltype(Impl::lensEffects) lensEffects;
+        decltype(Impl::postProcessBloomStrength) postProcessBloomStrength;
+        decltype(Impl::postProcessBloomThreshold) postProcessBloomThreshold;
+        decltype(Impl::postProcessBloomSoftKnee) postProcessBloomSoftKnee;
+        decltype(Impl::postProcessExposure) postProcessExposure;
+        decltype(Impl::autoExposureEnabled) autoExposureEnabled;
+        decltype(Impl::autoExposureKey) autoExposureKey;
+        decltype(Impl::autoExposureMinimum) autoExposureMinimum;
+        decltype(Impl::autoExposureMaximum) autoExposureMaximum;
+        decltype(Impl::autoExposureBrightenSpeed) autoExposureBrightenSpeed;
+        decltype(Impl::autoExposureDarkenSpeed) autoExposureDarkenSpeed;
+        decltype(Impl::postProcessGamma) postProcessGamma;
+        decltype(Impl::postProcessTonemapMode) postProcessTonemapMode;
+        decltype(Impl::volumetric) volumetric;
+        decltype(Impl::densityField) densityField;
+        decltype(Impl::requestedVolumetricLocal) requestedVolumetricLocal;
+        decltype(Impl::ssr) ssr;
+        decltype(Impl::screenIndirect) screenIndirect;
+        decltype(Impl::wireframeEnabled) wireframeEnabled;
+        decltype(Impl::viewportOrientationAxisEnabled) viewportOrientationAxisEnabled;
+        decltype(Impl::editorTransformGizmo) editorTransformGizmo;
+        decltype(Impl::editorGrid2D) editorGrid2D;
+        decltype(Impl::editorDebugLines) editorDebugLines;
+        decltype(Impl::editorDebugDepthTest) editorDebugDepthTest;
+        decltype(Impl::editorSelectionOutline2D) editorSelectionOutline2D;
+        decltype(Impl::hasSimulationTime) hasSimulationTime;
+        decltype(Impl::simulationTimeSeconds) simulationTimeSeconds;
+    };
+    std::unique_ptr<MainPresentationState> mainPresentationState;
 
     // -1 = normal (3D on view 0). >=0 = composite scene view (usually 1).
     int                           compositeSceneViewId = -1;
@@ -687,6 +745,8 @@ void Renderer::shutdown()
     // Disable any copied registration before the first GPU teardown. This
     // preserves owner-thread lifetime only; concurrent destruction is unsupported.
     if (_impl->aliveToken) _impl->aliveToken->store(false, std::memory_order_release);
+    _impl->mainPresentationState.reset();
+    _impl->densityField={};_impl->volumetric.local=_impl->requestedVolumetricLocal;
     for (auto& [id, view] : _impl->runtimeViews) {
         (void)id;
         if (_impl->adapter.isInitialized())
@@ -729,12 +789,20 @@ void Renderer::shutdown()
 
     ayt::resource::ResourceManager::instance().clearRefreshObserver(_impl->resourceRefreshObserverToken);
     _impl->resourceRefreshObserverToken = 0;
+    if(_impl->gpuPoints)_impl->gpuPoints->releaseBeforeDeviceShutdown();
     _impl->resources.shutdown();
     _impl->shaderPool.shutdown();
     _impl->adapter.shutdown();
+    if(_impl->gpuPoints){_impl->gpuPoints->afterDeviceShutdown();_impl->gpuPoints.reset();}
     _impl->screenshotCaptures.advance(true);
     _impl->pendingScreenshotBase.clear();
     _impl->shaderPoolReady = false;
+}
+
+std::shared_ptr<detail::GpuPointState> Renderer::createGpuPointState(std::string* error) {
+    if(!_impl||!_impl->adapter.isInitialized()){if(error)*error="Renderer is not initialized";return {};}
+    if(!_impl->gpuPoints)_impl->gpuPoints=detail::GpuPointContext::create(_impl->adapter,_impl->aliveToken,error);
+    return _impl->gpuPoints?_impl->gpuPoints->createState(error):nullptr;
 }
 
 bool Renderer::isInitialized() const noexcept
@@ -760,6 +828,7 @@ void Renderer::beginFrame(const ClearDesc& clear)
     _impl->sceneClear.g = finiteChannel(clear.g);
     _impl->sceneClear.b = finiteChannel(clear.b);
     _impl->sceneClear.a = finiteChannel(clear.a);
+    if(_impl->gpuPoints)_impl->gpuPoints->poll();
     _impl->cameraViewBatchSubmitted = false; _impl->cameraFrameOpen = true;
     _impl->compositeSceneViewId = -1;
     _impl->pipeline.resetFrameStats();
@@ -820,6 +889,12 @@ void Renderer::render(const RenderScene& scene)
 
     _impl->lastSceneItems = static_cast<uint32_t>(scene.items().size());
     _impl->lastDrawCalls  = 0;
+
+    const bool performanceEnabled = lightingEnabled() && !_impl->performance.lights.empty();
+    const SceneLights* effectiveLights = performanceEnabled ? &_impl->performance.shadowSources : sceneLights;
+    _impl->performance.stats.transparentDraws = _impl->performance.stats.transparentBudgetSkipped = _impl->performance.stats.transparentUnsupportedMaterials = 0;
+    _impl->performance.stats.surfaceDraws = _impl->performance.stats.volumeDraws = 0;
+    _impl->performance.stats.culledLights = _impl->performance.stats.surfaceBudgetSkipped = _impl->performance.stats.volumeBudgetSkipped = 0;
 
     detail::TAAPass* taaPassPtr = nullptr;
     bool taaPrepared = false;
@@ -920,6 +995,7 @@ void Renderer::render(const RenderScene& scene)
     // R5+ — host-configured post-process knobs. Rendered every frame
     // even when the value hasn't changed because the FrameContext is
     // stack-local; cost is negligible (3 floats + 1 byte enum).
+    frame.lensEffects = sanitizeLensEffects(_impl->lensEffects);
     frame.bloomStrength    = detail::sanitizeBloomStrength(
         _impl->postProcessBloomStrength);
     frame.exposure         = detail::sanitizePostProcessExposure(
@@ -930,8 +1006,10 @@ void Renderer::render(const RenderScene& scene)
     // §S4d — DepthHaze knobs (Editor / host). Defaults keep haze off.
     frame.hazeEnabled      = _impl->depthHazeEnabled;
     frame.ssr = _impl->ssr;
+    frame.screenIndirect = _impl->screenIndirect;
     frame.volumetric = _impl->volumetric;
     frame.clouds = _impl->clouds;
+    frame.densityField = _impl->densityField;
     frame.decalsEnabled = _impl->decalsEnabled;
     frame.hazeStrength     = detail::sanitizeDepthHazeStrength(
         _impl->depthHazeStrength);
@@ -1229,7 +1307,7 @@ void Renderer::render(const RenderScene& scene)
     // pre-C single key-light caster (pre-C byte-equivalent).
     if (detail::ShadowPass* shadow =
             _impl->pipeline.findPass<detail::ShadowPass>()) {
-        shadow->setSceneLightsRef(sceneLights,scene.sceneLights()==nullptr);
+        shadow->setSceneLightsRef(effectiveLights,!performanceEnabled && scene.sceneLights()==nullptr);
     }
 
     // Scene projection may carry TAA jitter, but the post-Present editor
@@ -1294,7 +1372,7 @@ void Renderer::render(const RenderScene& scene)
         fgW,
         fgH) && backendReady;
     const detail::BloomStageState bloomStages = detail::selectBloomStages(
-        frame.bloomStrength,
+        lensEffectsActive(frame.lensEffects)?std::max(frame.bloomStrength,1.f):frame.bloomStrength,
         bloomExtractPassPtr != nullptr,
         bloomExtractPassPtr != nullptr && bloomExtractPassPtr->isEnabled(),
         bloomBlurPassPtr != nullptr,
@@ -1353,7 +1431,8 @@ void Renderer::render(const RenderScene& scene)
     }
     graphInput.ssao = ssaoPassEnabled;
     const auto* ssrPass = _impl->pipeline.findPass<detail::SsrPass>();
-    graphInput.ssr = frame.ssr.enabled && frame.ssr.strength > 0
+    graphInput.ssr = ((frame.ssr.enabled && frame.ssr.strength > 0)
+        || (frame.screenIndirect.enabled && frame.screenIndirect.strength > 0))
         && ssrPass && ssrPass->isEnabled() && gbufferPassPtr && lightingPassPtr;
     if (graphInput.ssr && !detail::BGFXAdapter::isValid(graphInput.gbuffer)) {
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
@@ -1376,10 +1455,18 @@ void Renderer::render(const RenderScene& scene)
             graphInput.gbuffer = decalPass->output(visibleDecals.count);
         }
     }
-    const auto* fogPass = _impl->pipeline.findPass<detail::VolumetricPass>();
+    auto* fogPass = _impl->pipeline.findPass<detail::VolumetricPass>();
     graphInput.volumetric = backendReady && frame.volumetric.enabled && frame.volumetric.density > 0
         && fogPass && fogPass->isEnabled() && gbufferPassPtr && gbufferPassPtr->isEnabled()
         && lightingPassPtr && lightingPassPtr->isEnabled();
+    graphInput.volumetricDownsample = frame.volumetric.downsample;
+    graphInput.volumetricGrid = detail::runtimeVolumetricGridLayout(frame.volumetric,fgW,fgH);
+    if(fogPass){
+        const auto layout=graphInput.volumetric?graphInput.volumetricGrid:detail::VolumetricGridLayout{};
+        fogPass->prepareHistory(_impl->adapter,frame.volumetric,layout);
+        graphInput.volumetricHistoryRead=fogPass->historyRead();
+        graphInput.volumetricHistoryWrite=fogPass->historyWrite();
+    }
     if (graphInput.volumetric && !detail::BGFXAdapter::isValid(graphInput.gbuffer))
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
     const auto* cloudPass = _impl->pipeline.findPass<detail::CloudPass>();
@@ -1481,7 +1568,7 @@ void Renderer::render(const RenderScene& scene)
         // nullptr = B5 single-light path stays active (no behavior
         // change). count == 0 falls through to B5 fallback at
         // LightingPass::execute() side too.
-        sceneLights,
+        effectiveLights,
         // §Skybox0 (2026-07-23) — host-supplied Skybox DataSource
         // mount. Borrowed pointer from Renderer::setSkySource.
         // nullptr = no sky mounted (Forward path / SkySource not
@@ -1504,7 +1591,7 @@ void Renderer::render(const RenderScene& scene)
         // pre-C single-key-light fallback + LightingPass
         // perLightShadowCount=0 upload ⇒ byte-equivalent pre-C
         // key-only shadow multiply on lights[0].
-        sceneLights,
+        effectiveLights,
         // Bloom producer latches; physical textures resolve through FG.
         bloomExtractPassPtr,
         bloomBlurPassPtr,
@@ -1526,6 +1613,7 @@ void Renderer::render(const RenderScene& scene)
     ctx.instancingStats = &instancingStats;
     ctx.decals = &_impl->decals;
     ctx.decalVisibility = &visibleDecals;
+    ctx.performanceLights = performanceEnabled ? &_impl->performance : nullptr;
 
     static uint32_t s_compositeLog = 0;
     if (s_compositeLog < 3) {
@@ -1567,6 +1655,10 @@ void Renderer::render(const RenderScene& scene)
     detail::configureRenderViewOrder(_impl->adapter);
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
     if(feedbackPass)feedbackPass->finishFrame(&_impl->resourceBlackboard);
+    if (_impl->resourceBlackboard.findProduced(detail::BlackboardResourceId::VolumetricColor)) {
+        if (const auto* volume=_impl->pipeline.findPass<detail::VolumetricPass>())
+            _impl->debugOverlay.setVolumetricStats(volume->stats());
+    }
     // Commit temporal state as a pair. A skipped/failed resolve must not
     // leave color at t-2 while motion advances to t-1; a failed motion pass
     // must likewise never reuse its old object snapshots on the next frame.
@@ -1733,6 +1825,11 @@ uint16_t detail::CameraViewsTestAccess::framebuffer(const Renderer& renderer, Ca
     const auto found = renderer._impl->cameraOutputs.find(output.id);
     return found != renderer._impl->cameraOutputs.end() ? found->second.framebuffer.idx : UINT16_MAX;
 }
+uint16_t detail::CameraViewsTestAccess::finalColor(Renderer& renderer) noexcept {
+    if(!renderer._impl||!renderer.isInitialized())return UINT16_MAX;
+    const auto fbo=renderer._impl->frameGraph.resolve(detail::FgResourceId::FinalLdrColor);
+    return renderer._impl->adapter.getFboAttachment(fbo,0).idx;
+}
 detail::BGFXAdapter* detail::CameraViewsTestAccess::adapter(Renderer& renderer) noexcept {
     return renderer.bgfxAdapter();
 }
@@ -1802,7 +1899,11 @@ bool Renderer::renderViews(std::span<const CameraRenderView> views) {
             view.x,view.y,view.width,view.height,frame,firstView,fbo};
         ctx.drawLists = &lists;
         state->opaque.execute(ctx);
+        _impl->adapter.setViewFrameBuffer(firstView,fbo);
+        _impl->adapter.setViewRect(firstView,view.output.id?0:view.x,view.output.id?0:view.y,view.width,view.height);
         _impl->adapter.setViewClearRaw(firstView,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,view.clearRgba,1.f,0);
+        // Empty opaque scenes still execute the camera's requested clear.
+        _impl->adapter.touch(firstView);
         ctx.viewId = uint8_t(firstView + 1);
         state->transparent.execute(ctx);
         detail::Forward2DOpaquePass overlay(uint8_t(firstView + 2));
@@ -1943,6 +2044,7 @@ void Renderer::endFrame()
                                    _impl->viewportX, _impl->viewportY,
                                    _impl->viewportW, _impl->viewportH);
     _impl->adapter.endFrame();
+    if(_impl->gpuPoints)_impl->gpuPoints->poll();
     _impl->debugOverlay.onFrameSubmitted();
     _impl->compositeSceneViewId = -1;
 
@@ -2313,6 +2415,32 @@ void Renderer::setSceneLights(const ayt::render::SceneLights* lights)
     _impl->sceneLights = lights;
 }
 
+bool Renderer::setPerformanceLights(std::span<const PerformanceLight> lights, PerformanceLightBudget budget, std::string* error)
+{
+    if(!_impl)return false;
+    PerformanceLighting next;
+    if(!next.assign(lights,budget,error))return false;
+    for(const auto& light:next.lights)if(light.pattern==LightPattern::Texture){
+        const auto found=_impl->resources.textures().find(light.goboTexture.id);
+        if(found==_impl->resources.textures().end()
+            || !detail::BGFXAdapter::isValid(found->second.handle)){
+            if(error)*error="Texture Gobo must be a live Renderer-owned texture";
+            return false;
+        }
+    }
+    for(const auto& light:next.lights)if(light.iesProfile){
+        const auto found=_impl->resources.textures().find(light.iesTexture.id);
+        if(found==_impl->resources.textures().end()||!detail::BGFXAdapter::isValid(found->second.handle)){if(error)*error="IES atlas must be a live Renderer-owned texture";return false;}
+    }
+    _impl->performance=std::move(next);
+    if(error)error->clear();
+    return true;
+}
+PerformanceLightStats Renderer::performanceLightStats() const noexcept
+{
+    return _impl ? _impl->performance.stats : PerformanceLightStats{};
+}
+
 // §Skybox0 (2026-07-23) — public setter for the host-supplied
 // Skybox DataSource. Borrowed pointer pattern (mirror
 // setSceneLights above): lifetime is the host's responsibility,
@@ -2521,6 +2649,8 @@ bool Renderer::lightingEnabled() const noexcept
     return lighting != nullptr && lighting->isEnabled();
 }
 
+void Renderer::setLensEffects(const LensEffectsSettings& settings){if(_impl)_impl->lensEffects=sanitizeLensEffects(settings);}
+LensEffectsSettings Renderer::lensEffects() const noexcept {return _impl?_impl->lensEffects:LensEffectsSettings{};}
 void Renderer::setPostProcessBloomStrength(float strength)
 {
     if (!_impl) {
@@ -2793,9 +2923,128 @@ ColorGradingPreset Renderer::colorGradingPreset() const noexcept
 }
 
 // SSR host settings survive pipeline replacement, but never store GPU handles.
+void Renderer::beginMainPresentation() {
+    if (!_impl || _impl->mainPresentationState) return;
+    auto saved=std::make_unique<Impl::MainPresentationState>();
+    saved->pipeline=_impl->pipelineDesc;
+    saved->overlayEnabled=_impl->debugOverlay.isEnabled();
+    saved->overlaySuppressed=_impl->debugOverlay.isSuppressed();
+    saved->depthHazeEnabled=_impl->depthHazeEnabled;
+    saved->ssaoEnabled=_impl->ssaoEnabled;
+    saved->gbufferDebugEnabled=_impl->gbufferDebugEnabled;
+    saved->decalsEnabled=_impl->decalsEnabled;
+    saved->colorGradingEnabled=_impl->colorGradingEnabled;
+    saved->fxaaEnabled=_impl->fxaaEnabled;
+    saved->smaaEnabled=_impl->smaaEnabled;
+    saved->taaEnabled=_impl->taaEnabled;
+    saved->mainView=_impl->mainView;
+    saved->mainProjection=_impl->mainProjection;
+    saved->mainCameraValid=_impl->mainCameraValid;
+    saved->mainCameraPosition=_impl->mainCameraPosition;
+    saved->performance=_impl->performance;
+    saved->sceneLights=_impl->sceneLights;
+    saved->skySource=_impl->skySource;
+    saved->skyCubeTexture=_impl->skyCubeTexture;
+    saved->ambientStrength=_impl->ambientStrength;
+    saved->lensEffects=_impl->lensEffects;
+    saved->postProcessBloomStrength=_impl->postProcessBloomStrength;
+    saved->postProcessBloomThreshold=_impl->postProcessBloomThreshold;
+    saved->postProcessBloomSoftKnee=_impl->postProcessBloomSoftKnee;
+    saved->postProcessExposure=_impl->postProcessExposure;
+    saved->autoExposureEnabled=_impl->autoExposureEnabled;
+    saved->autoExposureKey=_impl->autoExposureKey;
+    saved->autoExposureMinimum=_impl->autoExposureMinimum;
+    saved->autoExposureMaximum=_impl->autoExposureMaximum;
+    saved->autoExposureBrightenSpeed=_impl->autoExposureBrightenSpeed;
+    saved->autoExposureDarkenSpeed=_impl->autoExposureDarkenSpeed;
+    saved->postProcessGamma=_impl->postProcessGamma;
+    saved->postProcessTonemapMode=_impl->postProcessTonemapMode;
+    saved->volumetric=_impl->volumetric;
+    saved->densityField=_impl->densityField;
+    saved->requestedVolumetricLocal=_impl->requestedVolumetricLocal;
+    saved->ssr=_impl->ssr;
+    saved->screenIndirect=_impl->screenIndirect;
+    saved->wireframeEnabled=_impl->wireframeEnabled;
+    saved->viewportOrientationAxisEnabled=_impl->viewportOrientationAxisEnabled;
+    saved->editorTransformGizmo=_impl->editorTransformGizmo;
+    saved->editorGrid2D=_impl->editorGrid2D;
+    saved->editorDebugLines=_impl->editorDebugLines;
+    saved->editorDebugDepthTest=_impl->editorDebugDepthTest;
+    saved->editorSelectionOutline2D=_impl->editorSelectionOutline2D;
+    saved->hasSimulationTime=_impl->hasSimulationTime;
+    saved->simulationTimeSeconds=_impl->simulationTimeSeconds;
+    _impl->mainPresentationState=std::move(saved);
+    _impl->invalidateTemporalResources(detail::ResourceInvalidationReason::FeatureDisabled);
+}
+void Renderer::endMainPresentation() {
+    if (!_impl || !_impl->mainPresentationState) return;
+    auto saved=std::move(_impl->mainPresentationState);
+    _impl->depthHazeEnabled=saved->depthHazeEnabled;
+    _impl->ssaoEnabled=saved->ssaoEnabled;
+    _impl->gbufferDebugEnabled=saved->gbufferDebugEnabled;
+    _impl->decalsEnabled=saved->decalsEnabled;
+    _impl->colorGradingEnabled=saved->colorGradingEnabled;
+    _impl->fxaaEnabled=saved->fxaaEnabled;
+    _impl->smaaEnabled=saved->smaaEnabled;
+    _impl->taaEnabled=saved->taaEnabled;
+    _impl->mainView=std::move(saved->mainView);
+    _impl->mainProjection=std::move(saved->mainProjection);
+    _impl->mainCameraValid=std::move(saved->mainCameraValid);
+    _impl->mainCameraPosition=std::move(saved->mainCameraPosition);
+    _impl->performance=std::move(saved->performance);
+    _impl->sceneLights=std::move(saved->sceneLights);
+    _impl->skySource=std::move(saved->skySource);
+    _impl->skyCubeTexture=std::move(saved->skyCubeTexture);
+    _impl->ambientStrength=std::move(saved->ambientStrength);
+    _impl->lensEffects=std::move(saved->lensEffects);
+    _impl->postProcessBloomStrength=std::move(saved->postProcessBloomStrength);
+    _impl->postProcessBloomThreshold=std::move(saved->postProcessBloomThreshold);
+    _impl->postProcessBloomSoftKnee=std::move(saved->postProcessBloomSoftKnee);
+    _impl->postProcessExposure=std::move(saved->postProcessExposure);
+    _impl->autoExposureEnabled=std::move(saved->autoExposureEnabled);
+    _impl->autoExposureKey=std::move(saved->autoExposureKey);
+    _impl->autoExposureMinimum=std::move(saved->autoExposureMinimum);
+    _impl->autoExposureMaximum=std::move(saved->autoExposureMaximum);
+    _impl->autoExposureBrightenSpeed=std::move(saved->autoExposureBrightenSpeed);
+    _impl->autoExposureDarkenSpeed=std::move(saved->autoExposureDarkenSpeed);
+    _impl->postProcessGamma=std::move(saved->postProcessGamma);
+    _impl->postProcessTonemapMode=std::move(saved->postProcessTonemapMode);
+    _impl->volumetric=std::move(saved->volumetric);
+    _impl->densityField=std::move(saved->densityField);
+    _impl->requestedVolumetricLocal=std::move(saved->requestedVolumetricLocal);
+    _impl->ssr=std::move(saved->ssr);
+    _impl->screenIndirect=std::move(saved->screenIndirect);
+    _impl->wireframeEnabled=std::move(saved->wireframeEnabled);
+    _impl->viewportOrientationAxisEnabled=std::move(saved->viewportOrientationAxisEnabled);
+    _impl->editorTransformGizmo=std::move(saved->editorTransformGizmo);
+    _impl->editorGrid2D=std::move(saved->editorGrid2D);
+    _impl->editorDebugLines=std::move(saved->editorDebugLines);
+    _impl->editorDebugDepthTest=std::move(saved->editorDebugDepthTest);
+    _impl->editorSelectionOutline2D=std::move(saved->editorSelectionOutline2D);
+    _impl->hasSimulationTime=std::move(saved->hasSimulationTime);
+    _impl->simulationTimeSeconds=std::move(saved->simulationTimeSeconds);
+    _impl->debugOverlay.setEnabled(saved->overlayEnabled);
+    _impl->debugOverlay.setSuppressed(saved->overlaySuppressed);
+    _impl->applyPipelineDesc(saved->pipeline);
+    setSkySourceCube(_impl->skyCubeTexture);
+    _impl->applyEditorOverlayKnobs();
+    _impl->invalidateTemporalResources(detail::ResourceInvalidationReason::FeatureDisabled);
+}
+
 void Renderer::setVolumetricSettings(const VolumetricSettings& settings) {
     // Independent of decal authoring.
-    if (_impl) _impl->volumetric = sanitizeVolumetricSettings(settings);
+    if (_impl){auto value=sanitizeVolumetricSettings(settings);_impl->requestedVolumetricLocal=value.local;if(_impl->densityField.profile)value.local=true;_impl->volumetric=value;}
+}
+bool Renderer::setVolumetricDensityField(VolumetricDensityBinding binding,std::string* error){
+    if(!_impl)return false;
+    if(bool(binding.profile)!=binding.texture.isValid()){if(error)*error="Density grid requires a matching profile and atlas";return false;}
+    if(binding.profile){const auto found=_impl->resources.textures().find(binding.texture.id);if(found==_impl->resources.textures().end()||!detail::BGFXAdapter::isValid(found->second.handle)){if(error)*error="Density atlas must be live and Renderer-owned";return false;}}
+    if(binding.profile!=_impl->densityField.profile||binding.texture.id!=_impl->densityField.texture.id)resetVolumetricHistory();
+    _impl->densityField=std::move(binding);_impl->volumetric.local=_impl->densityField.profile?true:_impl->requestedVolumetricLocal;if(error)error->clear();return true;
+}
+VolumetricDensityBinding Renderer::volumetricDensityField() const noexcept {return _impl?_impl->densityField:VolumetricDensityBinding{};}
+void Renderer::resetVolumetricHistory() {
+    if(_impl)if(auto* pass=_impl->pipeline.findPass<detail::VolumetricPass>())pass->invalidateHistory();
 }
 VolumetricSettings Renderer::volumetricSettings() const noexcept {
     return _impl ? _impl->volumetric : VolumetricSettings{};
@@ -2823,6 +3072,13 @@ void Renderer::setSsrSettings(const SsrSettings& settings) {
 }
 SsrSettings Renderer::ssrSettings() const noexcept {
     return _impl ? _impl->ssr : SsrSettings{};
+}
+
+void Renderer::setScreenSpaceIndirectSettings(const ScreenSpaceIndirectSettings& settings) {
+    if (_impl) _impl->screenIndirect = sanitizeScreenSpaceIndirect(settings);
+}
+ScreenSpaceIndirectSettings Renderer::screenSpaceIndirectSettings() const noexcept {
+    return _impl ? _impl->screenIndirect : ScreenSpaceIndirectSettings{};
 }
 
 void Renderer::setDepthHazeEnabled(bool enabled)
@@ -3060,6 +3316,7 @@ void Renderer::destroyTexture(TextureHandle& texture)
         texture = {};
         return;
     }
+    if(_impl->densityField.profile&&_impl->densityField.texture.id==texture.id){_impl->densityField={};_impl->volumetric.local=_impl->requestedVolumetricLocal;resetVolumetricHistory();}
     _impl->resources.destroyTexture(texture);
 }
 
@@ -3159,6 +3416,8 @@ Renderer::editorSelectionOutline2DState() const noexcept
                  : EditorSelectionOutline2DState{};
 }
 
+/// Enable the text HUD and backend per-view GPU timers together. Suppression hides
+/// only text; profiled RenderFrameStats remain available. Default disabled.
 void Renderer::setDebugOverlayEnabled(bool enabled)
 {
     if (_impl) {

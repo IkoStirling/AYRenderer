@@ -442,6 +442,7 @@ bool RendererSubSystem::initialize()
 void RendererSubSystem::update(float /*deltaTime*/)
 
 {
+    if (_mainPresentation) return;
     if (!_cameraViewports.empty()) {
         buildCameraViewPackets();
         _scenePacketValid.store(true,std::memory_order_release);
@@ -476,6 +477,7 @@ void RendererSubSystem::fixedUpdate(float /*fixedDeltaTime*/)
 void RendererSubSystem::shutdown()
 
 {
+    clearMainPresentationForOwner(_mainPresentationOwner);
     _viewPackets.clear();
     _cameraViewports.clear();
 
@@ -550,6 +552,29 @@ void RendererSubSystem::setViewportRect(uint16_t x, uint16_t y, uint16_t width, 
 }
 
 
+
+void RendererSubSystem::setMainPresentationForOwner(const void* owner, MainPresentationCallback callback)
+{
+    if (_insideMainPresentation || !owner || !callback) return;
+    if (_mainPresentationOwner != owner) {
+        clearMainPresentationForOwner(_mainPresentationOwner);
+        _presentationViewportX=_viewportX;_presentationViewportY=_viewportY;
+        _presentationViewportW=_viewportW;_presentationViewportH=_viewportH;
+        _mainPresentationOwner = owner;
+    }
+    _mainPresentation = std::move(callback);
+    _scenePacketValid.store(false, std::memory_order_release);
+}
+void RendererSubSystem::clearMainPresentationForOwner(const void* owner)
+{
+    if (_insideMainPresentation || !owner || owner != _mainPresentationOwner) return;
+    _mainPresentation = {};
+    _mainPresentationOwner = nullptr;
+    _scene.clear();
+    _scenePacketValid.store(false, std::memory_order_release);
+    _renderer.endMainPresentation();
+    setViewportRect(_presentationViewportX,_presentationViewportY,_presentationViewportW,_presentationViewportH);
+}
 
 void RendererSubSystem::setSceneBuilder(SceneBuildCallback callback)
 {
@@ -903,6 +928,22 @@ void RendererSubSystem::applySceneCameraOverrides(RenderScene& scene)
 
 void RendererSubSystem::renderScenePass()
 {
+    if (_mainPresentation) {
+        _renderer.beginMainPresentation();
+        _scene.clear();
+        _insideMainPresentation=true;
+        try {
+            _mainPresentation(_renderer, _scene);
+            _renderer.render(_scene);
+        } catch (...) {
+            _insideMainPresentation=false;
+            clearMainPresentationForOwner(_mainPresentationOwner);
+            throw;
+        }
+        _insideMainPresentation=false;
+        _scenePacketValid.store(false, std::memory_order_release);
+        return;
+    }
     if (!_cameraViewports.empty()) {
         if (!_scenePacketValid.load(std::memory_order_acquire)) buildCameraViewPackets();
         std::vector<CameraRenderView> views;

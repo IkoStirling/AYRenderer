@@ -37,6 +37,7 @@
 
 #include "AYRenderer/RenderScene.h"
 #include "AYRenderer/DeferredDecal.h"
+#include "AYRenderer/PerformanceLighting.h"
 #include "AYShader/ShaderResourcePool.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/FrameContext.h"
@@ -376,6 +377,7 @@ struct PassExecContext {
     // Renderer plans once before FrameGraph import. Borrowed until synchronous
     // dispatch completes; direct pass hosts may omit this and compute locally.
     const DeferredDecalVisibility* decalVisibility = nullptr;
+    PerformanceLighting* performanceLights = nullptr; // Renderer-owned packet; only counters mutate during dispatch
 
 };
 

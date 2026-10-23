@@ -6,6 +6,7 @@ set(AYRENDERER_TEST_Contracts_SOURCES
     Test_TextureStorageAccounting.cpp
     Test_MeshSubmissionInfo.cpp
     Test_PbrSurface.cpp
+    Test_PerformanceLighting.cpp
     Test_Ssr.cpp
     Test_Volumetric.cpp
     Test_Clouds.cpp

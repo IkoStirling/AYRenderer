@@ -1,5 +1,21 @@
 # AYRenderer 测试维护
 
+## main合并门禁（2026-10-23）
+
+合并灯光演出与main的云/艺术后处理、资源观察和设备清理实现。固定view避免冲突：
+既有50..54保持，点计算/读回55..59，体积240..242，完整顺序75项；UI容量132。
+FrameGraph旧0..36不变，追加37..40，Count41；原有数值/顺序断言同步保留精确检查，
+Deferred的Clouds占位同步到28项。标准包78变体，GPU点计算另有6个构建时嵌入阶段。
+
+本机Debug定向实际通过：Contracts216/3566、SceneMaterial108/12390、LightingShadow138/1517、
+PostProcess269/1797、FrameGraph41/159、UI120/461、Shader12/220（用例/断言），合计904项，
+均无跳过。D3D11与D3D12分别运行EmissivePointsGpu2项231断言和FroxelVolumeGpu1项46断言，
+全部通过，无跳过；这不是完整GPU矩阵。NavigationPlayground的core/worksite/host/render四项
+也实际通过，含3次交付、6份维修、抢占恢复与真实GPU截图落盘。
+主仓SDK doctor149能力、57模块、127检索、707入口，0错误/0警告。
+日志与JSON在C:/Users/lenovo/.codex/tmp/main-merge/validation。未执行Release、跨平台、
+完整Renderer全部分区、人工桌面或新的性能基准，不把分支原有验收重写为本次结果。
+
 ## 云团结构与外部atlas（2026-10-23）
 
 本轮Contracts/环境桥2/2通过（1.85s，Contracts171例，桥24检查），覆盖3种atlas布局、
@@ -632,6 +648,37 @@ SDK doctor：123能力/53模块/83搜索用例/519已文档化入口，0错误0�
 额外观察：既有 `validDeferredDecalTransform` 对45°Z旋转加scale(4,.25,1)的正交正尺度
 矩阵返回false；首轮旋转fixture因此未满足准入前提。最终使用既有校验接受的30°旋转
 验证剔除；该45°准入问题需单独修复，本次未修改AYMath或投影体准入算法。
+## 2026-10-19 可见发光口
+
+FixtureEmitterTests新增4项，Contracts总153/153、1025断言通过。FixtureEmittersGpu在
+D3D11/D3D12各2/2、59断言，无跳过；使用主Deferred最终LDR回读验证方向、完整/部分
+遮挡、烟雾与Bloom。正面/侧面/背面/完全遮挡/半遮挡红通道总量为
+28560/630/0/0/14280，不放宽半遮挡阈值。极小口径、源HDR上限后的介质衰减与
+256灯预算另由CPU覆盖。Shader12/12、208断言，68变体离线与无编译器加载通过。
+清单1003项/10分区无遗漏/重复。设备测试需显式AY_EMITTER_GPU_TEST=d3d11或d3d12，
+默认跳过，不冒充硬件验收。当前压力性能和已知近似见项目灯光系统文档§8；未人工查看图片。
+日志out/emitter-gpu-d3d11-verified.log、out/emitter-gpu-d3d12-verified.log、out/emitter-contracts-full.log。
+
+## 2026-10-18 聚合Point与光通变焦
+
+Contracts149/149、964断言；Shader12/12、208断言通过，68生产变体重新烘焙并通过
+无编译器加载测试。D3D11 GPU44项中41通过、3项既有独占设备夹具跳过，17366断言通过；
+D3D12 Phoskia31/31、11027断言通过。新增CPU覆盖RGB/中心、乱序、预算/相同亮度、
+65536点上限及非法值原子失败；GPU覆盖实际聚合器输出到表面Pass和表面/体积光通强度。
+Renderer清单997项/10分区无遗漏或重复。性能及后续限制见项目灯光系统文档§7，
+本轮未做人工图片验收。日志：out/lighting-stage8-contracts-final.log、
+out/lighting-stage8-shaders.log、out/lighting-stage8-gpu-d3d11.log、out/lighting-stage8-gpu-d3d12.log。
+
+## 2026-10-16 聚光灯数组 / 发光点演出
+
+Windows Debug：合入主线诊断显示后，renderer-full非GPU9组通过（124.72s）。
+D3D11/D3D12的AYRenderer_PhoskiaGpu各27用例9862断言通过，无跳过。
+新增实际LightingPass双光相加、VolumetricPass消光只应用一次与双光散射、scissor不泄漏；
+透视Spot按独立相机基向量和CPU积分逐像素核对，覆盖AYMath通用逆矩阵修复。
+截图回归覆盖异步TGA晚到后转换PNG；67项生产shader全部编译并在两设备路径无compiler加载。
+日志：out/lightshow-renderer-integrated.log、out/lightshow-integrated-d3d11.log、out/lightshow-integrated-d3d12.log。
+两后端耗时61.12s/93.27s，清单981用例/10完整分区，无遗漏或重复。
+实际画面与Release性能记录见[演出系统](../../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
 
 ## 2026-10-06 Deferred Decal v1 / 三项新增能力集成收尾
 
@@ -1116,3 +1163,138 @@ Windows Debug 的 10 个完整分区全部通过，清单为 909 个用例、无
 本次快速层 0.35 秒，完整层 54.88 秒；UI 组 36.08 秒，是主要剩余耗时。
 拆组优先降低定向编译和回归范围，尚未优化字体/文本夹具或解除后端资源锁。
 后续应先测量 UI 字体夹具，再细分高成本路径和评估独立临时资源，不削减断言。
+
+## 2026-10-16 聚光灯光束修复回归
+
+有限出光口、核心/外场衰减和解析光束弦段的最终验证：
+`AYRenderer_ContractsTests` 139/139、864断言；`AYRenderer_ShaderTests` 12/12、206断言，
+含67个生产shader变体的无编译器预热检查。模块清单983用例、10分区，无遗漏/重复。
+真实D3D11全GPU组40项中38通过、2项因需独占D3D11设备跳过，16672断言通过；
+最终归一化几何探针另在D3D11单项重跑，471断言通过。
+真实D3D12 `AYRenderer_PhoskiaGpu` 28/28、10333断言通过；
+其中几何探针验证锥体命中/未命中、核心、半影和近线性交点，
+透视探针以独立高密度CPU积分比较实际散射像素。
+D3D12单灯空中场景也完成实际渲染与截图。
+性能场景、配置和截图见[灯光演出系统](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
+
+
+2026-10-19: PhotometryTests cover bounded LM-63 Type C parsing, symmetry, physical units,
+color/flux normalization and Legacy preservation. FixtureEmittersGpu (AY_EMITTER_GPU_TEST=d3d11/d3d12)
+adds real main-view IES surface/volume energy and directional readback. Contracts155/1193,
+Sequence105/3871, shaders12/208 and each GPU backend3/93 passed; owned inventory1006/10.
+
+
+2026-10-19 optical stage: FixtureOpticsTests independently integrate prism angular energy,
+check focal pupil geometry and conservative lobe bounds. LightShowOpticsTests verify continuous
+focus/rotation and stepped topology. Real D3D11/D3D12 readback verifies rotating lobe locations
+and defocused image-edge contrast. Contracts157/1223, Sequence106/3888, shaders12/208,
+each GPU backend4/143, Studio optics8-frame smoke passed. SDK doctor126/53/83/542,0 errors/warnings.
+
+
+2026-10-19 camera stage: Contracts158/1236, PostProcess252/1357, Sequence106/3888;
+D3D11 and D3D12 each5/184 cover zero-Bloom glare, rotation, ghosts, source occlusion and disabled
+pixel identity. Production shaders12/208 passed in isolation after one transient shaderc process
+initialization failure in a concurrent run. SDK127/53/86/544 passed; owned inventory1011/10.
+
+
+2026-10-19 housing stage: Contracts160/1355, both D3D backends6/238 including hood/leaf
+opaque occlusion with dark-body baseline subtraction. Studio housing/shade/disabled smokes passed;
+invalid dimensions exit2. SDK127/53/87/545 passed; inventory1014/10. No production shader
+source changed; shared PBR/particle variants remain68.
+
+
+2026-10-19 PCSS stage: Contracts161/1373, LightingShadow137/1478, Sequence107/3902,
+production shaders12/208 (68 variants); each D3D backend7/306. GPU partial-shadow pixels:
+contact0, legacy hard0, large pupil350, small pupil90; volume hard/soft difference48 and bounded by
+unshadowed energy. Studio new/legacy smokes passed. SDK127/53/88/545 and inventory1016/10 passed.
+
+
+2026-10-19 transparent/SSR stage: Contracts163/1386, PostProcess252/1357, Sequence107/3902,
+Shader12/209 (69 production variants, no-compiler prewarm). Each D3D11/12 FixtureEmittersGpu9/395;
+transparent alpha increments177/89, rear60, stack208 vs207 expected, Gobo/IES and disabled identity.
+Each backend real no-IBL SSR1/27, scene1/2 -> reflected1.5010/3.0020; both legacy SSR cases passed.
+Studio glass/reflections smoke and invalid-budget rejection passed. SDK127/53/88/545 clean;
+Renderer inventory1021/10 clean. SSR remains on-screen opaque only; no refraction or indirect bounce yet.
+
+
+2026-10-19 single diffuse screen-bounce stage: Contracts164/1395, PostProcess252/1357,
+Shader12/209 (69 variants/no-compiler prewarm). Each D3D11/12 indirect real pass1/86,
+plus three existing SSR cases; unit/double1.3193/2.6387, half-strength1.1592,4ray/32step1.0938.
+Metal/black/uncovered preserve input; zero light stays zero. GI-only and combined Studio8-frame
+smokes passed, invalid5rays exit2. SDK128/53/88/547 clean, inventory1023/10 clean.
+
+
+2026-10-19 reduced volume / housing batches / profiler: Contracts166/2026, PostProcess252/1359,
+SceneMaterial79/9886, UI114/377, FrameGraph41/159, Sequence107/3902, Shader12/210(70 variants,
+no-compiler prewarm). Each D3D backend low-res extinction/checker/depth/noise1/674,
+main volume1/18, housing instance+native profiler1/17;9 prior optics/395 suite also passed per backend.
+Housing96objects: backenddraw102->9, instanced96, RGBdifference0. Volume energy110260/108787/109872.
+Full scene CPU sample45.501->20.644ms after contiguous housing meshes; downsample is still opt-in.
+Isolated64light volume GPU2.824/1.644/.611ms for divisors1/2/4. Combined45-frame Studio effects
+smoke and invalid3divisor rejection passed. SDK129/53/91/551 clean; inventory1028/10 clean.
+
+
+2026-10-19 局部雾重建补充：重建消光的4点密度规则同时应用局部盒.75..1柔边权重与动画噪声，
+修复局部设置下散射和消光密度不一致。常量全局路径保持原解析式。
+真实GPU回归新增局部/全局×静态/动画×1/2/4分辨率对照，两后端各1项1298断言通过。
+
+
+2026-10-19 froxel阶段：Contracts167/2094、PostProcess252/1361、SceneMaterial79/9965、UI114/377、
+FrameGraph41/159，Shader12/212（72生产变体及无编译器预热）；清单1031项/10分区。
+D3D11/D3D12各解析系数网格1项155断言、主Deferred1项46断言通过。
+主视图局部动画雾ray120311/grid120156，图案+分束91172/87868；预算与atlas resize均验证。
+45帧组合Studio预览实际160x64x32=327680cells、4表面/4体积/8透明draw，非法tile3退出2。
+SDK129能力/53模块/91检索/551符号，0错误0警告；未查看图片。
+原FixtureEmittersGpu 9项/395断言在D3D11与D3D12均通过。
+
+
+2026-10-20 独立体积历史最终验收：Contracts168/2119、PostProcess252/1363、SceneMaterial79/10042、
+UI114/377、FrameGraph41/159、Shader12/213（73生产变体和无编译器加载）通过。
+D3D11/D3D12各历史kernel1/619、主视图1/29（恒定像素差0、熄灯0、切片resize/显式重置/关闭）通过；
+历史关闭的原网格解析1/155和主视图光学/局部动画雾1/46在两后端亦通过。
+真实关闭路径发现FrameGraph仍返回未重导入的旧external句柄，已修复并加入CPU/GPU回归。
+45帧Studio玻璃/图案/PCSS/镜头组合预览实际160x64x32、327680cells、historyUsed=true，退出0。
+SDK129能力/53模块/92检索/552符号，0错误0警告；Renderer1034用例/10分区无遗漏重复。
+.lshow仍schema7，无图片查看。后续雾密度编排、点阵与Editor及频闪积分仍需继续。
+
+
+连续写入阶段验收：Renderer Contracts169/2211、Sequence108/3920通过；新增可选渲染桥成功/失败/关闭计时用例。
+点实例/CPU四边形真实GPU对照D3D11、D3D12各1项24断言通过；Renderer清单1035项/10分区，Sequence108项/3分区无遗漏重复。
+相同90帧热身后样本，CPU Presenter7.6742→3.3616ms、点批次6.6615→2.3455ms，整帧CPU20.4229→16.5421ms。
+保持10000个可见实例；GPU均值10.0923/8.3168ms仅记录同机样本，不将其单独归因于CPU写入修改或承诺帧率。
+默认未开启计时时45帧预览分段样本0/各段0，退出0。schema7未变，无图片查看。
+SDK门禁：129能力/53模块/93检索/554符号，0错误0警告。
+
+
+2026-10-20 schema8雾编排最终验收：Contracts171/2242、PostProcess252/1363、SceneMaterial79/10042、
+UI114/377、FrameGraph41/159、Sequence114/4019、Shader12/213（73生产变体/生成打包/无编译器加载）通过。
+整包循环重载测试补齐bgfx延迟释放帧边界，八轮重载/旧token失效仍验证；临时诊断快捷路径已移除。
+D3D11/D3D12各density atlas1/702、三种积分路径/双灯/resize/零场1/541通过；
+既有局部/全局×动态/静态×1/2/4重建1/1298、legacy散射/局部盒/阴影1/737、旧光学9/395在两后端均通过。
+隐藏原生Fog画板创建16³、拖动/一次Undo/Redo、物理key与编解码两后端通过；D3D12同时froxel/history=true。
+独立Core/EditorCore构建与fog/key/brush合约通过，无Renderer/音频/AssetIO。
+清单Renderer1038/10分区、Sequence114/3分区无遗漏重复；SDK129能力/53模块/95检索/561符号，0错误0警告。
+最后一次相同90样本64灯/1万点/1920x828默认无密度图配置：Presenter3.1807ms、点批次2.2276ms、
+整帧CPU15.8719/GPU9.1274ms、10000可见实例。是本机Debug样本，未据此承诺普遍帧率。
+资源格式登记与SDK写schema8、旧1..7空雾迁移同步；没有查看图片或连接演出硬件。
+
+2026-10-20 continuous-point validation: Contracts175/2321, Sequence120/4157,
+SceneMaterial79/10042, PostProcess252/1363, Shader12/213 (73 production variants) passed.
+D3D11/D3D12 coherent-perspective contact probes each1/376; legacy point surface each1/139.
+D3D12 combined Studio45 frames:1000 visible points,16 lights,froxel/history,16.67ms shutter.
+Inventory: Renderer1043/10 partitions, Sequence120/3. SDK129/53/97 search/565 symbols,0 errors/warnings.
+Debug/D3D11 1920x828,64 fixtures/10k points,16 aggregate lights,80 surface/12 volume/4 shadow,
+24 steps,90 samples: initial smooth aggregation25.8929ms; cached smooth5.3723ms.
+Final hard/smooth/contact aggregation4.1573/5.3723/7.3837ms, GPU11.4194/12.6907/15.6380ms.
+All retain10k visible instances/16 lights. Process timing varies; no universal FPS claim.
+
+2026-10-20 GPU point acceptance: D3D11/D3D12 each2 cases/231 assertions,
+all full-image CPU/GPU comparisons max difference0, including dense65536 last output,
+partial257 tiles, oblique camera, subpixel energy, black frames, budgets, path switch,
+readback-in-flight owner destruction and device shutdown. Six baked stages built.
+Contracts177/2343, SceneMaterial79/10401, UI114/377, FrameGraph41/159,
+PostProcess252/1373, Sequence120/4157, Shader12/213(73 standard variants) passed.
+Inventory1046/10 and120/3; SDK129 capabilities/53 modules/99 searches/566 symbols,0 errors/warnings.
+Same Debug/D3D11 90 samples: point CPU1.9881->.9917ms; GPU compute.7098ms.
+Frame CPU23.5177->22.0014ms, GPU12.0987->12.6955ms, a measured tradeoff.
+Async sample10000/10000; D3D12 combined sample1000/1000 with froxel history/contact/shutter passed.

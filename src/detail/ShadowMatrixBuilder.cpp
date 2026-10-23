@@ -1,4 +1,5 @@
 #include "detail/ShadowMatrixBuilder.h"
+#include "detail/SpotShadowProjection.h"
 
 #include "detail/BgfxMatrix.h"
 #include "detail/Draw2D.h"
@@ -525,19 +526,11 @@ void buildSpotShadowMatrices(
     if (std::fabs(dir.dot(up)) > 0.99f) {
         up = ayt::math::FVector3(0.0f, 0.0f, 1.0f);
     }
-    const float safeCos = std::clamp(
-        std::isfinite(coneCosOuter) ? coneCosOuter : 0.5f,
-        -0.996f, 0.9999f);
-    const float fov = std::clamp(2.0f * std::acos(safeCos),
-                                 kPi / 180.0f,
-                                 kPi * (175.0f / 180.0f));
-    const float farZ = std::max(
-        std::isfinite(range) ? range : 1.0f, 0.1f);
-    const float nearZ = std::min(std::max(farZ * 0.01f, 0.025f), farZ * 0.5f);
+    const auto parameters=spotShadowProjection(coneCosOuter,range);
     const ayt::math::Float4x4 view = ayt::math::lh::lookAt(
         position, position + dir, up);
     const ayt::math::Float4x4 projection = ayt::math::lh::perspective(
-        fov, 1.0f, nearZ, farZ);
+        parameters.fov, 1.0f, parameters.nearZ, parameters.farZ);
     writeMatrices(view, projection,
                   outView, outProj, outViewProj,
                   outViewColMajor, outProjColMajor,

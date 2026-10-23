@@ -1072,6 +1072,7 @@ void LightingPass::prepareOutput(BGFXAdapter& adapter)
 
 void LightingPass::destroyResources(BGFXAdapter& adapter)
 {
+    _performance.destroy(adapter);
     // �P5 B5 (2026-07-22) ??mirror GBufferPass::destroyResources at
     // GBufferPass.cpp:240-266. Drop the FBO, fullscreen VB/IB, and
     // reset all cached handles. W/H + buildStamp reset UNCONDITIONALLY
@@ -1829,6 +1830,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
     submitCtx.state  = 0;  // state owned by Adapter
     _program.submit(submitCtx);
 
+    const uint32_t performanceDraws = _performance.execute(ctx);
     _producedThisFrame = true;
     if (ctx.resourceBlackboard != nullptr) {
         ctx.resourceBlackboard->publishProduced(
@@ -1837,7 +1839,7 @@ uint32_t LightingPass::execute(PassExecContext& ctx)
             _lightingFbo, lightingColor, _allocatedW, _allocatedH,
             _targetGeneration);
     }
-    return 1;  // B5 ships exactly 1 draw (fullscreen triangle)
+    return 1 + performanceDraws;
 }
 
 } // namespace ayt::render::detail

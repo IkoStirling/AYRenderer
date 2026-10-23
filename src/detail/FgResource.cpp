@@ -402,8 +402,8 @@ bool FrameGraph::compile()
         if (r.isExternal || !r.live) {
             continue;
         }
-        r.physicalW = scaledDim(_viewportW, r.desc.scale);
-        r.physicalH = scaledDim(_viewportH, r.desc.scale);
+        r.physicalW = (r.desc.absoluteWidth?r.desc.absoluteWidth:scaledDim(_viewportW, r.desc.scale));
+        r.physicalH = (r.desc.absoluteHeight?r.desc.absoluteHeight:scaledDim(_viewportH, r.desc.scale));
         // Unique group per owned live RT — no auto-alias (F6.1).
         r.aliasGroup = nextAliasGroup;
         ++nextAliasGroup;
@@ -492,7 +492,9 @@ bgfx::FrameBufferHandle FrameGraph::resolve(FgResourceId id) const
     // FinalColorSource without any enabled effect Pass reading it,
     // so `live` can still be false. Never create/destroy externals.
     if (r.isExternal) {
-        return r.physical;
+        // Borrowed targets must be re-imported each frame. A disabled owner
+        // may already have destroyed the preceding frame's physical handle.
+        return r.declared ? r.physical : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
     }
     if (!r.live) {
         return bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
@@ -508,8 +510,8 @@ bgfx::FrameBufferHandle FrameGraph::resolve(FgResourceId id) const
     uint16_t w = r.physicalW;
     uint16_t h = r.physicalH;
     if (w == 0 || h == 0) {
-        w = scaledDim(_viewportW, r.desc.scale);
-        h = scaledDim(_viewportH, r.desc.scale);
+        w = (r.desc.absoluteWidth?r.desc.absoluteWidth:scaledDim(_viewportW, r.desc.scale));
+        h = (r.desc.absoluteHeight?r.desc.absoluteHeight:scaledDim(_viewportH, r.desc.scale));
         r.physicalW = w;
         r.physicalH = h;
     }

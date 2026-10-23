@@ -1,4 +1,8 @@
 #include "detail/BuiltinShaderCatalog.h"
+#include "detail/PerformanceTransparentSource.h"
+#include "detail/VolumeReconstructionSource.h"
+#include "detail/FroxelShaderSources.h"
+#include "detail/FroxelHistorySource.h"
 #include "detail/LightingPass.h"
 #include "detail/RigidInstancing.h"
 #include "detail/WorldLit2DMaterialSource.h"
@@ -9,6 +13,7 @@
 #include "AYRenderer/ShadowShaderSources.h"
 #include "AYRenderer/SSAOShaderSources.h"
 #include "AYRenderer/SsrShaderSources.h"
+#include "AYRenderer/PerformanceShaderSources.h"
 #include "AYRenderer/VolumetricShaderSources.h"
 #include "AYRenderer/CloudShaderSources.h"
 #include "AYRenderer/DeferredDecalShaderSources.h"
@@ -37,12 +42,17 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
         std::pair{"ssr",kSsrPhoskiaSource},
         std::pair{"volumetric",kVolumetricPhoskiaSource},
         std::pair{"clouds",kCloudPhoskiaSource},
+        std::pair{"volume_reconstruction",kVolumeReconstructionSource},
+        std::pair{"froxel_history",kFroxelHistorySource},
+            std::pair{"froxel_density",kFroxelDensitySource},
+        std::pair{"froxel_integration",kFroxelIntegrationSource},
         std::pair{"deferred_decal",kDeferredDecalPhoskiaSource},
         std::pair{"color_stylization",kColorStylizationPhoskiaSource},
         std::pair{"stylized_outline",kStylizedOutlinePhoskiaSource},
         std::pair{"analog_display",analogDisplayPhoskiaSource()},
         std::pair{"temporal_feedback",temporalFeedbackPhoskiaSource()},
         std::pair{"particle_unlit",kParticlePhoskiaSource},
+        std::pair{"emissive_point_instanced",kEmissivePointInstancedPhoskiaSource},
         std::pair{"bloom_extract",kBloomExtractPhoskiaSource},
         std::pair{"bloom_down",kBloomPyramidDownsamplePhoskiaSource},
         std::pair{"bloom_up",kBloomPyramidUpsamplePhoskiaSource},
@@ -56,6 +66,8 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
         std::pair{"tile_semantic_shadow",kTilemapSemanticShadowPhoskiaSource}})
         jobs.push_back(embeddedShader(name,source));
     jobs.push_back(embeddedShader("pbr_instances",rigidInstancedSource(kPbrPhoskiaSource)));
+    jobs.push_back(embeddedShader("performance_surface",kPerformanceSurfaceSource));
+    jobs.push_back(embeddedShader("performance_transparent",performanceTransparentSource()));
     jobs.push_back(embeddedShader("shadow_instances",rigidInstancedSource(kShadowCasterPhoskiaSource,true)));
     jobs.push_back(rawShader("shadow_sc",kShadowCasterVertexSc,kShadowCasterFragmentSc,kShadowCasterVaryingSc));
     jobs.push_back(rawShader("shadow_mask",kShadowMaskCasterVertexSc,kShadowMaskCasterFragmentSc,kShadowMaskCasterVaryingSc));

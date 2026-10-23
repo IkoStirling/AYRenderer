@@ -83,6 +83,10 @@ public:
 
 private:
     EditorOverlayPass _debugDraw;
+    shader::ShaderResource _performanceProgram;
+    struct VisiblePerformanceLight {size_t index;math::FVector3 center,extent;};
+    std::vector<VisiblePerformanceLight> _visiblePerformanceLights;
+    std::unordered_map<const DrawItem*,uint16_t> _performanceQuotas;
     enum class SubmitMode : uint8_t {
         TransparentSurface,
         SelectionMask,
@@ -101,7 +105,8 @@ private:
                                    uint8_t viewId,
                                    const PackedSceneLighting& lights,
                                    const PackedShadowAtlas& shadows,
-                                   SubmitMode mode);
+                                   SubmitMode mode,
+                                   GpuMaterial* materialOverride=nullptr);
 
     bgfx::FrameBufferHandle ensureDeferredCompositeFbo(
         BGFXAdapter& adapter,

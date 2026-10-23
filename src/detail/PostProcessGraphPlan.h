@@ -1,6 +1,7 @@
 #pragma once
 
 #include "detail/FgResource.h"
+#include "detail/VolumetricGrid.h"
 
 #include <bgfx/bgfx.h>
 
@@ -39,6 +40,10 @@ struct PostProcessGraphPlanInput {
     bool ssr = false;
     bool volumetric = false;
     bool clouds = false;
+    uint8_t volumetricDownsample = 1;
+    VolumetricGridLayout volumetricGrid;
+    bgfx::FrameBufferHandle volumetricHistoryRead=BGFX_INVALID_HANDLE;
+    bgfx::FrameBufferHandle volumetricHistoryWrite=BGFX_INVALID_HANDLE;
     bool decals = false;
     bgfx::FrameBufferHandle baseGBuffer = BGFX_INVALID_HANDLE;
     bool colorStylization = false;

@@ -188,10 +188,10 @@ TEST_CASE(nonzero_gpu_timings_survive_cpu_merge_and_map_to_current_passes)
     ayt::render::detail::DebugOverlay overlay;
     std::vector<ayt::render::RenderPassFrameStats> cpu;
     const char* names[] = {"Shadow", "MotionVector", "ColorGrading", "TAA",
-        "Present", "FXAA", "SMAA", "EditorOverlay", "Transparent", "Forward2DOpaque"};
+        "Present", "FXAA", "SMAA", "EditorOverlay", "Transparent", "Forward2DOpaque", "SSR", "Volumetric", "BloomBlur", "AutoExposure"};
     for (const auto* name : names) cpu.push_back({name, 3u, 1.5f, 99.0f});
     const uint16_t ids[] = {18, 25, 3, 4, 5, 245, 16, 17, 247, 248, 249,
-                           251, 252, 9, 253, 254, 246};
+                           251, 252, 9, 253, 254, 246, 32, 33, 240, 241, 242, 11, 12, 26, 27, 28, 29, 30, 31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59};
     std::vector<bgfx::ViewStats> views(std::size(ids));
     for (size_t i = 0; i < views.size(); ++i) {
         views[i].view = ids[i];
@@ -206,9 +206,10 @@ TEST_CASE(nonzero_gpu_timings_survive_cpu_merge_and_map_to_current_passes)
     gpu.numViews = static_cast<uint16_t>(views.size());
     gpu.viewStats = views.data();
     overlay.updateFrameStats(30, 10, cpu, &gpu);
-    const float expected[] = {4, 2, 2, 4, 2, 2, 6, 4, 6, 2};
+    const float expected[] = {4, 2, 2, 4, 2, 2, 6, 4, 6, 2, 2, 8, 14, 2};
     CHECK(overlay.stats().gpuFrameTimeMs == 20.0f);
     CHECK(overlay.stats().gpuFrameNumber == 7u);
+    CHECK(overlay.stats().pointGpuTimeMs==8);CHECK(overlay.stats().pointGpuReadbackTimeMs==2);
     for (size_t i = 0; i < cpu.size(); ++i) {
         CHECK(overlay.stats().passes[i].gpuTimeMs == expected[i]);
         CHECK(overlay.stats().passes[i].cpuTimeMs == 1.5f);
@@ -219,6 +220,7 @@ TEST_CASE(nonzero_gpu_timings_survive_cpu_merge_and_map_to_current_passes)
     for (const auto& pass : overlay.stats().passes) CHECK(pass.gpuTimeMs == 0.0f);
     overlay.updateFrameStats(0, 0, cpu, nullptr);
     CHECK(overlay.stats().gpuFrameTimeMs == 0.0f);
+    CHECK(overlay.stats().pointGpuTimeMs==0);CHECK(overlay.stats().pointGpuReadbackTimeMs==0);
     for (const auto& pass : overlay.stats().passes) CHECK(pass.gpuTimeMs == 0.0f);
 }
 
@@ -265,13 +267,13 @@ TEST_CASE(all_fixed_decal_volume_reflection_exposure_and_bloom_views_contribute_
 {
     ayt::render::detail::DebugOverlay overlay;
     std::vector<ayt::render::RenderPassFrameStats> cpu;
-    for(const auto* name:{"BloomBlur","AutoExposure","SSR","Volumetric","DeferredDecal","Transparent"})
+    for(const auto* name:{"BloomBlur","AutoExposure","SSR","Volumetric","DeferredDecal","Transparent","Clouds"})
         cpu.push_back({name,3u,1.5f,99.f});
-    std::vector<uint16_t> ids={11,12,26,27,28,29,30,31,32,33,9,244,253,254};
+    std::vector<uint16_t> ids={11,12,26,27,28,29,30,31,32,33,240,241,242,54,9,244,253,254};
     for(uint16_t view=34;view<=49;++view)ids.push_back(view);
     // Dynamic camera/UI/preview views and GPU particle compute have no
     // fixed RenderPass owner here; do not fold them into a nearby effect.
-    ids.insert(ids.end(),{64,111,112,242,243});
+    ids.insert(ids.end(),{64,111,112,243,55,56,57,58,59});
     std::vector<bgfx::ViewStats> views(ids.size());
     for(size_t index=0;index<ids.size();++index){
         views[index].view=ids[index];views[index].gpuTimeBegin=100;
@@ -280,7 +282,7 @@ TEST_CASE(all_fixed_decal_volume_reflection_exposure_and_bloom_views_contribute_
     bgfx::Stats gpu{};gpu.gpuTimerFreq=1000;gpu.gpuFrameNum=7;
     gpu.numViews=static_cast<uint16_t>(views.size());gpu.viewStats=views.data();
     overlay.updateFrameStats(18,10,cpu,&gpu);
-    const float expected[]={14,2,2,2,32,8};
+    const float expected[]={14,2,2,8,32,8,2};
     for(size_t index=0;index<cpu.size();++index){
         CHECK(overlay.stats().passes[index].gpuTimeMs==expected[index]);
         CHECK(overlay.stats().passes[index].cpuTimeMs==1.5f);

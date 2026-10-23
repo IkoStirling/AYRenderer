@@ -75,6 +75,7 @@ private:
     ayt::shader::BindingId      _uExposure      = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uAutoExposureEnabled = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uTonemapMode   = ayt::shader::InvalidBinding;
+    ayt::shader::BindingId      _uLensStrength=ayt::shader::InvalidBinding,_uLensShape=ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _uGammaParams   = ayt::shader::InvalidBinding;
     ayt::shader::BindingId      _tSceneColor    = ayt::shader::InvalidBinding;
     // §S1c (2026-07-23, short-term-plan §S1 sub-cut 3) — second

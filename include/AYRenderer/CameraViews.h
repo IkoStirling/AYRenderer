@@ -17,6 +17,7 @@ struct CameraRenderView {
     uint32_t layerMask = 0xFFFFFFFFu;
     uint16_t x = 0, y = 0, width = 1, height = 1;
     CameraOutputHandle output{};
+    /// Requested color/depth clear also executes when opaque geometry is empty.
     uint32_t clearRgba = 0x14171FFF;
     uint32_t spaceRegionId = 0; // zero preserves unpartitioned legacy rendering
 };

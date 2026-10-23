@@ -138,7 +138,7 @@ TEST_CASE(postprocess_consumes_haze_as_primary_source_not_halfres_sampler) {
     CHECK(primary.find("ssaoTexture") == std::string::npos);
     CHECK(fallback.find("ssaoTexture") == std::string::npos);
     CHECK(std::string(ayt::render::detail::kPostProcessCacheKeyCStr)
-          == "postprocess_tonemap_aces_v13_auto_exposure_fs");
+          == "postprocess_tonemap_v14_lens_effects");
 }
 
 TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {
@@ -154,23 +154,23 @@ TEST_CASE(depth_haze_and_ssao_latches_default_and_reset_false) {
 
 TEST_CASE(deferred_pipeline_matches_data_dependencies) {
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
-    CHECK(desc.passes.size() == 27u);
+    CHECK(desc.passes.size() == 28u);
     CHECK(desc.passes[2] == RenderPassSlot::GBuffer);
     CHECK(desc.passes[4] == RenderPassSlot::MotionVector);
     CHECK(desc.passes[5] == RenderPassSlot::SSAO);
     CHECK(desc.passes[6] == RenderPassSlot::Lighting);
     CHECK(desc.passes[8] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[10] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[11] == RenderPassSlot::Forward2DOpaque);
-    CHECK(desc.passes[12] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[13] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[14] == RenderPassSlot::AutoExposure);
-    CHECK(desc.passes[15] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[11] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[12] == RenderPassSlot::Forward2DOpaque);
+    CHECK(desc.passes[13] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[14] == RenderPassSlot::BloomBlur);
+    CHECK(desc.passes[15] == RenderPassSlot::AutoExposure);
+    CHECK(desc.passes[16] == RenderPassSlot::PostProcess);
 }
 
 TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     const auto& order = ayt::render::detail::kRenderViewOrder;
-    CHECK(order.size() == 66u);
+    CHECK(order.size() == 75u);
     const auto rank = [&order](bgfx::ViewId view) {
         return std::find(order.begin(), order.end(), view);
     };
@@ -180,10 +180,13 @@ TEST_CASE(explicit_view_order_matches_deferred_data_dependencies) {
     CHECK(std::count(order.begin(), order.end(), 243u) == 1);
     CHECK(rank(243u) < rank(9u));
     CHECK(rank(243u) < rank(246u));
+    const bgfx::ViewId pointChain[]{55,56,57,58,59};
+    for(size_t i=0;i<std::size(pointChain);++i){CHECK(std::count(order.begin(),order.end(),pointChain[i])==1);if(i)CHECK(rank(pointChain[i-1])<rank(pointChain[i]));}
+    CHECK(rank(58u)<rank(9u));
 
     const bgfx::ViewId dependencyChain[] = {
         7, 3, 14,       // GBuffer, motion vectors, SSAO
-        8, 32, 13, 33, 9,  // Lighting, SSR, opaque haze, transparent composition
+        8, 32, 13, 241, 240, 33, 242, 54, 9,  // Lighting, SSR, haze, volume, clouds, transparent composition
         244, 253, 246, // Selection masks, camera-overlay 2D
         10, 11, 26, 27, 28, 29, 30, 12, // Bloom pyramid and resolve
         31, 15,        // Exposure before tone mapping

@@ -1,0 +1,525 @@
+#include <AYRenderer.h>
+#include <AYRenderer/EmissivePointCloud.h>
+#include <AYRenderer/FixtureEmitters.h>
+#include <AYRenderer/FixtureHousings.h>
+#include <AYMath/MathUtils.h>
+#include <AYRenderer/PerformanceShaderSources.h>
+#include <AYShader/Phoskia.h>
+#include <AYShader/IR.h>
+#include <AYTest.h>
+#include "detail/SpotShadowProjection.h"
+#include "detail/PerformanceTransparentSource.h"
+#include <limits>
+#include <cmath>
+
+using namespace ayt::render;
+namespace {
+PerformanceLight light(uint32_t id) {
+    PerformanceLight p;p.id=id;p.light=Light::spot({0,2,0},{0,-1,0},10,20,.95f,.8f,{1,0,0});return p;
+}
+}
+TEST_SUITE(FixtureEmitterTests)
+TEST_CASE(front_side_back_and_physical_aperture_orientation_are_consistent) {
+    auto p=light(7);p.light.position={0,0,0};p.light.spotDirection={0,0,-1};p.light.intensity=1;p.apertureRadius=.3f;
+    const auto projection=ayt::math::lh::perspective(ayt::math::radians(55.f),1,.1f,1000);
+    const auto view=[&](ayt::math::FVector3 eye){return ayt::math::lh::lookAt(eye,{0,0,0},{0,1,0});};
+    FixtureEmitterSettings settings;settings.minimumPixelRadius=0;ParticleDrawData front,side,back,far;FixtureEmitterStats stats;
+    CHECK(buildFixtureEmitterBatch({&p,1},view({0,0,-3}),projection,128,128,settings,{},front,stats));
+    CHECK(stats.prepared==1);CHECK(front.vertices.size()==4);CHECK(front.indices.size()==6);CHECK(front.world3D);
+    CHECK(front.vertices[0].r>1);for(const auto& vertex:front.vertices)CHECK(std::abs(vertex.z)<1e-6f);
+    CHECK(std::abs(front.vertices[0].r-1/(3.141592653589793*.09))<1e-5);
+    CHECK(buildFixtureEmitterBatch({&p,1},view({3,0,-3}),projection,128,128,settings,{},side,stats));
+    CHECK(stats.prepared==1);CHECK(side.vertices[0].r<front.vertices[0].r*.01f);
+    CHECK(buildFixtureEmitterBatch({&p,1},view({0,0,3}),projection,128,128,settings,{},back,stats));
+    CHECK(stats.backFacing==1);CHECK(back.vertices.empty());
+    CHECK(buildFixtureEmitterBatch({&p,1},view({0,0,-6}),projection,128,128,settings,{},far,stats));
+    CHECK(far.vertices[0].r==front.vertices[0].r); // Resolved radiance has no extra distance-squared dimming.
+    settings.offAxisGlow=0;
+    CHECK(buildFixtureEmitterBatch({&p,1},view({3,0,-3}),projection,128,128,settings,{},side,stats));CHECK(side.vertices.empty());
+}
+TEST_CASE(iris_zoom_flux_and_subpixel_footprint_keep_energy_rules) {
+    auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,-1};p.light.intensity=1;p.apertureRadius=.03f;
+    const auto view=ayt::math::lh::lookAt({0,0,-30},{0,0,0},{0,1,0});
+    const auto projection=ayt::math::lh::perspective(ayt::math::radians(55.f),1,.1f,1000);
+    FixtureEmitterSettings settings;settings.minimumPixelRadius=0;ParticleDrawData real,filtered,iris,flux;FixtureEmitterStats stats;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},real,stats));
+    settings.minimumPixelRadius=2;CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},filtered,stats));
+    const auto energy=[](const ParticleDrawData& b){const float width=b.vertices[1].x-b.vertices[0].x;return b.vertices[0].r*width*width;};
+    CHECK(std::abs(energy(real)-energy(filtered))<1e-5f);CHECK(filtered.vertices[0].r<real.vertices[0].r);
+    settings.minimumPixelRadius=0;p.iris=.5f;CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},iris,stats));
+    CHECK(std::abs(energy(iris)/energy(real)-.25f)<1e-5f);
+    p.iris=1;p.constantFlux=true;CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},flux,stats));
+    CHECK(std::abs(flux.vertices[0].r/real.vertices[0].r-performanceLightFluxScale(p))<1e-6f);
+}
+TEST_CASE(global_local_and_animated_medium_extinguish_visible_emitter) {
+    auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,-1};p.light.intensity=1;p.apertureRadius=.3f;
+    const auto view=ayt::math::lh::lookAt({0,0,-3},{0,0,0},{0,1,0});
+    const auto projection=ayt::math::lh::perspective(ayt::math::radians(55.f),1,.1f,1000);
+    ParticleDrawData clear,fogged,local,animated,repeat;FixtureEmitterStats stats;VolumetricSettings fog;fog.enabled=true;fog.density=.2f;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{}, {},clear,stats));
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{},fog,fogged,stats));
+    CHECK(std::abs(fogged.vertices[0].r/clear.vertices[0].r-std::exp(-.6f))<1e-5f);
+    fog.local=true;fog.center={0,0,-1.5f};fog.halfExtent={10,10,.5f};
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{},fog,local,stats));
+    CHECK(std::abs(local.vertices[0].r/clear.vertices[0].r-std::exp(-.175f))<.002f);
+    fog.noiseStrength=.8f;fog.noiseTime=5;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{},fog,animated,stats));
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{},fog,repeat,stats));
+    CHECK(animated.vertices[0].r==repeat.vertices[0].r);CHECK(animated.vertices[0].r<clear.vertices[0].r);
+    fog.center={50,0,0};CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{},fog,repeat,stats));
+    CHECK(repeat.vertices[0].r==clear.vertices[0].r);
+}
+TEST_CASE(validation_is_transactional_and_hdr_is_bounded_at_tiny_apertures) {
+    auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,-1};p.apertureRadius=.1f;
+    const auto view=ayt::math::lh::lookAt({0,0,-3},{0,0,0},{0,1,0});
+    const auto projection=ayt::math::lh::perspective(ayt::math::radians(55.f),1,.1f,1000);
+    ParticleDrawData batch;FixtureEmitterStats stats;CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{}, {},batch,stats));
+    const auto old=batch.vertices[0].r;FixtureEmitterSettings settings;settings.maximumRadiance=std::numeric_limits<float>::infinity();
+    CHECK(!buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},batch,stats));CHECK(batch.vertices[0].r==old);CHECK(stats.prepared==1);
+    CHECK(!buildFixtureEmitterBatch({&p,1},view,projection,0,128,{}, {},batch,stats));
+    auto invalid=view;invalid(0,0)=std::numeric_limits<float>::quiet_NaN();
+    CHECK(!buildFixtureEmitterBatch({&p,1},invalid,projection,128,128,{}, {},batch,stats));CHECK(batch.vertices[0].r==old);
+    settings={};settings.minimumPixelRadius=0;settings.maximumRadiance=100;p.apertureRadius=1e-8f;p.light.intensity=100000;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},batch,stats));CHECK(stats.clamped==1);CHECK(batch.vertices[0].r==100);
+    p.apertureRadius=1e-24f;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,{},batch,stats));CHECK(std::isfinite(batch.vertices[0].r));
+    VolumetricSettings fog;fog.enabled=true;fog.density=.2f;
+    CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,settings,fog,batch,stats));
+    CHECK(std::abs(batch.vertices[0].r-100*std::exp(-.6f))<1e-4f);
+    p.apertureRadius=0;CHECK(buildFixtureEmitterBatch({&p,1},view,projection,128,128,{}, {},batch,stats));CHECK(batch.vertices.empty());
+    p.apertureRadius=.1f;std::vector<PerformanceLight> lights(256,p);for(uint32_t i=0;i<256;++i)lights[i].id=i;
+    CHECK(buildFixtureEmitterBatch(lights,view,projection,128,128,{}, {},batch,stats));CHECK(stats.prepared==256);CHECK(batch.vertices.size()==1024);
+    lights.push_back(p);CHECK(!buildFixtureEmitterBatch(lights,view,projection,128,128,{}, {},batch,stats));CHECK(stats.prepared==256);
+}
+TEST_SUITE_END
+
+TEST_SUITE(PerformanceLightingTests)
+TEST_CASE(constant_flux_zoom_preserves_angular_integral_and_defaults_off) {
+    auto p=light(1);CHECK(performanceLightFluxScale(p)==1);p.constantFlux=true;
+    const double reference=2.0-std::cos(2.0*3.141592653589793/180)-std::cos(3.0*3.141592653589793/180);
+    for(float outer:{.02f,.052359878f,.3f,1.2f}){
+        p.light.coneCosInner=std::cos(outer*.6666667f);p.light.coneCosOuter=std::cos(outer);
+        const double integral=2.0-double(p.light.coneCosInner)-p.light.coneCosOuter;
+        CHECK(std::abs(performanceLightFluxScale(p)*integral-reference)<1e-9);
+    }
+    p.light=Light::point({0,0,0},5,1,{1,1,1});CHECK(performanceLightFluxScale(p)==1);
+}
+TEST_CASE(point_aggregation_preserves_rgb_energy_centroid_and_input_order) {
+    std::vector<EmissivePoint> points{{9,{1,1,1},{1,0,0},4,.1f},{2,{3,1,1},{0,0,1},8,.1f},
+        {7,{-1,1,1},{0,1,0},2,.1f},{8,{40,0,0},{1,1,1},0,.1f}};
+    EmissivePointLightingSettings settings;settings.intensityScale=1;
+    std::vector<PerformanceLight> lights,reverse;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));
+    CHECK(stats.source==4);CHECK(stats.contributing==3);CHECK(stats.occupiedCells==2);CHECK(lights.size()==2);
+    const auto& mix=lights[1].light;CHECK(mix.type==LightType::Point);
+    CHECK(std::abs(mix.color.x*mix.intensity-4)<1e-5f);CHECK(std::abs(mix.color.z*mix.intensity-8)<1e-5f);
+    const double x=(1*.2126*4+3*.0722*8)/(.2126*4+.0722*8);
+    CHECK(std::abs(mix.position.x-x)<1e-5);CHECK(mix.range>settings.range);
+    std::reverse(points.begin(),points.end());CHECK(buildEmissivePointLights(points,settings,reverse,stats));
+    CHECK(reverse[1].light.position.x==mix.position.x);CHECK(reverse[1].light.color.z==mix.color.z);
+    PerformanceLighting packet;CHECK(packet.assign(lights,{}));CHECK(packet.stats.shadowLights==0);
+    ayt::math::FVector3 center,extent;performanceLightBounds(packet.lights[1],center,extent);
+    CHECK(center.x==mix.position.x);CHECK(extent.x==mix.range);CHECK(extent.z==mix.range);
+}
+TEST_CASE(point_aggregation_selects_brightest_cells_and_rejects_bad_values_transactionally) {
+    std::vector<EmissivePoint> points{{1,{1,0,0},{1,0,0},1,.1f},{2,{21,0,0},{1,0,0},10,.1f}};
+    EmissivePointLightingSettings settings;settings.maxLights=1;settings.intensityScale=1;
+    std::vector<PerformanceLight> lights;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));
+    CHECK(lights.size()==1);CHECK(lights[0].light.position.x==21);CHECK(stats.budgetSkipped==1);
+    points[0].id=2;CHECK(!buildEmissivePointLights(points,settings,lights,stats));CHECK(lights[0].light.position.x==21);
+    points[0].id=1;points[0].intensity=std::numeric_limits<float>::infinity();
+    CHECK(!buildEmissivePointLights(points,settings,lights,stats));CHECK(stats.budgetSkipped==1);
+    points[0].intensity=1;settings.cellSize=0;CHECK(!buildEmissivePointLights(points,settings,lights,stats));
+    settings.cellSize=8;settings.maxLights=65;CHECK(!buildEmissivePointLights(points,settings,lights,stats));
+    settings.maxLights=0;CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(lights.empty());
+    settings.maxLights=16;points[0].color={10000,10000,10000};points[0].intensity=100000;settings.intensityScale=100;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(stats.clampedCells==1);
+    PerformanceLighting packet;CHECK(packet.assign(lights,{}));
+    auto point=lights[0];point.light.castShadow=true;CHECK(!packet.assign({&point,1},{}));
+    point.light.castShadow=false;point.volumetric=1;CHECK(!packet.assign({&point,1},{}));
+}
+
+TEST_CASE(point_aggregation_caps_sparse_maximum_input_and_ties_by_cell_coordinate) {
+    std::vector<EmissivePoint> points(65536);
+    for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].position={float(i),0,0};points[i].intensity=1;}
+    EmissivePointLightingSettings settings;settings.cellSize=1;settings.maxLights=64;
+    std::vector<PerformanceLight> lights,shuffled;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(lights.size()==64);
+    CHECK(stats.occupiedCells==65536);CHECK(stats.budgetSkipped==65472);
+    CHECK(lights.front().light.position.x==0);CHECK(lights.back().light.position.x==63);
+    std::reverse(points.begin(),points.end());CHECK(buildEmissivePointLights(points,settings,shuffled,stats));
+    CHECK(shuffled.front().light.position.x==0);CHECK(shuffled.back().light.position.x==63);
+    points.push_back(points[0]);CHECK(!buildEmissivePointLights(points,settings,shuffled,stats));CHECK(shuffled.size()==64);
+}
+TEST_CASE(finite_aperture_expands_conservative_bounds_and_is_validated) {
+    auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,1};
+    p.apertureRadius=.2f;ayt::math::FVector3 center,extent;performanceLightBounds(p,center,extent);
+    CHECK(std::abs(center.z-5)<1e-5f);CHECK(std::abs(extent.z-5)<1e-5f);
+    CHECK(std::abs(extent.x-(.2f+10*std::tan(std::acos(.8f))))<1e-4f);
+    PerformanceLighting packet;CHECK(packet.assign({&p,1},{}));CHECK(packet.lights[0].apertureRadius==.2f);
+    p.apertureRadius=-.1f;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].apertureRadius==.2f);
+    p.apertureRadius=std::numeric_limits<float>::quiet_NaN();CHECK(!packet.assign({&p,1},{}));
+}
+TEST_CASE(pattern_focus_and_iris_are_bounded_and_preserve_packet_on_failure) {
+    auto p=light(1);PerformanceLighting packet;
+    p.patternFocus=.4f;p.iris=.7f;
+    CHECK(packet.assign({&p,1},{}));CHECK(packet.lights[0].patternFocus==.4f);
+    p.iris=0;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].iris==.7f);
+    p.iris=1;p.patternFocus=std::numeric_limits<float>::quiet_NaN();
+    CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].patternFocus==.4f);
+}
+TEST_CASE(texture_gobo_requires_a_handle_and_preserves_previous_packet) {
+    PerformanceLighting packet;auto p=light(1);
+    CHECK(packet.assign({&p,1},{}));
+    p.pattern=LightPattern::Texture;
+    CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].pattern==LightPattern::Open);
+    p.goboTexture={42};
+    CHECK(packet.assign({&p,1},{}));CHECK(packet.lights[0].goboTexture.id==42);
+    Renderer renderer;std::string error;
+    auto open=light(9);CHECK(renderer.setPerformanceLights({&open,1},{},&error));
+    CHECK(!renderer.setPerformanceLights({&p,1},{},&error));
+    CHECK(!error.empty());CHECK(renderer.performanceLightStats().sourceLights==1);
+}
+TEST_CASE(shadow_softness_is_bounded_and_transactional) {
+    PerformanceLighting packet;auto p=light(1);p.light.castShadow=true;
+    p.shadowSoftness=2;CHECK(packet.assign({&p,1},{}));CHECK(packet.lights[0].shadowSoftness==2);
+    p.shadowSoftness=5;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].shadowSoftness==2);
+    p.shadowSoftness=std::numeric_limits<float>::quiet_NaN();CHECK(!packet.assign({&p,1},{}));
+}
+TEST_CASE(budgets_are_independent_and_priority_is_stable_with_shadow_mapping) {
+    std::vector<PerformanceLight> lights;for(uint32_t i=0;i<32;++i){auto p=light(i);p.light.castShadow=true;lights.push_back(p);}
+    lights[8].priority=2;lights[10].priority=2;PerformanceLighting packet;
+    CHECK(packet.assign(lights,{32,16,4}));CHECK(packet.lights.size()==32);CHECK(packet.lights[0].id==8);CHECK(packet.lights[1].id==10);
+    CHECK(packet.shadowSources.count==4);CHECK(packet.stats.shadowLights==4);
+    CHECK(packet.shadowSlots[0]==0);CHECK(packet.shadowSlots[3]==3);CHECK(packet.shadowSlots[4]==-1);
+    CHECK(packet.shadowSources.lights[0].color.x==0);CHECK(packet.budget.volumeLights==16);
+}
+TEST_CASE(invalid_packets_preserve_the_previous_snapshot) {
+    PerformanceLighting packet;auto p=light(1);CHECK(packet.assign({&p,1},{}));
+    p.light.spotDirection={0,0,0};CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights.size()==1);CHECK(packet.lights[0].light.spotDirection.y==-1);
+    p=light(1);p.volumetric=std::numeric_limits<float>::quiet_NaN();CHECK(!packet.assign({&p,1},{}));
+    p=light(1);CHECK(!packet.assign({&p,1},{257,16,4}));CHECK(!packet.assign({&p,1},{64,65,4}));CHECK(!packet.assign({&p,1},{64,16,9}));
+    auto lights=std::vector{p,p};CHECK(!packet.assign(lights,{}));CHECK(packet.assign({},{}));CHECK(packet.lights.empty());
+}
+TEST_CASE(projected_range_scissors_cull_offscreen_lights_and_preserve_intersections) {
+    auto p=light(1);p.light.range=.1f;p.light.position={0,0,0};auto vp=ayt::math::Float4x4::identity();
+    auto rect=performanceLightRect(p,vp,100,100);CHECK(rect.visible);CHECK(rect.width<100);CHECK(rect.height<100);
+    p.light.position.x=100;CHECK(!performanceLightRect(p,vp,100,100).visible);
+    p.light.position={0,0,0};p.light.range=10;rect=performanceLightRect(p,vp,100,100);CHECK(rect.visible);CHECK(rect.width==100);
+    CHECK(!performanceLightRect(p,vp,0,100).visible);
+}
+TEST_CASE(point_batches_keep_hdr_color_and_split_uint16_indices_without_per_point_materials) {
+    std::vector<EmissivePoint> points(20000);for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].position={0,0,.5f};}
+    points[0].color={2,0,0};points[0].intensity=8;
+    std::vector<ParticleDrawData> batches;EmissivePointStats stats;
+    const auto identity=ayt::math::Float4x4::identity();
+    CHECK(buildEmissivePointBatches(points,identity,identity,100,100,{},batches,stats));
+    CHECK(stats.visible==20000);CHECK(stats.batches==2);CHECK(batches[0].vertices.size()==16383*4);
+    CHECK(batches[0].vertices[0].r==16);CHECK(batches[0].indices.back()<65532);
+    CHECK(batches[1].vertices.size()==(20000-16383)*4);
+}
+TEST_CASE(point_quality_budget_selects_stable_ids_independent_of_input_order) {
+    std::vector<EmissivePoint> points(100);
+    for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].position={float(i)/100.f,0,.5f};points[i].radius=.01f;}
+    const auto identity=ayt::math::Float4x4::identity();
+    EmissivePointSettings settings;settings.maxPoints=10;
+    std::vector<ParticleDrawData> first,second;EmissivePointStats stats;
+    CHECK(buildEmissivePointBatches(points,identity,identity,100,100,settings,first,stats));
+    CHECK(stats.visible==10);CHECK(stats.budgetSkipped==90);
+    std::vector<float> firstPositions;
+    for(size_t i=0;i<10;++i)firstPositions.push_back(first[0].vertices[i*4].x);
+    std::reverse(points.begin(),points.end());
+    CHECK(buildEmissivePointBatches(points,identity,identity,100,100,settings,second,stats));
+    std::vector<float> secondPositions;
+    for(size_t i=0;i<10;++i)secondPositions.push_back(second[0].vertices[i*4].x);
+    std::sort(firstPositions.begin(),firstPositions.end());std::sort(secondPositions.begin(),secondPositions.end());
+    CHECK(firstPositions==secondPositions);
+}
+TEST_CASE(point_culling_budgets_and_subpixel_coverage_are_explicit) {
+    std::vector<EmissivePoint> points(3);points[1].position.x=100;points[2].intensity=0;
+    std::vector<ParticleDrawData> batches;EmissivePointStats stats;const auto identity=ayt::math::Float4x4::identity();
+    CHECK(buildEmissivePointBatches(points,identity,identity,100,100,{},batches,stats));CHECK(stats.visible==1);CHECK(stats.culled==2);
+    points[0].radius=.0001f;
+    CHECK(buildEmissivePointBatches(points,identity,identity,100,100,{},batches,stats));
+    CHECK(batches[0].vertices[1].x-batches[0].vertices[0].x>.029f);CHECK(batches[0].vertices[0].r<4);
+    CHECK(buildEmissivePointBatches(points,identity,identity,100,100,{.75f,true,0},batches,stats));CHECK(stats.visible==0);CHECK(stats.budgetSkipped==1);
+    points[0].radius=-1;stats.visible=9;CHECK(!buildEmissivePointBatches(points,identity,identity,100,100,{},batches,stats));CHECK(stats.visible==9);
+}
+TEST_CASE(point_instances_preserve_cpu_selection_hdr_and_bounded_batches) {
+    std::vector<EmissivePoint> points(20000);
+    for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].position={0,0,.5f};}
+    points[0].color={2,0,0};points[0].intensity=8;
+    const auto identity=ayt::math::Float4x4::identity();
+    std::vector<ParticleDrawData> cpu,instances;EmissivePointStats cpuStats,instanceStats;
+    CHECK(buildEmissivePointBatches(points,identity,identity,100,100,{},cpu,cpuStats));
+    CHECK(buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},instances,instanceStats));
+    CHECK(instanceStats.visible==cpuStats.visible);CHECK(instanceStats.batches==2);
+    CHECK(instanceStats.instanced);CHECK(instances[0].instanceStride==64);
+    CHECK(instances[0].instanceData.size()==16383*16);
+    CHECK(instances[1].instanceData.size()==(20000-16383)*16);
+    CHECK(instances[0].vertices.empty());CHECK(instances[0].indices.empty());
+    CHECK(instances[0].instanceData[0]==points[0].position.x);
+    CHECK(instances[0].instanceData[3]==points[0].radius);
+    CHECK(instances[0].instanceData[12]==cpu[0].vertices[0].r);
+    EmissivePointSettings budget;budget.maxPoints=17;
+    CHECK(buildEmissivePointInstanceBatches(points,identity,identity,100,100,budget,instances,instanceStats));
+    CHECK(instanceStats.visible==17);CHECK(instanceStats.budgetSkipped==20000-17);
+    CHECK(instances[0].instanceData.size()==17*16);
+    points[0].radius=-1;instanceStats.visible=9;
+    CHECK(!buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},instances,instanceStats));
+    CHECK(instanceStats.visible==9);
+}
+TEST_CASE(instance_storage_reuse_overwrites_all_fields_and_keeps_batch_edges_after_shrink) {
+ std::vector<EmissivePoint> points(20000);for(uint32_t i=0;i<points.size();++i){points[i].id=i;points[i].position={float(i%10)*.01f,0,.5f};points[i].radius=.02f;points[i].color={float(i%7)+.25f,2,3};points[i].intensity=float(i%5)+1;}
+ const auto identity=ayt::math::Float4x4::identity();std::vector<ParticleDrawData> batches;EmissivePointStats stats;
+ CHECK(buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},batches,stats));CHECK(batches.size()==2);
+ for(auto& batch:batches)std::fill(batch.instanceData.begin(),batch.instanceData.end(),std::numeric_limits<float>::quiet_NaN());
+ for(auto& p:points){p.radius=.03f;p.color.x*=.5f;}
+ CHECK(buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},batches,stats));
+ for(const auto& batch:batches)CHECK(std::all_of(batch.instanceData.begin(),batch.instanceData.end(),[](float value){return std::isfinite(value);}));
+ for(const size_t index:{0u,16382u,16383u,16384u,19999u}){
+  const auto& p=points[index];const float expected[16]={p.position.x,p.position.y,p.position.z,p.radius,1,0,0,0,0,1,0,0,p.color.x*p.intensity,p.color.y*p.intensity,p.color.z*p.intensity,1};
+  const auto* actual=batches[index/16383].instanceData.data()+(index%16383)*16;for(int field=0;field<16;++field)CHECK(actual[field]==expected[field]);
+ }
+ CHECK(buildEmissivePointInstanceBatches(std::span<const EmissivePoint>(points).first(3),identity,identity,100,100,{},batches,stats));CHECK(batches.size()==1);CHECK(batches[0].instanceData.size()==48);
+ CHECK(buildEmissivePointInstanceBatches(points,identity,identity,100,100,{},batches,stats));CHECK(stats.visible==20000);CHECK(batches.size()==2);CHECK(batches[1].instanceData.size()==3617*16);
+}
+TEST_CASE(instanced_point_shader_uses_production_frontend) {
+    ayt::shader::phoskia::Compiler compiler;ayt::shader::phoskia::ir::IRProgram program;
+    std::vector<std::string> errors;
+    const bool success=compiler.generateIr(kEmissivePointInstancedPhoskiaSource,{},program,errors);
+    for(const auto& error:errors)std::fprintf(stderr,"%s\n",error.c_str());
+    CHECK(success);
+}
+TEST_CASE(surface_shader_uses_production_frontend_and_bounded_procedural_patterns) {
+    ayt::shader::phoskia::Compiler compiler;ayt::shader::phoskia::ir::IRProgram program;std::vector<std::string> errors;
+    const bool success=compiler.generateIr(kPerformanceSurfaceSource,{},program,errors);
+    for(const auto& e:errors)std::fprintf(stderr,"%s\n",e.c_str());CHECK(success);
+}
+TEST_SUITE_END
+
+TEST_SUITE(EmissivePointLightingContinuityTests)
+TEST_CASE(continuous_grid_preserves_rgb_and_first_moment_and_crosses_cell_boundaries) {
+    EmissivePointLightingSettings settings;settings.smoothCells=true;settings.intensityScale=1;settings.maxLights=64;
+    std::vector<EmissivePoint> points{{1,{3,2,1},{1,.5f,0},8,.1f},{2,{4,3,2},{0,.5f,1},4,.1f}};
+    std::vector<PerformanceLight> lights,reordered;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(stats.contributing==2);CHECK(lights.size()==8);
+    double rgb[3]{},moment[3]{};
+    for(const auto& light:lights)for(int c=0;c<3;++c){const double energy=light.light.color[c]*light.light.intensity;rgb[c]+=energy;moment[c]+=energy*light.light.position.x;}
+    CHECK(std::abs(rgb[0]-8)<1e-5);CHECK(std::abs(rgb[1]-6)<1e-5);CHECK(std::abs(rgb[2]-4)<1e-5);
+    CHECK(std::abs(moment[0]-24)<1e-5);CHECK(std::abs(moment[1]-20)<1e-5);CHECK(std::abs(moment[2]-16)<1e-5);
+    std::reverse(points.begin(),points.end());CHECK(buildEmissivePointLights(points,settings,reordered,stats));
+    CHECK(reordered.size()==lights.size());for(size_t i=0;i<lights.size();++i)CHECK(reordered[i].light.intensity==lights[i].light.intensity);
+    for(auto& point:points)point.position=point.id==1?ayt::math::FVector3(0,0,0):ayt::math::FVector3(1,1,1);
+    CHECK(buildEmissivePointLights(points,settings,reordered,stats));
+    double mixed[3]{};for(const auto& light:reordered)for(int c=0;c<3;++c)mixed[c]+=light.light.color[c]*light.light.intensity;
+    CHECK(std::abs(mixed[0]-8)<1e-5);CHECK(std::abs(mixed[1]-6)<1e-5);CHECK(std::abs(mixed[2]-4)<1e-5);
+    points.resize(1);points[0].color={1,1,1};points[0].intensity=1;points[0].position={7.9999f,0,0};
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));points[0].position.x=8.0001f;
+    CHECK(buildEmissivePointLights(points,settings,reordered,stats));
+    double l1=0;for(const auto& a:lights){double value=0;for(const auto& b:reordered)if(a.light.position.x==b.light.position.x)value=b.light.intensity;l1+=std::abs(a.light.intensity-value);}
+    for(const auto& b:reordered)if(std::none_of(lights.begin(),lights.end(),[&](const auto& a){return a.light.position.x==b.light.position.x;}))l1+=b.light.intensity;
+    CHECK(l1<.0001);
+    points[0].position={100000,-100000,100000};settings.cellSize=9999;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));PerformanceLighting packet;CHECK(packet.assign(lights,{}));
+    settings.cellSize=.01f;CHECK(buildEmissivePointLights(points,settings,lights,stats));
+    for(size_t i=0;i<lights.size();++i)for(size_t j=i+1;j<lights.size();++j)CHECK((lights[i].light.position-lights[j].light.position).length()>0);
+}
+TEST_CASE(rank_fades_release_slots_before_new_admission_and_reset_without_black_afterglow) {
+    EmissivePointLightingSettings settings;settings.smoothCells=true;settings.maxLights=1;settings.intensityScale=1;
+    std::vector<EmissivePoint> points{{1,{0,0,0},{1,1,1},2,.1f},{2,{16,0,0},{1,1,1},1,.1f}};
+    EmissivePointLightingHistory history;std::vector<PerformanceLight> lights;EmissivePointLightingStats stats;
+    CHECK(history.update(points,settings,0,.1f,lights,stats));CHECK(stats.historyReset);CHECK(lights.size()==1);CHECK(lights[0].light.position.x==0);
+    points[1].intensity=3;
+    CHECK(history.update(points,settings,.05,.1f,lights,stats));CHECK(!stats.historyReset);CHECK(lights.size()==1);CHECK(lights[0].light.position.x==0);CHECK(std::abs(lights[0].light.intensity-1)<1e-5);CHECK(stats.deferredCells==1);
+    CHECK(history.update(points,settings,.05,.1f,lights,stats));CHECK(std::abs(lights[0].light.intensity-1)<1e-5);
+    CHECK(history.update(points,settings,.101,.1f,lights,stats));CHECK(lights.empty());
+    CHECK(history.update(points,settings,.151,.1f,lights,stats));CHECK(lights.size()==1);CHECK(lights[0].light.position.x==16);CHECK(std::abs(lights[0].light.intensity-1.5)<1e-4);
+    CHECK(history.update(points,settings,.202,.1f,lights,stats));CHECK(lights.size()==1);CHECK(lights[0].light.intensity==3);
+    CHECK(history.update(points,settings,0,.1f,lights,stats));CHECK(stats.historyReset);
+    points[0].intensity=points[1].intensity=0;CHECK(history.update(points,settings,.01,.1f,lights,stats));CHECK(lights.empty());CHECK(stats.historyReset);
+    points[0].intensity=2;CHECK(history.update(points,settings,.02,.1f,lights,stats));
+    CHECK(history.update(points,settings,1,.1f,lights,stats));CHECK(stats.historyReset);CHECK(lights.size()==1);
+    const auto before=lights[0].light.intensity;CHECK(!history.update(points,settings,-1,.1f,lights,stats));CHECK(lights[0].light.intensity==before);
+    settings.range=0;CHECK(!history.update(points,settings,1,.1f,lights,stats));CHECK(lights[0].light.intensity==before);
+    settings.range=20;settings.maxLights=0;CHECK(history.update(points,settings,1.01,.1f,lights,stats));CHECK(lights.empty());
+}
+TEST_CASE(hard_grid_keeps_legacy_float_classification_at_decimal_cell_edges) {
+    EmissivePointLightingSettings settings;settings.cellSize=.01f;
+    std::vector<EmissivePoint> points{{1,{.03f,0,0},{1,1,1},1,.1f},{2,{.035f,0,0},{1,1,1},1,.1f}};
+    std::vector<PerformanceLight> lights;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(stats.occupiedCells==1);CHECK(lights.size()==1);
+    CHECK(std::abs(lights[0].light.position.x-.0325f)<1e-6);
+}
+TEST_CASE(contact_settings_copy_to_points_and_reject_invalid_packet_transactionally) {
+    EmissivePointLightingSettings settings;settings.contactDistance=2;settings.contactThickness=.4f;
+    std::vector<EmissivePoint> points{{1,{0,0,0},{1,1,1},2,.1f}};
+    std::vector<PerformanceLight> lights;EmissivePointLightingStats stats;
+    CHECK(buildEmissivePointLights(points,settings,lights,stats));CHECK(lights[0].pointContactDistance==2);
+    CHECK(lights[0].pointContactThickness==.4f);PerformanceLighting packet;CHECK(packet.assign(lights,{}));CHECK(packet.stats.shadowLights==0);
+    auto invalid=lights[0];invalid.pointContactThickness=0;CHECK(!packet.assign({&invalid,1},{}));CHECK(packet.lights[0].pointContactDistance==2);
+    invalid=light(1);invalid.pointContactDistance=1;CHECK(!packet.assign({&invalid,1},{}));
+    settings.contactDistance=11;CHECK(!buildEmissivePointLights(points,settings,lights,stats));CHECK(lights[0].pointContactDistance==2);
+}
+TEST_SUITE_END
+
+TEST_SUITE(PhotometryTests)
+TEST_CASE(lm63_type_c_sampling_symmetry_and_transactional_rejection) {
+    const std::string data="IESNA:LM-63-2002\n[TEST] measured\nTILT=NONE\n1 1000 2 3 2 1 2 .1 .2 .3\n1 1 20\n0 45 90\n0 180\n10 20 0\n30 40 0\n";
+    IesProfile profile;std::string error;CHECK(IesProfile::parse(data,profile,&error));CHECK(error.empty());
+    CHECK(profile.peakCandela()==80);CHECK(profile.sample(0,0)==20);CHECK(profile.sample(0,90)==40);
+    CHECK(profile.sample(0,270)==40);CHECK(profile.sample(0,-90)==40);CHECK(profile.sample(45,180)==80);
+    CHECK(profile.sample(91,0)==0);CHECK(profile.sample(-1,0)==0);
+    auto bad=data;bad.replace(bad.find("TILT=NONE"),9,"TILT=INCLUDE");CHECK(!IesProfile::parse(bad,profile,&error));CHECK(profile.peakCandela()==80);
+    CHECK(!IesProfile::parse(data+"nan",profile));CHECK(!IesProfile::parse(data+"42",profile));
+    bad=data;bad.replace(bad.find("0 45 90"),7,"0 0 90");CHECK(!IesProfile::parse(bad,profile));
+    bad=data;bad.replace(bad.find("3 2 1 2"),7,"3 2 2 2");CHECK(!IesProfile::parse(bad,profile));
+    std::vector<uint8_t> atlas;CHECK(profile.angularTexture(atlas));CHECK(atlas.size()==257*129*4);
+    for(int y=0;y<129;++y)CHECK(atlas[y*257*4]==atlas[(y*257+256)*4]);
+    CHECK(profile.projection(.2f,32,atlas));CHECK(atlas.size()==32*32*4);CHECK(!profile.projection(0,32,atlas));
+}
+TEST_CASE(physical_flux_intensity_distance_color_and_legacy_compatibility) {
+    auto p=light(1);p.light.color={1,1,1};p.light.intensity=100;
+    CHECK(performanceLightIntensity(p)==100);p.constantFlux=true;CHECK(std::abs(performanceLightIntensity(p)-100*performanceLightFluxScale(p))<1e-6);
+    p.intensityUnit=LightIntensityUnit::Candela;CHECK(performanceLightIntensity(p)==100);
+    CHECK(illuminanceLux(100,2)==25);CHECK(illuminanceLux(100,4)==6.25f);CHECK(illuminanceLux(100,2,.5f)==12.5f);CHECK(illuminanceLux(100,0)==0);
+    p.intensityUnit=LightIntensityUnit::Lumen;const auto solid=spotSolidAngle(.95f,.8f);
+    CHECK(std::abs(performanceLightIntensity(p)*solid-100)<1e-4f);
+    p.light.type=LightType::Point;CHECK(std::abs(performanceLightIntensity(p)*12.5663706f-100)<1e-4f);
+    p.light.color={1,0,0};CHECK(std::abs(performanceLightIntensity(p)*12.5663706f*.2126f-100)<1e-4f);
+    p.light.color={0,0,0};CHECK(performanceLightIntensity(p)==0);
+    CHECK(spotSolidAngle(.8f,.95f)==0);
+    IesProfile profile;CHECK(IesProfile::parse("IESNA:LM-63-1995\nTILT=NONE\n1 -1 1 3 1 1 2 0 0 0\n1 1 10\n0 90 180\n0\n100 100 100\n",profile));
+    CHECK(std::abs(profile.coneSolidAngle(.95f,.8f)-solid)<1e-4f);
+    p=light(1);p.light.color={1,1,1};p.intensityUnit=LightIntensityUnit::Lumen;p.iesProfile=std::make_shared<IesProfile>(profile);p.iesTexture={42};
+    CHECK(std::abs(performanceLightIntensity(p)*profile.coneSolidAngle(.95f,.8f)-20)<1e-4f);
+    PerformanceLighting packet;CHECK(packet.assign({&p,1},{}));p.iesTexture={};CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights.size()==1);
+}
+TEST_SUITE_END
+
+TEST_SUITE(FixtureOpticsTests)
+TEST_CASE(finite_pupil_focus_uses_distance_and_iris_with_legacy_disabled) {
+    auto p=light(1);p.apertureRadius=.1f;p.light.coneCosOuter=std::cos(.1f);p.focusDistance=10;
+    CHECK(performanceLightFocusBlur(p,10)==0);CHECK(performanceLightFocusBlur(p,5)>0);CHECK(performanceLightFocusBlur(p,20)>0);
+    const auto blur=performanceLightFocusBlur(p,5);CHECK(std::abs(blur-.05f/(.1f+5*std::tan(.1f)))<1e-6f);
+    p.iris=.5f;CHECK(std::abs(performanceLightFocusBlur(p,5)-blur*.5f)<1e-6f);
+    p.focusDistance=0;CHECK(performanceLightFocusBlur(p,5)==0);
+    p.focusDistance=10;p.apertureRadius=0;CHECK(performanceLightFocusBlur(p,5)==0);
+}
+TEST_CASE(prism_rotates_real_lobes_preserves_total_angular_energy_and_bounds) {
+    auto p=light(1);p.light.coneCosInner=std::cos(.02f);p.light.coneCosOuter=std::cos(.04f);p.apertureRadius=.03f;
+    const auto central=p.light.spotDirection;CHECK(performanceLightAngular(p,central)==1);
+    p.prismCount=4;p.prismAngle=.2f;CHECK(performanceLightAngular(p,central)==0);
+    const auto lobe=performanceLightLobeDirection(p,0);CHECK(std::abs(lobe.length()-1)<1e-6f);CHECK(std::abs(performanceLightAngular(p,lobe)-.25f)<1e-5f);
+    p.prismRotation=.785398163f;CHECK(performanceLightAngular(p,lobe)==0);const auto rotated=performanceLightLobeDirection(p,0);CHECK(std::abs(performanceLightAngular(p,rotated)-.25f)<1e-5f);
+    ayt::math::FVector3 center,extent;performanceLightBounds(p,center,extent);
+    for(uint8_t i=0;i<p.prismCount;++i){const auto end=p.light.position+performanceLightLobeDirection(p,i)*p.light.range;for(int a=0;a<3;++a)CHECK(std::abs(end[a]-center[a])<=extent[a]+1e-4f);}
+    // Integrate a wider cone to avoid under-resolving a narrow beam in this
+    // independent equal-solid-angle spherical quadrature.
+    p.light.coneCosInner=.95f;p.light.coneCosOuter=.8f;double sum=0;constexpr int n=128,m=256;
+    for(int y=0;y<n;++y){const float c=-1+(y+.5f)*2/n,r=std::sqrt(1-c*c);for(int x=0;x<m;++x){const float a=(x+.5f)*6.283185307f/m;sum+=performanceLightAngular(p,{r*std::cos(a),c,r*std::sin(a)});}}
+    const double integrated=sum*12.566370614359172/(n*m);CHECK(std::abs(integrated-spotSolidAngle(.95f,.8f))<.002);
+    PerformanceLighting packet;CHECK(packet.assign({&p,1},{}));p.prismCount=9;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].prismCount==4);
+    p.prismCount=4;p.focusDistance=-1;CHECK(!packet.assign({&p,1},{}));
+}
+TEST_SUITE_END
+
+TEST_SUITE(LensEffectsTests)
+TEST_CASE(disabled_defaults_and_finite_shared_graph_settings) {
+    LensEffectsSettings settings;CHECK(!lensEffectsActive(settings));settings.enabled=true;CHECK(lensEffectsActive(settings));
+    settings.starStrength=settings.ghostStrength=0;CHECK(!lensEffectsActive(settings));settings.starStrength=1;CHECK(lensEffectsActive(settings));
+    settings.starAxes=255;settings.starLength=3;settings.ghostStrength=-1;settings.starStrength=std::numeric_limits<float>::infinity();settings.dispersion=std::numeric_limits<float>::quiet_NaN();
+    const auto clean=sanitizeLensEffects(settings);CHECK(clean.starAxes==4);CHECK(clean.starLength==.25f);CHECK(clean.starStrength==0);CHECK(clean.ghostStrength==0);CHECK(clean.dispersion==0);CHECK(!lensEffectsActive(clean));
+    Renderer renderer;CHECK(!renderer.lensEffects().enabled);renderer.setLensEffects(settings);CHECK(renderer.lensEffects().starAxes==4);CHECK(!lensEffectsActive(renderer.lensEffects()));
+}
+TEST_SUITE_END
+
+TEST_SUITE(FixtureHousingTests)
+TEST_CASE(geometry_follows_axis_and_survives_dark_fixture_with_bounded_parts) {
+    auto p=light(1);p.light.position={0,0,0};p.light.spotDirection={0,0,1};p.light.intensity=0;p.apertureRadius=.2f;
+    FixtureHousingSettings settings;settings.shadeLeaves=true;std::vector<FixtureHousingDraw> draws;FixtureHousingStats stats;
+    CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(stats.fixtures==1);CHECK(stats.parts==6);CHECK(draws.size()==6);
+    const auto back=draws[0].world*ayt::math::FVector4(0,0,-1,1),front=draws[1].world*ayt::math::FVector4(0,0,1,1);
+    CHECK(std::abs(back.z+.6f)<1e-6);CHECK(std::abs(front.z-.1f)<1e-6);
+    CHECK(draws[2].part==FixtureHousingPart::Leaf);const auto oldX=draws[2].world(0,3);settings.leafAngle=.5f;
+    CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(draws[2].world(0,3)<oldX);
+    for(const auto& draw:draws)for(int i=0;i<16;++i)CHECK(std::isfinite(draw.world.ptr()[i]));
+    std::vector<PerformanceLight> lights(256,p);for(size_t i=0;i<lights.size();++i)lights[i].id=uint32_t(i);
+    CHECK(buildFixtureHousingDraws(lights,settings,draws,stats));CHECK(stats.parts==1536);CHECK(stats.fixtures==256);
+}
+TEST_CASE(shared_housing_meshes_form_contiguous_runs_without_losing_transforms) {
+    Renderer renderer;InitDesc init;init.backend=Backend::Noop;CHECK(renderer.initialize(init));
+    std::vector<PerformanceLight> lights;for(uint32_t i=0;i<6;++i){auto p=light(i+1);p.apertureRadius=.2f;p.light.position.x=float(i);lights.push_back(p);}
+    FixtureHousingSettings settings;settings.shadeLeaves=true;std::vector<FixtureHousingDraw> expected;FixtureHousingStats stats;CHECK(buildFixtureHousingDraws(lights,settings,expected,stats));
+    FixtureHousings housings;RenderScene scene;CHECK(housings.append(renderer,scene,lights,settings));CHECK(scene.items().size()==36);CHECK(housings.stats().parts==36);
+    size_t at=0;for(const auto part:{FixtureHousingPart::Body,FixtureHousingPart::Hood,FixtureHousingPart::Leaf}){
+        const auto mesh=scene.items()[at].mesh;
+        for(const auto& draw:expected)if(draw.part==part){const auto& item=scene.items()[at++];CHECK(item.mesh.id==mesh.id);for(int component=0;component<16;++component)CHECK(std::abs(item.world.ptr()[component]-draw.world.ptr()[component])<1e-6f);}
+    }
+    CHECK(at==36);CHECK(scene.items()[0].mesh.id!=scene.items()[6].mesh.id);CHECK(scene.items()[6].mesh.id!=scene.items()[12].mesh.id);
+    renderer.shutdown();
+}
+TEST_CASE(invalid_settings_preserve_output_and_point_or_zero_exit_have_no_body) {
+    auto p=light(1);p.apertureRadius=.2f;std::vector<FixtureHousingDraw> draws;FixtureHousingStats stats;FixtureHousingSettings settings;
+    CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(stats.parts==2);settings.hoodLength=-1;
+    CHECK(!buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(stats.parts==2);CHECK(draws.size()==2);
+    settings.hoodLength=0;CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(stats.parts==1);
+    p.apertureRadius=0;CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(draws.empty());
+    p.light.type=LightType::Point;p.volumetric=0;p.apertureRadius=.2f;CHECK(buildFixtureHousingDraws({&p,1},settings,draws,stats));CHECK(draws.empty());
+}
+TEST_SUITE_END
+
+TEST_SUITE(AreaShadowTests)
+TEST_CASE(spot_depth_reconstruction_and_parallel_plane_penumbra) {
+    const auto projection=ayt::render::detail::spotShadowProjection(.95f,30);
+    CHECK(std::abs(projection.nearZ-.3f)<1e-6);CHECK(projection.farZ==30);
+    for(float z:{.3f,1.f,5.f,20.f,30.f}){
+        const auto matrix=ayt::math::lh::perspective(projection.fov,1,projection.nearZ,projection.farZ);
+        const auto clip=matrix*ayt::math::FVector4(0,0,z,1);const float encoded=clip.z/clip.w*.5f+.5f;
+        CHECK(std::abs(ayt::render::detail::spotShadowDistance(encoded,projection.nearZ,projection.farZ)-z)<z*1e-4f);
+    }
+    CHECK(performanceShadowPenumbra(.2f,5,5)==0);CHECK(std::abs(performanceShadowPenumbra(.2f,10,5)-.2f)<1e-6);
+    CHECK(std::abs(performanceShadowPenumbra(.4f,10,5)-.4f)<1e-6);CHECK(performanceShadowPenumbra(.2f,15,5)>.39f);
+    CHECK(performanceShadowPenumbra(.2f,10,0)==0);CHECK(performanceShadowPenumbra(.2f,4,5)==0);
+    auto p=light(1);p.light.castShadow=true;p.apertureRadius=.2f;PerformanceLighting packet;CHECK(packet.assign({&p,1},{}));const auto legacy=packet.shadowSources.lights[0].coneCosOuter;
+    p.areaShadow=true;CHECK(packet.assign({&p,1},{}));CHECK(packet.shadowSources.lights[0].coneCosOuter<legacy);
+    p.areaShadowBias=-1;CHECK(!packet.assign({&p,1},{}));CHECK(packet.lights[0].areaShadow);
+}
+TEST_SUITE_END
+
+TEST_SUITE(TransparentPerformanceTests)
+TEST_CASE(transparent_shader_reuses_full_optics_and_stock_pbr_abi) {
+    const auto& source=ayt::render::detail::performanceTransparentSource();CHECK(!source.empty());
+    ayt::shader::phoskia::Compiler compiler;ayt::shader::phoskia::ir::IRProgram program;std::vector<std::string> errors;
+    const bool success=compiler.generateIr(source,{},program,errors);for(const auto& e:errors)std::fprintf(stderr,"%s\n",e.c_str());CHECK(success);
+    CHECK(source.find("performanceShadowArea")!=std::string::npos);CHECK(source.find("texture2d iesAtlas")!=std::string::npos);
+    CHECK(source.find("property aypt_opacitySource")!=std::string::npos);CHECK(source.find("skinningMatrix")!=std::string::npos);
+}
+TEST_CASE(transparent_replay_limits_are_transactional) {
+    auto p=light(1);PerformanceLighting packet;PerformanceLightBudget limits;CHECK(packet.assign({&p,1},limits));
+    CHECK(packet.budget.transparentDraws==128);CHECK(packet.budget.transparentLightsPerObject==8);
+    limits.transparentDraws=1025;CHECK(!packet.assign({&p,1},limits));CHECK(packet.budget.transparentDraws==128);
+    limits.transparentDraws=128;limits.transparentLightsPerObject=33;CHECK(!packet.assign({&p,1},limits));
+    limits.transparentDraws=0;limits.transparentLightsPerObject=0;CHECK(packet.assign({&p,1},limits));
+}
+
+TEST_SUITE_END
+
+TEST_SUITE(EmissivePointGpuFallbackTests)
+TEST_CASE(cpu_builders_drop_borrowed_gpu_callbacks_when_switching_paths) {
+    std::vector<EmissivePoint> points{{1,{0,0,0},{1,0,0},1,.1f}};std::vector<ParticleDrawData> batches(1);EmissivePointStats stats;
+    const auto identity=ayt::math::Float4x4::identity();int token=1;
+    const auto seed=[&](){batches[0].gpuStream=&token;batches[0].submitGpu=[](void*,uint16_t){};};
+    seed();CHECK(buildEmissivePointBatches(points,identity,identity,64,64,{},batches,stats));CHECK(batches.size()==1);CHECK(!batches[0].gpuStream);CHECK(!batches[0].submitGpu);CHECK(stats.countsExact);
+    seed();CHECK(buildEmissivePointInstanceBatches(points,identity,identity,64,64,{},batches,stats));CHECK(!batches[0].gpuStream);CHECK(!batches[0].submitGpu);CHECK(!stats.gpuCulling);
+}
+TEST_CASE(noop_and_visible_budget_fallback_keep_exact_cpu_counts) {
+    Renderer renderer;InitDesc init;init.backend=Backend::Noop;CHECK(renderer.initialize(init));
+    EmissivePointCloud cloud;RenderScene scene;std::vector<EmissivePoint> points{{1,{0,0,0},{1,0,0},1,.1f},{2,{.2f,0,0},{0,0,1},1,.1f}};
+    const auto identity=ayt::math::Float4x4::identity();EmissivePointSettings settings;settings.preferGpuCulling=true;settings.maxPoints=1;std::string error;
+    CHECK(cloud.append(renderer,scene,points,identity,identity,64,64,settings,&error));CHECK(error.empty());CHECK(!cloud.stats().gpuCulling);CHECK(cloud.stats().countsExact);CHECK(cloud.stats().visible==1);CHECK(cloud.stats().gpuFallback==EmissivePointGpuFallback::VisibleBudget);
+    settings.maxPoints=65536;scene.clear();CHECK(cloud.append(renderer,scene,points,identity,identity,64,64,settings,&error));CHECK(error.empty());CHECK(!cloud.stats().gpuCulling);CHECK(cloud.stats().countsExact);CHECK(cloud.stats().visible==2);CHECK(cloud.stats().gpuFallback==EmissivePointGpuFallback::Unavailable);
+    renderer.shutdown();
+}
+TEST_SUITE_END

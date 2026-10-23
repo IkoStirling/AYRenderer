@@ -152,7 +152,7 @@ constexpr const char* kFinalPPExpectedSubstrings[] = {
 };
 
 constexpr const char* kExpectedFinalPPCacheKey =
-    "postprocess_tonemap_aces_v13_auto_exposure_fs";
+    "postprocess_tonemap_v14_lens_effects";
 
 } // namespace
 
@@ -403,22 +403,22 @@ TEST_CASE(s1c_make_deferred_slot_table_postprocess_after_bloomblur) {
     // DepthHaze and PostProcess), PostProcess at index 9.
     const RenderPipelineDesc desc = RenderPipelineDesc::makeDeferred();
     CHECK(desc.path == RenderPath::Deferred);
-    CHECK(desc.passes.size() == 27);
+    CHECK(desc.passes.size() == 28);
     CHECK(desc.passes[4] == RenderPassSlot::MotionVector);
     CHECK(desc.passes[5] == RenderPassSlot::SSAO);
     CHECK(desc.passes[6] == RenderPassSlot::Lighting);
     CHECK(desc.passes[8] == RenderPassSlot::DepthHaze);
-    CHECK(desc.passes[10] == RenderPassSlot::Transparent);
-    CHECK(desc.passes[11] == RenderPassSlot::Forward2DOpaque);
-    CHECK(desc.passes[12] == RenderPassSlot::BloomExtract);
-    CHECK(desc.passes[13] == RenderPassSlot::BloomBlur);
-    CHECK(desc.passes[15] == RenderPassSlot::PostProcess);
-    CHECK(desc.passes[16] == RenderPassSlot::TAA);
-    CHECK(desc.passes[17] == RenderPassSlot::FXAA);
-    CHECK(desc.passes[18] == RenderPassSlot::SMAA);
-    CHECK(desc.passes[20] == RenderPassSlot::ColorGrading);
-    CHECK(desc.passes[24] == RenderPassSlot::Present);
-    CHECK(desc.passes[25] == RenderPassSlot::UI);
+    CHECK(desc.passes[11] == RenderPassSlot::Transparent);
+    CHECK(desc.passes[12] == RenderPassSlot::Forward2DOpaque);
+    CHECK(desc.passes[13] == RenderPassSlot::BloomExtract);
+    CHECK(desc.passes[14] == RenderPassSlot::BloomBlur);
+    CHECK(desc.passes[16] == RenderPassSlot::PostProcess);
+    CHECK(desc.passes[17] == RenderPassSlot::TAA);
+    CHECK(desc.passes[18] == RenderPassSlot::FXAA);
+    CHECK(desc.passes[19] == RenderPassSlot::SMAA);
+    CHECK(desc.passes[21] == RenderPassSlot::ColorGrading);
+    CHECK(desc.passes[25] == RenderPassSlot::Present);
+    CHECK(desc.passes[26] == RenderPassSlot::UI);
 }
 
 // === H. setEnabled(false) on PostProcessPass skips dispatch =========

@@ -1,5 +1,15 @@
 # AYRenderer Design
 
+## 2026-10-23 — main合并不变量
+
+主仓云/艺术后处理的50..54固定view保持编号，点阵五阶段分配55..59；体积240..242保持
+依赖顺序，固定执行序列共75个不同view，UI跳过全部保留区后容量132。FrameGraph先保留
+0..36的既有资源，再追加体积积分/网格/历史37..40，Count41；没有复用旧枚举值。
+阴影/普通照明优先实际Scene的区域灯包，performance模式使用其shadowSources；显式空的
+Scene灯包不恢复隐式旧方向光。截图采用主仓唯一请求文件名/FIFO重试，保留异步读回直到
+完整文件，合并GPU点阵的设备前后两段清理。资源刷新观察者继续按owner撤销。
+标准shader包同时包含云、艺术阶段和灯光演出变体。完整消费方重编后验证组合。
+
 ## 2026-10-23 — 单层云光线步进
 
 新增append-only Clouds slot29、CloudColor FG36和blackboard输出，默认Deferred顺序
@@ -383,6 +393,56 @@ GPU view、shader 变体或公开玩法入口。`setFrustumCullingEnabled(false)
 再入镜时原 prepare 的尺寸、depth 和 generation 校验负责重建。关闭/清空仍释放私有目标。
 可见项仍全屏复制；不提供遮挡剔除、scissor、volume draw、tile 或 atlas 扩展。
 实际验收与复现见 [docs/testing.md](docs/testing.md)。
+## 2026-10-20 单 owner 主呈现
+
+RendererSubSystem 在 renderScenePass 开头优先主呈现 owner，跳过 World、主相机同步、
+可见性过滤与多 CameraRenderView 提取；回调填充 OwnedCpu scene 后主 Renderer 只提交一次。
+首次提交时 Renderer::Impl 保存呈现值快照，callback 期间拒绝重入 set/clear。
+匹配解绑清 scene、失效提取缓存、还原值、重建原 pipeline、重新绑定天空 cube，并恢复宿主视口。
+异常路径同样解绑/恢复后继续抛出，shutdown 在设备资源销毁前收回租约。
+时域GPU历史不复制，切换明确失效；渲染资源的创建/销毁和未列入呈现快照的业务状态仍归宿主。
+
+文档缓存显式 releaseResources：GPU点阵 state 先释放，由 context 保留排队 readback 目的地；
+随后销毁 facade 创建的 mesh/material/texture。保留 packet 或共享 facade 副本须先撤下。
+Renderer::destroyTexture 只清同句柄密度绑定，文档释放不会清除已经恢复的宿主密度场。
+
+
+## 2026-10-17 — 聚光灯数组与批量发光点
+
+PerformanceLighting复制并校验最多256个Spot，独立表面/体积/阴影预算；旧八灯结构保持兼容，
+活动包用黑色阴影源保留atlas生产，Lighting阶段按灯scissor叠加GGX，不重复环境光。
+统一程序化投影函数用于表面与体积。体积先消光一次，再累计各灯散射，并按锥体保守AABB
+裁剪屏幕区域；积分进一步解析相交有限出光口的前向扩张锥体，保留介质入口到弦段起点的透射率。
+稳定二次求根含轴向/近线性/未命中分支，不在空AABB区间浪费步数；
+无图案光束按弦长和局部半径选择积分步数，通常至少16步，用户上限更低则按上限；
+图案光束使用完整上限。
+无时域历史、froxel或clustered列表。
+两层半径r(z)=apertureRadius+z*tan(halfAngle)，核心至外场smoothstep衰减；
+半径为零维持原角度点源轮廓。光源range以连续距离衰减到零，不添加末端盖面。
+patternFocus扩展程序化图案阈值过渡宽度，Texture Gobo以五次纹理采样近似柔焦；
+贴图以旋转/缩放后的归一化光锥坐标投射，越界裁掉，亮度乘alpha和iris。
+Renderer验证贴图句柄仍在自身资源表中；每灯在表面与体积Pass分别绑定同一贴图。
+iris在归一化投影坐标中裁剪图案；
+它们不改变保守锥体包围与阴影投影，也不实现镜头失焦的物理卷积。
+shadowSoftness为可选2x2 atlas PCF半径（0..4像素）；零保持原单点采样，
+开启时表面与体积用相同四点过滤，采样限在本灯atlas子区避免串光。
+有限口径只近似轮廓/投影尺度；阴影仍由单点光源生成，不是面积光半影或完整镜头焦面。
+局部AABB介质在最外侧25%半轴距离以smoothstep淡出密度；消光与散射
+使用同一权重，防止局部烟雾边界重新产生空中光束“封口”。
+局部介质的全屏消光只用四点积分边缘权重，各灯散射仍保持用户的步数预算。
+可选动画密度使用世界位置与绝对节目时间驱动三层平滑正弦变化，并对倍率限幅；
+同一介质样本的消光和散射一致。强度零时跳过噪声计算，保持旧静态路径。
+动画不模拟烟机流体或体积速度场；全分辨率逐灯采样成本需按设备测量。
+EmissivePointCloud复用浮点粒子顶点/共享材质，逐点HDR、视锥筛选和屏幕覆盖能量校正。
+超预算可见点按ID散列排名选择，再按原输入顺序提交；帧间ID不变时不会因列表重排而改变集合。
+这一质量预算减少上传/填充量。可用硬件实例化时，每个可见点打包四个vec4
+（中心与半径、相机右/上轴、HDR辐射色），复用单位四边形，在透明Additive通道
+保持深度测试/不写深度；无实例化能力或显式关闭时保留CPU四顶点路径。
+两路径共用选择/覆盖校正，RenderScene OwnedCpu复制实例流；瞬态GPU容量不足仍跳过该批。
+无GPU裁剪、压缩或间接绘制。D3D11真实离屏读回对照单点两路径颜色，
+Contracts覆盖大批拆分、预算及生产Phoskia编译。
+生命周期、限制和测试入口见[项目契约](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
+新增实例点材质进入生产清单（共68变体）；原单光体积入口在无活动包时继续生效。
 
 ## 2026-10-14 — 独立相机 Forward 视图
 
@@ -394,7 +454,8 @@ GPU view64..111分配三Pass连续区间，原主管线/编辑器/粒子view保�
 RendererSubSystem在每视图自己的相机/aspect下提取OwnedCpu packet后恢复主视口；
 主镜头3D mask在presentation副本过滤，原Scene完整保留。该路径明确为Forward，
 完整Deferred多视图仍需独立的Pass/FrameGraph/blackboard/历史与view命名空间设计。
-UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，最大单Pass预算141；
+UI Layer与四视图预览的分配器同时跳过固定场景和camera区间，合并后最大单Pass预算132；
+
 constexpr容量与公开上限静态交叉检查，防止布局变更后重用同帧GPU view。
 范围、使用方式与实际验收见 [相机系统](../../AYDocs/CAMERA-SYSTEM.md)。
 
@@ -2069,3 +2130,267 @@ The shared helper owns no GPU resource and contains no effect algorithm. Default
 The shared procedural noise function uses bounded integer-domain float arithmetic rather than sin hashes;
 it is seeded grain and is not a blue-noise provider. The view-local physical mask is independent of warped image UV.
 Look v2 adds a strict display object; v1 migration fills display disabled. No runtime-history data is serialized.
+## 2026-10-18 聚合点阵表面光与变焦光通
+
+`buildEmissivePointLights`（EmissivePointCloud.h）把最多65536个有限HDR点按世界网格合并，
+稳定ID决定累加顺序，线性RGB功率相加，亮度加权求中心，范围为配置range加本单元最大偏移
+并限于10000。cellSize[.01,10000]、range[.01,1000]、intensityScale[0,100]；
+最多64个候选灯使用有界堆，亮单元优先、相同亮度按单元坐标排序；输入排序与视锥预算不改变结果。
+已按稳定ID排序的点阵以哈希网格平均O(N)聚合；任意顺序输入先按ID排序，O(N log N)。
+点到单元映射与稀疏累加器为O(N)，候选灯临时存储O(maxLights)，没有逐点SceneLight。
+超过1e9的单元RGB分量夹取，clampedCells显式报告；非法数据/重复ID不替换输出及统计。
+
+setPerformanceLights现在接收Spot和仅表面Point，仍共享256项/表面预算；Point要求
+volumetric=0、Open、无阴影且constantFlux关闭，使用球形范围AABB/scissor和同一GGX通道，
+不扩大旧八灯ABI，不产生体积光。EmissivePointCloud本身仍只提交可见发光；聚合需宿主显式接入。
+这不是逐点GI，不能表达遮挡或网格跨界的连续变化；预算排名变化也可跳变。
+
+PerformanceLight.constantFlux默认关闭，开启时performanceLightFluxScale按
+(2-cos(2°)-cos(3°))/(2-coneCosInner-coneCosOuter)缩放表面和体积强度。
+这是smoothstep角度轮廓的解析归一化；Gobo/iris仍损失光通，有限口径近场不是物理光学。
+
+## 2026-10-19 可见灯具发光口
+
+`FixtureEmitters.h`提供显式的`FixtureEmitters::append`，输入与主视图相同的
+PerformanceLight灯包、view/projection和viewport。`buildFixtureEmitterBatch`是可离线测试的
+准备函数，最多256灯/1024顶点；非法灯包、相机和设置不替换输出/统计。
+仅Spot且apertureRadius>0、intensity>0生成圆形平面，随灯具轴朝向，背面不出光。
+Point和旧版零口径不自动造灯泡。发光口按iris收缩；核心/外场余弦轮廓和constantFlux与灯束一致，
+可选offAxisGlow提供很弱的前半球镜片辉光，不在背面添加屏幕贴片。
+
+近似辐亮度为intensity/出光口面积×radianceScale×角度权重，保留线性HDR颜色；
+不对已分辨发光面再施加平方反比。默认.75px最小足迹按面积修正能量，最大RGB默认10000，
+允许[1,60000]，超限在介质透射和足迹能量修正前夹取并计入clamped，避免高亮饱和吞掉雾衰减。radianceScale[0,100]、
+minimumPixelRadius[0,4]、offAxisGlow[0,1]均为显式呈现参数，尚非标准光度单位标定。
+
+资源复用现有ParticleUnlit生产材质，圆盘纹理64×64，最多一个CPU批次/绘制；
+Additive、深度测试、不写深度，服从不透明场景的完整/部分遮挡，再进入现有Bloom/曝光链。
+因Transparent在体积之后，发光口自行读取Renderer的VolumetricSettings：均匀介质解析透射，
+局部盒/动态密度用最多16次中心视线积分，使用相同噪声时间与边缘淡出。该近似不做逐像素介质积分。
+未生成独立屏幕眩光，不添加第二次散射；现有体积HG方向约定保持不变。
+
+Renderer拥有纹理/材质/quad，借用批次活到下一次append/销毁，保留帧使用OwnedCpu；
+Renderer重启后重建Facade。prepared仅为CPU候选数，GPU裁剪/深度及瞬态缓冲可减少实际像素。
+尚无灯体外壳、Gobo在镜片上的真实像、镜头鬼影、星芒或物理焦面。
+
+
+## 2026-10-19 光度与IES
+
+PerformanceLight.intensityUnit支持Legacy/Candela/Lumen；Legacy保留历史表现，物理模式以米为世界尺度，
+颜色按Rec.709线性亮度归一化（黑色无光），表面/体积/可见灯口共用performanceLightIntensity。
+Lumen以smoothstep光锥与峰值归一化IES的有效立体角换算，iris/Gobo是后续吸收；
+Candela直接指定峰值方向强度。constantFlux只对Legacy生效。有限口径近场、range截断和RGB色谱仍是近似。
+illuminanceLux提供无截断无遮挡的cd×cos/r²诊断，不把显示器像素宣称为测光仪。
+
+IesProfile::parse只接受LM-63-1995/2002/2019、Type C、TILT=NONE、ballast字段均为1；
+最多4MiB/262144测量样本，严格递增角度，支持旋转/90°/180°/360°对称，360°接缝需一致。
+不支持Type A/B、外部/内嵌TILT或非单位ballast；失败保留旧对象。颜色不由IES指定。
+createIesTexture上传257×129线性RGBA8角度图，CPU灯口与GPU表面/体积共享坐标基；
+8bit峰值归一化会量化极弱旁瓣。Host配对不可变profile与存活atlas，Renderer检查句柄后复制灯包。
+有效立体角以128点余弦空间求积，水平角均值由原始采样分段线性积分；极窄IES尖峰需提高采样质量。
+
+
+## 2026-10-19 距离焦平面与棱镜
+
+focusDistance>0使用有限出光口/iris作为几何瞳孔，距焦面z处的弥散圆半径为
+apertureRadius×iris×abs(1-z/focusDistance)，除以该处光束半径得到投影滤波足迹。
+焦面处额外模糊为零，零focusDistance精确保留旧柔焦；图案使用有界五点瞳孔滤波，
+不是衍射/像差/连续光学卷积。patternFocus仍是独立的作者柔化参数。
+
+prismCount为1（禁用）或2..8，prismAngle[0,.35]rad，prismRotation为连续弧度。
+每束保持原核心/外场发散，绕主轴倾斜并按束数分配强度；表面/烟雾/可见灯口共享方向与IES。
+有限瞳孔的分束在出光口附近允许真实几何重叠；不人为挖空中心。
+CPU裁剪取所有分束包围盒并集，体积解析各束交段的保守并集，再对实际每束求值。
+阴影仍同一出光位置，投影外场扩大覆盖分束；非面积光阴影。
+同灯仍一个表面和一个体积draw，shader最多8束，体积保留最多64步；稀疏宽分束可能欠采样，
+不保证与单束相同GPU成本。五条固定Star图案射线展开，保留Shader1024迭代乘积安全门。
+
+
+## 2026-10-19 相机镜头高光效果
+
+Renderer::setLensEffects复制sanitizeLensEffects后的设置，默认关闭，非法浮点归零/合理默认并夹限。
+主视图PostProcess在曝光/tonemap之前从本帧BloomBlurB读取HDR高光，产生1..4轴双向星芒、
+三组镜面中心鬼影、RGB色散与可选静态程序化脏镜纹理调制。星芒按视口高宽比修正方向，
+每轴16次有界采样，鬼影最多9次采样；这是一种屏幕空间艺术模型，不是衍射/镜片光线追踪。
+设置开启且有效强度>0会独立启用既有半分辨率高光提取/模糊，即使Bloom贡献为0也有效。
+关闭不增加RT或draw，shader跳过镜头采样。输入必须是当前帧已产出的高光；资源缺失时强度归零，
+不读历史缓冲。灯口被不透明几何完整遮挡时不能生成鬼影；镜头效果可扩展到图像其他物体上。
+曝光仍共享现有固定倍率/自动测光历史，lens不是第二套自动曝光。此阶段无实体镜片/灯壳几何。
+
+
+## 2026-10-19 灯体与遮光几何
+
+FixtureHousings::append显式追加不透明灯壳、镜片边框、筒形遮光罩与可选四片铰接遮光叶。
+bodyLength[.5,10]、hoodLength[0,4]为出光口半径倍数，leafAngle[-.5,.5]rad为铰接角。
+单位网格/材质在Renderer中共享，变更设置只改矩阵；不销毁保留场景仍引用的旧网格。
+最多256灯/1536部件，灯灭保留实体，Point/零出光口跳过；非法输入保留准备输出/统计。
+普通opaque深度、GBuffer与刚体批处理生效，背壳/罩/叶片可遮挡相机所见灯口。
+灯壳金属为共享PBR材质，接受既有灯光/阴影；半径与方向跟随演出帧，外壳不随iris收缩。
+这些是可见几何，不会重写光度/IES/Gobo或把叶片角自动转换为光束通光率；
+光传播遮挡仍服从现有阴影预算/近裁剪精度，近灯口的机械挡光并非完整镜片追迹。
+
+
+## 2026-10-19 有限出光口半影（PCSS）
+
+PerformanceLight.areaShadow为可选模式，仍需castShadow与atlas槽，默认关闭保留旧硬影/2x2 PCF。
+瞳孔半径=apertureRadius×iris；先搜索更近遮挡深度，线性化ShadowCaster存储的
+.5+.5*(clipZ/clipW)，再估算世界半影R×(zReceiver-zBlocker)/zBlocker并过滤可见性。
+SpotShadowProjection.h是阴影生产矩阵与采样侧near/far/FOV的一致入口；源投影按有限瞳孔/棱镜扩大，
+覆盖近处光束口径，最大仍遵循175°FOV。接触处几何半影为零，远处/大瞳孔更柔。
+areaShadowBias[0,.1]为独立世界单位偏移（默认.003），旧light.shadowBias仍只用于legacy NDC比较。
+表面16、体积8个确定性分层样本，额外中心遮挡采样；搜索和过滤半径最多32个atlas像素，
+夹回本灯子图，既有shadowSoftness作为过滤下限。0半径回退旧路径，采样不使用历史或随机帧噪声。
+该PCSS是平行平面/平均遮挡深度近似，稀疏采样、atlas分辨率、近裁剪及半径预算会限制质量，
+并非多光源面积蒙卡阴影。不会增添新的shadow atlas槽或改变旧八灯Shader ABI。
+算法参考：https://download.nvidia.com/developer/SDK/Individual_Samples/MEDIA/docPix/docs/PCSS.pdf
+
+
+## 2026-10-19 扩展灯透明 PBR 与独立 SSR
+
+主视图 Deferred 透明阶段按原有后到前顺序提交 base，再追加扩展灯直接光。
+复用不透明光学核及阴影绑定，包含光度/IES/Gobo/iris/焦面/棱镜/PCSS；仅标准 PBR ABI，
+自定义 Unlit/粒子不强行改写。临时材质副本用独立 aypt_ 属性名，避免 bgfx 全局 uniform
+默认值污染共享 PBR；源材质不变。RGB One/One、alpha Zero/One，直接光按源 alpha 加权，
+非预乘 Additive 保持既有全量语义，深度只读；后层光仍被前层 alpha 遮挡。
+PerformanceLightBudget.transparentDraws 默认128、范围0..1024，transparentLightsPerObject
+默认8、范围0..32。来源还受surfaceLights约束，保留sortKey显式分层，同层按近到远分配额度，再按后到前合成；
+刚性网格用保守AABB求交，无可靠包围盒/变形失败开放。统计区分提交、预算跳过和不支持材质。
+0额度不建透明光程序；预算只是受控近似，不保证透明叠层的完整物理传播/折射/彩色透射阴影。
+
+SSR现在可在没有IBL环境立方贴图、环境强度0的舞台工作；延迟建立黑立方和64x64 split-sum
+积分LUT，关闭SSR不建立资源。已有IBL时复用其资源，命中替换原IBL镜面；反射的本帧屏幕辐射
+已含照明，不再乘环境强度。输入包含不透明扩展灯直接光；保持既有8..64步与失败/未命中回退。
+SSR位于体积和透明之前，仅反射可见不透明接收面，不反射透明层、后加发光灯口、离屏对象，
+不提供折射、递归反射或全局间接光。生命周期销毁fallback纹理，资源失败不发布结果。
+
+
+## 2026-10-19 单次屏幕漫反射
+
+ScreenSpaceIndirectSettings 经 Renderer::setScreenSpaceIndirectSettings 复制/有限化，默认关闭。
+主Deferred以独立开关复用SSR Pass/瞬态HDR目标，specular SSR可保持关闭；全关闭不增加RT/draw。
+本帧LightingColor（含不透明扩展光）为唯一辐射输入，禁止历史/递归反馈。
+每个StandardLit非金属接收面最多4条确定性余弦半球射线、每条4..32步、命中4次细化；
+核对几何覆盖、厚度、自命中、朝向和屏幕边界，缺失样本贡献0。距离/厚度均为世界单位。
+余弦抽样抵消Lambert的1/pi，漫反射权重为clamp(albedo,0,1)×(1-metallic)×.96，
+再乘strength[0,1]并平均射线，保留alpha；金属1、黑反射率和零输入不增加漫反射。
+关闭项不依赖环境贴图。固定方向避免逐帧随机闪烁，但1..4射线会有离散欠采样；
+它不是离屏GI、探针、多次反弹、透明折射或时域累积。共享屏幕命中规则与SSR维护一致。
+
+
+## 2026-10-19 低分辨率体积积分与深度重建
+
+VolumetricSettings.downsample为每轴除数1/2/4，默认1保持原路径。2/4新增一个FrameGraph瞬态
+RGBA16F积分目标，尺寸ceil(viewport/divisor)，存储散射RGB/透射alpha；扩展灯仍一次介质消光、
+独立预算下逐灯积分和scissor，保留全部IES/Gobo/焦面/棱镜/PCSS。传统单灯也支持同一重建。
+本帧积分完成后用专用视图242重建到既有全分辨率VolumetricColor，再透明/Bloom；
+FrameGraph资源ID30追加VolumetricIntegration，旧ID不变，Count31。关闭或除数1不分配此附件。
+
+重建仅采散射，四点双线性权重结合GBuffer视空间深度和天空/几何分类；深度容差max(.05,.02×z)，
+4倍容差外拒绝，未覆盖的细前景不借背景散射（零散射回退）。消光仍在全分辨率按实际观察路径
+计算，动画密度沿用4点积分，场景RGB与alpha始终来自全分辨率源；不会把背景一起缩小模糊。
+增加一个重建draw，volumeDraws仍只数光源。低采样仍可能漏掉很细的光束/前景，不是froxel或历史重投影。
+
+242纳入固定视图保留，离屏UI分配器自动跳过；现有各ID与camera64..111不变。
+UIRenderBackend.kMaxOffscreenPaintsPerFrame从145变144，与实际保留容量一致，四视图组仍可留下空隙。
+
+
+## 2026-10-19 合批与逐视图性能诊断
+
+FixtureHousings::append按Body/Hood/Leaf共享网格分组，保持各部件矩阵与组内顺序，
+让既有GBuffer/Shadow刚体实例合批连续生效；buildFixtureHousingDraws的离线输出顺序不变。
+16灯/96部件D3D11和D3D12均从102后端draw降到9，instancedObjects96，RGB回读差0。
+实例对象数含多Pass/阴影重复，不等于独立实体数量。
+
+setDebugOverlayEnabled(true)现在同时启用BGFX_DEBUG_PROFILER；默认关闭查询。
+setDebugOverlaySuppressed(true)隐藏文字但保留采样，getFrameStats为逐帧更新的借用快照。
+DebugOverlay归并补全SSR32、体积33/242、Bloom11/12/26..30及曝光31；
+独立相机/动态离屏UI不逐项归属，0分项表示未启用/不支持，不应解释为零开销。
+GPU完成帧可滞后CPU；Renderer CPU帧内时间不覆盖Host的演出求值/Presenter工作。
+
+
+2026-10-19 局部雾重建补充：重建消光的4点密度规则同时应用局部盒.75..1柔边权重与动画噪声，
+修复局部设置下散射和消光密度不一致。常量全局路径保持原解析式。
+真实GPU回归新增局部/全局×静态/动画×1/2/4分辨率对照，两后端各1项1298断言通过。
+
+
+## 2026-10-19 有界 froxel 系数网格
+
+VolumetricSettings.froxel默认关闭；tile4/8/16、深度16/32/64，cell预算65536..4194304、默认1048576。
+XY分辨率同时受纹理轴限与cell预算约束。RGBA32F八列atlas保存RGB入射散射系数和alpha消光系数，
+局部柔边/动画密度独立写一次，各灯复用完整光学与阴影核，只加RGB，随后按观察距离对数切片做Beer积分。
+默认1920x828、tile8、32切片为240x104x32=798720cell（field约12.2MiB），不分配逐格灯列表。
+无RGBA32F framebuffer能力回退原ray路径；网格启用时downsample不参与布局。极细图案可能欠采样。
+场景颜色/alpha仍全分辨率，深度感知重建及当前介质消光沿用既有路径；无历史或多重散射。
+新增FroxelField资源ID31，原ID不变；view241注入、33积分、242重建，UI单Pass容量143。
+RenderFrameStats.volumetric报告实际积分宽高、切片、cell数及启用状态；关闭帧清零。
+
+
+## 2026-10-20 独立体积系数历史
+
+froxelHistory默认关闭，weight=.85[0,.95]；仅网格路径启用。两份RGBA32F最近采样历史由Pass持有、
+FrameGraph按32/33导入（额外32bytes/cell），view240位于241注入和33积分之间；UI容量142。
+前帧系数按世界位置重投影，并由当前5点邻域夹紧；零通道/亮度或消光突变拒绝历史，当前alpha不滤波。
+尺寸、网格/物理参数、镜头大切换、提交帧间断或noiseTime跳变失效；显式resetVolumetricHistory处理跳播/换场。
+失败退回当前场，关闭释放缓存；成功完成全分辨率输出后才交换历史，不依赖TAA/曝光结果。
+historyUsed是帧级重投影资格，不是逐格接受数；最近采样、无子格抖动/方差估计，仍可能漏掉细光束。
+
+FrameGraph::resolve对external借用也要求本帧declared：效果关闭未重导入时返回invalid，
+避免Owner已释放旧FBO后仍查询其附件；本阶段历史关停真实GPU用例覆盖此路径。
+
+
+## 2026-10-20 点实例连续写入
+
+实例数据按批次一次resize后写完整64字节记录，避免每点vector::insert与迭代器扩容检查。
+沿用相同裁剪、稳定ID预算、半径/覆盖能量及16浮点布局；缩放重用和16383边界有CPU回归。
+独立D3D11/D3D12点实例与CPU四边形读回对照通过AY_POINT_GPU_TEST选择后端。
+这项CPU准备优化不等同GPU筛选/compaction或点光聚合稳定性。
+
+
+## 2026-10-20 局部密度场
+
+VolumetricDensityField::create复制各轴1..64的uint8数据，CPU三线性采样；createVolumetricDensityTexture生成
+8列线性RGBA8 atlas。setVolumetricDensityField验证配对与活句柄，active时强制local=true，普通数值设置不丢绑定；
+destroyTexture/shutdown清除绑定并失效独立体积历史，host纹理需活过渲染。场在盒外0，叠加原.75..1柔边和动画噪声。
+ray、froxel密度写入、全分辨率消光与CPU灯口读取同一场；GPU两层Z插值并使用显式LOD0避免动态循环导数展开。
+分离消光/灯口最多16采样，legacy单Pass可共用最多64 ray步，froxel每格中心；高频网格仍可能欠采样，非精确体素积分或流体。
+网格图案是消光倍数，不新增彩色透射、透明雾积分、多重散射或硬件控制。
+
+### 连续点阵聚合与有界排名过渡
+
+EmissivePointLightingSettings.smoothCells默认false；true把RGB按三线性权重分给8个固定世界网格节点。
+预算/钳制前保持RGB和位置一阶矩，±100000世界边界节点截断除外；不再跨硬桶突变，不能保证预算裁剪后能量守恒。
+范围扩展sqrt(3)*cellSize并受10000总上限约束；最多524288候选节点，最多64灯，仍独立于可见点数预算。
+EmissivePointLightingHistory::update接收time和transitionSeconds[0,1]，只用于smoothCells。
+最多maxLights个槽，旧节点先淡出释放，再准入新节点淡入；可能出现短暂能量降低，保持原RGB不改变色相。
+同时间不推进，逆时/超过.25秒缺帧/配置变化重置；全黑立即清空。显式seek/编辑调用reset；默认无历史。
+Presenter setPointLighting(settings,transitionSeconds=0)保留原路径，可显式resetPointLightingHistory；Studio跳播会重置。
+Studio --point-smooth、--point-transition秒，点照明按钮按off/hard/smooth循环；不改变schema8。
+
+Point PerformanceLight可选pointContactDistance[0,10]、pointContactThickness[.001,5]、pointContactBias[0,.5]、pointContactStrength[0,1]。
+距离0默认关闭；EmissivePointLightingSettings的contact*复制到聚合灯。共享不透明/标准透明受光绑定执行最多8次采样。
+使用当前GBuffer世界位置/覆盖率沿向光方向短距追踪，比较相机空间前向深度以判断可见遮挡；厚度和偏移是世界单位。
+只检测当前视图中的不透明遮挡，不能处理离屏、背面、多层透明或完整点光阴影；不占cube/Spot shadow槽。
+Studio --point-occlusion距离显式开启。现有Spot必须保持pointContactDistance=0。
+
+连续聚合缓存每个硬格的8邻节点索引（最多65536个邻域），同格点不重复8次哈希；零权重角按需创建，无空能量节点。固定节点不计算未使用的重心。
+
+### GPU点阵筛选、压缩与间接绘制（显式会话选项）
+
+EmissivePointSettings.preferGpuCulling默认false；Windows D3D11/12具有compute/instancing/indirect及RGBA32F image-write时可用。
+仅当source.size()<=maxPoints才走GPU；较小显示预算整批回CPU稳定ID排名，preferInstancing=false也保留CPU四边形。
+源数据仍在CPU求值/验证，32-byte输入上传；mark、256点分块计数、前缀和、按原顺序压缩4vec4/64-byte实例，最后一个索引间接四边形绘制。
+GPU与CPU共享XY/w裁剪、最小像素半径及面积能量公式，不额外加Z裁剪；可见筛选不影响独立的CPU点照明聚合。
+Renderer每设备最多8个存活GPU cloud state；缓冲按256..65536的二次幂扩容，不占瞬态实例预算。
+4个compute及raw draw vertex/fragment共6阶段在构建时烘焙为s_5_0 DXBC并嵌入，无运行时shaderc路径；78个标准生产变体仍单独覆盖。
+
+cloud.stats()是append刷新的值快照。GPU模式countsExact=false，visible/culled为未知0，不能称为实际0可见；source仍是当前输入数。
+gpuDiagnostics默认false，正常GPU绘制不读回、不等待。开启后，gpuSampleValid/source/visible/serial标记较早提交的异步样本，可能跨多个帧。
+计算、blit、readTexture请求分开提交，越过返回完成帧后才消费；一个state最多一个在途读回。销毁state会取消尚未排队的请求，
+已排队CPU目标由Renderer context保活到完成/设备关闭后，避免销毁cloud时写入已释放内存。
+GPU流在OwnedCpu RenderScene中仍借用Cloud状态，必须保持owner到render结束，不能跨下一次append保留GPU帧；设备重建后重建Cloud/Presenter。
+
+固定view55/56/57/58为mark/count/prefix/compact，59为诊断blit，排在主渲染之前；与云和艺术后处理合并后UI离屏单视图上限为132。
+RenderFrameStats.pointGpuTimeMs/pointGpuReadbackTimeMs分别统计四个计算视图和blit，GPU帧号/0含义沿用原诊断；后者不含CPU映射或排队延迟。
+Studio --point-gpu显式启用，--point-gpu-readback再启用带序号样本；--point-cpu保留CPU四边形。JSON增加gpuPointCulling、pointCountsExact、
+gpuPointFallback、gpuPointSampleValid/Serial/Source/Visible及meanPointGpuMs/meanPointGpuReadbackMs。
+CameraRenderView即使没有不透明几何也执行请求的颜色/深度清屏，避免纯点阵或空帧保留上一张输出。
