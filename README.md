@@ -1,5 +1,28 @@
 # AYRenderer
 
+## 单层体积云（2026-10-23）
+
+主Deferred管线新增Clouds阶段（View54），在体积雾之后、透明物体与曝光/色调映射之前，
+用三维密度光线步进、Beer透射、方向光散射和短程光照步进生成云内自遮蔽。
+按GBuffer世界位置截断射线，天空射线可以越过场景相机far plane，受独立maxDistance限制。
+默认关闭；高级Host使用Renderer::setCloudSettings，普通环境显示使用AYEnvironment桥。
+设置为拥有值、owner线程调用；每帧不推进时间，宿主提供shape/detail phase。
+
+CloudQuality控制8..64视线步、0..8光照步、最大距离和composite/transmittance/radiance/ray调试。
+初版为全分辨率单层Y向高度云，无地面云影、多次散射、地球曲率或历史重投影；
+不消费环境historyRevision，TAA不提供云专用速度补偿。Forward与独立renderViews不支持该阶段。
+默认程序生成可平铺32³ FBM，种子变化重建约148KiB RGBA8 atlas，其余帧复用。
+缺省weatherMap为白色。自定义形状/细节纹理必须是linear的272×136 atlas：
+8×4个34×34切片，每片32×32有效数据、一圈wrapped边框，R为密度；weatherMap为linear 2D R。
+句柄借用到endFrame，Host负责加载与释放；失效句柄、sRGB/cube或错误atlas尺寸使本次云提交跳过。
+关闭或零coverage/density/absorption不分配本次云目标；重新启用不读取上一帧云结果。
+私有噪声/白图与几何按管线关闭路径清理，输出由FrameGraph瞬态池拥有。
+
+固定View54占用原UI可用槽，最大单View离屏UI绘制由141变为140；分组预览仍可能留空槽。
+CPU契约/边框测试为AYRenderer_Clouds；实机独立目标AYRenderer_CloudRenderTest，
+参数为fresh-output-directory和d3d11/d3d12，读回检查天空透射、前景深度、空密度/天气图、
+自遮蔽、phase变化、关闭和resize。测试记录见docs/testing.md。
+
 ## 区域视图与传送门表面（2026-10-23）
 
 `CameraRenderView::spaceRegionId` 非零时只提取相同区域的 `DrawItem`；零保留旧版

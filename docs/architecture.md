@@ -67,7 +67,7 @@ Forward:
 
 Deferred:
   Shadow → Skybox → GBuffer → DeferredDecal → MotionVector → SSAO → Lighting
-  → SSR → DepthHaze → Volumetric → Transparent → CameraOverlay2D
+  → SSR → DepthHaze → Volumetric → Clouds → Transparent → CameraOverlay2D
   → BloomExtract → BloomBlur → AutoExposure → PostProcess → TAA/FXAA/SMAA
   → StylizedOutline → ColorGrading → ColorStylization → TemporalFeedback
   → AnalogDisplay → Present → UI → GBufferDebug

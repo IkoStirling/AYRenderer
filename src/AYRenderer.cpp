@@ -21,6 +21,7 @@
 #include "detail/DepthHazePipeline.h"
 #include "detail/SsrPass.h"
 #include "detail/VolumetricPass.h"
+#include "detail/CloudPass.h"
 #include "detail/DeferredDecalPass.h"
 #include "detail/DeferredDecalVisibility.h"
 #include "detail/DebugOverlay.h"
@@ -267,6 +268,7 @@ struct Renderer::Impl {
     bool                           ssaoEnabled  = false;
     SsrSettings                    ssr;
     VolumetricSettings             volumetric;
+    CloudSettings                  clouds;
     bool                          decalsEnabled = false;
     std::vector<DeferredDecal>     decals;
     float                          ssaoStrength = 0.0f;
@@ -929,6 +931,7 @@ void Renderer::render(const RenderScene& scene)
     frame.hazeEnabled      = _impl->depthHazeEnabled;
     frame.ssr = _impl->ssr;
     frame.volumetric = _impl->volumetric;
+    frame.clouds = _impl->clouds;
     frame.decalsEnabled = _impl->decalsEnabled;
     frame.hazeStrength     = detail::sanitizeDepthHazeStrength(
         _impl->depthHazeStrength);
@@ -1379,6 +1382,11 @@ void Renderer::render(const RenderScene& scene)
         && lightingPassPtr && lightingPassPtr->isEnabled();
     if (graphInput.volumetric && !detail::BGFXAdapter::isValid(graphInput.gbuffer))
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
+    const auto* cloudPass = _impl->pipeline.findPass<detail::CloudPass>();
+    graphInput.clouds = backendReady && frame.clouds.enabled && frame.clouds.coverage > 0
+        && frame.clouds.density > 0 && frame.clouds.absorption > 0 && cloudPass && cloudPass->isEnabled()
+        && gbufferPassPtr && gbufferPassPtr->isEnabled() && lightingPassPtr && lightingPassPtr->isEnabled();
+    if (graphInput.clouds && !detail::BGFXAdapter::isValid(graphInput.gbuffer)) graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
     graphInput.bloomExtract = bloomStages.extract;
     graphInput.bloomBlur = bloomStages.blur;
     graphInput.autoExposure = autoExposureStageEnabled;
@@ -2792,6 +2800,8 @@ void Renderer::setVolumetricSettings(const VolumetricSettings& settings) {
 VolumetricSettings Renderer::volumetricSettings() const noexcept {
     return _impl ? _impl->volumetric : VolumetricSettings{};
 }
+void Renderer::setCloudSettings(const CloudSettings& settings) { if (_impl) _impl->clouds = sanitizeCloudSettings(settings); }
+CloudSettings Renderer::cloudSettings() const noexcept { return _impl ? _impl->clouds : CloudSettings{}; }
 void Renderer::setDeferredDecals(const std::vector<DeferredDecal>& decals) {
     if (!_impl) return;
     std::vector<DeferredDecal> copy;

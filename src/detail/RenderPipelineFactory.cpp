@@ -28,6 +28,7 @@
 #include "detail/TransparentPass.h"
 #include "detail/UIPass.h"
 #include "detail/VolumetricPass.h"
+#include "detail/CloudPass.h"
 
 namespace ayt::render::detail {
 
@@ -59,6 +60,7 @@ std::unique_ptr<RenderPass> makeRenderPass(RenderPassSlot slot)
     case RenderPassSlot::DepthHaze: return std::make_unique<DepthHazePass>();
     case RenderPassSlot::SSR: return std::make_unique<SsrPass>();
     case RenderPassSlot::Volumetric: return std::make_unique<VolumetricPass>();
+    case RenderPassSlot::Clouds: return std::make_unique<CloudPass>();
     case RenderPassSlot::DeferredDecal: return std::make_unique<DeferredDecalPass>();
     case RenderPassSlot::SSAO: return std::make_unique<SSAOPass>();
     case RenderPassSlot::GBufferDebug: return std::make_unique<GBufferDebugPass>();

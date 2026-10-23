@@ -26,6 +26,7 @@
 #include "detail/TemporalFeedbackPass.h"
 #include "detail/TransparentPass.h"
 #include "detail/VolumetricPass.h"
+#include "detail/CloudPass.h"
 
 namespace ayt::render::detail {
 namespace {
@@ -63,6 +64,7 @@ void destroyPipelineGpuResources(RenderPipeline& pipeline, BGFXAdapter& adapter)
     destroy<AutoExposurePass>(pipeline, adapter);
     destroy<SsrPass>(pipeline, adapter);
     destroy<VolumetricPass>(pipeline, adapter);
+    destroy<CloudPass>(pipeline, adapter);
     destroy<DepthHazePass>(pipeline, adapter);
     destroy<SSAOPass>(pipeline, adapter);
     destroy<GBufferDebugPass>(pipeline, adapter);

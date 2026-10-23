@@ -127,6 +127,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::SSR,
         RenderPassSlot::DepthHaze,
         RenderPassSlot::Volumetric,
+        RenderPassSlot::Clouds,
         RenderPassSlot::Transparent,
         // The same camera-overlay 2D stage is available in Deferred. It writes
         // the current Lighting/Haze color producer without entering GBuffer.

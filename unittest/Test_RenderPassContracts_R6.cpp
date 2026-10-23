@@ -79,7 +79,7 @@ TEST_CASE(legacy_normalization_is_pure_idempotent_and_preserves_explicit_errors)
 TEST_CASE(every_public_slot_has_one_static_contract)
 {
     for (uint8_t raw = 0; raw <= static_cast<uint8_t>(
-             RenderPassSlot::TemporalFeedback); ++raw) {
+             RenderPassSlot::Clouds); ++raw) {
         const auto slot = static_cast<RenderPassSlot>(raw);
         const auto* contract = renderPassContract(slot);
         CHECK(contract != nullptr);

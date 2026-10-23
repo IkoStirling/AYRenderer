@@ -3,6 +3,7 @@
 #include "AYMath/MathTypes.h"
 #include "AYRenderer/SsrSettings.h"
 #include "AYRenderer/VolumetricSettings.h"
+#include "AYRenderer/CloudSettings.h"
 
 #include <cstdint>
 
@@ -133,6 +134,7 @@ struct FrameContext {
     SsrSettings ssr;
     VolumetricSettings volumetric;
     bool decalsEnabled = false;
+    CloudSettings clouds;
 };
 
 } // namespace ayt::render::detail

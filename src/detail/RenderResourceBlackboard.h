@@ -35,6 +35,7 @@ enum class BlackboardResourceId : uint8_t {
     VolumetricColor,
     FeedbackHistoryRead,
     FeedbackHistoryWrite,
+    CloudColor,
     Count,
 };
 

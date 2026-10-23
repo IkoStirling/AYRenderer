@@ -1,5 +1,26 @@
 # AYRenderer Design
 
+## 2026-10-23 — 单层云光线步进
+
+新增append-only Clouds slot29、CloudColor FG36和blackboard输出，默认Deferred顺序
+SSR→DepthHaze→Volumetric→Clouds→Transparent→曝光/后处理。FG与静态契约同时声明依赖，
+当前帧CloudColor成功发布后才成为HDR输入；失败回到当前帧早先的生产者，禁用无旧帧复用。
+固定View54加入依赖重排与GPU计时归属，UI分配器避开该槽，公开容量变为140。
+
+形状与细节来自带边框的2D切片atlas，经XY硬件双线性+Z双切片插值构成周期3D噪声。
+内置32³分层value-noise用局部整数hash、无全局RNG；同seed复用，变seed先分配成功再替换。
+有界视线与光照嵌套步进按高度包络/覆盖/侵蚀计算密度，Beer透射与HG单散射逐步累积，
+光照步进估算云内可见度；scattering=0保留纯吸收，weatherMap=0对应局部零覆盖。
+射线使用逆VP恢复，透视从camera、正交从near位置开始，几何覆盖截断到世界位置；
+空天空不受相机far plane截断，接近水平的射线显式处理平行高度层。
+逆VP在云阶段以double消元和残差校验得到，上传齐次近/远角点并按UV插值；
+独立重投影点与设备像素验证该路径，不依赖通用快速inverse在投影矩阵上的行为。
+视线步点按像素错开，噪声坐标做连续扰动、远距离密度渐隐，缓解固定高度采样条纹。
+
+GPU私有atlas/白图不借用主附件，resize保留，完整管线销毁统一释放。外部atlas/map经资源表
+检查有效性、linear/非cube和atlas尺寸，仍是Host借用，并非GPU租约或资产自动发现。
+这是全分辨率参考实现，无历史缓存、降采样或云地面阴影；环境phase和history标记不由Renderer推进。
+
 ## 2026-10-23 — 传送门视图与表面
 
 DrawItem、CameraRenderView 与 CameraViewportDesc 的零区域是 legacy 全量路径，

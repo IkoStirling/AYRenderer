@@ -10,6 +10,7 @@
 #include "AYRenderer/SSAOShaderSources.h"
 #include "AYRenderer/SsrShaderSources.h"
 #include "AYRenderer/VolumetricShaderSources.h"
+#include "AYRenderer/CloudShaderSources.h"
 #include "AYRenderer/DeferredDecalShaderSources.h"
 #include "AYRenderer/ColorStylizationShaderSources.h"
 #include "AYRenderer/StylizedOutlineShaderSources.h"
@@ -35,6 +36,7 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
         std::pair{"auto_exposure",kAutoExposurePhoskiaSource},
         std::pair{"ssr",kSsrPhoskiaSource},
         std::pair{"volumetric",kVolumetricPhoskiaSource},
+        std::pair{"clouds",kCloudPhoskiaSource},
         std::pair{"deferred_decal",kDeferredDecalPhoskiaSource},
         std::pair{"color_stylization",kColorStylizationPhoskiaSource},
         std::pair{"stylized_outline",kStylizedOutlinePhoskiaSource},

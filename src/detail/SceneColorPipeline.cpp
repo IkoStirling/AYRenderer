@@ -38,6 +38,10 @@ bgfx::FrameBufferHandle selectSceneColorSourceFbo(
         return BGFX_INVALID_HANDLE;
     }
 
+    if (ctx.resourceBlackboard != nullptr) {
+        const auto* clouds = ctx.resourceBlackboard->findProduced(BlackboardResourceId::CloudColor);
+        if (clouds && BGFXAdapter::isValid(clouds->framebuffer)) return clouds->framebuffer;
+    }
     // Haze becomes authoritative only after a successful current-frame
     if (ctx.resourceBlackboard != nullptr) {
         const auto* fog = ctx.resourceBlackboard->findProduced(BlackboardResourceId::VolumetricColor);

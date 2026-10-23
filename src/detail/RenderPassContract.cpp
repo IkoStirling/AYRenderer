@@ -49,7 +49,8 @@ constexpr std::array<RenderPassResourceWrite, 2> kForwardWrites = {{
            Extent::Full, true),
     output(Id::SceneDepth, Life::External, Format::D24S8),
 }};
-constexpr std::array<RenderPassResourceRead, 4> kTransparentReads = {{
+constexpr std::array<RenderPassResourceRead, 5> kTransparentReads = {{
+    optional(Id::CloudColor),
     required(Id::SceneColor),
     required(Id::SceneDepth),
     optional(Id::ShadowAtlas),
@@ -112,14 +113,16 @@ constexpr std::array<RenderPassResourceRead, 6> kHazeReads = {{
 constexpr std::array<RenderPassResourceWrite, 1> kHazeWrites = {{
     output(Id::HazeColor, Life::Transient, Format::RGBA16F),
 }};
-constexpr std::array<RenderPassResourceRead, 1> kOverlay2DReads = {{
+constexpr std::array<RenderPassResourceRead, 2> kOverlay2DReads = {{
+    optional(Id::CloudColor),
     required(Id::SceneColor),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kOverlay2DWrites = {{
     output(Id::SceneColor, Life::External, Format::RGBA16F,
            Extent::Full, true),
 }};
-constexpr std::array<RenderPassResourceRead, 4> kBloomExtractReads = {{
+constexpr std::array<RenderPassResourceRead, 5> kBloomExtractReads = {{
+    optional(Id::CloudColor),
     required(Id::SceneColor),
     optional(Id::HazeColor),
     optional(Id::SsrColor),
@@ -146,7 +149,8 @@ constexpr std::array<RenderPassResourceWrite, 7> kBloomBlurWrites = {{
     output(Id::BloomPyramidUpQuarter, Life::Transient, Format::RGBA16F,
            Extent::Quarter),
 }};
-constexpr std::array<RenderPassResourceRead, 6> kPostProcessReads = {{
+constexpr std::array<RenderPassResourceRead, 7> kPostProcessReads = {{
+    optional(Id::CloudColor),
     required(Id::SceneColor),
     optional(Id::HazeColor),
     optional(Id::SsrColor),
@@ -157,7 +161,8 @@ constexpr std::array<RenderPassResourceRead, 6> kPostProcessReads = {{
 constexpr std::array<RenderPassResourceWrite, 1> kPostProcessWrites = {{
     output(Id::FinalLdrColor, Life::Transient, Format::RGBA8),
 }};
-constexpr std::array<RenderPassResourceRead, 5> kAutoExposureReads = {{
+constexpr std::array<RenderPassResourceRead, 6> kAutoExposureReads = {{
+    optional(Id::CloudColor),
     required(Id::SceneColor),
     optional(Id::HazeColor),
     optional(Id::SsrColor),
@@ -290,9 +295,14 @@ constexpr std::array<RenderPassResourceWrite, 1> kVolumetricWrites = {{
     output(Id::VolumetricColor, Life::Transient, Format::RGBA16F),
 }};
 
-const std::array<RenderPassContract, 29>& contracts() noexcept
+constexpr std::array<RenderPassResourceRead, 6> kCloudReads = {{
+    required(Id::OpaqueLightingColor), required(Id::GBufferWorldPosition), required(Id::GBufferSurface),
+    optional(Id::SsrColor), optional(Id::HazeColor), optional(Id::VolumetricColor),
+}};
+constexpr std::array<RenderPassResourceWrite, 1> kCloudWrites = {{output(Id::CloudColor, Life::Transient, Format::RGBA16F)}};
+const std::array<RenderPassContract, 30>& contracts() noexcept
 {
-    static const std::array<RenderPassContract, 29> table = {{
+    static const std::array<RenderPassContract, 30> table = {{
         {RenderPassSlot::Shadow, "Shadow", noReads, kShadowWrites, false},
         {RenderPassSlot::Skybox, "Skybox", noReads, kSkyboxWrites, false},
         {RenderPassSlot::ForwardOpaque, "ForwardOpaque", kForwardReads,
@@ -338,6 +348,7 @@ const std::array<RenderPassContract, 29>& contracts() noexcept
         {RenderPassSlot::StylizedOutline, "StylizedOutline", kOutlineReads, kOutlineWrites, false},
         {RenderPassSlot::AnalogDisplay, "AnalogDisplay", kDisplayReads, kDisplayWrites, false},
         {RenderPassSlot::TemporalFeedback, "TemporalFeedback", kFeedbackReads, kFeedbackWrites, true},
+        {RenderPassSlot::Clouds, "Clouds", kCloudReads, kCloudWrites, false},
     }};
     return table;
 }
@@ -449,6 +460,7 @@ const char* renderPassResourceName(RenderPassResourceId resource) noexcept
         "VolumetricColor",
         "DecalGBuffer",
         "StylizedColor",
+        "OutlinedColor", "DisplayColor", "TemporalColor", "FeedbackHistory", "CloudColor",
     }};
     const auto index = static_cast<std::size_t>(resource);
     return index < names.size() ? names[index] : "UnknownResource";

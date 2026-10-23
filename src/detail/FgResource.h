@@ -122,7 +122,8 @@ enum class FgResourceId : uint8_t {
     DisplayColor = 33,
     TemporalColor = 34,
     FeedbackHistory = 35,
-    Count        = 36,
+    CloudColor = 36,
+    Count        = 37,
 };
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。

@@ -91,6 +91,13 @@ ay_add_test(AYRenderer_ContractsTests NAME AYRenderer_MixedSceneVisibility
     SUITE RendererSceneVisibilityTests LABELS "2d-3d-mixed;ayrenderer")
 
 if(WIN32)
+    add_executable(AYRenderer_CloudRenderTest EXCLUDE_FROM_ALL integration/CloudRenderTest.cpp)
+    target_link_libraries(AYRenderer_CloudRenderTest PRIVATE AYRenderer user32)
+    target_include_directories(AYRenderer_CloudRenderTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src ${CMAKE_CURRENT_SOURCE_DIR}/../demo)
+    ay_stage_production_shaders(AYRenderer_CloudRenderTest)
+    if(MSVC)
+        target_link_options(AYRenderer_CloudRenderTest PRIVATE /DEBUG:NONE /INCREMENTAL:NO)
+    endif()
     # Explicit real-device visual/temporal acceptance. Fresh output directory
     # and backend are required; never mixed into portable CPU/Noop statistics.
     add_executable(AYRenderer_TextureSamplingRenderTest EXCLUDE_FROM_ALL

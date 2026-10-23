@@ -466,6 +466,7 @@ enum class RenderPassSlot : uint8_t {
     StylizedOutline = 26,
     AnalogDisplay = 27,
     TemporalFeedback = 28,
+    Clouds = 29,
 };
 
 enum class ColorGradingPreset : uint8_t {

@@ -1,5 +1,27 @@
 # AYRenderer 测试维护
 
+## 单层体积云（2026-10-23）
+
+MSVC19.51/Windows，E:/CodexBuilds/AliyatEnvironmentDisplay-20261023：
+Contracts/SceneMaterial/UI及环境桥4/4通过（63.30s）；补充投影重建和最终改动后Contracts/环境桥
+定向2/2通过（1.88s），Contracts170例2014断言，环境桥24检查。CPU证据为独立设置/FG/顺序、
+周期噪声边框/种子、相机点重投影，以及无效资源resolver前置拒绝和设置恢复。
+
+独立真实设备目标AYRenderer_CloudRenderTest：D3D11和D3D12均通过完整像素序列；
+最终skyDelta均104.808、foregroundDelta=0（8-bit RGB平均差）。验证实际云对天空的吸收、
+前景遮挡、外部零密度/零天气图、光照步进自遮蔽、程序噪声phase变化、禁用无旧帧和400×200 resize。
+命令：`AYRenderer_CloudRenderTest <fresh-directory> d3d11`（或d3d12）。
+每帧还核对Clouds阶段提交，不以有截图文件代替云生效。源、阶段、设备和输出目录均为显式输入。
+
+实际ShaderBuild生成71个Windows/s_5_0内置变体（含云），production目标校验复用成功。
+环境示例D3D11以--clouds采集七种960×540画面，逐张核对代表晴/雨/夜与移动/关闭对照。
+原始像素与日志在E:/CodexBuilds/cloud-pixels-d3d{11,12}-accepted、cloud-captures-accepted；
+主仓out/environment-cloud-render保存日志、JUnit、截图与启动入口。
+SDK doctor最终142能力/57模块/110搜索/649文档符号，0错误/0警告。
+初次项目逆矩阵产生常量错误射线、最初像素断言失败；云阶段改用double消元、残差校验和
+齐次角点插值后两后端完整测试通过，未改变AYMath或其余效果的逆矩阵契约。
+初版没有地面云影、历史重投影或性能等级认证，不外推到Forward/独立相机视图。
+
 ## 固定View GPU计时归属（2026-10-22）
 
 `timing-ack-before-timing.json`在原Renderer库下1例25断言中6失败，非零fixture每View独立2ms：

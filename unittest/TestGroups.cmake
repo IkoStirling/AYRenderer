@@ -8,6 +8,7 @@ set(AYRENDERER_TEST_Contracts_SOURCES
     Test_PbrSurface.cpp
     Test_Ssr.cpp
     Test_Volumetric.cpp
+    Test_Clouds.cpp
     Test_DeferredDecal.cpp
     Test_BgfxMatrix.cpp
     Test_FgResource_F1.cpp

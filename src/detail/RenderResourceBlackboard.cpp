@@ -171,6 +171,7 @@ void RenderResourceBlackboard::invalidateFrameOutputs(
              BlackboardResourceId::GBufferDepth,
              BlackboardResourceId::SsaoOcclusion,
              BlackboardResourceId::DepthHazeColor,
+             BlackboardResourceId::CloudColor,
              BlackboardResourceId::LightingColor,
              BlackboardResourceId::SkyboxColor,
              BlackboardResourceId::BloomBright,
@@ -325,6 +326,7 @@ const char* blackboardResourceName(BlackboardResourceId id) noexcept
     case BlackboardResourceId::AutoExposure: return "AutoExposure";
     case BlackboardResourceId::SsrColor: return "SsrColor";
     case BlackboardResourceId::VolumetricColor: return "VolumetricColor";
+    case BlackboardResourceId::CloudColor: return "CloudColor";
     case BlackboardResourceId::FeedbackHistoryRead: return "FeedbackHistoryRead";
     case BlackboardResourceId::FeedbackHistoryWrite: return "FeedbackHistoryWrite";
     case BlackboardResourceId::Count: break;

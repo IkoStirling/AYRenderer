@@ -110,6 +110,7 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     graph.setExecutionEligibility(RenderPassSlot::SSAO, input.ssao);
     graph.setExecutionEligibility(RenderPassSlot::SSR, input.ssr);
     graph.setExecutionEligibility(RenderPassSlot::Volumetric, input.volumetric);
+    graph.setExecutionEligibility(RenderPassSlot::Clouds, input.clouds);
     graph.setExecutionEligibility(RenderPassSlot::DeferredDecal, input.decals);
     graph.setExecutionEligibility(RenderPassSlot::DepthHaze, input.haze);
     graph.setExecutionEligibility(RenderPassSlot::BloomExtract,
@@ -131,7 +132,7 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     graph.setExecutionEligibility(RenderPassSlot::AnalogDisplay, input.analogDisplay);
     graph.setExecutionEligibility(RenderPassSlot::TemporalFeedback, input.temporalFeedback);
 
-    if (input.ssao || input.taa || input.ssr || input.volumetric || input.decals || input.stylizationNormals) {
+    if (input.ssao || input.taa || input.ssr || input.volumetric || input.clouds || input.decals || input.stylizationNormals) {
         // These are multiple logical views of one pass-owned MRT. FrameGraph
         // borrows the FBO only for dependency/lifetime description; concrete
         // passes continue binding the individual attachments directly.
@@ -206,6 +207,12 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
         graph.addPass({"Volumetric", {result.hdrSceneSource, FgResourceId::GBufferWorldPosition, FgResourceId::GBufferSurface},
                        {FgResourceId::VolumetricColor}, true, false, executionSlot(RenderPassSlot::Volumetric)});
         result.hdrSceneSource = FgResourceId::VolumetricColor;
+    }
+    if (input.clouds) {
+        graph.addResource(FgResourceId::CloudColor, graphTextureDesc(RenderPassSlot::Clouds, RenderPassResourceId::CloudColor));
+        graph.addPass({"Clouds", {result.hdrSceneSource, FgResourceId::GBufferWorldPosition, FgResourceId::GBufferSurface},
+                       {FgResourceId::CloudColor}, true, false, executionSlot(RenderPassSlot::Clouds)});
+        result.hdrSceneSource = FgResourceId::CloudColor;
     }
     if (input.bloomExtract) {
         // Volume output, if enabled, is the current HDR source.
