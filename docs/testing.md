@@ -1,5 +1,18 @@
 # AYRenderer 测试维护
 
+## 云团结构与外部atlas（2026-10-23）
+
+本轮Contracts/环境桥2/2通过（1.85s，Contracts171例，桥24检查），覆盖3种atlas布局、
+独立天气场的seed/分布和公里级相对投影；ShaderBuild实际生成71个Windows/s_5_0变体。
+AYRenderer_CloudRenderTest新增可选第三参（导入云PNG所在目录），真实使用128³ base与32³ detail。
+D3D11/D3D12完整通过：skyDelta=110.005、foregroundDelta=0，含phase 0/1绕回、远离原点相机，
+以及从下方/上方读回的云团透射。clear比例0.610038/0.630563，thick比例0.365775/0.337213，
+云顶像素范围变化180；断言晴空>15%、厚云>1%、云顶变化>10px，排除均匀云盖假通过。
+原始图像/日志：E:/CodexBuilds/cloud-gpu-final-d3d11、cloud-gpu-final-d3d12；
+环境桥七视图人工检查位于cloud-gallery-final，交付副本out/environment-cloud-shape。
+side视图仍有有限步数噪点，验收不等同于电影级天空或时域/性能认证。
+外部素材离线转换的3项格式测试在主仓tools/assets，来源/许可证见AYDocs/ASSET-SOURCE-WORKFLOW.md。
+
 ## 单层体积云（2026-10-23）
 
 MSVC19.51/Windows，E:/CodexBuilds/AliyatEnvironmentDisplay-20261023：

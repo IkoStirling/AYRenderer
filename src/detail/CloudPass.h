@@ -11,7 +11,8 @@ public:
 private:
  FullscreenPassGeometry _geometry;
  shader::ShaderResource _program;
- bgfx::TextureHandle _noise=BGFX_INVALID_HANDLE,_white=BGFX_INVALID_HANDLE;
+ bgfx::TextureHandle _noise=BGFX_INVALID_HANDLE,_weather=BGFX_INVALID_HANDLE;
+ uint32_t _weatherSeed=0;
  uint32_t _seed=0;
 };
 }
