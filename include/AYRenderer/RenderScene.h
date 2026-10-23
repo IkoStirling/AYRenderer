@@ -107,6 +107,9 @@ struct DrawItem {
     /// Optional presentation provenance for editor diagnostics; never a rendering authority.
     uint32_t sourceEntityId=0;
     uintptr_t sourceWorld=0;
+    /// Zero is unpartitioned legacy content. Explicit portal views may select
+    /// one region; items in other regions are not visible through that view.
+    uint32_t spaceRegionId=0;
 };
 
 // Camera used by the camera-overlay 2D composition domain. It is independent

@@ -100,6 +100,10 @@ public:
     CameraOutputHandle createCameraOutput(uint16_t width, uint16_t height);
     /// Borrow the color texture for material/UI sampling until destroyCameraOutput/shutdown.
     TextureHandle cameraOutputTexture(CameraOutputHandle output) const noexcept;
+    /// Project a previously rendered child camera output onto a portal quad.
+    /// The quad's screen coordinates determine sample coordinates. Use a
+    /// distinct material per output; producer views render before consumers.
+    MaterialHandle createPortalSurfaceMaterial(CameraOutputHandle output);
     /// Release color/depth storage and invalidate the handle; stale handles are harmless.
     void destroyCameraOutput(CameraOutputHandle output);
     /// Bounded owned last-main-render diagnostics. Disabled by default; owner thread only.

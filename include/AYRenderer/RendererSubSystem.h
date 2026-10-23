@@ -62,6 +62,7 @@ struct SceneCamera3D {
     uint64_t identity = 0; // nonzero, includes World/component generation
     uint64_t cutGeneration = 0;
     uint32_t layerMask = 0xFFFFFFFFu;
+    uint32_t spaceRegionId = 0; // zero retains legacy unpartitioned camera
 };
 using SceneCameraProvider = std::function<bool(SceneCamera3D&)>;
 
@@ -101,6 +102,7 @@ public:
     const std::vector<CameraViewportDesc>& cameraViewports() const noexcept { return _cameraViewports; }
     /// Current scene extraction viewport; providers/builders use it to resolve camera components.
     int32_t activeViewportId() const noexcept { return _activeViewportId; }
+    uint32_t activeCameraSpaceRegion() const noexcept { return _currentCamera.spaceRegionId; }
     /// Scene packet count for diagnostics/tests, including the legacy single-view packet.
     size_t cameraViewPacketCount() const noexcept { return _cameraViewports.empty() ? 1 : _viewPackets.size(); }
 

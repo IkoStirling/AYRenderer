@@ -1,5 +1,16 @@
 # AYRenderer
 
+## 区域视图与传送门表面（2026-10-23）
+
+`CameraRenderView::spaceRegionId` 非零时只提取相同区域的 `DrawItem`；零保留旧版
+未分区渲染。普通 Entity 3D 相机会把所属区域传给主视图；`CameraViewportDesc`
+可覆盖多视图的区域筛选。使用
+`createCameraOutput` 和 `createPortalSurfaceMaterial` 可把先渲染的子视图按入口表面
+当前屏幕投影取样，斜视时仍跟随观察者位姿。一个输出对应一个材质；先销毁材质，
+再释放输出。父子视图共用场景时，资源依赖检查只考虑该视图实际可见的区域。
+视图数量和 Forward 渲染域仍受现有多视图契约约束。见
+[连接空间说明](../../AYDocs/CONNECTED-SPACES.md)。
+
 ## GPU计时的固定View归属（2026-10-22）
 
 现有RenderFrameStats/DebugOverlay汇总全部Bloom金字塔、自动曝光、SSR、Volumetric、

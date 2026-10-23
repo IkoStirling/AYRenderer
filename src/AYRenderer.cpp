@@ -1,4 +1,5 @@
 #include "AYRenderer.h"
+#include "AYRenderer/PortalSurfaceShaderSources.h"
 #include "detail/RenderAssetBridge.h"
 #include <AYResource/assetsImpl/Material.h>
 
@@ -1703,6 +1704,17 @@ TextureHandle Renderer::cameraOutputTexture(CameraOutputHandle output) const noe
     const auto found = _impl->cameraOutputs.find(output.id);
     return found != _impl->cameraOutputs.end() ? found->second.texture : TextureHandle{};
 }
+MaterialHandle Renderer::createPortalSurfaceMaterial(CameraOutputHandle output) {
+    const auto texture = cameraOutputTexture(output);
+    if (!texture.isValid()) return {};
+    auto material = createMaterialFromBgfxSc(kPortalSurfaceVertexSc,
+        kPortalSurfaceFragmentSc,kPortalSurfaceVaryingSc);
+    if (!material.isValid()) return {};
+    const bool bottomLeft = bgfx::getCaps() && bgfx::getCaps()->originBottomLeft;
+    setMaterialColor(material,"portalUv",0.5f,bottomLeft ? 0.5f : -0.5f,0.5f,0.5f);
+    setMaterialTexture(material,"portalColor",texture);
+    return material;
+}
 bool Renderer::cameraOutputMatches(CameraOutputHandle output, uint16_t width, uint16_t height) const noexcept {
     if (!_impl) return false;
     const auto found = _impl->cameraOutputs.find(output.id);
@@ -1748,6 +1760,8 @@ bool Renderer::renderViews(std::span<const CameraRenderView> views) {
             || uint32_t(view.y) + view.height > _impl->initDesc.height) return false;
         // WorldLit2D requires the deferred material lane; reject it explicitly in this Forward API.
         for (const auto& item : view.scene->items()) {
+            if (view.spaceRegionId && item.spaceRegionId != view.spaceRegionId) continue;
+            if (!item.payload && !(item.cameraLayerMask & view.layerMask)) continue;
             if (item.payload && item.payload->renderDomain == RenderDomain2D::WorldLit) return false;
             const auto material = _impl->resources.materials().find(item.material.id);
             if (material == _impl->resources.materials().end()) continue;
@@ -1765,7 +1779,7 @@ bool Renderer::renderViews(std::span<const CameraRenderView> views) {
         auto& state = _impl->runtimeViews[view.id];
         if (!state) state = std::make_unique<Impl::RuntimeView>();
         RenderScene visible;
-        copyCameraVisibleScene(*view.scene,visible,view.layerMask,true);
+        copyCameraVisibleScene(*view.scene,visible,view.layerMask,true,view.spaceRegionId);
         detail::FrameContext frame;
         frame.view = view.view; frame.projection = view.projection; frame.cameraPosition = view.position;
         frame.lightDirection = _impl->directionalLightDir.normalize(); frame.lightColor = _impl->directionalLightColor;

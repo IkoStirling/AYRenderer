@@ -836,6 +836,8 @@ void RendererSubSystem::syncMainCamera()
     _currentCamera.identity = identity;
     _currentCamera.cutGeneration = generation;
     _currentCamera.layerMask = hasSceneCamera && !hostOverride ? sceneCamera.layerMask : 0xFFFFFFFFu;
+    _currentCamera.spaceRegionId = hasSceneCamera && !hostOverride
+        ? sceneCamera.spaceRegionId : 0;
 }
 
 bool RendererSubSystem::setCameraViewports(std::vector<CameraViewportDesc> viewports) {
@@ -869,6 +871,7 @@ void RendererSubSystem::buildCameraViewPackets() {
             _activeViewportId = viewport.id;
             _viewportX = viewport.x; _viewportY = viewport.y; _viewportW = viewport.width; _viewportH = viewport.height;
             syncMainCamera();
+            if (viewport.spaceRegionId) _currentCamera.spaceRegionId = viewport.spaceRegionId;
             CameraViewPacket packet;
             packet.viewport = viewport; packet.camera = _currentCamera;
             if (_sceneBuilder) _sceneBuilder(packet.scene);
@@ -909,6 +912,8 @@ void RendererSubSystem::renderScenePass()
             view.id = uint32_t(packet.viewport.id); view.scene = &packet.scene;
             view.view = packet.camera.view; view.projection = packet.camera.projection; view.position = packet.camera.position;
             view.layerMask = packet.camera.layerMask;
+            view.spaceRegionId = packet.viewport.spaceRegionId
+                ? packet.viewport.spaceRegionId : packet.camera.spaceRegionId;
             view.x = packet.viewport.x; view.y = packet.viewport.y;
             view.width = packet.viewport.width; view.height = packet.viewport.height; view.output = packet.viewport.output;
             views.push_back(view);
@@ -944,7 +949,8 @@ void RendererSubSystem::renderScenePass()
         }
     }
     RenderScene cameraScene;
-    copyCameraVisibleScene(_scene,cameraScene,_currentCamera.layerMask);
+    copyCameraVisibleScene(_scene,cameraScene,_currentCamera.layerMask,false,
+                           _currentCamera.spaceRegionId);
     if (hasVisibilityFilter && !visibility.allVisible()) {
         RenderScene presentationScene(RenderScene::DrawDataOwnership::OwnedCpu);
         copyVisibleSceneForPresentation(

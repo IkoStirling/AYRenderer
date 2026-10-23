@@ -1,5 +1,17 @@
 # AYRenderer Design
 
+## 2026-10-23 — 传送门视图与表面
+
+DrawItem、CameraRenderView 与 CameraViewportDesc 的零区域是 legacy 全量路径，
+普通 SceneCamera3D 从选中 Entity 相机继承区域；非零视图按区域做 CPU draw list 筛选。
+资源依赖校验使用同一筛选，防止共享场景中
+父区域的门面材质被子视图误判为自采样。空间图和门变换留在 AYEntity，不在渲染器内复制。
+
+传送门表面用带屏幕 clip 坐标 varying 的专用 Forward 材质，采样已渲染的子视图输出；
+UV 的垂直方向由设备原点决定。入口 quad 保持普通深度遮挡，不投射阴影。
+子视图先于父视图提交，禁止自反馈或后向依赖；不同输出独立材质与释放顺序由 Host 管理。
+目前没有自动可见门递归或镜面反射门，斜近面由 AYEntity Render Integration 提供。
+
 ## 2026-10-22 — 已实现效果的GPU计时归属
 
 DebugOverlay继续使用既有bgfx统计样本，不新增设备query或改变执行顺序。

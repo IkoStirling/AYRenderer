@@ -18,6 +18,7 @@ struct CameraRenderView {
     uint16_t x = 0, y = 0, width = 1, height = 1;
     CameraOutputHandle output{};
     uint32_t clearRgba = 0x14171FFF;
+    uint32_t spaceRegionId = 0; // zero preserves unpartitioned legacy rendering
 };
 /// Host viewport recipe. Camera components with matching viewportId are selected independently.
 /// Output dimensions must match width/height; backbuffer rectangles must fit the client.
@@ -25,13 +26,16 @@ struct CameraViewportDesc {
     int32_t id = 0;
     uint16_t x = 0, y = 0, width = 1, height = 1;
     CameraOutputHandle output{};
+    uint32_t spaceRegionId = 0;
 };
 inline constexpr uint32_t kMaximumCameraViews = 16;
 
-/// Copy a scene with a 3D camera layer filter. Overlay2D retains its own layer contract.
+/// Copy a scene with a 3D camera layer filter and optional space region.
+/// Overlay2D retains its own layer contract, but explicit region views also
+/// exclude payload draws with no matching region.
 /// Owned CPU backing remains shared; the output is published only after the copy succeeds.
 inline void copyCameraVisibleScene(const RenderScene& source, RenderScene& output, uint32_t layerMask,
-                                   bool runtimeView = false) {
+                                   bool runtimeView = false, uint32_t spaceRegionId = 0) {
     RenderScene result(source.drawDataOwnership());
     if (source.sceneLights()) result.setSceneLights(*source.sceneLights());
     if (source.hasOverlayCamera2D()) {
@@ -40,6 +44,7 @@ inline void copyCameraVisibleScene(const RenderScene& source, RenderScene& outpu
     }
     for (const auto& item : source.items()) {
         if (!item.payload && !(item.cameraLayerMask & layerMask)) continue;
+        if (spaceRegionId && item.spaceRegionId != spaceRegionId) continue;
         auto copy = item;
         // Editor selection uses fixed editor-only views and belongs to the main editor viewport.
         if (runtimeView) copy.outlineHull = false;

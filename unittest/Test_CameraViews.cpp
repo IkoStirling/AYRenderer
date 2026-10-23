@@ -34,6 +34,17 @@ TEST_CASE(layer_filter_preserves_2d_and_owned_payloads) {
     CHECK_FLOAT_EQ(visible.items()[1].payload->tintRGBA.x,.4f,1e-5f);
     CHECK(visible.overlayCamera2D().layerMask==8);
 }
+TEST_CASE(region_filter_keeps_only_matching_3d_draws) {
+    RenderScene source, visible;
+    DrawItem item; item.mesh.id=1; item.spaceRegionId=1; source.add(item);
+    item.mesh.id=2; item.spaceRegionId=2; source.add(item);
+    item.mesh.id=3; item.spaceRegionId=0; source.add(item);
+    copyCameraVisibleScene(source,visible,0xFFFFFFFFu,true,2);
+    CHECK(visible.items().size()==1);
+    CHECK(visible.items()[0].mesh.id==2);
+    copyCameraVisibleScene(source,visible,0xFFFFFFFFu,true,0);
+    CHECK(visible.items().size()==3);
+}
 TEST_CASE(view_batches_validate_before_submission_and_outputs_have_explicit_lifetime) {
     Renderer renderer; InitDesc desc; desc.backend=Backend::Noop; desc.width=320; desc.height=240;
     CHECK(renderer.initialize(desc));
@@ -62,6 +73,30 @@ TEST_CASE(view_batches_validate_before_submission_and_outputs_have_explicit_life
     renderer.endFrame();
     renderer.shutdown();
 }
+TEST_CASE(portal_surface_material_binds_an_existing_camera_output) {
+    Renderer renderer; InitDesc desc; desc.backend=Backend::Noop;
+    desc.width=64; desc.height=64;
+    CHECK(renderer.initialize(desc));
+    CHECK_FALSE(renderer.createPortalSurfaceMaterial({999}).isValid());
+    auto output=renderer.createCameraOutput(32,32);
+    CHECK(output.id!=0);
+    auto material=renderer.createPortalSurfaceMaterial(output);
+    CHECK(material.isValid());
+    auto quad=renderer.createUnitQuad(); CHECK(quad.isValid());
+    RenderScene scene; DrawItem portal;
+    portal.mesh=quad; portal.material=material; portal.spaceRegionId=1;
+    scene.add(portal);
+    std::array<CameraRenderView,2> views;
+    views[0].id=1; views[0].scene=&scene; views[0].spaceRegionId=2;
+    views[0].width=32; views[0].height=32; views[0].output=output;
+    views[1]=views[0]; views[1].id=2; views[1].spaceRegionId=1;
+    views[1].width=64; views[1].height=64; views[1].output={};
+    renderer.beginFrame(); CHECK(renderer.renderViews(views)); renderer.endFrame();
+    renderer.destroyMesh(quad);
+    renderer.destroyMaterial(material);
+    renderer.destroyCameraOutput(output);
+    renderer.shutdown();
+}
 TEST_CASE(subsystem_extracts_each_view_with_matching_aspect_and_restores_primary) {
     int window=0; RendererSubSystem::setWindowProvider({});
     RendererSubSystem::setBootstrapBackend(Backend::Noop);
@@ -75,6 +110,7 @@ TEST_CASE(subsystem_extracts_each_view_with_matching_aspect_and_restores_primary
         CHECK_FALSE(sub.setCameraViewports({}));
         camera.identity=uint64_t(sub.activeViewportId()+1);
         camera.position={float(sub.activeViewportId()),0,-5};
+        camera.spaceRegionId=uint32_t(sub.activeViewportId()+1);
         camera.view=ayt::math::lh::lookAt(camera.position,camera.position+ayt::math::FVector3{0,0,1},{0,1,0});
         camera.projection=ayt::math::lh::perspective(1.f,sub.viewportAspect(),.1f,100.f); return true;
     });
