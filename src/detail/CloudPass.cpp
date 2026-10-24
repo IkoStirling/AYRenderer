@@ -55,6 +55,7 @@ uint32_t CloudPass::execute(PassExecContext& ctx){
  v("cloudOptics",s.absorption,s.scattering,s.anisotropy,s.shadowStrength);v("cloudTint",s.tint.x,s.tint.y,s.tint.z,float(s.seed%10007));
  v("cloudPhase",s.shapePhase.x,s.shapePhase.y,s.shapePhase.z,0);v("cloudDetailPhase",s.detailPhase.x,s.detailPhase.y,s.detailPhase.z,0);
  auto light=Light::directional(ctx.frame.lightDirection,ctx.frame.lightColor);if(ctx.sceneLights){light.intensity=0;for(uint32_t i=0;i<std::min(ctx.sceneLights->count,kMaxSceneLights);++i)if(ctx.sceneLights->lights[i].type==LightType::Directional){light=ctx.sceneLights->lights[i];break;}}
+ if(s.light.overrideScene){light.direction=s.light.direction;light.color=s.light.radiance;light.intensity=1;}
  auto direction=light.direction;auto length=std::sqrt(direction.x*direction.x+direction.y*direction.y+direction.z*direction.z);direction=std::isfinite(length)&&length>1e-5f?direction/length:math::FVector3{0,-1,0};
  const auto positive=[](float f){return std::isfinite(f)?std::clamp(f,0.f,10000.f):0.f;};v("cloudLightDirection",direction.x,direction.y,direction.z,0);
  v("cloudLightColor",positive(light.color.x)*positive(light.intensity),positive(light.color.y)*positive(light.intensity),positive(light.color.z)*positive(light.intensity),0);

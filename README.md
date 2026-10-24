@@ -1146,3 +1146,12 @@ cellular、billow为[0,1]相对权重，warp为周期扭曲，detailStrength只�
 引擎环境静态示例对照四套来源/生成方式不同的噪声包和四组算法权重；外部原件先入AssetRepo。
 AYRenderer_CloudRenderTest可额外接第四参数lab目录，强制加载四包并检查密度差异、算法差异、扭曲、周期与光照。
 运行命令及视觉证据见引擎AYDocs/ENVIRONMENT-DISPLAY.md；CPU/GPU断言不替代静态美术审查。
+
+
+## 2026-10-24 — 乌云光照与远景衔接
+
+CloudSettings.light默认沿用场景首个方向光；overrideScene=true可提供遮挡之前的线性radiance与光线传播direction，
+由同一密度执行云内自遮蔽，不再把地面阴天衰减误用到云顶。不会修改SceneLights或地表受光。
+方向归一化，退化回落向下；radiance有限并限制0..10000。无需新增uniform或FrameGraph资源。
+Stratus混合密度的底部由多场浅起伏组成，减弱重复圆碗轮廓；积云/层积形态公式保持。
+CPU覆盖光源边界；实机CloudRenderTest比较地面暗光、独立入射、零入射、关闭覆盖四态。

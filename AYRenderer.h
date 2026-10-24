@@ -563,7 +563,9 @@ public:
     VolumetricSettings volumetricSettings() const noexcept;
     /// Advanced host: single-layer raymarched clouds on the main Deferred view, default off.
     /// Owner-thread sanitized value copy; borrowed atlas/map textures remain host-owned through endFrame.
-      /// Optional structure.blend composes base/cellular/billow density from packed linear atlases; zero retains legacy.
+    /// Optional structure.blend composes base/cellular/billow density from packed linear atlases; zero retains legacy.
+    /// Optional light.overrideScene supplies incident linear sun/moon radiance before ground occlusion;
+    /// default uses the first scene directional light. Does not alter scene lights or surface illumination.
     void setCloudSettings(const CloudSettings& settings);
     CloudSettings cloudSettings() const noexcept;
     /// Owner-thread: discard only volume history after seek/scene replacement.

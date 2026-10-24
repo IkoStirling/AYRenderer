@@ -1,6 +1,6 @@
 #pragma once
 namespace ayt::render {
-inline constexpr char kCloudCacheKey[]="cloud_hybrid_structure_v5";
+inline constexpr char kCloudCacheKey[]="cloud_hybrid_structure_v6";
 inline constexpr char kCloudPhoskiaSource[]=R"PHOSKIA(
 // Convert periodic 3D coordinates into two atlas slices, with wrapped texel borders.
 fn cloudFraction(v:float):float {return v-floor(v)}
@@ -206,6 +206,8 @@ material Clouds {
         let bottom=0.04+(1.0-lobes)*0.08
         if(cloudForm.x>1.5 && cloudForm.x<2.5){signal=0.10+mass*0.30+lobes*0.60;top=0.32+mass*0.30+n.g*0.28;bottom=0.06+(1.0-n.g)*0.28}
         if(cloudForm.x<0.5 || cloudForm.x>2.5 && cloudForm.x<3.5){signal=0.22+mass*0.45+lobes*0.33;top=0.50+mass*0.25;bottom=0.04+(1.0-n.g)*0.22+coarse.a*0.08}
+        // Stratus has an irregular shallow base, rather than repeated cellular hanging bowls.
+        if(cloudForm.x>2.5 && cloudForm.x<3.5){bottom=0.045+(1.0-lobes)*0.12+(1.0-body)*0.10+coarse.a*0.03}
         if(cloudForm.x>4.5){signal=mass*0.58+lobes*0.42;top=0.38+coarse.a*0.5;local=clamp(local-h*0.24,0.0,1.0)}
         let vertical=max(h-top,0.0)*2.8+max(bottom-h,0.0)*3.5
         let cutoff=0.88-local*0.58

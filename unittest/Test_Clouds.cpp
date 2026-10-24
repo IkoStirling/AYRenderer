@@ -9,6 +9,12 @@
 using namespace ayt::render;
 using namespace ayt::render::detail;
 TEST_SUITE(AYRenderer_Clouds)
+TEST_CASE(incident_cloud_light_is_optional_finite_and_normalized){
+ CloudSettings s;CHECK(!s.light.overrideScene);s.light.overrideScene=true;s.light.direction={0,-4,3};s.light.radiance={-1,std::numeric_limits<float>::infinity(),20000};auto a=sanitizeCloudSettings(s);
+ CHECK(a.light.overrideScene);CHECK(std::abs(a.light.direction.y+.8f)<1e-6);CHECK(std::abs(a.light.direction.z-.6f)<1e-6);CHECK(a.light.radiance.x==0);CHECK(a.light.radiance.y==0);CHECK(a.light.radiance.z==10000);
+ s.light.direction={0,0,0};a=sanitizeCloudSettings(s);CHECK(a.light.direction.y==-1);
+ s.light.direction={std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity(),0};a=sanitizeCloudSettings(s);CHECK(a.light.direction.x==0&&a.light.direction.y==-1);
+}
 TEST_CASE(morphology_and_atmosphere_have_independent_bounded_controls){
  CloudSettings s;s.coverage=.2f;s.cloudType=0;s.clustering=std::numeric_limits<float>::quiet_NaN();s.edgeSoftness=3;s.weatherScale=0;s.aerialDensity=std::numeric_limits<float>::infinity();s.weatherExtent={0,-1};s=sanitizeCloudSettings(s);
  CHECK(s.coverage==.2f);CHECK(s.cloudType==0);CHECK(s.clustering==.55f);CHECK(s.edgeSoftness==1);CHECK(s.weatherScale==1);CHECK(s.aerialDensity==.000015f);CHECK(s.weatherExtent.x==1);CHECK(s.weatherExtent.y==1);

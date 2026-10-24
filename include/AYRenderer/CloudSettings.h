@@ -12,6 +12,9 @@ struct HighCloudSettings { float coverage=0,density=.12f,baseHeight=8500,thickne
 /// Hybrid atlases pack R=base mass, G=rounded cellular, B=billow, A=independent variation.
 /// Cellular/billow are normalized relative weights; warp and detailStrength are independent of coverage.
 struct CloudStructureSettings { float blend=0,cellular=.5f,billow=.25f,warp=.25f,detailStrength=.12f; };
+/// Optional incident sunlight/moonlight before ground/cloud occlusion, in scene-linear RGB.
+/// Direction points along light travel. Disabled uses the first scene directional light as before.
+struct CloudLightSettings { bool overrideScene=false; math::FVector3 direction{0,-1,0},radiance{1,1,1}; };
 /// Main Deferred view only. No temporal reconstruction; costs scale with steps * (lightSteps+1).
 struct CloudQuality {
     uint8_t steps=48,lightSteps=4,debugView=0;float maxDistance=60000;
@@ -50,6 +53,7 @@ struct CloudSettings {
     uint32_t seed=1;
     CloudQuality quality;
     TextureHandle shapeNoise{},detailNoise{},weatherMap{};
+    CloudLightSettings light;
 };
 inline CloudSettings sanitizeCloudSettings(CloudSettings s) noexcept {
     auto f=[](float v,float fallback,float low,float high){return std::isfinite(v)?std::clamp(v,low,high):fallback;};
@@ -61,6 +65,9 @@ inline CloudSettings sanitizeCloudSettings(CloudSettings s) noexcept {
     s.precipitation=f(s.precipitation,1,0,1);
     if(static_cast<uint8_t>(s.form)>static_cast<uint8_t>(CloudForm::Towering))s.form=CloudForm::Blended;
     auto& m=s.structure;m.blend=f(m.blend,0,0,1);m.cellular=f(m.cellular,.5f,0,1);m.billow=f(m.billow,.25f,0,1);m.warp=f(m.warp,.25f,0,1);m.detailStrength=f(m.detailStrength,.12f,0,1);
+    for(int i=0;i<3;++i){s.light.direction[i]=f(s.light.direction[i],i==1?-1.f:0.f,-1e6f,1e6f);s.light.radiance[i]=f(s.light.radiance[i],0,0,10000);}
+    const auto length=std::sqrt(s.light.direction.x*s.light.direction.x+s.light.direction.y*s.light.direction.y+s.light.direction.z*s.light.direction.z);
+    s.light.direction=length>1e-5f?s.light.direction/length:math::FVector3{0,-1,0};
     auto& h=s.highClouds;h.coverage=f(h.coverage,0,0,1);h.density=f(h.density,.12f,0,1);
     h.baseHeight=f(h.baseHeight,8500,-10000,100000);h.thickness=f(h.thickness,600,1,10000);h.scale=f(h.scale,22000,1,1000000);
     for(int i=0;i<3;++i)s.horizonColor[i]=f(s.horizonColor[i],.6f,0,16);

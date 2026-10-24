@@ -78,6 +78,13 @@ int main(int argc,char** argv){try{
   s.structure.warp=.85f;auto warped=capture("hybrid-warped",s,true);require(difference(warped,billow,0,0,400,200)>.5,"Domain warp must change structure without changing coverage");
   s.shapePhase={0,0,0};auto hybridZero=capture("hybrid-phase-zero",s,true);s.shapePhase={1,1,1};auto hybridOne=capture("hybrid-phase-one",s,true);require(difference(hybridZero,hybridOne,0,0,400,200)<.5,"Hybrid scales and warp preserve normalized phase wrap");
   s.shapePhase={};s.quality.debugView=0;s.shadowStrength=0;auto hybridUnshadowed=capture("hybrid-no-shadow",s,true);s.shadowStrength=1;auto hybridShadowed=capture("hybrid-shadowed",s,true);require(difference(hybridUnshadowed,hybridShadowed,0,0,400,200)>1,"Hybrid multiple-order lighting must preserve density self shadowing");
+  // Ground overcast attenuation and incident cloud illumination have independent inputs.
+  SceneLights groundLight;groundLight.add(Light::directional({-.8f,-.6f,0},{.12f,.12f,.12f}));scene.setSceneLights(groundLight);
+  auto attenuated=capture("cloud-light-ground-attenuated",s,true);s.light.overrideScene=true;s.light.direction={-.8f,-.6f,0};s.light.radiance={1,1,1};auto incident=capture("cloud-light-incident",s,true);
+  require(difference(attenuated,incident,0,0,400,200)>2,"Incident light override must illuminate clouds independently of ground attenuation");
+  require(scene.sceneLights()->lights[0].color.x==.12f,"Cloud illumination must not mutate scene lighting");
+  s.light.radiance={0,0,0};auto noIncident=capture("cloud-light-zero",s,true);require(difference(incident,noIncident,0,0,400,200)>2,"Explicit zero incident light removes direct cloud scattering");
+  s.light.overrideScene=false;auto sceneAgain=capture("cloud-light-scene-restored",s,true);require(difference(attenuated,sceneAgain,0,0,400,200)<.5,"Disabling light override restores scene illumination");
   for(auto& pack:packs)for(auto texture:pack)renderer.destroyTexture(texture);
   std::cout<<"PASS four-pack cloud algorithm matrix "<<backend<<'\n';
  }
