@@ -1,5 +1,24 @@
 # AYRenderer Design
 
+## 2026-10-24 — 连续天气密度与空气透视
+
+Clouds v3使用连续3D噪声/高度剖面，移除每格三个椭球的包络；cloudType、clustering、
+edgeSoftness与coverage独立。weatherScale单独控制宏观分布尺度，不随shapeScale改变。
+边缘smoothstep从固定阈值向云体内部展开，避免提高softness同时给整片晴空添加低密度云；
+连接薄层由云型与聚集控制。shape RGB为体积结构，A预留；detail RGB侵蚀。seed提供周期相位偏置。
+
+legacy map的R乘coverage；spatialWeather显式采用线性RGBA：coverage/type/precipitation/thickness。
+worldOrigin/extent和repeat定义二维世界映射；非循环地图的边缘夹到纹素中心，越界清空，
+与CPU WeatherField采样一致。A把云层厚度映射为0.25..1倍，B增加雨云光学厚度；
+云底至Y=0之间可积分低密度降水介质，雨幕还乘全局precipitation，依旧截断到几何深度。
+没有新增FG资源或固定View；读取的地图由Host借用，GPU阶段不求值作者区域/优先级。
+
+atmosphereEnabled在云密度关闭时也可执行Clouds阶段，仅改变天空背景和云辐射的距离衰减。
+天空以视线高度在clear与horizonColor间渐变，云辐射按aerialDensity向horizonColor散射，
+场景几何仍由早先DepthHaze处理，不再次加雾。层云增加近似漫射补光，雨云底部保留更强遮蔽。
+这是轻量天空/空气近似，不是物理Rayleigh/Mie求解、多层天气模拟或逐像素地面云影。
+96步/有限光照采样仍有噪点，当前无云专用时域重建。
+
 ## 2026-10-23 — main合并不变量
 
 主仓云/艺术后处理的50..54固定view保持编号，点阵五阶段分配55..59；体积240..242保持

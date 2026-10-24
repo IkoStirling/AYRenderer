@@ -9,6 +9,11 @@
 using namespace ayt::render;
 using namespace ayt::render::detail;
 TEST_SUITE(AYRenderer_Clouds)
+TEST_CASE(morphology_and_atmosphere_have_independent_bounded_controls){
+ CloudSettings s;s.coverage=.2f;s.cloudType=0;s.clustering=std::numeric_limits<float>::quiet_NaN();s.edgeSoftness=3;s.weatherScale=0;s.aerialDensity=std::numeric_limits<float>::infinity();s.weatherExtent={0,-1};s=sanitizeCloudSettings(s);
+ CHECK(s.coverage==.2f);CHECK(s.cloudType==0);CHECK(s.clustering==.55f);CHECK(s.edgeSoftness==1);CHECK(s.weatherScale==1);CHECK(s.aerialDensity==.000015f);CHECK(s.weatherExtent.x==1);CHECK(s.weatherExtent.y==1);
+ s.coverage=1;s.cloudType=1;s.atmosphereEnabled=true;s.enabled=false;auto a=sanitizeCloudSettings(s);CHECK(a.cloudType==1);CHECK(!a.enabled&&a.atmosphereEnabled);
+}
 TEST_CASE(atlas_layouts_and_independent_weather_distribution){
  auto a=cloudAtlasLayout(272,136),b=cloudAtlasLayout(528,528),c=cloudAtlasLayout(2080,1040);
  CHECK(a.resolution==32);CHECK(a.columns==8);CHECK(a.rows==4);CHECK(b.resolution==64);CHECK(c.resolution==128);CHECK(c.columns==16);CHECK(c.rows==8);

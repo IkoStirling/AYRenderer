@@ -17,17 +17,24 @@
 设置为拥有值、owner线程调用；每帧不推进时间，宿主提供shape/detail phase。
 
 CloudQuality控制8..96视线步、0..8光照步、最大距离和composite/transmittance/radiance/ray调试。
-覆盖率较低时使用随机尺寸/高度/位置的多瓣云团，0.75..0.95平滑转为连片云层。
+连续三维密度取代格状椭球包络；cloudType（0层云/1积云）、clustering、edgeSoftness与coverage独立。
+软边缘从固定外边界向内形成密度过渡，薄连接层可表达云块聚集，不靠全屏模糊。
 宏观天气场与三维内部侵蚀独立，HG双瓣与衰减补光近似多次散射，短距离加密的光照步进保留云内明暗。
 当前为全分辨率单层Y向高度云，无地面云影、物理多次散射求解、地球曲率或历史重投影；
 不消费环境historyRevision，TAA不提供云专用速度补偿。Forward与独立renderViews不支持该阶段。
 默认程序生成可平铺32³ FBM，种子变化重建约148KiB RGBA8 atlas，其余帧复用。
-缺省weatherMap为独立seeded 256²分布图，尺度为shapeScale的6倍；天气场和云团布局固定于世界，
-phase仅推进内部噪声。自定义linear atlas支持32³/64³/128³，对应272×136/528×528/2080×1040：
-8×4/8×8/16×8切片，每片有效数据加一圈wrapped边框。形状R为基础，GBA补充起伏；细节RGB侵蚀，
-灰度仍有效。weatherMap为linear 2D R，高值优先形成云，coverage选择阈值，R=0局部清空。
+缺省weatherMap为独立seeded 256²分布图，weatherScale独立控制宏观尺度；天气场固定于世界，
+phase推进连续体积噪声。自定义linear atlas支持32³/64³/128³，对应272×136/528×528/2080×1040：
+8×4/8×8/16×8切片，每片有效数据加一圈wrapped边框。形状R为基础，GB补充起伏、A预留；细节RGB侵蚀。
+灰度仍有效。legacy weatherMap使用R乘全局coverage，不再在较低coverage提前饱和。
+spatialWeather模式RGBA分别为覆盖率/云型/降水/相对厚度，weatherOrigin/Extent显式世界映射，
+weatherRepeat控制循环；非循环场外无云/无雨，边界夹到纹素中心。该模式必须提供有效线性2D纹理。
+场厚度映射0.25..1倍；B同时加强云光学厚度，并在云底至Y=0间形成有限雨幕介质，
+雨幕再乘precipitation；深度截断仍保留，Host可用同一数值场控制近处粒子。
 句柄借用到endFrame，Host负责加载与释放；失效句柄、sRGB/cube或错误atlas尺寸使本次云提交跳过。
-关闭或零coverage/density/absorption不分配本次云目标；重新启用不读取上一帧云结果。
+未启用atmosphereEnabled时，关闭或零coverage/density/absorption不分配本次云目标；重新启用无旧帧。
+可选天空渐变/空气透视使用horizonColor与aerialDensity，云密度关闭时仍可绘制天空；
+只对天空和云积分着色，几何仍用既有DepthHaze，避免前景重复加雾。不是物理Rayleigh/Mie大气求解。
 私有噪声/天气图与几何按管线关闭路径清理，输出由FrameGraph瞬态池拥有。
 云射线在相机相对空间求逆并归一化，再添加世界平移，避免公里级相机位置与小near组合丢失精度。
 授权素材先入AssetRepo，再离线转换复制到构建assets，见[素材流程](../../AYDocs/ASSET-SOURCE-WORKFLOW.md)。

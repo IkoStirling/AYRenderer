@@ -1,5 +1,25 @@
 # AYRenderer 测试维护
 
+## 连续云与空间天气场（2026-10-24）
+
+云密度改为连续三维场与独立层云/积云高度剖面，新增云型、聚集、向内软边缘、世界空间
+RGBA天气场、局部雨幕、天空渐变和距离空气透视。Windows Debug生产ShaderBuild生成78变体。
+最终Contracts、环境字段/通道/粒子显示/桥五项CTest通过（6.21s），独立CLI Cook测试通过（4.45s）。
+
+独立真实GPU序列D3D11和D3D12均通过，skyDelta=110.001、foregroundDelta=0。
+同coverage改变云型确实改变像素；软边近透明区从2430增到15384像素；验证RGBA独立通道、
+场外清空、repeat、仅降水场与干场、关云后的天空渐变以及前景不被天空阶段重涂。
+现有自遮蔽、phase绕回、真实128³/32³ atlas与关闭/resize检查继续通过。
+云团从下方/上方测得晴空63.1537%/48.2463%、厚云20.89%/39.0062%、云顶变化89/25px。
+
+本轮修正测试fixture：resize后显式更新viewport到400×200，且逐像素检查alpha=255，
+避免旧320×180 viewport外黑边被错误计为厚云。下方历史形态统计含旧fixture，不能与本轮直接比较。
+没有修改Renderer resize与viewport各自独立的API契约。
+
+日志/像素在E:/CodexBuilds/weather-gpu-fourth-d3d11、weather-gpu-fourth-d3d12；
+环境七种960×540最终画面在weather-gallery-final，人工核对四类天空与有/无雾对照。
+本机交付入口out/environment-weather-gallery/weather-gallery.cmd；不声称物理天空、时域降噪或性能等级验收。
+
 ## main合并门禁（2026-10-23）
 
 合并灯光演出与main的云/艺术后处理、资源观察和设备清理实现。固定view避免冲突：

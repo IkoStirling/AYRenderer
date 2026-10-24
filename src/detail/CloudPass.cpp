@@ -8,8 +8,9 @@
 namespace ayt::render::detail {
 uint32_t CloudPass::execute(PassExecContext& ctx){
  auto& a=ctx.adapter;const auto s=sanitizeCloudSettings(ctx.frame.clouds);
- if(!s.enabled||s.coverage<=0||s.density<=0||s.absorption<=0||!a.isInitialized()||a.isNoopBackend()||!ctx.frameGraph||!ctx.resourceBlackboard||!ctx.viewportWidth||!ctx.viewportHeight)return 0;
+ if((!s.atmosphereEnabled&&(!s.enabled||s.coverage<=0||s.density<=0||s.absorption<=0))||!a.isInitialized()||a.isNoopBackend()||!ctx.frameGraph||!ctx.resourceBlackboard||!ctx.viewportWidth||!ctx.viewportHeight)return 0;
  BlackboardGBufferView gb;if(!ctx.resourceBlackboard->resolveGBuffer(gb)||!ctx.resourceBlackboard->findProduced(BlackboardResourceId::LightingColor))return 0;
+ if(s.spatialWeather&&!s.weatherMap.isValid())return 0;
  auto input=a.getFboAttachment(selectSceneColorSourceFbo(ctx),0);auto target=ctx.frameGraph->resolve(FgResourceId::CloudColor);auto output=a.getFboAttachment(target,0);
  if(!BGFXAdapter::isValid(input)||!BGFXAdapter::isValid(output)||input.idx==output.idx)return 0;
  // Reconstruct camera-relative rays. Inverting a translated VP loses precision at kilometre
@@ -35,7 +36,13 @@ uint32_t CloudPass::execute(PassExecContext& ctx){
  corner("cloudFar0",-1,1,1);corner("cloudFarX",1,1,1);corner("cloudFarY",-1,-1,1);
  const float nearZ=bgfx::getCaps()->homogeneousDepth?-1.f:0.f;corner("cloudNear0",-1,1,nearZ);corner("cloudNearX",1,1,nearZ);corner("cloudNearY",-1,-1,nearZ);
  v("cloudCamera",ctx.frame.cameraPosition.x,ctx.frame.cameraPosition.y,ctx.frame.cameraPosition.z,std::abs(ctx.frame.projection.row[3].w)>.5f?1.f:0.f);
- v("cloudLayer",s.baseHeight,s.thickness,s.coverage,s.density);v("cloudShape",s.shapeScale,s.detailScale,s.erosion,0);
+ v("cloudLayer",s.baseHeight,s.thickness,s.coverage,s.enabled?s.density:0.f);v("cloudShape",s.shapeScale,s.detailScale,s.erosion,s.weatherScale);
+ v("cloudMorphology",s.cloudType,s.clustering,s.edgeSoftness,s.atmosphereEnabled?s.aerialDensity:0.f);
+ v("cloudHorizon",s.horizonColor.x,s.horizonColor.y,s.horizonColor.z,s.atmosphereEnabled?1.f:0.f);
+ v("cloudFieldBounds",s.weatherOrigin.x,s.weatherOrigin.y,s.weatherExtent.x,s.weatherExtent.y);
+ const auto weatherMeta=ctx.textures.find(s.weatherMap.id);
+ v("cloudFieldControl",s.spatialWeather?1.f:0.f,s.weatherRepeat?1.f:0.f,weatherMeta!=ctx.textures.end()?1.f/weatherMeta->second.width:1.f,weatherMeta!=ctx.textures.end()?1.f/weatherMeta->second.height:1.f);
+ v("cloudWeatherPolicy",s.precipitation,0,0,0);
  v("cloudShapeLayout",float(shapeLayout.resolution),float(shapeLayout.resolution+2),float(shapeLayout.columns),float(shapeLayout.rows));
  v("cloudDetailLayout",float(detailLayout.resolution),float(detailLayout.resolution+2),float(detailLayout.columns),float(detailLayout.rows));
  v("cloudOptics",s.absorption,s.scattering,s.anisotropy,s.shadowStrength);v("cloudTint",s.tint.x,s.tint.y,s.tint.z,float(s.seed%10007));
