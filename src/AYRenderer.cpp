@@ -1470,8 +1470,8 @@ void Renderer::render(const RenderScene& scene)
     if (graphInput.volumetric && !detail::BGFXAdapter::isValid(graphInput.gbuffer))
         graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
     const auto* cloudPass = _impl->pipeline.findPass<detail::CloudPass>();
-    graphInput.clouds = backendReady && (frame.clouds.atmosphereEnabled || (frame.clouds.enabled && frame.clouds.coverage > 0
-        && frame.clouds.density > 0 && frame.clouds.absorption > 0)) && cloudPass && cloudPass->isEnabled()
+    graphInput.clouds = backendReady && (frame.clouds.atmosphereEnabled || (frame.clouds.enabled && frame.clouds.absorption > 0
+        && ((frame.clouds.coverage > 0 && frame.clouds.density > 0) || (frame.clouds.highClouds.coverage > 0 && frame.clouds.highClouds.density > 0)))) && cloudPass && cloudPass->isEnabled()
         && gbufferPassPtr && gbufferPassPtr->isEnabled() && lightingPassPtr && lightingPassPtr->isEnabled();
     if (graphInput.clouds && !detail::BGFXAdapter::isValid(graphInput.gbuffer)) graphInput.gbuffer = gbufferPassPtr->gbufferFbo();
     graphInput.bloomExtract = bloomStages.extract;

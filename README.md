@@ -20,7 +20,7 @@ CloudQuality控制8..96视线步、0..8光照步、最大距离和composite/tran
 连续三维密度取代格状椭球包络；cloudType（0层云/1积云）、clustering、edgeSoftness与coverage独立。
 软边缘从固定外边界向内形成密度过渡，薄连接层可表达云块聚集，不靠全屏模糊。
 宏观天气场与三维内部侵蚀独立，HG双瓣与衰减补光近似多次散射，短距离加密的光照步进保留云内明暗。
-当前为全分辨率单层Y向高度云，无地面云影、物理多次散射求解、地球曲率或历史重投影；
+当前为全分辨率主Y向高度云，可叠加独立高空薄云片；无地面云影、物理多次散射求解、地球曲率或历史重投影；
 不消费环境historyRevision，TAA不提供云专用速度补偿。Forward与独立renderViews不支持该阶段。
 默认程序生成可平铺32³ FBM，种子变化重建约148KiB RGBA8 atlas，其余帧复用。
 缺省weatherMap为独立seeded 256²分布图，weatherScale独立控制宏观尺度；天气场固定于世界，
@@ -32,7 +32,7 @@ weatherRepeat控制循环；非循环场外无云/无雨，边界夹到纹素中
 场厚度映射0.25..1倍；B同时加强云光学厚度，并在云底至Y=0间形成有限雨幕介质，
 雨幕再乘precipitation；深度截断仍保留，Host可用同一数值场控制近处粒子。
 句柄借用到endFrame，Host负责加载与释放；失效句柄、sRGB/cube或错误atlas尺寸使本次云提交跳过。
-未启用atmosphereEnabled时，关闭或零coverage/density/absorption不分配本次云目标；重新启用无旧帧。
+未启用atmosphereEnabled时，关闭、零absorption或主云/高云均无介质时不分配云目标；重新启用无旧帧。
 可选天空渐变/空气透视使用horizonColor与aerialDensity，云密度关闭时仍可绘制天空；
 只对天空和云积分着色，几何仍用既有DepthHaze，避免前景重复加雾。不是物理Rayleigh/Mie大气求解。
 私有噪声/天气图与几何按管线关闭路径清理，输出由FrameGraph瞬态池拥有。
@@ -43,6 +43,17 @@ weatherRepeat控制循环；非循环场外无云/无雨，边界夹到纹素中
 CPU契约/边框测试为AYRenderer_Clouds；实机独立目标AYRenderer_CloudRenderTest，
 参数为fresh-output-directory和d3d11/d3d12，读回检查天空透射、前景深度、空密度/天气图、
 自遮蔽、phase变化、关闭和resize。测试记录见docs/testing.md。
+
+CloudForm显式选择Blended(旧cloudType混合)、Cumulus、Stratocumulus、Stratus、Cirrus、Towering。
+新形态采用不同高度剖面、额外中尺度结构及方向性薄云密度；不以coverage代替云型。
+显式form覆盖cloudType与天气图G的形态选择；R/B/A仍控制覆盖、降水和厚度。
+highClouds可独立设置coverage/density/baseHeight/thickness/scale，主云为零仍可显示高云。
+高云是带世界空间卷曲细丝的解析薄云片，没有第二套体积步进或自遮蔽；不受主天气图限制。
+有主云时须把高云片放在整个主高度层之上，重叠高云在低层API中被跳过。
+该阶段用于静态形态对照，尚无形态之间的交叉渐变、天气前沿演化或高云风动画。
+CloudQuality.samplingPhase为0..1积分采样偏移，缺省0；宿主可在冻结场景配合通用TAA推进采样序列，
+它不移动云、风或天气时间。切换场景/云型须notifyCameraCut；没有AA时保持偏移固定，避免闪烁。
+静态展示的多帧收敛不代表已实现运动云的速度补偿或云专用时域重建。
 
 ## 区域视图与传送门表面（2026-10-23）
 
