@@ -2431,3 +2431,14 @@ RenderFrameStats.pointGpuTimeMs/pointGpuReadbackTimeMs分别统计四个计算�
 Studio --point-gpu显式启用，--point-gpu-readback再启用带序号样本；--point-cpu保留CPU四边形。JSON增加gpuPointCulling、pointCountsExact、
 gpuPointFallback、gpuPointSampleValid/Serial/Source/Visible及meanPointGpuMs/meanPointGpuReadbackMs。
 CameraRenderView即使没有不透明几何也执行请求的颜色/深度清屏，避免纯点阵或空帧保留上一张输出。
+
+### 云体主形/堆叠/边缘解耦（2026-10-24）
+
+CloudStructureSettings是显式有界值配置，blend0保留legacy分支。主RGBA atlas承载独立算法场，
+主形在独立2.8倍尺度采样，中尺度按(base+cellular*w1+billow*w2)/(1+w1+w2)组合；
+周期sin域扭曲与细节侵蚀单独控制，细节不能在空域添加密度。覆盖率仍来自独立宏观天气场。
+原Blended及五种CloudForm的旧实现仍在，混合路径对积云、层积、层云、高耸形态分别组织高度结构。
+Cirrus与解析高空片暂未采用新密度组合。旧高云排序/前景深度/alpha保持既有契约。
+自遮蔽仍采同一密度函数，补光取exp(-tau)、exp(-.32tau)、exp(-.09tau)三个阶的近似，
+不代表物理能量守恒求解。光源、密度、配比来自每帧参数，不解释离线作者规则。
+附加主形采样增加GPU成本；采样步数/时域重建/多层体积预算本轮不扩张，没有新的性能等级保证。

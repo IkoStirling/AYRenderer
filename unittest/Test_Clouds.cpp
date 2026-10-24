@@ -15,6 +15,7 @@ TEST_CASE(morphology_and_atmosphere_have_independent_bounded_controls){
  s.coverage=1;s.cloudType=1;s.atmosphereEnabled=true;s.enabled=false;auto a=sanitizeCloudSettings(s);CHECK(a.cloudType==1);CHECK(!a.enabled&&a.atmosphereEnabled);
  s.form=CloudForm(255);s.highClouds.coverage=2;s.highClouds.thickness=-1;s.highClouds.scale=std::numeric_limits<float>::quiet_NaN();a=sanitizeCloudSettings(s);CHECK(a.form==CloudForm::Blended);CHECK(a.highClouds.coverage==1);CHECK(a.highClouds.thickness==1);CHECK(a.highClouds.scale==22000);
  s.quality.samplingPhase=std::numeric_limits<float>::infinity();a=sanitizeCloudSettings(s);CHECK(a.quality.samplingPhase==0);
+ s.structure={std::numeric_limits<float>::quiet_NaN(),2,-1,std::numeric_limits<float>::infinity(),2};a=sanitizeCloudSettings(s);CHECK(a.structure.blend==0);CHECK(a.structure.cellular==1);CHECK(a.structure.billow==0);CHECK(a.structure.warp==.25f);CHECK(a.structure.detailStrength==1);
 }
 TEST_CASE(atlas_layouts_and_independent_weather_distribution){
  auto a=cloudAtlasLayout(272,136),b=cloudAtlasLayout(528,528),c=cloudAtlasLayout(2080,1040);

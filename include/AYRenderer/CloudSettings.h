@@ -8,6 +8,10 @@ enum class CloudForm : uint8_t { Blended, Cumulus, Stratocumulus, Stratus, Cirru
 /// Optional high, optically thin cirrus sheet. Analytic thickness integration, not a second raymarched volume.
 /// With an active primary volume, place its base above baseHeight+thickness; overlapping sheets are skipped.
 struct HighCloudSettings { float coverage=0,density=.12f,baseHeight=8500,thickness=600,scale=22000; };
+/// Opt-in density composition. blend=0 preserves the legacy density/lighting path.
+/// Hybrid atlases pack R=base mass, G=rounded cellular, B=billow, A=independent variation.
+/// Cellular/billow are normalized relative weights; warp and detailStrength are independent of coverage.
+struct CloudStructureSettings { float blend=0,cellular=.5f,billow=.25f,warp=.25f,detailStrength=.12f; };
 /// Main Deferred view only. No temporal reconstruction; costs scale with steps * (lightSteps+1).
 struct CloudQuality {
     uint8_t steps=48,lightSteps=4,debugView=0;float maxDistance=60000;
@@ -19,7 +23,8 @@ struct CloudQuality {
 /// phase is added to world/scale. Host advances phase, Renderer never advances time.
 /// Optional borrowed linear noise atlases: 32^3 (272x136), 64^3 (528x528), 128^3 (2080x1040).
 /// Tiles have one wrapped border; layout is 8x4, 8x8 or 16x8 respectively. R is base density,
-/// optional GB vary the base body; shape A is reserved. Detail RGB is erosion noise (grayscale remains valid).
+/// optional GB vary the legacy base body. Hybrid structure uses packed R mass/G cellular/B billow/A variation.
+/// Detail RGB is erosion noise (grayscale remains valid); hybrid packs and weights are an explicit host choice.
 /// Legacy weather uses linear R. spatialWeather uses RGBA coverage/type/precipitation/thickness,
 /// world origin/extent and explicit repeat policy. Cloud type is independent of coverage.
 /// Empty handles use seeded volume noise and an independent, larger stationary weather field.
@@ -33,6 +38,7 @@ struct CloudSettings {
     float absorption=.0015f,scattering=.9f,anisotropy=.5f,shadowStrength=.7f;
     float cloudType=.7f,clustering=.55f,edgeSoftness=.5f,weatherScale=24000;
     CloudForm form=CloudForm::Blended;
+    CloudStructureSettings structure;
     HighCloudSettings highClouds;
     /// Global rain/snow visual intensity, multiplied by packed field B for below-cloud shafts.
     float precipitation=1;
@@ -54,6 +60,7 @@ inline CloudSettings sanitizeCloudSettings(CloudSettings s) noexcept {
     s.cloudType=f(s.cloudType,.7f,0,1);s.clustering=f(s.clustering,.55f,0,1);s.edgeSoftness=f(s.edgeSoftness,.5f,0,1);s.weatherScale=f(s.weatherScale,24000,1,1000000);s.aerialDensity=f(s.aerialDensity,.000015f,0,.01f);
     s.precipitation=f(s.precipitation,1,0,1);
     if(static_cast<uint8_t>(s.form)>static_cast<uint8_t>(CloudForm::Towering))s.form=CloudForm::Blended;
+    auto& m=s.structure;m.blend=f(m.blend,0,0,1);m.cellular=f(m.cellular,.5f,0,1);m.billow=f(m.billow,.25f,0,1);m.warp=f(m.warp,.25f,0,1);m.detailStrength=f(m.detailStrength,.12f,0,1);
     auto& h=s.highClouds;h.coverage=f(h.coverage,0,0,1);h.density=f(h.density,.12f,0,1);
     h.baseHeight=f(h.baseHeight,8500,-10000,100000);h.thickness=f(h.thickness,600,1,10000);h.scale=f(h.scale,22000,1,1000000);
     for(int i=0;i<3;++i)s.horizonColor[i]=f(s.horizonColor[i],.6f,0,16);

@@ -1134,3 +1134,15 @@ RenderFrameStats.pointGpuTimeMs/pointGpuReadbackTimeMs分别统计四个计算�
 Studio --point-gpu显式启用，--point-gpu-readback再启用带序号样本；--point-cpu保留CPU四边形。JSON增加gpuPointCulling、pointCountsExact、
 gpuPointFallback、gpuPointSampleValid/Serial/Source/Visible及meanPointGpuMs/meanPointGpuReadbackMs。
 CameraRenderView即使没有不透明几何也执行请求的颜色/深度清屏，避免纯点阵或空帧保留上一张输出。
+
+### 体积云分层密度组合（2026-10-24）
+
+CloudSettings.structure的blend默认0，保留原密度与光照；非零时将独立低频主形与中尺度圆团/折叠梯度组合，
+cellular、billow为[0,1]相对权重，warp为周期扭曲，detailStrength只侵蚀已有边缘。
+混合主atlas为linear RGBA：R主形、Gcellular、Bbillow、A独立变化；现有2D切片图集尺寸与借用生命周期不变。
+较大尺度用world/(scale*2.8)+phase独立寻址，避免非整数频率放大归一相位的周期跳变。
+不同CloudForm控制云顶/云底和层状连接，层积/雨层的底部也由中尺度结构调制，不只改变云顶。
+新路径保留太阳密度自遮蔽，采用三个衰减阶的补光近似；仍无完整多次散射、大气求解、地面云影或云专用重建。
+引擎环境静态示例对照四套来源/生成方式不同的噪声包和四组算法权重；外部原件先入AssetRepo。
+AYRenderer_CloudRenderTest可额外接第四参数lab目录，强制加载四包并检查密度差异、算法差异、扭曲、周期与光照。
+运行命令及视觉证据见引擎AYDocs/ENVIRONMENT-DISPLAY.md；CPU/GPU断言不替代静态美术审查。

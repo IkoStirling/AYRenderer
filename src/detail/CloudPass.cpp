@@ -45,6 +45,8 @@ uint32_t CloudPass::execute(PassExecContext& ctx){
  v("cloudFieldControl",s.spatialWeather?1.f:0.f,s.weatherRepeat?1.f:0.f,weatherMeta!=ctx.textures.end()?1.f/weatherMeta->second.width:1.f,weatherMeta!=ctx.textures.end()?1.f/weatherMeta->second.height:1.f);
  v("cloudWeatherPolicy",s.precipitation,s.quality.samplingPhase,0,0);
  v("cloudForm",float(s.form),0,0,0);
+ v("cloudStructure",s.structure.blend,s.structure.cellular,s.structure.billow,s.structure.warp);
+ v("cloudStructureDetail",s.structure.detailStrength,0,0,0);
  const bool highOrdered=s.coverage<=0||s.density<=0||s.highClouds.baseHeight>s.baseHeight+s.thickness;
  v("cloudHighLayer",s.highClouds.baseHeight,s.highClouds.thickness,s.enabled&&highOrdered?s.highClouds.coverage:0.f,s.highClouds.density);
  v("cloudHighShape",s.highClouds.scale,0,0,0);

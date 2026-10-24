@@ -1,6 +1,6 @@
 #pragma once
 namespace ayt::render {
-inline constexpr char kCloudCacheKey[]="cloud_static_families_v4";
+inline constexpr char kCloudCacheKey[]="cloud_hybrid_structure_v5";
 inline constexpr char kCloudPhoskiaSource[]=R"PHOSKIA(
 // Convert periodic 3D coordinates into two atlas slices, with wrapped texel borders.
 fn cloudFraction(v:float):float {return v-floor(v)}
@@ -49,6 +49,8 @@ material Clouds {
  uniform vec4 cloudFieldControl
  uniform vec4 cloudWeatherPolicy
  uniform vec4 cloudForm
+ uniform vec4 cloudStructure
+ uniform vec4 cloudStructureDetail
  uniform vec4 cloudHighLayer
  uniform vec4 cloudHighShape
  uniform vec4 cloudShapeLayout
@@ -84,7 +86,7 @@ material Clouds {
   let end=limit
   if(abs(direction.y)>0.00001){
    let bottom=cloudLayer.x
-   if(cloudFieldControl.x>0.5){bottom=min(bottom,0.0)}
+   if(cloudFieldControl.x>0.5 && cloudWeatherPolicy.x>0.0){bottom=min(bottom,0.0)}
    let a=(bottom-origin.y)/direction.y
    let b=(cloudLayer.x+cloudLayer.y-origin.y)/direction.y
    begin=max(0.0,min(a,b));end=min(end,max(a,b))
@@ -122,7 +124,7 @@ material Clouds {
        let q=p/cloudShape.x+cloudPhase.xyz+seedPhase
        if(cloudForm.x>3.5 && cloudForm.x<4.5){q=vec3(q.x*0.32+q.z*0.12,q.y*0.7,q.z*3.5);q.x=q.x+sin(q.z*2.0)*0.045}
        // Periodic warp: advancing any normalized phase by one remains continuous.
-       q=q+vec3(sin(q.z*6.283185),sin(q.x*6.283185),sin(q.y*6.283185))*0.035
+       q=q+vec3(sin(q.z*6.283185),sin(q.x*6.283185),sin(q.y*6.283185))*(0.035+cloudStructure.x*cloudStructure.w*0.18)
        let qd=p/cloudShape.y+cloudDetailPhase.xyz
        let z=cloudFraction(q.z)*cloudShapeLayout.x-0.5
        let zd=cloudFraction(qd.z)*cloudDetailLayout.x-0.5
@@ -191,6 +193,29 @@ material Clouds {
        let veil=(1.0-kind)*cloudMorphology.y*0.06*local*layerProfile
        if(cloudForm.x>0.5){veil=0.0}
        density=(max(shape-erosion,0.0)+veil)*smoothstep(0.001,0.1,body)*cloudLayer.w*mix(2.0,3.0,kind)*(1.0+wet*0.8)
+       if(cloudStructure.x>0.0 && (cloudForm.x<3.5 || cloudForm.x>4.5)){
+        // Independent periodic macro mass, cellular lobes and billow signals. Detail cannot create mass in empty space.
+        // Each scale owns the same normalized phase, avoiding non-integer phase multiplication at wrap boundaries.
+        let qc=p/(cloudShape.x*2.8)+cloudPhase.xyz+seedPhase+vec3(0.31,0.67,0.19)
+        let zc=cloudFraction(qc.z)*cloudShapeLayout.x-0.5
+        let coarse=mix(sampleLod(shapeNoise,cloudAtlasUv(qc,floor(zc),cloudShapeLayout),0.0),sampleLod(shapeNoise,cloudAtlasUv(qc,floor(zc)+1.0,cloudShapeLayout),0.0),cloudFraction(zc))
+        let mass=coarse.r*0.72+coarse.b*0.28
+        let lobes=(n.r+n.g*cloudStructure.y+n.b*cloudStructure.z)/(1.0+cloudStructure.y+cloudStructure.z)
+        let signal=mass*0.56+lobes*0.44
+        let top=0.3+mass*0.5+lobes*0.12
+        let bottom=0.04+(1.0-lobes)*0.08
+        if(cloudForm.x>1.5 && cloudForm.x<2.5){signal=0.10+mass*0.30+lobes*0.60;top=0.32+mass*0.30+n.g*0.28;bottom=0.06+(1.0-n.g)*0.28}
+        if(cloudForm.x<0.5 || cloudForm.x>2.5 && cloudForm.x<3.5){signal=0.22+mass*0.45+lobes*0.33;top=0.50+mass*0.25;bottom=0.04+(1.0-n.g)*0.22+coarse.a*0.08}
+        if(cloudForm.x>4.5){signal=mass*0.58+lobes*0.42;top=0.38+coarse.a*0.5;local=clamp(local-h*0.24,0.0,1.0)}
+        let vertical=max(h-top,0.0)*2.8+max(bottom-h,0.0)*3.5
+        let cutoff=0.88-local*0.58
+        let rim=mix(0.045,0.16,cloudMorphology.z)
+        let core=smoothstep(cutoff,cutoff+rim,signal-vertical)*smoothstep(0.0,0.08,local)
+        let fine=dot(d,vec3(0.625,0.25,0.125))*cloudStructureDetail.x*(1.0-smoothstep(0.15,0.8,core))
+        let hybrid=max(core-fine,0.0)*cloudLayer.w*2.5*(1.0+wet*0.45)
+        density=mix(density,hybrid,cloudStructure.x)
+        if(j==0){primaryBody=mass}
+       }
        if(h<=0.0 && cloudFieldControl.x>0.5){density=wet*cloudWeatherPolicy.x*0.025*smoothstep(0.0,0.15,(cloudLayer.x-p.y)/max(cloudLayer.x,1.0))*(0.6+body*0.8)}
       }
       if(j==0){medium=density*(1.0-smoothstep(cloudQuality.z*0.65,cloudQuality.z,rayDistance))}else{lightDepth=lightDepth+density*lightDs}
@@ -204,6 +229,14 @@ material Clouds {
      let lighting=cloudAmbient.rgb*(mix(1.8,0.7,primaryType)+height*0.6)*(1.0-wetness*0.5*(1.0-height))+cloudLightColor.rgb*(lightT*phase*0.65+multiple*0.15)
      if(cloudForm.x>0.5){lighting=lighting*(0.82+primaryBody*0.36)}
      if(cloudForm.x>3.5 && cloudForm.x<4.5){lighting=cloudAmbient.rgb*1.8+cloudLightColor.rgb*0.7}
+     if(cloudStructure.x>0.0 && (cloudForm.x<3.5 || cloudForm.x>4.5)){
+      let tau=lightDepth*cloudOptics.x*cloudOptics.w
+      let sunlight=exp(-tau)*phase*0.46+exp(-tau*0.32)*0.24+exp(-tau*0.09)*0.12
+      let skyVisibility=0.4+0.85*smoothstep(0.04,0.85,height)
+      let sky=cloudAmbient.rgb*skyVisibility*(1.0-wetness*0.38*(1.0-height))
+      let hybridLight=sky+cloudLightColor.rgb*sunlight
+      lighting=mix(lighting,hybridLight,cloudStructure.x)
+     }
      let aerial=1.0-exp(-rayDistance*cloudMorphology.w)
      let lit=cloudOptics.y*mix(cloudTint.rgb*lighting,cloudHorizon.rgb,aerial)
      radiance=radiance+transmission*(1.0-stepT)*lit

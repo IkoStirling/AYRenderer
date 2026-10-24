@@ -15,7 +15,7 @@ using namespace ayt::math;
 namespace fs=std::filesystem;
 void require(bool b,const char* m){if(!b)throw std::runtime_error(m);}
 int main(int argc,char** argv){try{
- require(argc==3||argc==4,"Usage: CloudRenderTest <fresh-output-directory> d3d11|d3d12 [imported-cloud-asset-directory]");const fs::path output=fs::absolute(argv[1]);require(!fs::exists(output),"Use fresh output directory");fs::create_directories(output);
+ require(argc>=3&&argc<=5,"Usage: CloudRenderTest <fresh-output-directory> d3d11|d3d12 [imported-cloud-asset-directory] [four-pack-lab-directory]");const fs::path output=fs::absolute(argv[1]);require(!fs::exists(output),"Use fresh output directory");fs::create_directories(output);
  const std::string backend=argv[2];require(backend=="d3d11"||backend=="d3d12","Select D3D backend");
  WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"AYCloudRenderTest";RegisterClassW(&wc);auto window=CreateWindowW(wc.lpszClassName,L"Cloud acceptance",WS_OVERLAPPEDWINDOW,0,0,400,240,nullptr,nullptr,wc.hInstance,nullptr);require(window!=nullptr,"Create hidden native window");
  Renderer renderer;InitDesc init;init.windowHandle=window;init.width=320;init.height=180;init.msaa=0;init.vsync=false;init.backend=backend=="d3d11"?Backend::Direct3D11:Backend::Direct3D12;require(renderer.initialize(init),"Initialize actual device");
@@ -42,7 +42,7 @@ int main(int argc,char** argv){try{
  renderer.setMainCameraLookAtPerspective({8000,700,-12000},{0,2300,6000},{0,1,0},65,2,.1f,120);s.baseHeight=1500;s.thickness=3000;s.shapeScale=8000;s.detailScale=350;s.absorption=.002f;s.quality.maxDistance=60000;s.coverage=.6f;s.weatherMap={};
  auto distant=capture("kilometre-camera",s,true);require(distant.isValid(),"Camera-relative cloud rays work away from world origin");
  std::array<TextureHandle,2> imported{};
- if(argc==4){const fs::path assets=argv[3];imported[0]=renderer.createTextureFromFile((assets/"BaseNoise.png").string());imported[1]=renderer.createTextureFromFile((assets/"DetailNoise.png").string());require(imported[0].isValid()&&imported[1].isValid(),"Load actual imported linear 128/32 volume atlases");}
+ if(argc>=4){const fs::path assets=argv[3];imported[0]=renderer.createTextureFromFile((assets/"BaseNoise.png").string());imported[1]=renderer.createTextureFromFile((assets/"DetailNoise.png").string());require(imported[0].isValid()&&imported[1].isValid(),"Load actual imported linear 128/32 volume atlases");}
  // Structural image checks complement the gallery's visual review: both clear sky and opaque
  // bodies must exist from different elevations, with varying cloud tops rather than a flat band.
  scene=RenderScene{};scene.setSceneLights(lights);s=CloudSettings{};s.enabled=true;s.coverage=.55f;s.density=.6f;s.thickness=3000;s.shapeScale=8000;s.detailScale=350;s.absorption=.002f;s.quality.steps=96;s.quality.debugView=1;s.shapeNoise=imported[0];s.detailNoise=imported[1];
@@ -63,6 +63,24 @@ int main(int argc,char** argv){try{
  s.form=CloudForm::Cirrus;s.baseHeight=8500;s.thickness=900;s.shapeScale=20000;s.density=.12f;s.absorption=.0008f;auto formCirrus=capture("form-cirrus",s,true);require(difference(formLayered,formCirrus,0,0,400,200)>2,"Thin directional cloud family must differ from low layered clouds");
  s=CloudSettings{};auto highOff=capture("high-off",s,false);s.enabled=true;s.coverage=0;s.density=0;s.highClouds={1,.4f,8500,800,22000};s.shapeNoise=imported[0];s.detailNoise=imported[1];auto highOn=capture("high-only",s,true);require(difference(highOff,highOn,0,0,400,200)>.5,"High thin clouds must submit and render independently of primary volume");
  renderer.setMainCameraLookAtPerspective({0,2,-8},{0,4,4},{0,1,0},60,2,.1f,120);scene.add(cube,material,translate(0,2,0)*scale(3,4,2));s.highClouds.coverage=0;s.enabled=false;auto highForegroundOff=capture("high-foreground-off",s,false);s.highClouds.coverage=1;s.enabled=true;auto highForeground=capture("high-foreground",s,true);require(difference(highForegroundOff,highForeground,185,100,215,112)<.5,"High clouds respect foreground geometry depth");
+ // Opt-in actual asset matrix: the explicit lab argument is required for this acceptance run.
+ if(argc==5){
+  renderer.setMainCameraLookAtPerspective({0,12,-32},{0,1400,6000},{0,1,0},58,2,1,60000);
+  scene=RenderScene{};SceneLights hybridLights;hybridLights.add(Light::directional({-.8f,-.6f,0},{1,1,1}));scene.setSceneLights(hybridLights);
+  s=CloudSettings{};s.enabled=true;s.coverage=.85f;s.density=.45f;s.baseHeight=1600;s.thickness=2400;s.shapeScale=6500;s.quality.steps=96;s.quality.lightSteps=6;s.quality.debugView=1;s.weatherMap=whiteMap;s.form=CloudForm::Cumulus;s.structure.blend=1;
+  std::array<std::array<TextureHandle,2>,4> packs{};decltype(base) firstPack;
+  const char* packNames[]={"yangrc","lague-test","lague-flight","procedural"};
+  for(int n=0;n<4;++n){for(int c=0;c<2;++c){packs[n][c]=renderer.createTextureFromFile((fs::path(argv[4])/packNames[n]/(c?"DetailNoise.png":"BaseNoise.png")).string());require(packs[n][c].isValid(),"Load mandatory packed cloud lab atlases");}
+   s.shapeNoise=packs[n][0];s.detailNoise=packs[n][1];const auto name=std::string("hybrid-")+packNames[n];auto image=capture(name.c_str(),s,true);size_t opaquePixels=0;for(size_t i=0;i<image.rgba8.size();i+=4)opaquePixels+=image.rgba8[i]<64;require(opaquePixels>100,"Each noise pack must produce an optically thick body");
+   if(n==0)firstPack=image;else{const double delta=difference(firstPack,image,0,0,400,200);std::cout<<name<<" delta="<<delta<<'\n';require(delta>1,"Independent imported/generated noise packs must change density structure");}
+  }
+  s.shapeNoise=packs[0][0];s.detailNoise=packs[0][1];s.structure.cellular=1;s.structure.billow=0;auto cells=capture("hybrid-cellular",s,true);s.structure.cellular=0;s.structure.billow=1;auto billow=capture("hybrid-billow",s,true);const double mixDelta=difference(cells,billow,0,0,400,200);std::cout<<"hybrid algorithm delta="<<mixDelta<<'\n';require(mixDelta>.5,"Independent cellular and billow algorithms must change shape at fixed assets and coverage");
+  s.structure.warp=.85f;auto warped=capture("hybrid-warped",s,true);require(difference(warped,billow,0,0,400,200)>.5,"Domain warp must change structure without changing coverage");
+  s.shapePhase={0,0,0};auto hybridZero=capture("hybrid-phase-zero",s,true);s.shapePhase={1,1,1};auto hybridOne=capture("hybrid-phase-one",s,true);require(difference(hybridZero,hybridOne,0,0,400,200)<.5,"Hybrid scales and warp preserve normalized phase wrap");
+  s.shapePhase={};s.quality.debugView=0;s.shadowStrength=0;auto hybridUnshadowed=capture("hybrid-no-shadow",s,true);s.shadowStrength=1;auto hybridShadowed=capture("hybrid-shadowed",s,true);require(difference(hybridUnshadowed,hybridShadowed,0,0,400,200)>1,"Hybrid multiple-order lighting must preserve density self shadowing");
+  for(auto& pack:packs)for(auto texture:pack)renderer.destroyTexture(texture);
+  std::cout<<"PASS four-pack cloud algorithm matrix "<<backend<<'\n';
+ }
  renderer.destroyTexture(dryTex);renderer.destroyTexture(rainTex);renderer.destroyTexture(layerTex);
  for(auto texture:imported)if(texture.isValid())renderer.destroyTexture(texture);
  renderer.destroyTexture(noise);renderer.destroyTexture(zeroNoise);renderer.destroyTexture(whiteMap);renderer.destroyTexture(blackMap);renderer.destroyMaterial(material);renderer.destroyMesh(cube);renderer.shutdown();DestroyWindow(window);
