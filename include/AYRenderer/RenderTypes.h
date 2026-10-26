@@ -43,6 +43,9 @@ enum class MaterialModel : uint8_t {
     // Four-band direct lighting with ordinary PBR ambient and emissive terms.
     // Opaque Deferred surfaces only; Forward uses its existing PBR shader.
     ToonLit     = 2,
+    // Broadens only the direct diffuse response toward grazing angles while
+    // retaining the PBR specular, shadow, AO and emissive terms. Opaque Deferred.
+    SoftDiffuseLit = 3,
     Count,
 };
 

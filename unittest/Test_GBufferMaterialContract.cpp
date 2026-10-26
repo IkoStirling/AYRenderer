@@ -25,7 +25,8 @@ TEST_CASE(material_model_values_are_append_only)
     CHECK(static_cast<uint8_t>(MaterialModel::StandardLit) == 0u);
     CHECK(static_cast<uint8_t>(MaterialModel::Unlit) == 1u);
     CHECK(static_cast<uint8_t>(MaterialModel::ToonLit) == 2u);
-    CHECK(static_cast<uint8_t>(MaterialModel::Count) == 3u);
+    CHECK(static_cast<uint8_t>(MaterialModel::SoftDiffuseLit) == 3u);
+    CHECK(static_cast<uint8_t>(MaterialModel::Count) == 4u);
 }
 
 TEST_CASE(ao_and_material_model_round_trip_without_coverage)
@@ -39,6 +40,8 @@ TEST_CASE(ao_and_material_model_round_trip_without_coverage)
         0.81f, MaterialModel::Unlit);
     const float toon = GBufferLayout::packAoAndMaterialModel(
         0.42f, MaterialModel::ToonLit);
+    const float soft = GBufferLayout::packAoAndMaterialModel(
+        0.63f, MaterialModel::SoftDiffuseLit);
 
     CHECK(GBufferLayout::unpackMaterialModel(lit)
           == MaterialModel::StandardLit);
@@ -46,9 +49,12 @@ TEST_CASE(ao_and_material_model_round_trip_without_coverage)
           == MaterialModel::Unlit);
     CHECK(GBufferLayout::unpackMaterialModel(toon)
           == MaterialModel::ToonLit);
+    CHECK(GBufferLayout::unpackMaterialModel(soft)
+          == MaterialModel::SoftDiffuseLit);
     CHECK(std::abs(GBufferLayout::unpackAo(lit) - 0.37f) < 1.0e-6f);
     CHECK(std::abs(GBufferLayout::unpackAo(unlit) - 0.81f) < 1.0e-6f);
     CHECK(std::abs(GBufferLayout::unpackAo(toon) - 0.42f) < 1.0e-6f);
+    CHECK(std::abs(GBufferLayout::unpackAo(soft) - 0.63f) < 1.0e-6f);
     CHECK(GBufferLayout::kWorldPositionPackedAttachment == 2u);
     CHECK(GBufferLayout::kEmissiveCoverageAttachment == 3u);
 }
@@ -92,6 +98,10 @@ TEST_CASE(resource_manager_validates_and_updates_material_model)
         handle, ayt::render::MaterialModel::ToonLit));
     CHECK(resources.materials().at(handle.id).materialModel
           == ayt::render::MaterialModel::ToonLit);
+    CHECK(resources.setMaterialModel(
+        handle, ayt::render::MaterialModel::SoftDiffuseLit));
+    CHECK(resources.materials().at(handle.id).materialModel
+          == ayt::render::MaterialModel::SoftDiffuseLit);
     CHECK_FALSE(resources.setMaterialModel(
         handle, ayt::render::MaterialModel::Count));
     CHECK_FALSE(resources.setMaterialModel(
@@ -149,6 +159,8 @@ TEST_CASE(shader_contract_keeps_model_and_coverage_independent)
     CHECK(lighting.find("let isToon = step(1.5, materialModel)")
           != std::string::npos);
     CHECK(lighting.find("let toonDirect = toon0 + toon1")
+          != std::string::npos);
+    CHECK(lighting.find("let softLit = pbrLit + softDiffuseExtra")
           != std::string::npos);
 }
 

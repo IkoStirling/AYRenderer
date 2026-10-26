@@ -666,7 +666,7 @@ TEST_CASE(independent_material_snapshots_do_not_replace_or_mutate_path_cached_sc
     removeFile(shaderPath);removeFile(matPath);
 }
 
-TEST_CASE(persisted_toon_model_loads_with_independent_pbr_defaults)
+TEST_CASE(persisted_toon_and_soft_models_load_with_independent_pbr_defaults)
 {
     using namespace ayt::render;
     using namespace ayt::render::detail;
@@ -692,6 +692,18 @@ TEST_CASE(persisted_toon_model_loads_with_independent_pbr_defaults)
         CHECK(materialUniformScalar(gpu,"roughness",-1)==0.5f);
         CHECK(materialUniformScalar(gpu,"ao",-1)==1.0f);
         resources.destroyMaterial(handle);
+    }
+    source.setInt("__ayMaterialModel",3);
+    auto softHandle=bindMaterialFromResource(resources,source,
+        tempPath("bridge_soft.mat"));
+    CHECK(softHandle.isValid());
+    if(softHandle.isValid()) {
+        const auto& gpu=resources.materials().at(softHandle.id);
+        CHECK(gpu.materialModel==MaterialModel::SoftDiffuseLit);
+        CHECK(materialUniformScalar(gpu,"metallic",-1)==0.0f);
+        CHECK(materialUniformScalar(gpu,"roughness",-1)==0.5f);
+        CHECK(materialUniformScalar(gpu,"ao",-1)==1.0f);
+        resources.destroyMaterial(softHandle);
     }
     adapter.shutdown();
     removeFile(shaderPath);

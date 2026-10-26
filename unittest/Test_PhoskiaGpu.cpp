@@ -1085,7 +1085,7 @@ TEST_CASE(forward_deferred_background_and_stylization_share_viewport_and_pbr) {
 #endif
 }
 
-TEST_CASE(deferred_toon_material_changes_direct_light_without_changing_legacy_models) {
+TEST_CASE(deferred_toon_and_soft_diffuse_models_change_direct_light) {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");
     if(!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
@@ -1138,10 +1138,13 @@ TEST_CASE(deferred_toon_material_changes_direct_light_without_changing_legacy_mo
     };
     const int pbr=center(MaterialModel::StandardLit);
     const int toon=center(MaterialModel::ToonLit);
+    const int soft=center(MaterialModel::SoftDiffuseLit);
     const int unlit=center(MaterialModel::Unlit);
-    std::cout<<"[MaterialToon] PBR="<<pbr<<" toon="<<toon<<" unlit="<<unlit<<'\n';
-    CHECK(pbr>=0);CHECK(toon>=0);CHECK(unlit>=0);
+    std::cout<<"[MaterialModels] PBR="<<pbr<<" toon="<<toon
+             <<" soft="<<soft<<" unlit="<<unlit<<'\n';
+    CHECK(pbr>=0);CHECK(toon>=0);CHECK(soft>=0);CHECK(unlit>=0);
     CHECK(std::abs(toon-pbr)>=3);
+    CHECK(soft>=pbr+3);
     renderer.destroyMaterial(material);renderer.destroyMesh(mesh);renderer.shutdown();
 #else
     SKIP_TEST("Windows device fixture required");

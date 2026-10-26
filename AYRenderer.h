@@ -245,8 +245,10 @@ public:
     // unknown handle.
     void setMaterialBlendMode(MaterialHandle material, BlendMode blendMode);
 
-    /// Selects the opaque Deferred lighting model: StandardLit, Unlit, or
-    /// ToonLit. ToonLit quantizes each light's direct N dot L into four bands;
+    /// Selects the opaque Deferred lighting model: StandardLit, Unlit,
+    /// ToonLit, or SoftDiffuseLit. ToonLit quantizes direct light into four
+    /// bands; SoftDiffuseLit broadens direct diffuse at grazing angles but
+    /// retains PBR specular. It is not subsurface scattering or transmission.
     /// Forward, transparent and custom shader paths keep their existing look.
     /// Coverage remains independent from the model in the GBuffer.
     void setMaterialModel(MaterialHandle material, MaterialModel model);

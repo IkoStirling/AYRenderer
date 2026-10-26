@@ -237,6 +237,12 @@ RenderAssetBridgeTests 覆盖第二个根和旧 flat 回退；真实导入材质
 Forward 与透明路径仍按已有材质 shader 绘制，不承诺相同分段效果。
 旧材质的模型值 0/1 与缺省 PBR 结果保持不变。
 
+不透明 Deferred 材质还可选 `MaterialModel::SoftDiffuseLit`（持久材质参数
+`__ayMaterialModel=3`）。它只给每盏灯的漫反射增加随 N·L 减小而增强的有限补光，
+保留原 PBR 高光、灯色、阴影、衰减、环境与自发光；适合需要柔和近景受光的材质。
+这是固定形状的局部近似，不模拟皮肤次表面散射、厚度透射或头发纤维。
+Forward、透明和自定义 shader 不切换到该模型。旧材质仍使用原模型和结果。
+
 `PbrSurfaceSettings` 统一 Forward/Deferred 的 UV 缩放/偏移、法线强度和粗糙度偏置，
 默认值保留旧材质；使用现有 `.mat` 通用参数，不扩 IMaterial ABI 或 GBuffer 附件。
 Forward 法线改为 inverse-transpose，内置 PBR 的 Mask cutoff 与 Deferred 对齐。

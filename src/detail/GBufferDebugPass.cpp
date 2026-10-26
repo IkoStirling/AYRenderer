@@ -72,7 +72,7 @@ material GBufferDebug {
         let pick9 = step(8.5, c)
         let materialModel = floor(w.a * 0.5 + 0.0001)
         let materialAo = max(0.0, min(1.0, w.a - materialModel * 2.0))
-        let modelNorm = min(materialModel * 0.5, 1.0)
+        let modelNorm = min(materialModel * 0.3333333333, 1.0)
         let albedoView = vec4(a.rgb, 1.0)
         let normalView = vec4(n.xyz, 1.0)
         let worldView = vec4(w.xyz * 0.05 + vec3(0.5, 0.5, 0.5), 1.0)
@@ -101,7 +101,7 @@ material GBufferDebug {
 )";
 
 constexpr const char* kGBufferDebugCacheKey =
-    "gbufferdebug_v6_three_material_models";
+    "gbufferdebug_v7_four_material_models";
 
 } // namespace
 

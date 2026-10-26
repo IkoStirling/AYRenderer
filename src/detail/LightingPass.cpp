@@ -88,7 +88,7 @@ const char* const kLightingBuildStampCStr = kLightingBuildStamp;
 //   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
 //   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v35_material_toon_bands";
+    "lighting_v36_material_soft_diffuse";
 
 // �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -806,6 +806,7 @@ material Lighting {
         let brdfDiffuse0 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF0) * (1.0 - materialMetallic) * oneOverPi
         let brdfSpecular0 = brdfF0 * (brdfD0 * brdfG0 / max(4.0 * NdotV * brdfNdotL0, 0.001))
         let direct0 = (brdfDiffuse0 + brdfSpecular0) * keyContrib
+        let softDiffuse0 = brdfDiffuse0 * keyContrib * (1.0 - brdfNdotL0)
 
         let brdfRawL1 = Ld1 * isDir1 + Lp1 * (isPoint1 + isSpot1)
         let brdfL1 = brdfRawL1 * (1.0 / max(length(brdfRawL1), 0.0001))
@@ -818,6 +819,7 @@ material Lighting {
         let brdfDiffuse1 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF1) * (1.0 - materialMetallic) * oneOverPi
         let brdfSpecular1 = brdfF1 * (brdfD1 * brdfG1 / max(4.0 * NdotV * brdfNdotL1, 0.001))
         let direct1 = (brdfDiffuse1 + brdfSpecular1) * f1
+        let softDiffuse1 = brdfDiffuse1 * f1 * (1.0 - brdfNdotL1)
 
         let brdfRawL2 = Ld2 * isDir2 + Lp2 * (isPoint2 + isSpot2)
         let brdfL2 = brdfRawL2 * (1.0 / max(length(brdfRawL2), 0.0001))
@@ -830,6 +832,7 @@ material Lighting {
         let brdfDiffuse2 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF2) * (1.0 - materialMetallic) * oneOverPi
         let brdfSpecular2 = brdfF2 * (brdfD2 * brdfG2 / max(4.0 * NdotV * brdfNdotL2, 0.001))
         let direct2 = (brdfDiffuse2 + brdfSpecular2) * f2
+        let softDiffuse2 = brdfDiffuse2 * f2 * (1.0 - brdfNdotL2)
 
         let brdfRawL3 = Ld3 * isDir3 + Lp3 * (isPoint3 + isSpot3)
         let brdfL3 = brdfRawL3 * (1.0 / max(length(brdfRawL3), 0.0001))
@@ -842,6 +845,7 @@ material Lighting {
         let brdfDiffuse3 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF3) * (1.0 - materialMetallic) * oneOverPi
         let brdfSpecular3 = brdfF3 * (brdfD3 * brdfG3 / max(4.0 * NdotV * brdfNdotL3, 0.001))
         let direct3 = (brdfDiffuse3 + brdfSpecular3) * f3
+        let softDiffuse3 = brdfDiffuse3 * f3 * (1.0 - brdfNdotL3)
 
         let brdfRawL4 = Ld4 * isDir4 + Lp4 * (isPoint4 + isSpot4)
         let brdfL4 = brdfRawL4 * (1.0 / max(length(brdfRawL4), 0.0001))
@@ -854,6 +858,7 @@ material Lighting {
         let brdfDiffuse4 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF4) * (1.0 - materialMetallic) * oneOverPi
         let brdfSpecular4 = brdfF4 * (brdfD4 * brdfG4 / max(4.0 * NdotV * brdfNdotL4, 0.001))
         let direct4 = (brdfDiffuse4 + brdfSpecular4) * f4
+        let softDiffuse4 = brdfDiffuse4 * f4 * (1.0 - brdfNdotL4)
 
         let brdfRawL5 = Ld5 * isDir5 + Lp5 * (isPoint5 + isSpot5)
         let brdfL5 = brdfRawL5 * (1.0 / max(length(brdfRawL5), 0.0001))
@@ -866,6 +871,7 @@ material Lighting {
         let brdfDiffuse5 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF5) * (1.0 - materialMetallic) * oneOverPi
         let brdfSpecular5 = brdfF5 * (brdfD5 * brdfG5 / max(4.0 * NdotV * brdfNdotL5, 0.001))
         let direct5 = (brdfDiffuse5 + brdfSpecular5) * f5
+        let softDiffuse5 = brdfDiffuse5 * f5 * (1.0 - brdfNdotL5)
 
         let brdfRawL6 = Ld6 * isDir6 + Lp6 * (isPoint6 + isSpot6)
         let brdfL6 = brdfRawL6 * (1.0 / max(length(brdfRawL6), 0.0001))
@@ -878,6 +884,7 @@ material Lighting {
         let brdfDiffuse6 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF6) * (1.0 - materialMetallic) * oneOverPi
         let brdfSpecular6 = brdfF6 * (brdfD6 * brdfG6 / max(4.0 * NdotV * brdfNdotL6, 0.001))
         let direct6 = (brdfDiffuse6 + brdfSpecular6) * f6
+        let softDiffuse6 = brdfDiffuse6 * f6 * (1.0 - brdfNdotL6)
 
         let brdfRawL7 = Ld7 * isDir7 + Lp7 * (isPoint7 + isSpot7)
         let brdfL7 = brdfRawL7 * (1.0 / max(length(brdfRawL7), 0.0001))
@@ -890,8 +897,13 @@ material Lighting {
         let brdfDiffuse7 = albedo.rgb * (vec3(1.0, 1.0, 1.0) - brdfF7) * (1.0 - materialMetallic) * oneOverPi
         let brdfSpecular7 = brdfF7 * (brdfD7 * brdfG7 / max(4.0 * NdotV * brdfNdotL7, 0.001))
         let direct7 = (brdfDiffuse7 + brdfSpecular7) * f7
+        let softDiffuse7 = brdfDiffuse7 * f7 * (1.0 - brdfNdotL7)
 
         let directLit = direct0 + direct1 + direct2 + direct3 + direct4 + direct5 + direct6 + direct7
+        // A bounded wrapped-looking diffuse lobe for close opaque surfaces.
+        // Specular, per-light attenuation and shadowing retain the PBR path.
+        let softDiffuseExtra = softDiffuse0 + softDiffuse1 + softDiffuse2 + softDiffuse3
+                             + softDiffuse4 + softDiffuse5 + softDiffuse6 + softDiffuse7
         // Quantize each light's cosine response before combining lights. The
         // ratio retains that light's color, shadowing, attenuation and BRDF;
         // a back-facing surface stays dark instead of gaining a false band.
@@ -921,10 +933,12 @@ material Lighting {
                        * materialAo * ssaoAmbient
         let pbrLit = ambientLit + directLit + surface.rgb
         let toonLit = ambientLit + toonDirect + surface.rgb
+        let softLit = pbrLit + softDiffuseExtra
         let unlit = albedo.rgb + surface.rgb
         let isUnlit = step(0.5, materialModel) * (1.0 - step(1.5, materialModel))
         let isToon = step(1.5, materialModel) * (1.0 - step(2.5, materialModel))
-        let lit = mix(mix(pbrLit, unlit, isUnlit), toonLit, isToon)
+        let isSoft = step(2.5, materialModel) * (1.0 - step(3.5, materialModel))
+        let lit = mix(mix(mix(pbrLit, unlit, isUnlit), toonLit, isToon), softLit, isSoft)
         // Uncovered pixels are scene background, independent of lighting.
         // skyMix.y selects a produced sky; otherwise retain clear RGBA.
         let skyColor = mix(sceneBackground.xyz,

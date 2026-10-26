@@ -2484,6 +2484,18 @@ Cirrus与解析高空片暂未采用新密度组合。旧高云排序/前景深�
 附加主形采样增加GPU成本；采样步数/时域重建/多层体积预算本轮不扩张，没有新的性能等级保证。
 
 
+## 2026-10-27 — 可选柔和漫反射材质
+
+MaterialModel 是追加持久整数：0 StandardLit、1 Unlit、2 ToonLit、3 SoftDiffuseLit。
+RT2.a 继续按 `model*2 + AO` 打包，覆盖率仍单独在 RT3.a；不增加 MRT。
+主 Deferred 每灯保留原 Cook-Torrance 直接光，再给 SoftDiffuseLit 加
+`diffuseBRDF * lightContribution * (1 - NdotL)`。`lightContribution` 已含
+原 NdotL、距离/聚光衰减、灯色与阴影；因此背光不凭空透射，高光仍取原式，
+直接漫反射在斜角更柔和。固定系数不由美术逐材质调节；无法代替多层皮肤散射、
+厚度或透光贴图。额外八路乘加与原灯槽一致，不增加纹理采样和存储附件。
+缺省材质仍选 StandardLit；Forward/透明/自定义着色器未改变。
+运行时 shader 缓存版本提升到 v36，以免复用旧光照程序。
+
 ## 2026-10-24 — 乌云光照与远景衔接
 
 CloudSettings.light默认沿用场景首个方向光；overrideScene=true可提供遮挡之前的线性radiance与光线传播direction，
