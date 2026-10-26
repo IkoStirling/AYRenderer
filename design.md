@@ -11,7 +11,14 @@ the CPU destination until the bgfx ready frame passes. Polling transfers the
 CPU bytes once; discard keeps the destination alive until completion.
 Shutdown destroys GPU staging before adapter shutdown and releases host
 destinations only after the render thread has drained. CPU rows retain the
-backend's declared texture origin; the host handles video encoding/transport.
+backend's declared texture origin. `convertTransparentCameraFrame` validates
+the exact bounded RGBA8 extent, flips bottom-left rows to top-left and
+unpremultiplies each color with integer rounding; zero alpha forces zero RGB.
+It publishes an owned candidate only on success and copies the host's
+presentation timestamp. `writeTransparentVideoFramePng` writes normalized
+RGBA8 through a same-directory temporary file and refuses an existing target.
+PNG sequences are directly usable by compositors; live encoding/transport
+remains host-owned.
 
 ## Explicit transparent 2D output (2026-10-27)
 

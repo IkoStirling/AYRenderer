@@ -1,8 +1,13 @@
 #include "detail/RenderViewNamespaces.h"
+#include "detail/TextureImageLoader.h"
 #include <AYRenderer.h>
+#include <AYRenderer/TransparentFrameExport.h>
 #include <AYRenderer/RendererSubSystem.h>
 #include <AYTest.h>
 #include <array>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 
 using namespace ayt::render;
@@ -196,6 +201,47 @@ TEST_CASE(main_presentation_owner_replaces_world_and_restores_host_state) {
     sub.clearMainPresentationForOwner(&owner);CHECK(sub.hasMainPresentation());
     sub.renderCompositeFrame(true,nullptr,[](bool,CompositeUiPhase){});
     sub.shutdown();CHECK_FALSE(sub.hasMainPresentation());
+}
+TEST_CASE(transparent_readback_normalizes_orientation_and_alpha) {
+    CameraReadbackFrame source;
+    source.width=2; source.height=2; source.originBottomLeft=true;
+    // Backend row zero is the bottom row.
+    source.pixels={64,32,0,128, 9,8,7,0,
+                   255,128,0,255, 0,0,0,0};
+    TransparentVideoFrame frame;
+    CHECK(convertTransparentCameraFrame(source,123456789,frame));
+    CHECK(frame.width==2 && frame.height==2);
+    CHECK(frame.presentationTimeNs==123456789);
+    CHECK(frame.pixels[0]==255 && frame.pixels[1]==128);
+    CHECK(frame.pixels[8]==128 && frame.pixels[9]==64);
+    CHECK(frame.pixels[12]==0 && frame.pixels[13]==0 &&
+          frame.pixels[14]==0 && frame.pixels[15]==0);
+    const auto original=frame.pixels;
+    source.pixels.pop_back();
+    CHECK_FALSE(convertTransparentCameraFrame(source,2,frame));
+    CHECK(frame.pixels==original && frame.presentationTimeNs==123456789);
+}
+
+TEST_CASE(transparent_frame_writes_png_without_overwriting_existing_output) {
+    TransparentVideoFrame frame{2,1,100,{255,0,0,255,0,0,0,0}};
+    const auto unique=std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto path=std::filesystem::temp_directory_path()/
+        ("aliyat-alpha-frame-"+std::to_string(unique)+".png");
+    CHECK(writeTransparentVideoFramePng(frame,path.string()));
+    std::ifstream input(path,std::ios::binary);
+    std::array<unsigned char,8> signature{};
+    input.read(reinterpret_cast<char*>(signature.data()),signature.size());
+    CHECK(input.good());
+    const std::array<unsigned char,8> expected{137,80,78,71,13,10,26,10};
+    CHECK(signature==expected);
+    const auto decoded=detail::decodeImageFile(path.string());
+    CHECK(decoded.width==2 && decoded.height==1);
+    CHECK(decoded.rgba8==frame.pixels);
+    CHECK_FALSE(writeTransparentVideoFramePng(frame,path.string()));
+    input.close();
+    std::error_code error;
+    std::filesystem::remove(path,error);
+    CHECK(!error);
 }
 TEST_SUITE_END
 }

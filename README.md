@@ -9,6 +9,12 @@ premultiplied RGBA8 CPU frame and reports its row origin. Three requests and
 `discardCameraOutputReadback` if a frame is no longer needed. The Renderer
 reserves GPU view 112 for copies, leaving 131 generic UI offscreen views.
 The host supplies any video encoding or streaming transport.
+`convertTransparentCameraFrame` converts a completed premultiplied readback to
+an owned top-left, straight-alpha RGBA8 frame with a host presentation time;
+it preserves the destination on invalid input. `writeTransparentVideoFramePng`
+can export each normalized frame to a distinct PNG path using a temporary
+file and leaves existing output intact. Video encoding and live compositor
+transport remain host integrations.
 
 ## Transparent 2D camera output
 
