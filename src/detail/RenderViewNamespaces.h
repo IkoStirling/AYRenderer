@@ -5,6 +5,7 @@
 namespace ayt::render::detail {
 inline constexpr uint16_t kCameraFirstView = 64;
 inline constexpr uint16_t kCameraLastView = 111;
+inline constexpr uint16_t kCameraReadbackView = 112;
 // Offscreen UI may consume only views absent from the fixed scene/editor order
 // and the runtime camera range. Grouped previews must not straddle a reservation.
 inline constexpr uint16_t nextUiViewRange(uint16_t next, uint16_t count) noexcept {
@@ -12,6 +13,9 @@ inline constexpr uint16_t nextUiViewRange(uint16_t next, uint16_t count) noexcep
     while (uint32_t(next) + count - 1 <= 242) {
         const uint32_t last = uint32_t(next) + count - 1;
         if (next <= kCameraLastView && last >= kCameraFirstView) { next=kCameraLastView+1; continue; }
+        if (next <= kCameraReadbackView && last >= kCameraReadbackView) {
+            next=kCameraReadbackView+1; continue;
+        }
         bool reserved=false;
         for (auto view : kRenderViewOrder) if (view >= next && view <= last) {
             next=uint16_t(view+1); reserved=true; break;

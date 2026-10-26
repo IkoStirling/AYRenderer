@@ -59,7 +59,8 @@ public:
     //  17 = FXAA offscreen LDR filter (ordered before Present)
     //  18–25 = Shadow atlas slots
     //  26–30 = Bloom pyramid stages; 31 = exposure adaptation
-    //  32–242 = retained UI Layer / generic offscreen paint targets
+    //  32–242 = retained UI Layer / generic offscreen paint targets,
+    //            except 64–111 camera views and 112 camera output readback
     //  243 = GPU particle simulation (before camera-overlay composition)
     //  244 = unjittered selection silhouette; 245 = TAA diagnostics
     //  246 = camera-overlay 2D composition
@@ -73,8 +74,9 @@ public:
     static constexpr uint8_t kLastLayerViewId = 242;
     /// Maximum single-view offscreen paints after fixed scene and camera-view reservations.
     /// The allocator skips reserved ranges; four-view scene previews may leave small gaps.
-    /// Combined fixed reservations include point compute/readback55..59 and volume240..242.
-    static constexpr uint16_t kMaxOffscreenPaintsPerFrame = 132;
+    /// Combined reservations include point55..59, cameras64..111, readback112
+    /// and volume240..242.
+    static constexpr uint16_t kMaxOffscreenPaintsPerFrame = 131;
 
     UIRenderBackend();
     ~UIRenderBackend() override;

@@ -1,11 +1,21 @@
 #pragma once
 #include <AYRenderer/RenderScene.h>
 #include <cstdint>
+#include <vector>
 
 namespace ayt::render {
 /// Renderer-owned color/depth output. Zero is the window backbuffer; nonzero handles
 /// are acquired with createCameraOutput and invalid after release or renderer shutdown.
 struct CameraOutputHandle { uint64_t id = 0; };
+struct CameraReadbackHandle { uint64_t id = 0; };
+struct CameraReadbackFrame {
+    uint16_t width = 0, height = 0;
+    /// Premultiplied RGBA8 rows in backend texture order. Flip rows when
+    /// originBottomLeft is true before passing to a top-left video encoder.
+    bool originBottomLeft = false;
+    std::vector<uint8_t> pixels;
+};
+enum class CameraReadbackStatus { Invalid, Pending, Ready };
 /// Independent runtime view, using the stable Forward 3D + transparent + Overlay2D path.
 /// View IDs are host identities, not GPU view numbers. Borrow scene only during renderViews.
 struct CameraRenderView {

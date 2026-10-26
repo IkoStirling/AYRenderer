@@ -132,7 +132,6 @@ TEST_CASE(transparent_sprite_output_preserves_alpha_on_gpu) {
     desc.width=64; desc.height=64; desc.vsync=false; desc.msaa=0;
     CHECK(renderer.initialize(desc));
     if(!renderer.isInitialized()) { DestroyWindow(window); return; }
-    auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(renderer);
     const uint64_t required=BGFX_CAPS_TEXTURE_READ_BACK | BGFX_CAPS_TEXTURE_BLIT;
     CHECK((bgfx::getCaps()->supported & required)==required);
     const std::array<uint8_t,4> texel{255,0,0,255};
@@ -155,28 +154,46 @@ TEST_CASE(transparent_sprite_output_preserves_alpha_on_gpu) {
     view.transparent2DOutput=true; view.position={0,0,-2};
     view.view=ayt::math::lh::lookAt({0,0,-2},{0,0,0},{0,1,0});
     view.projection=ayt::math::lh::ortho(-1,1,-1,1,.1f,10);
-    for(int frame=0;frame<3;++frame) {
+    CHECK(renderer.requestCameraOutputReadback(output).id==0);
+    for(int frame=0;frame<2;++frame) {
         renderer.beginFrame(); CHECK(renderer.renderViews(std::array{view})); renderer.endFrame();
     }
-    auto readback=bgfx::createTexture2D(32,32,false,1,bgfx::TextureFormat::RGBA8,
-        BGFX_TEXTURE_READ_BACK | BGFX_TEXTURE_BLIT_DST);
-    CHECK(bgfx::isValid(readback));
-    const auto fbo=bgfx::FrameBufferHandle{
-        ayt::render::detail::CameraViewsTestAccess::framebuffer(renderer,output)};
-    bgfx::blit(112,readback,0,0,adapter->getFboAttachment(fbo,0));
+    renderer.beginFrame(); CHECK(renderer.renderViews(std::array{view}));
+    const auto ticket=renderer.requestCameraOutputReadback(output);
+    CHECK(ticket.id!=0);
+    const auto discardedA=renderer.requestCameraOutputReadback(output);
+    const auto discardedB=renderer.requestCameraOutputReadback(output);
+    CHECK(discardedA.id!=0); CHECK(discardedB.id!=0);
+    CHECK(renderer.requestCameraOutputReadback(output).id==0);
+    renderer.discardCameraOutputReadback(discardedA);
+    renderer.discardCameraOutputReadback(discardedB);
+    ayt::render::CameraReadbackFrame frame;
+    frame.width=77;
+    CHECK(renderer.pollCameraOutputReadback(discardedA,frame)==
+          ayt::render::CameraReadbackStatus::Invalid);
+    CHECK(renderer.pollCameraOutputReadback(ticket,frame)==
+          ayt::render::CameraReadbackStatus::Pending);
+    CHECK(frame.width==77);
     renderer.endFrame();
-    std::array<uint8_t,32*32*4> pixels{};
-    const auto ready=bgfx::readTexture(readback,pixels.data());
-    for(int frame=0;frame<120 && adapter->gpuFrameCounter()<ready;++frame)
-        renderer.endFrame();
-    CHECK(adapter->gpuFrameCounter()>=ready);
+    auto state=ayt::render::CameraReadbackStatus::Pending;
+    for(int step=0;step<120 && state==ayt::render::CameraReadbackStatus::Pending;++step) {
+        state=renderer.pollCameraOutputReadback(ticket,frame);
+        if(state==ayt::render::CameraReadbackStatus::Pending) {
+            renderer.beginFrame(); renderer.endFrame();
+        }
+    }
+    CHECK(state==ayt::render::CameraReadbackStatus::Ready);
+    CHECK(frame.width==32); CHECK(frame.height==32);
+    CHECK(frame.pixels.size()==32*32*4);
+    const auto& pixels=frame.pixels;
     const auto center=(16*32+16)*4;
     const auto corner=(1*32+1)*4;
     CHECK(pixels[corner+3]<5);
     CHECK(pixels[center]>110 && pixels[center]<145);
     CHECK(pixels[center+1]<5 && pixels[center+2]<5);
     CHECK(pixels[center+3]>110 && pixels[center+3]<145);
-    bgfx::destroy(readback);
+    CHECK(renderer.pollCameraOutputReadback(ticket,frame)==
+          ayt::render::CameraReadbackStatus::Invalid);
     renderer.destroyCameraOutput(output);
     renderer.destroyMesh(mesh);
     renderer.destroyMaterial(material);

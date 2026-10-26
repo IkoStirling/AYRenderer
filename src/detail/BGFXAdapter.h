@@ -387,6 +387,8 @@ public:
 
     // Sample-only 2D target for shadow resolve (no BGFX_TEXTURE_RT).
     bgfx::TextureHandle createBlitDstTexture2D(uint16_t width, uint16_t height);
+    // RGBA8 staging texture for a blit followed by asynchronous CPU readback.
+    bgfx::TextureHandle createReadbackTexture2D(uint16_t width, uint16_t height);
 
     bool supportsTextureReadBack() const noexcept;
 

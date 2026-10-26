@@ -153,8 +153,32 @@ struct Renderer::Impl {
         bgfx::FrameBufferHandle framebuffer = BGFX_INVALID_HANDLE;
         TextureHandle texture{};
         uint16_t width = 0, height = 0;
+        uint32_t renderedFrame = UINT32_MAX;
     };
     std::unordered_map<uint64_t, CameraOutput> cameraOutputs;
+    struct CameraReadback {
+        uint64_t id = 0;
+        bgfx::TextureHandle staging = BGFX_INVALID_HANDLE;
+        uint16_t width = 0, height = 0;
+        bool originBottomLeft = false, discard = false, failed = false;
+        uint32_t copyFrame = 0, readyFrame = UINT32_MAX;
+        std::vector<uint8_t> pixels;
+    };
+    std::vector<CameraReadback> cameraReadbacks;
+    void advanceCameraReadbacks() {
+        const auto frame = adapter.gpuFrameCounter();
+        for (auto& packet : cameraReadbacks) {
+            if (packet.readyFrame == UINT32_MAX && !packet.failed && frame > packet.copyFrame)
+                if (!adapter.requestTextureReadback(packet.staging, packet.pixels.data(),
+                                                    packet.readyFrame))
+                    packet.failed = true;
+        }
+        std::erase_if(cameraReadbacks,[&](auto& packet) {
+            if (!packet.discard || (!packet.failed && frame <= packet.readyFrame)) return false;
+            if (bgfx::isValid(packet.staging)) adapter.destroy(packet.staging);
+            return true;
+        });
+    }
     detail::PostProcessPass previewPostProcess;
     bool cameraViewBatchSubmitted = false, cameraFrameOpen = false;
     struct RuntimeView {
@@ -792,7 +816,12 @@ void Renderer::shutdown()
     if(_impl->gpuPoints)_impl->gpuPoints->releaseBeforeDeviceShutdown();
     _impl->resources.shutdown();
     _impl->shaderPool.shutdown();
+    for (auto& packet : _impl->cameraReadbacks)
+        if (bgfx::isValid(packet.staging)) _impl->adapter.destroy(packet.staging);
     _impl->adapter.shutdown();
+    // An in-flight bgfx readTexture may still address these host buffers until
+    // adapter shutdown has drained the render thread.
+    _impl->cameraReadbacks.clear();
     if(_impl->gpuPoints){_impl->gpuPoints->afterDeviceShutdown();_impl->gpuPoints.reset();}
     _impl->screenshotCaptures.advance(true);
     _impl->pendingScreenshotBase.clear();
@@ -829,6 +858,7 @@ void Renderer::beginFrame(const ClearDesc& clear)
     _impl->sceneClear.b = finiteChannel(clear.b);
     _impl->sceneClear.a = finiteChannel(clear.a);
     if(_impl->gpuPoints)_impl->gpuPoints->poll();
+    _impl->advanceCameraReadbacks();
     _impl->cameraViewBatchSubmitted = false; _impl->cameraFrameOpen = true;
     _impl->compositeSceneViewId = -1;
     _impl->pipeline.resetFrameStats();
@@ -1804,6 +1834,68 @@ TextureHandle Renderer::cameraOutputTexture(CameraOutputHandle output) const noe
     const auto found = _impl->cameraOutputs.find(output.id);
     return found != _impl->cameraOutputs.end() ? found->second.texture : TextureHandle{};
 }
+CameraReadbackHandle Renderer::requestCameraOutputReadback(CameraOutputHandle output) {
+    if (!isInitialized() || !_impl->cameraFrameOpen || !_impl->cameraViewBatchSubmitted ||
+        !output.id || !_impl->adapter.supportsTextureReadBack()) return {};
+    const auto found = _impl->cameraOutputs.find(output.id);
+    if (found == _impl->cameraOutputs.end() ||
+        found->second.renderedFrame != _impl->adapter.gpuFrameCounter()) return {};
+    const auto width = found->second.width, height = found->second.height;
+    const uint64_t bytes = uint64_t(width) * height * 4;
+    if (bytes > 2048ull * 2048ull * 4 || _impl->cameraReadbacks.size() >= 3) return {};
+    uint64_t retained = 0;
+    for (const auto& packet : _impl->cameraReadbacks) retained += packet.pixels.size();
+    if (retained + bytes > 32ull * 1024ull * 1024ull) return {};
+    Impl::CameraReadback packet;
+    packet.pixels.resize(size_t(bytes));
+    auto staging = _impl->adapter.createReadbackTexture2D(width,height);
+    if (!bgfx::isValid(staging)) return {};
+    auto source = _impl->adapter.getFboAttachment(found->second.framebuffer,0);
+    if (!_impl->adapter.blitTexture(uint8_t(detail::kCameraReadbackView),staging,source,width,height)) {
+        _impl->adapter.destroy(staging); return {};
+    }
+    static std::atomic<uint64_t> nextReadbackId{1};
+    packet.id = nextReadbackId.fetch_add(1,std::memory_order_relaxed);
+    packet.staging = staging;
+    packet.width = width; packet.height = height;
+    packet.originBottomLeft = bgfx::getCaps() && bgfx::getCaps()->originBottomLeft;
+    packet.copyFrame = _impl->adapter.gpuFrameCounter();
+    const auto id = packet.id;
+    _impl->cameraReadbacks.push_back(std::move(packet));
+    return {id};
+}
+CameraReadbackStatus Renderer::pollCameraOutputReadback(CameraReadbackHandle handle,
+                                                       CameraReadbackFrame& output) {
+    if (!_impl || !isInitialized() || !handle.id) return CameraReadbackStatus::Invalid;
+    _impl->advanceCameraReadbacks();
+    auto& packets = _impl->cameraReadbacks;
+    const auto it = std::find_if(packets.begin(),packets.end(),[&](const auto& packet) {
+        return packet.id == handle.id;
+    });
+    if (it == packets.end() || it->discard) return CameraReadbackStatus::Invalid;
+    if (it->failed) {
+        if (bgfx::isValid(it->staging)) _impl->adapter.destroy(it->staging);
+        packets.erase(it);
+        return CameraReadbackStatus::Invalid;
+    }
+    if (it->readyFrame == UINT32_MAX ||
+        _impl->adapter.gpuFrameCounter() <= it->readyFrame)
+        return CameraReadbackStatus::Pending;
+    CameraReadbackFrame frame;
+    frame.width = it->width; frame.height = it->height;
+    frame.originBottomLeft = it->originBottomLeft;
+    frame.pixels = std::move(it->pixels);
+    _impl->adapter.destroy(it->staging);
+    packets.erase(it);
+    output = std::move(frame);
+    return CameraReadbackStatus::Ready;
+}
+void Renderer::discardCameraOutputReadback(CameraReadbackHandle handle) noexcept {
+    if (!_impl || !handle.id) return;
+    for (auto& packet : _impl->cameraReadbacks)
+        if (packet.id == handle.id) { packet.discard = true; break; }
+    if (isInitialized()) _impl->advanceCameraReadbacks();
+}
 MaterialHandle Renderer::createPortalSurfaceMaterial(CameraOutputHandle output) {
     const auto texture = cameraOutputTexture(output);
     if (!texture.isValid()) return {};
@@ -1913,6 +2005,9 @@ bool Renderer::renderViews(std::span<const CameraRenderView> views) {
         state->transparent.execute(ctx);
         detail::Forward2DOpaquePass overlay(uint8_t(firstView + 2));
         overlay.execute(ctx);
+        if (view.output.id)
+            _impl->cameraOutputs.at(view.output.id).renderedFrame =
+                _impl->adapter.gpuFrameCounter();
     }
     // Remove detached viewport resources while the device is still alive.
     for (auto it = _impl->runtimeViews.begin(); it != _impl->runtimeViews.end();) {
@@ -2050,6 +2145,7 @@ void Renderer::endFrame()
                                    _impl->viewportW, _impl->viewportH);
     _impl->adapter.endFrame();
     if(_impl->gpuPoints)_impl->gpuPoints->poll();
+    _impl->advanceCameraReadbacks();
     _impl->debugOverlay.onFrameSubmitted();
     _impl->compositeSceneViewId = -1;
 

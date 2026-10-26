@@ -1,5 +1,18 @@
 # AYRenderer Design
 
+## Camera output readback ownership (2026-10-27)
+
+View 112 executes after the runtime camera range 64..111 and before retained
+UI views, so blits cannot race a producer or a layer paint. The UI range
+allocator skips 112. A request is accepted only for an output submitted in
+the current open camera frame, within three packets, 2048x2048 per output and
+32 MiB total staging bytes. A packet retains both the GPU staging texture and
+the CPU destination until the bgfx ready frame passes. Polling transfers the
+CPU bytes once; discard keeps the destination alive until completion.
+Shutdown destroys GPU staging before adapter shutdown and releases host
+destinations only after the render thread has drained. CPU rows retain the
+backend's declared texture origin; the host handles video encoding/transport.
+
 ## Explicit transparent 2D output (2026-10-27)
 
 `CameraRenderView::transparent2DOutput` is an opt-in branch of the existing

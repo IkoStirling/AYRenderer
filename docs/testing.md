@@ -1,5 +1,14 @@
 # AYRenderer 测试维护
 
+## 透明 2D CPU 帧读回（2026-10-27）
+
+共用 Windows Debug 构建下，`AYRenderer_SceneMaterialTests` 110/110、12459 断言通过；
+`AYRenderer_UITests --suite AYRenderer_UILayerRenderTarget` 2/2、54 断言通过。
+`AYRenderer_GpuTests --suite CameraViewsGpu --case transparent_sprite_output_preserves_alpha_on_gpu`
+分别在 D3D11 与 D3D12 上 27/27 断言通过，覆盖异步就绪、透明背景、半透明
+中心像素、三请求上限、舍弃请求与一次性消费。GPU 输出单帧上限 2048²、
+总 staging 32 MiB；UI 视图容量随保留 112 从 132 调整为 131。
+
 ## 静态形态族与薄云片（2026-10-24）
 
 CloudForm新增五种显式形态并保留旧Blended；增加独立高空解析薄云片、可选samplingPhase积分偏移。

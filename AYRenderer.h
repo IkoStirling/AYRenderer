@@ -107,6 +107,17 @@ public:
     CameraOutputHandle createCameraOutput(uint16_t width, uint16_t height);
     /// Borrow the color texture for material/UI sampling until destroyCameraOutput/shutdown.
     TextureHandle cameraOutputTexture(CameraOutputHandle output) const noexcept;
+    /// Queue an asynchronous copy of a camera output rendered in this frame.
+    /// Call after renderViews and before endFrame. At most three requests and
+    /// 32 MiB of staging data may be in flight; zero means unsupported/full.
+    CameraReadbackHandle requestCameraOutputReadback(CameraOutputHandle output);
+    /// Poll on the Renderer owner thread in subsequent frames. Ready consumes
+    /// the handle and moves a premultiplied RGBA8 frame into output. Pending and
+    /// Invalid leave output intact. The host owns the resulting CPU frame.
+    CameraReadbackStatus pollCameraOutputReadback(CameraReadbackHandle handle,
+                                                  CameraReadbackFrame& output);
+    /// Discard a request while retaining its GPU destination until completion.
+    void discardCameraOutputReadback(CameraReadbackHandle handle) noexcept;
     /// Project a previously rendered child camera output onto a portal quad.
     /// The quad's screen coordinates determine sample coordinates. Use a
     /// distinct material per output; producer views render before consumers.

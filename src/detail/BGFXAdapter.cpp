@@ -1319,6 +1319,16 @@ bgfx::TextureHandle BGFXAdapter::createBlitDstTexture2D(uint16_t width, uint16_t
                                  bgfx::TextureFormat::RGBA8, flags, nullptr);
 }
 
+bgfx::TextureHandle BGFXAdapter::createReadbackTexture2D(uint16_t width, uint16_t height)
+{
+    if (!_initialized || !textureExtentValid(width,height) || !supportsTextureReadBack())
+        return BGFX_INVALID_HANDLE;
+    const uint64_t flags = BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK;
+    if (!textureRequestValid(width,height,bgfx::TextureFormat::RGBA8,flags))
+        return BGFX_INVALID_HANDLE;
+    return bgfx::createTexture2D(width,height,false,1,bgfx::TextureFormat::RGBA8,flags,nullptr);
+}
+
 bool BGFXAdapter::supportsTextureReadBack() const noexcept
 {
     if (!_initialized) {

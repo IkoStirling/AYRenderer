@@ -1,5 +1,15 @@
 # AYRenderer
 
+## Camera output CPU frame delivery
+
+After `renderViews`, a host can call `requestCameraOutputReadback` before
+`endFrame`, then poll the returned handle in later frames. The result owns a
+premultiplied RGBA8 CPU frame and reports its row origin. Three requests and
+32 MiB of staging memory are the in-flight limits; use
+`discardCameraOutputReadback` if a frame is no longer needed. The Renderer
+reserves GPU view 112 for copies, leaving 131 generic UI offscreen views.
+The host supplies any video encoding or streaming transport.
+
 ## Transparent 2D camera output
 
 An explicit `CameraRenderView::transparent2DOutput` renders only SceneOverlay
@@ -7,13 +17,13 @@ Sprite draws into a Renderer-owned offscreen output. The view requires an
 RGBA clear of zero and rejects 3D, WorldLit2D and particle items before any
 submission. Sprite blending accumulates premultiplied RGB and source-over
 Alpha, so the output can be sampled by a later GPU consumer without an opaque
-background. The host owns texture transfer or capture for a live streaming
-endpoint; ordinary camera views retain their established blend behavior.
+background. The host can use the asynchronous camera output readback above
+for video capture; ordinary camera views retain their established blend behavior.
 
 ## main集成（2026-10-23）
 
 灯光演出与现有云/艺术后处理共存。保留主仓View50..54，GPU点阵计算/读回改用55..59，
-体积网格/历史使用240..242；UI离屏单视图预算统一为132。FrameGraph保留既有0..36编号，
+体积网格/历史使用240..242；后续透明帧读回占用112，UI离屏单视图预算现为131。FrameGraph保留既有0..36编号，
 新增体积资源37..40（Count41），消费方需重编。生产包合并后为78个标准变体。
 截图保留按请求唯一文件名的FIFO队列，GPU点阵在设备关闭前释放、读回内存活至设备关闭后；
 资源热刷新继续使用按owner登记/撤销的观察者。合并门禁见docs/testing.md。
