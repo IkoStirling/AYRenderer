@@ -205,6 +205,12 @@ RenderAssetBridgeTests 覆盖第二个根和旧 flat 回退；真实导入材质
 
 ## PBR 材质与可编辑内容（2026-10-20）
 
+不透明 Deferred 材质可选 `MaterialModel::ToonLit`（持久材质参数
+`__ayMaterialModel=2`）。每盏灯的直接光按法线夹角分为四级，再保留原灯色、
+遮挡、衰减、PBR 环境光与自发光；同一 Scene 可混用 StandardLit、Unlit 和 ToonLit。
+Forward 与透明路径仍按已有材质 shader 绘制，不承诺相同分段效果。
+旧材质的模型值 0/1 与缺省 PBR 结果保持不变。
+
 `PbrSurfaceSettings` 统一 Forward/Deferred 的 UV 缩放/偏移、法线强度和粗糙度偏置，
 默认值保留旧材质；使用现有 `.mat` 通用参数，不扩 IMaterial ABI 或 GBuffer 附件。
 Forward 法线改为 inverse-transpose，内置 PBR 的 Mask cutoff 与 Deferred 对齐。

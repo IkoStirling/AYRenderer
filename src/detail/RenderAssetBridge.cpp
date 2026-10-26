@@ -711,7 +711,8 @@ MaterialHandle bindMaterialFromResource(RenderResourceManager& mgr,
         material.getAlphaCutoff(), material.isDoubleSided());
     const MaterialModel materialModel = inferMaterialModel(material, shaderRef);
     (void)mgr.setMaterialModel(handle, materialModel);
-    if (materialModel == MaterialModel::StandardLit) {
+    if (materialModel == MaterialModel::StandardLit
+        || materialModel == MaterialModel::ToonLit) {
         // Missing resource factors must be explicit instance values. bgfx
         // uniform storage outlives a draw, so relying on shader properties
         // lets a later preview's values bleed into sparse/legacy materials.

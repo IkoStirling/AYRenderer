@@ -311,6 +311,14 @@ RenderAssetBridgeTests 检查第二根与旧 flat 引用，Editor 的真实两�
 
 ## 2026-10-20 — PBR 表面语义与隔离预览
 
+`MaterialModel` 追加值 2 为 ToonLit，不重排旧资产的 StandardLit=0/Unlit=1。
+RT2.a 继续按 model*2+AO 编码，RT3.a 仍单独记录覆盖。Lighting 对每灯的
+N·L 四级量化后缩放对应的 PBR 直接光，环境、间接光和发光不量化；这样保留
+现有灯色、阴影与材质参数，同时让模型选择留在每件材质。无新附件或全屏后处理。
+Forward、透明及自定义 shader 尚无 ToonLit 光照等价保证。契约与 IR 验证位于
+Test_GBufferMaterialContract，持久材质导入见 Test_RenderAssetBridge，
+真实 D3D11 像素差异见 Test_PhoskiaGpu；这些夹具不代表全部美术场景的画质。
+
 表面控制是值类型，不增加 IMaterial 虚接口、材质文件版本或 GBuffer 附件。
 `PbrSurfaceBinding` 从现有 uniformSlots 读取/有限化每个 draw 的 UV/法线/粗糙度参数，
 即使材质 shader 不声明这些语义也保留槽值，供统一 GBuffer、Shadow、Motion 重放使用。

@@ -40,6 +40,9 @@ enum class BlendMode : uint8_t {
 enum class MaterialModel : uint8_t {
     StandardLit = 0,
     Unlit       = 1,
+    // Four-band direct lighting with ordinary PBR ambient and emissive terms.
+    // Opaque Deferred surfaces only; Forward uses its existing PBR shader.
+    ToonLit     = 2,
     Count,
 };
 

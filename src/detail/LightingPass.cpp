@@ -88,7 +88,7 @@ const char* const kLightingBuildStampCStr = kLightingBuildStamp;
 //   v24 uniform T name[N]; v25 mat4 let (not mat4x4); v26 mix(vec2,?)
 //   overloads (missing ? float _rectUv ? HLSL .y subscript fail).
 static constexpr const char* kLightingCacheKey =
-    "lighting_v34_scene_background_pbr_parity";
+    "lighting_v35_material_toon_bands";
 
 // �P5.5 B (2026-07-23) ? Bug fix #3: single source of truth for
 // cache-key string equality tests. The extern is declared in
@@ -892,6 +892,18 @@ material Lighting {
         let direct7 = (brdfDiffuse7 + brdfSpecular7) * f7
 
         let directLit = direct0 + direct1 + direct2 + direct3 + direct4 + direct5 + direct6 + direct7
+        // Quantize each light's cosine response before combining lights. The
+        // ratio retains that light's color, shadowing, attenuation and BRDF;
+        // a back-facing surface stays dark instead of gaining a false band.
+        let toon0 = direct0 * (floor(brdfNdotL0 * 3.0 + 0.5) / 3.0) / max(brdfNdotL0, 0.0001)
+        let toon1 = direct1 * (floor(brdfNdotL1 * 3.0 + 0.5) / 3.0) / max(brdfNdotL1, 0.0001)
+        let toon2 = direct2 * (floor(brdfNdotL2 * 3.0 + 0.5) / 3.0) / max(brdfNdotL2, 0.0001)
+        let toon3 = direct3 * (floor(brdfNdotL3 * 3.0 + 0.5) / 3.0) / max(brdfNdotL3, 0.0001)
+        let toon4 = direct4 * (floor(brdfNdotL4 * 3.0 + 0.5) / 3.0) / max(brdfNdotL4, 0.0001)
+        let toon5 = direct5 * (floor(brdfNdotL5 * 3.0 + 0.5) / 3.0) / max(brdfNdotL5, 0.0001)
+        let toon6 = direct6 * (floor(brdfNdotL6 * 3.0 + 0.5) / 3.0) / max(brdfNdotL6, 0.0001)
+        let toon7 = direct7 * (floor(brdfNdotL7 * 3.0 + 0.5) / 3.0) / max(brdfNdotL7, 0.0001)
+        let toonDirect = toon0 + toon1 + toon2 + toon3 + toon4 + toon5 + toon6 + toon7
         let ambientF = fresnelSchlickRoughness(NdotV, F0, materialRoughness)
         let ambientDiffuseWeight = (vec3(1.0, 1.0, 1.0) - ambientF) * (1.0 - materialMetallic)
         let irradiance = sample(irradianceCube, N).rgb
@@ -908,9 +920,11 @@ material Lighting {
         let ambientLit = mix(legacyAmbientLit, iblAmbient, iblV2Active.x)
                        * materialAo * ssaoAmbient
         let pbrLit = ambientLit + directLit + surface.rgb
+        let toonLit = ambientLit + toonDirect + surface.rgb
         let unlit = albedo.rgb + surface.rgb
         let isUnlit = step(0.5, materialModel) * (1.0 - step(1.5, materialModel))
-        let lit = mix(pbrLit, unlit, isUnlit)
+        let isToon = step(1.5, materialModel) * (1.0 - step(2.5, materialModel))
+        let lit = mix(mix(pbrLit, unlit, isUnlit), toonLit, isToon)
         // Uncovered pixels are scene background, independent of lighting.
         // skyMix.y selects a produced sky; otherwise retain clear RGBA.
         let skyColor = mix(sceneBackground.xyz,

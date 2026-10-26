@@ -1085,6 +1085,69 @@ TEST_CASE(forward_deferred_background_and_stylization_share_viewport_and_pbr) {
 #endif
 }
 
+TEST_CASE(deferred_toon_material_changes_direct_light_without_changing_legacy_models) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) SKIP_TEST("Isolated D3D11/12 device required");
+    HWND window=CreateWindowExW(0,L"STATIC",L"Deferred toon material",WS_OVERLAPPED,
+        0,0,96,96,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window);if(!window)return;
+    struct WindowCleanup{HWND h;~WindowCleanup(){DestroyWindow(h);}} cleanup{window};
+    using namespace ayt::render;
+    Renderer renderer;InitDesc init;
+    init.windowHandle=window;init.width=96;init.height=96;init.msaa=0;init.vsync=false;
+    init.backend=std::string(backend)=="d3d12"?Backend::Direct3D12:Backend::Direct3D11;
+    CHECK(renderer.initialize(init));if(!renderer.isInitialized())return;
+    renderer.configurePipeline(RenderPipelineDesc::makeDeferred());
+    renderer.setFxaaEnabled(false);renderer.setSmaaEnabled(false);renderer.setTaaEnabled(false);
+    renderer.setPostProcessGamma(1);renderer.setPostProcessExposure(1);
+    renderer.setPostProcessTonemapMode(Renderer::TonemapMode::None);
+    renderer.setShadowsEnabled(false);
+    renderer.setDirectionalLight({.8660254f,0,.5f},{2,2,2});
+    renderer.setMainCamera(ayt::math::Float4x4::identity(),ayt::math::Float4x4::identity(),{0,0,-2});
+    const float vertices[][12]={
+        {-.8f,-.8f,.5f,0,0,-1,1,0,0,1,0,1},{.8f,-.8f,.5f,0,0,-1,1,0,0,1,1,1},
+        {.8f,.8f,.5f,0,0,-1,1,0,0,1,1,0},{-.8f,.8f,.5f,0,0,-1,1,0,0,1,0,0}};
+    const uint16_t indices[]={0,2,1,0,3,2};
+    VertexLayoutDesc layout;
+    layout.add({VertexAttribute::Position,3,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::Normal,3,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::Tangent,4,VertexComponentType::Float,false});
+    layout.add({VertexAttribute::TexCoord0,2,VertexComponentType::Float,false});
+    auto mesh=renderer.createMesh(vertices,4,layout,indices,6);CHECK(mesh.isValid());
+    auto material=renderer.createMaterialFromPhoskia(kPbrPhoskiaSource);CHECK(material.isValid());
+    renderer.setMaterialColor(material,"baseColor",.5f,.5f,.5f,1);
+    renderer.setMaterialFloat(material,"metallic",0);
+    renderer.setMaterialFloat(material,"roughness",1);
+    renderer.setMaterialFloat(material,"ao",1);
+    RenderScene scene;scene.add(mesh,material);
+    const auto path=std::filesystem::temp_directory_path()/
+        (std::string("ay-toon-material-")+backend+"-"+
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".png");
+    auto center=[&](MaterialModel model){
+        renderer.setMaterialModel(material,model);
+        for(int frame=0;frame<14;++frame){
+            renderer.beginFrame({});renderer.render(scene);
+            CHECK(renderer.getFrameStats().graph.compileSucceeded);
+            if(frame>=9)CHECK(renderer.captureScreenshot(path.string()));
+            renderer.endFrame();
+        }
+        auto image=decodeImageFile(path.string());
+        CHECK(image.width==96 && image.height==96);
+        return image.rgba8.size()==96*96*4 ? int(image.rgba8[(48*96+48)*4]) : -1;
+    };
+    const int pbr=center(MaterialModel::StandardLit);
+    const int toon=center(MaterialModel::ToonLit);
+    const int unlit=center(MaterialModel::Unlit);
+    std::cout<<"[MaterialToon] PBR="<<pbr<<" toon="<<toon<<" unlit="<<unlit<<'\n';
+    CHECK(pbr>=0);CHECK(toon>=0);CHECK(unlit>=0);
+    CHECK(std::abs(toon-pbr)>=3);
+    renderer.destroyMaterial(material);renderer.destroyMesh(mesh);renderer.shutdown();
+#else
+    SKIP_TEST("Windows device fixture required");
+#endif
+}
+
 TEST_CASE(color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle) {
 #ifdef _WIN32
     const char* backend=std::getenv("AY_TAA_GPU_TEST");

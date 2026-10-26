@@ -234,9 +234,10 @@ public:
     // unknown handle.
     void setMaterialBlendMode(MaterialHandle material, BlendMode blendMode);
 
-    // Selects the deferred lighting model written into the GBuffer. Coverage
-    // remains independent, so Unlit geometry still occludes and receives the
-    // same depth/transparent-composite behavior as StandardLit geometry.
+    /// Selects the opaque Deferred lighting model: StandardLit, Unlit, or
+    /// ToonLit. ToonLit quantizes each light's direct N dot L into four bands;
+    /// Forward, transparent and custom shader paths keep their existing look.
+    /// Coverage remains independent from the model in the GBuffer.
     void setMaterialModel(MaterialHandle material, MaterialModel model);
 
     // P2.1 diagnostics and host-side surface overrides. alphaMode uses the

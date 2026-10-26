@@ -666,6 +666,37 @@ TEST_CASE(independent_material_snapshots_do_not_replace_or_mutate_path_cached_sc
     removeFile(shaderPath);removeFile(matPath);
 }
 
+TEST_CASE(persisted_toon_model_loads_with_independent_pbr_defaults)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    if (!fileExists(AY_SHADER_SHADERC_HINT))
+        SKIP_TEST("shaderc is required for the material resource bridge");
+    const auto shaderPath = tempPath("bridge_toon.phoskia");
+    CHECK(writeTextFile(shaderPath, kPbrPhoskiaSource));
+    BGFXAdapter adapter;BGFXInitParams init;init.backend=Backend::Noop;
+    CHECK(adapter.initialize(init));
+    ayt::shader::ShaderResourcePool pool;
+    pool.setShadercExecutable(AY_SHADER_SHADERC_HINT);
+    RenderResourceManager resources(adapter,pool);
+    ayt::resource::Material source;
+    source.initialise("Toon surface",shaderPath);
+    source.setInt("__ayMaterialModel",2);
+    auto handle=bindMaterialFromResource(resources,source,
+        tempPath("bridge_toon.mat"));
+    CHECK(handle.isValid());
+    if(handle.isValid()) {
+        const auto& gpu=resources.materials().at(handle.id);
+        CHECK(gpu.materialModel==MaterialModel::ToonLit);
+        CHECK(materialUniformScalar(gpu,"metallic",-1)==0.0f);
+        CHECK(materialUniformScalar(gpu,"roughness",-1)==0.5f);
+        CHECK(materialUniformScalar(gpu,"ao",-1)==1.0f);
+        resources.destroyMaterial(handle);
+    }
+    adapter.shutdown();
+    removeFile(shaderPath);
+}
+
 TEST_CASE(shared_material_program_survives_destroy_reload_and_final_owner_reclaims_it)
 {
     using namespace ayt::render;
