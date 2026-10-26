@@ -1855,6 +1855,7 @@ bool Renderer::renderViews(std::span<const CameraRenderView> views) {
         const auto& view = views[i];
         if (!view.scene || !view.width || !view.height || !finiteMatrix(view.view) || !finiteMatrix(view.projection)
             || !std::isfinite(view.position.x) || !std::isfinite(view.position.y) || !std::isfinite(view.position.z)) return false;
+        if (view.transparent2DOutput && (!view.output.id || view.clearRgba != 0)) return false;
         for (size_t previous = 0; previous < i; ++previous)
             if (views[previous].id == view.id || (view.output.id && views[previous].output.id == view.output.id)) return false;
         if (view.output.id) {
@@ -1865,6 +1866,9 @@ bool Renderer::renderViews(std::span<const CameraRenderView> views) {
             || uint32_t(view.y) + view.height > _impl->initDesc.height) return false;
         // WorldLit2D requires the deferred material lane; reject it explicitly in this Forward API.
         for (const auto& item : view.scene->items()) {
+            if (view.transparent2DOutput &&
+                (!item.payload || item.particleBatch ||
+                 item.payload->renderDomain != RenderDomain2D::SceneOverlay)) return false;
             if (view.spaceRegionId && item.spaceRegionId != view.spaceRegionId) continue;
             if (!item.payload && !(item.cameraLayerMask & view.layerMask)) continue;
             if (item.payload && item.payload->renderDomain == RenderDomain2D::WorldLit) return false;
@@ -1898,6 +1902,7 @@ bool Renderer::renderViews(std::span<const CameraRenderView> views) {
             _impl->resources.meshes(),_impl->resources.textures(),_impl->resources.materials(),
             view.x,view.y,view.width,view.height,frame,firstView,fbo};
         ctx.drawLists = &lists;
+        ctx.transparent2DOutput = view.transparent2DOutput;
         state->opaque.execute(ctx);
         _impl->adapter.setViewFrameBuffer(firstView,fbo);
         _impl->adapter.setViewRect(firstView,view.output.id?0:view.x,view.output.id?0:view.y,view.width,view.height);

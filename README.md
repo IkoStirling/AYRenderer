@@ -1,5 +1,15 @@
 # AYRenderer
 
+## Transparent 2D camera output
+
+An explicit `CameraRenderView::transparent2DOutput` renders only SceneOverlay
+Sprite draws into a Renderer-owned offscreen output. The view requires an
+RGBA clear of zero and rejects 3D, WorldLit2D and particle items before any
+submission. Sprite blending accumulates premultiplied RGB and source-over
+Alpha, so the output can be sampled by a later GPU consumer without an opaque
+background. The host owns texture transfer or capture for a live streaming
+endpoint; ordinary camera views retain their established blend behavior.
+
 ## main集成（2026-10-23）
 
 灯光演出与现有云/艺术后处理共存。保留主仓View50..54，GPU点阵计算/读回改用55..59，

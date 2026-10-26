@@ -6,6 +6,7 @@
 #include <AYRenderer/FixtureEmitters.h>
 #include <AYRenderer/FixtureHousings.h>
 #include <AYRenderer/PbrShaderSources.h>
+#include <AYRenderer/TilemapShaderSources.h>
 #include <numeric>
 #include <algorithm>
 #include <AYRenderer/UIRenderBackend.h>
@@ -114,6 +115,75 @@ TEST_CASE(independent_camera_layers_outputs_and_resize_are_verified_by_gpu_readb
     renderer.shutdown(); DestroyWindow(window);
 #else
     SKIP_TEST("Windows D3D11 device required");
+#endif
+}
+TEST_CASE(transparent_sprite_output_preserves_alpha_on_gpu) {
+#ifdef _WIN32
+    const char* backend=std::getenv("AY_TAA_GPU_TEST");
+    if(!backend || !backend[0]) SKIP_TEST("Requires isolated D3D11/12 device");
+    const bool d3d12=std::string(backend)=="d3d12";
+    if(!d3d12 && std::string(backend)!="d3d11") SKIP_TEST("Choose d3d11 or d3d12 explicitly");
+    HWND window=CreateWindowExW(0,L"STATIC",L"Transparent 2D acceptance",WS_OVERLAPPED,
+        0,0,64,64,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK(window!=nullptr); if(!window) return;
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc; desc.windowHandle=window;
+    desc.backend=d3d12?ayt::render::Backend::Direct3D12:ayt::render::Backend::Direct3D11;
+    desc.width=64; desc.height=64; desc.vsync=false; desc.msaa=0;
+    CHECK(renderer.initialize(desc));
+    if(!renderer.isInitialized()) { DestroyWindow(window); return; }
+    auto* adapter=ayt::render::detail::CameraViewsTestAccess::adapter(renderer);
+    const uint64_t required=BGFX_CAPS_TEXTURE_READ_BACK | BGFX_CAPS_TEXTURE_BLIT;
+    CHECK((bgfx::getCaps()->supported & required)==required);
+    const std::array<uint8_t,4> texel{255,0,0,255};
+    auto texture=renderer.createTextureFromRgba8(1,1,texel.data());
+    auto material=renderer.createMaterialFromPhoskia(
+        ayt::render::kTilemapPhoskiaSource,"transparent_sprite_gpu");
+    auto mesh=renderer.createUnitQuad();
+    CHECK(texture.isValid()); CHECK(material.isValid()); CHECK(mesh.isValid());
+    renderer.setMaterialTexture(material,"albedoMap",texture);
+    ayt::render::DrawPayload2D payload;
+    payload.tintRGBA.w=0.5f;
+    ayt::render::DrawItem draw; draw.mesh=mesh; draw.material=material;
+    draw.payload=&payload;
+    ayt::render::RenderScene scene; scene.add(draw);
+    auto output=renderer.createCameraOutput(32,32);
+    CHECK(output.id!=0);
+    ayt::render::CameraRenderView view;
+    view.id=15; view.scene=&scene; view.output=output;
+    view.width=32; view.height=32; view.clearRgba=0;
+    view.transparent2DOutput=true; view.position={0,0,-2};
+    view.view=ayt::math::lh::lookAt({0,0,-2},{0,0,0},{0,1,0});
+    view.projection=ayt::math::lh::ortho(-1,1,-1,1,.1f,10);
+    for(int frame=0;frame<3;++frame) {
+        renderer.beginFrame(); CHECK(renderer.renderViews(std::array{view})); renderer.endFrame();
+    }
+    auto readback=bgfx::createTexture2D(32,32,false,1,bgfx::TextureFormat::RGBA8,
+        BGFX_TEXTURE_READ_BACK | BGFX_TEXTURE_BLIT_DST);
+    CHECK(bgfx::isValid(readback));
+    const auto fbo=bgfx::FrameBufferHandle{
+        ayt::render::detail::CameraViewsTestAccess::framebuffer(renderer,output)};
+    bgfx::blit(112,readback,0,0,adapter->getFboAttachment(fbo,0));
+    renderer.endFrame();
+    std::array<uint8_t,32*32*4> pixels{};
+    const auto ready=bgfx::readTexture(readback,pixels.data());
+    for(int frame=0;frame<120 && adapter->gpuFrameCounter()<ready;++frame)
+        renderer.endFrame();
+    CHECK(adapter->gpuFrameCounter()>=ready);
+    const auto center=(16*32+16)*4;
+    const auto corner=(1*32+1)*4;
+    CHECK(pixels[corner+3]<5);
+    CHECK(pixels[center]>110 && pixels[center]<145);
+    CHECK(pixels[center+1]<5 && pixels[center+2]<5);
+    CHECK(pixels[center+3]>110 && pixels[center+3]<145);
+    bgfx::destroy(readback);
+    renderer.destroyCameraOutput(output);
+    renderer.destroyMesh(mesh);
+    renderer.destroyMaterial(material);
+    renderer.destroyTexture(texture);
+    renderer.shutdown(); DestroyWindow(window);
+#else
+    SKIP_TEST("Windows D3D11/12 device required");
 #endif
 }
 TEST_CASE(portal_surface_samples_preceding_region_view_on_device) {

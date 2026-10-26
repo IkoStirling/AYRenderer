@@ -132,6 +132,14 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
                         BGFX_STATE_BLEND_ZERO, BGFX_STATE_BLEND_ONE)
                     : BGFX_STATE_BLEND_FUNC_SEPARATE(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
                         BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA)));
+        } else if (ctx.transparent2DOutput) {
+            adapter.setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                BGFX_STATE_BLEND_FUNC_SEPARATE(
+                    BGFX_STATE_BLEND_SRC_ALPHA,
+                    BGFX_STATE_BLEND_INV_SRC_ALPHA,
+                    BGFX_STATE_BLEND_ONE,
+                    BGFX_STATE_BLEND_INV_SRC_ALPHA) |
+                (wireframe ? BGFX_STATE_PT_LINES : 0));
         } else adapter.setStateAlphaBlend(wireframe, /*doubleSided=*/true);
 
         // Bind albedo textures (flushMaterial loop shape; shadowMap

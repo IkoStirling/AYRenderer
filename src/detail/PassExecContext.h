@@ -379,6 +379,10 @@ struct PassExecContext {
     const DeferredDecalVisibility* decalVisibility = nullptr;
     PerformanceLighting* performanceLights = nullptr; // Renderer-owned packet; only counters mutate during dispatch
 
+    // Explicit offscreen Sprite-only output. Preserve correct source-over alpha
+    // while RGB remains premultiplied in the transparent target.
+    bool transparent2DOutput = false;
+
 };
 
 } // namespace ayt::render::detail

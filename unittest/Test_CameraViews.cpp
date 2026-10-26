@@ -73,6 +73,36 @@ TEST_CASE(view_batches_validate_before_submission_and_outputs_have_explicit_life
     renderer.endFrame();
     renderer.shutdown();
 }
+TEST_CASE(transparent_2d_output_rejects_opaque_clear_and_3d_before_submission) {
+    Renderer renderer; InitDesc desc; desc.backend=Backend::Noop;
+    desc.width=64; desc.height=64;
+    CHECK(renderer.initialize(desc));
+    RenderScene scene;
+    const auto output=renderer.createCameraOutput(32,32);
+    CameraRenderView view;
+    view.scene=&scene; view.width=32; view.height=32;
+    view.transparent2DOutput=true;
+    renderer.beginFrame();
+    CHECK_FALSE(renderer.renderViews(std::array{view}));
+    view.output=output;
+    CHECK_FALSE(renderer.renderViews(std::array{view}));
+    view.clearRgba=0;
+    CHECK(renderer.renderViews(std::array{view}));
+    renderer.endFrame();
+    DrawItem item; item.mesh.id=10; scene.add(item);
+    renderer.beginFrame();
+    CHECK_FALSE(renderer.renderViews(std::array{view}));
+    scene.clear();
+    DrawPayload2D payload;
+    payload.renderDomain=RenderDomain2D::WorldLit;
+    item.payload=&payload; scene.add(item);
+    CHECK_FALSE(renderer.renderViews(std::array{view}));
+    payload.renderDomain=RenderDomain2D::SceneOverlay;
+    CHECK(renderer.renderViews(std::array{view}));
+    renderer.endFrame();
+    renderer.destroyCameraOutput(output);
+    renderer.shutdown();
+}
 TEST_CASE(portal_surface_material_binds_an_existing_camera_output) {
     Renderer renderer; InitDesc desc; desc.backend=Backend::Noop;
     desc.width=64; desc.height=64;

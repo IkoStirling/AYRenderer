@@ -20,6 +20,9 @@ struct CameraRenderView {
     /// Requested color/depth clear also executes when opaque geometry is empty.
     uint32_t clearRgba = 0x14171FFF;
     uint32_t spaceRegionId = 0; // zero preserves unpartitioned legacy rendering
+    /// Offscreen Sprite-only premultiplied-alpha output. Requires clearRgba=0
+    /// and an owned output; rejects 3D, WorldLit2D and particle draws.
+    bool transparent2DOutput = false;
 };
 /// Host viewport recipe. Camera components with matching viewportId are selected independently.
 /// Output dimensions must match width/height; backbuffer rectangles must fit the client.

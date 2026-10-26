@@ -1,5 +1,17 @@
 # AYRenderer Design
 
+## Explicit transparent 2D output (2026-10-27)
+
+`CameraRenderView::transparent2DOutput` is an opt-in branch of the existing
+three-pass independent Forward view. Batch validation requires an offscreen
+CameraOutput, zero RGBA clear and only SceneOverlay DrawPayload2D items; it
+rejects particle batches, 3D and WorldLit2D before any GPU submission. The
+2D pass uses separate source-over blend factors: RGB srcAlpha/invSrcAlpha,
+Alpha one/invSrcAlpha. Over transparent black this stores premultiplied RGB
+and correct accumulated Alpha. The default branch remains unchanged. This
+mode produces a sampleable GPU texture; CPU readback and broadcast/encoder
+integration are not implied by its handle.
+
 ## 2026-10-24 — 静态云形态族与独立高空薄云
 
 CloudForm保留0=Blended旧逻辑，1..5为Cumulus/Stratocumulus/Stratus/Cirrus/Towering。
