@@ -47,6 +47,7 @@ using ayt::render::Backend;
 using ayt::render::DrawItem;
 using ayt::render::DrawPayload2D;
 using ayt::render::kSpriteRetroAaPhoskiaSource;
+using ayt::render::kPuppetMasked2DPhoskiaSource;
 using ayt::render::kTilemapPhoskiaSource;
 using ayt::render::RenderPassSlot;
 using ayt::render::RenderPath;
@@ -449,6 +450,41 @@ TEST_CASE(dynamic_mesh_2d_draws_after_repeated_vertex_updates) {
     renderer.destroyTexture(texture);
     renderer.destroyMesh(mesh);
     renderer.destroyMaterial(material);
+    renderer.shutdown();
+}
+
+TEST_CASE(masked_avatar_overlay_material_accepts_two_textures) {
+    if (!shadercAvailable()) return;
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend=Backend::Noop;
+    desc.width=128; desc.height=128;
+    CHECK(renderer.initialize(desc));
+    auto material=renderer.createMaterialFromPhoskia(
+        kPuppetMasked2DPhoskiaSource,"masked_avatar_overlay");
+    CHECK(material.isValid());
+    if (!material.isValid()) { renderer.shutdown(); return; }
+    const uint8_t white[4]={255,255,255,255};
+    const uint8_t halfMask[4]={255,255,255,128};
+    auto albedo=renderer.createTextureFromRgba8(1,1,white);
+    auto mask=renderer.createTextureFromRgba8(1,1,halfMask);
+    auto quad=renderer.createUnitQuad();
+    CHECK(albedo.isValid() && mask.isValid() && quad.isValid());
+    renderer.setMaterialTexture(material,"albedoMap",albedo);
+    renderer.setMaterialTexture(material,"maskMap",mask);
+    DrawPayload2D payload;
+    RenderScene scene;
+    DrawItem item;
+    item.mesh=quad; item.material=material; item.payload=&payload;
+    scene.add(item);
+    renderer.beginFrame({});
+    renderer.render(scene);
+    renderer.endFrame();
+    CHECK(renderer.getFrameStats().drawCalls==1u);
+    renderer.destroyMesh(quad);
+    renderer.destroyMaterial(material);
+    renderer.destroyTexture(albedo);
+    renderer.destroyTexture(mask);
     renderer.shutdown();
 }
 

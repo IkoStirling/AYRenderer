@@ -47,6 +47,35 @@ material Tilemap2D {
 }
 )";
 
+/// Optional avatar-layer alpha mask. The mask alpha uses the same UV layout
+/// as the active albedo atlas/variant; the author supplies matching artwork.
+/// This material works with both rigid Sprite quads and BakedAtlas mesh UVs.
+inline constexpr const char* kPuppetMasked2DPhoskiaSource = R"(
+material PuppetMasked2D {
+    texture2d albedoMap
+    texture2d maskMap
+    property srcRect = vec4(0.0, 0.0, 1.0, 1.0)
+    property tint    = vec4(1.0, 1.0, 1.0, 1.0)
+    property flip    = vec4(0.0, 0.0, 0.0, 0.0)
+    vertex {
+        in pos : position
+        in uv  : texcoord
+        out uvOut : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
+    }
+    fragment {
+        in uvOut : texcoord
+        let v = 1.0 - uvOut.y
+        let u = mix(uvOut.x, 1.0 - uvOut.x, flip.x)
+        let vv = mix(v, 1.0 - v, flip.y)
+        let uvInRect = vec2(mix(srcRect.x, srcRect.z, u), mix(srcRect.y, srcRect.w, vv))
+        let albedo = sample(albedoMap, uvInRect) * tint
+        let coverage = sample(maskMap, uvInRect).a
+        return vec4(albedo.rgb, albedo.a * coverage)
+    }
+}
+)";
+
 // Sprite-only opt-in filter for pixel artwork presented at a non-integer
 // screen scale. It reconstructs a stable texel footprint from screen-space
 // derivatives before the normal bilinear sample. This keeps moving camera
