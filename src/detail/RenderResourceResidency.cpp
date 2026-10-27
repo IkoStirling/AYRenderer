@@ -73,6 +73,40 @@ struct KeyCandidates {
 };
 }
 
+bool RenderResourceManager::observeMeshLogicalPayload(MeshHandle mesh,
+    uint64_t contextId, ResourceLogicalPayloadObservation& out) const
+{
+    out = {};
+    if (!_adapter.isInitialized() || !mesh.isValid()) return false;
+    const auto found = _meshes.find(mesh.id);
+    if (found == _meshes.end()) return false;
+    const GpuMesh& resident = found->second;
+    out.contextId = contextId;
+    out.resourceId = mesh.id;
+    out.kind = ObservedResourceKind::Mesh;
+    out.logicalBytesKnown = true;
+    out.logicalBytes = resident.vertexBufferBytes + resident.indexBufferBytes
+        + resident.wireframeIndexBufferBytes;
+    return true;
+}
+
+bool RenderResourceManager::observeTextureLogicalPayload(TextureHandle texture,
+    uint64_t contextId, ResourceLogicalPayloadObservation& out) const
+{
+    out = {};
+    if (!_adapter.isInitialized() || !texture.isValid()) return false;
+    const auto found = _textures.find(texture.id);
+    if (found == _textures.end()) return false;
+    const GpuTexture& resident = found->second;
+    out.contextId = contextId;
+    out.resourceId = texture.id;
+    out.kind = ObservedResourceKind::Texture;
+    out.borrowed = resident.borrowed;
+    if (!resident.borrowed)
+        out.logicalBytesKnown = storageBytes(resident, out.logicalBytes);
+    return true;
+}
+
 ResourceResidencySnapshot RenderResourceManager::resourceResidencySnapshot(uint64_t contextId,
     uint32_t maxTextureRows) const
 {

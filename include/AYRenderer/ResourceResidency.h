@@ -14,6 +14,20 @@ enum class ObservedTextureKind : uint8_t { Unknown, Texture2D, Cube };
 enum class ObservedTextureFilter : uint8_t { Unknown, Point, Linear, AnisotropicDeviceMaximum };
 enum class ObservedTextureAddress : uint8_t { Unknown, Repeat, Mirror, Clamp, Border };
 
+enum class ObservedResourceKind : uint8_t { Mesh, Texture };
+
+/// Current successful GPU version for one live Renderer handle. This is an
+/// owner-thread diagnostic value, not an allocation lease or a VRAM bound.
+/// Unknown logical bytes must never be treated as zero for budget admission.
+struct ResourceLogicalPayloadObservation {
+    uint64_t contextId = 0;
+    uint64_t resourceId = 0;
+    ObservedResourceKind kind = ObservedResourceKind::Mesh;
+    bool borrowed = false;
+    bool logicalBytesKnown = false;
+    uint64_t logicalBytes = 0;
+};
+
 /// Owned diagnostic values for one current RRM table entry, not a GPU lease.
 /// Descriptions refer to the last successfully created GPU version. Cache keys
 /// are opaque identities and are not necessarily filesystem paths.

@@ -37,6 +37,7 @@ struct PreviewSceneCamera;
 struct PreviewSceneSettings;
 struct MeshSubmissionInfo;
 struct ResourceResidencySnapshot;
+struct ResourceLogicalPayloadObservation;
 
 namespace detail {
 class BGFXAdapter;
@@ -706,6 +707,13 @@ public:
     /// vertex/index/optional wireframe upload lengths; logical bytes are not total VRAM.
     /// Uninitialized renderers return available=false. Not a gameplay loader.
     ResourceResidencySnapshot resourceResidencySnapshot(uint32_t maxTextureRows = 128) const;
+    /// Owner-thread table observations for one current handle. False clears out
+    /// when the Renderer is unavailable or the handle is not resident. Logical
+    /// bytes never stand in for device allocation size or a Region lease.
+    bool observeMeshLogicalPayload(MeshHandle mesh,
+        ResourceLogicalPayloadObservation& out) const;
+    bool observeTextureLogicalPayload(TextureHandle texture,
+        ResourceLogicalPayloadObservation& out) const;
 
     /// Queue a backbuffer capture for this frame. Call after render(), before endFrame().
     /// The last request before endFrame wins. Returns false for an invalid backend/empty path

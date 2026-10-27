@@ -3572,6 +3572,22 @@ ResourceResidencySnapshot Renderer::resourceResidencySnapshot(uint32_t maxTextur
     return _impl->resources.resourceResidencySnapshot(_impl->resourceContextId,maxTextureRows);
 }
 
+bool Renderer::observeMeshLogicalPayload(MeshHandle mesh,
+    ResourceLogicalPayloadObservation& out) const
+{
+    out = {};
+    return isInitialized() && _impl->resources.observeMeshLogicalPayload(
+        mesh, _impl->resourceContextId, out);
+}
+
+bool Renderer::observeTextureLogicalPayload(TextureHandle texture,
+    ResourceLogicalPayloadObservation& out) const
+{
+    out = {};
+    return isInitialized() && _impl->resources.observeTextureLogicalPayload(
+        texture, _impl->resourceContextId, out);
+}
+
 bool Renderer::captureScreenshot(const std::string& filePath)
 {
     if (!_impl || !_impl->adapter.isInitialized() || filePath.empty()) {

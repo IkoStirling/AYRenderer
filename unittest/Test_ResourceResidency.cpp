@@ -24,6 +24,49 @@ const TextureResidencyRow* find(const ResourceResidencySnapshot& snapshot,uint64
 }
 
 TEST_SUITE(ResourceResidencyTests)
+TEST_CASE(single_handle_logical_payload_is_context_bound_and_clears_missing_results)
+{
+    Renderer renderer;
+    ResourceLogicalPayloadObservation observation;
+    CHECK_FALSE(renderer.observeMeshLogicalPayload(MeshHandle{1},observation));
+    CHECK(observation.contextId==0);
+    InitDesc init;init.backend=Backend::Noop;CHECK(renderer.initialize(init));
+    const float vertices[]={0,0,0, 1,0,0, 0,1,0};
+    const uint16_t indices[]={0,1,2};
+    auto mesh=renderer.createMesh(vertices,3,VertexLayoutDesc::position3(),indices,3);
+    const uint8_t pixels[16]={};
+    auto texture=renderer.createTextureFromRgba8(2,2,pixels,"single-payload");
+    CHECK(mesh.isValid());CHECK(texture.isValid());
+    if(!mesh.isValid()||!texture.isValid())return;
+    const auto oldContext=renderer.resourceContextId();
+    CHECK(renderer.observeMeshLogicalPayload(mesh,observation));
+    CHECK(observation.contextId==oldContext);
+    CHECK(observation.resourceId==mesh.id);
+    CHECK(observation.kind==ObservedResourceKind::Mesh);
+    CHECK(observation.logicalBytesKnown);
+    CHECK(observation.logicalBytes==54);
+    CHECK(renderer.observeTextureLogicalPayload(texture,observation));
+    CHECK(observation.contextId==oldContext);
+    CHECK(observation.kind==ObservedResourceKind::Texture);
+    CHECK_FALSE(observation.borrowed);
+    CHECK(observation.logicalBytesKnown);
+    CHECK(observation.logicalBytes==16);
+    auto staleMesh=mesh;auto staleTexture=texture;
+    renderer.destroyMesh(mesh);renderer.destroyTexture(texture);
+    CHECK_FALSE(renderer.observeMeshLogicalPayload(staleMesh,observation));
+    CHECK(observation.contextId==0);
+    CHECK_FALSE(renderer.observeTextureLogicalPayload(staleTexture,observation));
+    CHECK(observation.logicalBytes==0);
+    renderer.shutdown();CHECK(renderer.initialize(init));
+    CHECK(renderer.resourceContextId()!=oldContext);
+    CHECK_FALSE(renderer.observeMeshLogicalPayload(staleMesh,observation));
+    auto freshMesh=renderer.createMesh(vertices,3,VertexLayoutDesc::position3(),indices,3);
+    CHECK(freshMesh.isValid());
+    CHECK(renderer.observeMeshLogicalPayload(freshMesh,observation));
+    CHECK(observation.contextId==renderer.resourceContextId());
+    CHECK(observation.contextId!=oldContext);
+    renderer.destroyMesh(freshMesh);
+}
 TEST_CASE(mesh_payload_totals_follow_creation_and_destruction)
 {
     ResidencyFixture f;CHECK(f.ready);if(!f.ready)return;
@@ -77,6 +120,11 @@ TEST_CASE(dynamic_and_borrowed_entries_do_not_invent_uploads_or_duplicate_owned_
     if(!owned.isValid()||!dynamic.isValid())return;
     auto borrowed=f.resources.registerBorrowedTexture(f.resources.textures().at(owned.id).handle,4,4);
     CHECK(borrowed.isValid());
+    ResourceLogicalPayloadObservation borrowedPayload;
+    CHECK(f.resources.observeTextureLogicalPayload(borrowed,71,borrowedPayload));
+    CHECK(borrowedPayload.borrowed);
+    CHECK_FALSE(borrowedPayload.logicalBytesKnown);
+    CHECK(borrowedPayload.logicalBytes==0);
     const auto snapshot=f.resources.resourceResidencySnapshot(71,128);
     CHECK(snapshot.textureEntries==3);CHECK(snapshot.ownedTextures==2);CHECK(snapshot.borrowedTextures==1);
     CHECK(snapshot.knownOwnedLogicalTextureBytes==64+24);CHECK(snapshot.knownOwnedCreationUploadBytes==64);

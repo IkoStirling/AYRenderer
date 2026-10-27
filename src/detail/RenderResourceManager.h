@@ -186,6 +186,10 @@ public:
     size_t materialCacheSize() const { return _materialCacheByKey.size(); }
     ResourceResidencySnapshot resourceResidencySnapshot(uint64_t contextId,
         uint32_t maxTextureRows) const;
+    bool observeMeshLogicalPayload(MeshHandle mesh, uint64_t contextId,
+        ResourceLogicalPayloadObservation& out) const;
+    bool observeTextureLogicalPayload(TextureHandle texture, uint64_t contextId,
+        ResourceLogicalPayloadObservation& out) const;
 
 private:
     BGFXAdapter&                 _adapter;

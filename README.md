@@ -148,6 +148,9 @@ UIRenderBackend的wrapped文本在塑形前按LF/CRLF/CR和Unicode行/段分隔�
 配合`AYRenderer/ResourceResidency.h`取得拥有自身字符串和值的报告，不加载或保留GPU资源。
 Mesh/Material/Texture表总计覆盖当前RRM；纹理行最多512、按id排序，每行最多4个1024字节缓存key。
 Mesh总计另含当前成功版本的顶点、索引及可选线框缓冲上传长度；这是逻辑字节，不是驱动分配。
+高级宿主也可用 `observeMeshLogicalPayload` 或 `observeTextureLogicalPayload` 按当前
+句柄读取一项逻辑载荷与资源上下文 ID；缺失句柄会清空输出并返回 false。
+借用纹理的逻辑字节保持未知。单项值仍不能充当实际显存租约或硬预算上界。
 `maxRows=0`只求总计；行遗漏、key截断与未知描述分别显示。
 
 逻辑存储、当前创建负载、来源像素/块负载、保留CPU图像分开计量；GPU拒绝重载保持旧版本描述。
