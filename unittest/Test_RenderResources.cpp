@@ -5,6 +5,7 @@
 #include "AYResource/AssetPath.h"
 #include "detail/RenderResourceManager.h"
 #include <filesystem>
+#include <cstdint>
 
 #include "AYIO/File.h"
 
@@ -85,6 +86,36 @@ bool writeBinaryFile(const std::string& path, const std::vector<ayt::math::UInt8
 } // namespace
 
 TEST_SUITE(RenderResourceTests)
+
+TEST_CASE(mesh_upload_rejects_wrapping_byte_counts_before_read)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    BGFXAdapter adapter;
+    BGFXInitParams init;
+    init.backend = Backend::Noop;
+    CHECK(adapter.initialize(init));
+    ayt::shader::ShaderResourcePool shaders;
+    RenderResourceManager resources(adapter, shaders);
+    const float vertices[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    const uint16_t indices16[] = {0, 1, 2};
+    const uint32_t indices32[] = {0, 1, 2};
+    const auto layout = VertexLayoutDesc::position3();
+    CHECK_FALSE(resources.createMesh(vertices, UINT32_MAX, layout,
+                                     indices16, 3).isValid());
+    CHECK_FALSE(resources.createMesh(vertices, 3, layout,
+                                     indices16, UINT32_MAX).isValid());
+    CHECK_FALSE(resources.createMesh32(vertices, 3, layout,
+                                       indices32, 536870912u).isValid());
+    CHECK_FALSE(resources.createMeshFromResourceData(vertices, 3, UINT32_MAX,
+                                                     layout, indices32, 3).isValid());
+    CHECK_FALSE(resources.createMeshFromResourceData(vertices, 3, 12,
+                                                     layout, indices32,
+                                                     UINT32_MAX).isValid());
+    CHECK(resources.meshes().empty());
+    resources.shutdown();
+    adapter.shutdown();
+}
 
 TEST_CASE(optional_wireframe_upload_preserves_solid_geometry_and_bounds)
 {

@@ -663,6 +663,14 @@ GPU handles 由 Renderer 管理；未引入 dynamic VB、并发提交或借用 C
 AYAvatar 对每次 CPU 变形上传默认 false，可按 upload 参数显式开启检查。
 RenderResourceTests 在 Noop backend 验证默认线框存在、禁用时无 buffer、相同几何数/bounds 及完整销毁。
 
+## 2026-10-27 — 网格上传字节边界
+
+`uploadMeshInternal` 在求局部 bounds 或提取线框前，用 64 位中间值计算顶点、
+索引和可选线框索引的最坏上传字节数。任何一项超过 adapter 的 32 位长度上限
+都返回无效句柄，不读取由调用者提供的超大数量数据，也不创建部分 GPU 缓冲。
+它是单次上传长度校验，不提供全局 GPU 驻留计量或驱动实际显存使用量。
+`RenderResourceTests` 用短输入指针及故意超限的计数验证拒绝发生在读取前。
+
 ## 2026-10-03 — 编辑器渲染线程迁移：阶段 1 CPU 数据所有权
 
 已实现：`RenderScene` 新增显式 `OwnedCpu` 模式，`RendererSubSystem` 的提取场景默认使用它。

@@ -179,6 +179,8 @@ Renderer通过Resource通用报告回调确认已驻留Mesh/Material及linear/sR
 `isMaterialResident`仅查当前材质表。缓存须先核对上下文；这些查询不是foreign-id校验、shader就绪证明或GPU lease。
 游戏侧仍使用MeshComponent和已安装的RenderIntegration。准备接纳预算和实际验收见
 [设计](design.md)、[测试维护](docs/testing.md)与[跨模块设计](../../AYDocs/RENDER-MESH-SUBMISSION-METADATA-RFC-20261022.md)。
+直接网格上传在读取输入数据前以 64 位中间值核对顶点、索引及可选线框缓冲
+的字节数，超出 adapter 的 32 位上传范围返回无效句柄，不创建半份 GPU 网格。
 
 ## Cube 与渲染目标创建接纳（2026-10-22）
 

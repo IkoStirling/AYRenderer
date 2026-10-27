@@ -21,6 +21,7 @@
 
 #include <bgfx/bgfx.h>
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -452,10 +453,20 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
     }
 
     const uint32_t uploadStride = bgfxLayout.getStride() > 0 ? bgfxLayout.getStride() : vertexStride;
-    const uint32_t vertexBytes  = uploadStride * vertexCount;
-    const uint32_t indexBytes   = use32BitIndices
-        ? indexCount * sizeof(uint32_t)
-        : indexCount * sizeof(uint16_t);
+    const uint64_t indexStride = use32BitIndices
+        ? sizeof(uint32_t) : sizeof(uint16_t);
+    const uint64_t sourceBytesWide = uint64_t(vertexStride) * vertexCount;
+    const uint64_t vertexBytesWide = uint64_t(uploadStride) * vertexCount;
+    const uint64_t indexBytesWide = uint64_t(indexCount) * indexStride;
+    // The adapter accepts 32-bit byte counts. Reject before scanning source
+    // data or allocating optional wireframe indices; wrapping would upload a
+    // shorter buffer than the mesh metadata describes.
+    if (sourceBytesWide > UINT32_MAX || vertexBytesWide > UINT32_MAX ||
+        indexBytesWide > UINT32_MAX ||
+        (buildWireframe && uint64_t(indexCount) * 2u * indexStride > UINT32_MAX))
+        return out;
+    const uint32_t vertexBytes = static_cast<uint32_t>(vertexBytesWide);
+    const uint32_t indexBytes = static_cast<uint32_t>(indexBytesWide);
     const uint16_t indexFlags   = use32BitIndices ? BGFX_BUFFER_INDEX32 : BGFX_BUFFER_NONE;
 
     GpuMesh mesh;
@@ -562,7 +573,9 @@ MeshHandle RenderResourceManager::createMeshFromResourceData(const void* vertice
                                                              const MeshMorphContractDesc& morph,
                                                              std::shared_ptr<const MeshSubmissionInfo> submissionInfo)
 {
-    if (indices == nullptr || indexCount == 0) {
+    if (indices == nullptr || indexCount == 0 ||
+        uint64_t(vertexCount) * vertexStride > UINT32_MAX ||
+        uint64_t(indexCount) * sizeof(uint32_t) > UINT32_MAX) {
         return {};
     }
 

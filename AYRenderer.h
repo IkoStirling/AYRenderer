@@ -140,11 +140,15 @@ public:
     void resize(uint32_t width, uint32_t height);
     void setViewportRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
 
+    /// Owner-thread upload. Rejects vertex/index byte counts outside the
+    /// adapter's 32-bit range before reading source buffers; optional
+    /// wireframe uploads are checked against the same limit.
     MeshHandle createMesh(const void* vertices,
                           uint32_t vertexCount,
                           const VertexLayoutDesc& layout,
                           const uint16_t* indices,
                           uint32_t indexCount);
+    /// Same pre-read byte-bound validation, including optional wireframe data.
     MeshHandle createMesh32(const void* vertices,
                             uint32_t vertexCount,
                             const VertexLayoutDesc& layout,
