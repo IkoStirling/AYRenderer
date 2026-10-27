@@ -121,6 +121,47 @@ material SpriteRetroAA {
 }
 )";
 
+// Sprite-only nearest-texel sampling. The atlas texture may be bilinear;
+// sampling its texel center yields a hard pixel edge without changing shared
+// sampler state. Clamp within the source rectangle to avoid bleeding from an
+// adjacent trimmed frame at UV boundaries. `albedoTexel.xy` is supplied by
+// Forward2DOpaquePass from the resident atlas dimensions.
+inline constexpr const char* kSpriteNearestPhoskiaSource = R"(
+material SpriteNearest {
+    texture2d albedoMap
+    uniform vec4 albedoTexel
+    property srcRect = vec4(0.0, 0.0, 1.0, 1.0)
+    property tint    = vec4(1.0, 1.0, 1.0, 1.0)
+    property flip    = vec4(0.0, 0.0, 0.0, 0.0)
+
+    vertex {
+        in pos : position
+        in uv  : texcoord
+        out uvOut : texcoord = uv
+        return modelViewProjection * vec4(pos, 1.0)
+    }
+    fragment {
+        in uvOut : texcoord
+        let v = 1.0 - uvOut.y
+        let u = mix(uvOut.x, 1.0 - uvOut.x, flip.x)
+        let vv = mix(v, 1.0 - v, flip.y)
+        let uvInRect = vec2(mix(srcRect.x, srcRect.z, u), mix(srcRect.y, srcRect.w, vv))
+        let minUv = vec2(srcRect.x + albedoTexel.x * 0.5,
+                         srcRect.y + albedoTexel.y * 0.5)
+        let maxUv = vec2(srcRect.z - albedoTexel.x * 0.5,
+                         srcRect.w - albedoTexel.y * 0.5)
+        let clampedUv = vec2(clamp(uvInRect.x, minUv.x, maxUv.x),
+                             clamp(uvInRect.y, minUv.y, maxUv.y))
+        let texel = vec2(floor(clampedUv.x / albedoTexel.x),
+                         floor(clampedUv.y / albedoTexel.y))
+        let nearestUv = vec2((texel.x + 0.5) * albedoTexel.x,
+                             (texel.y + 0.5) * albedoTexel.y)
+        let albedo = sample(albedoMap, nearestUv) * tint
+        return vec4(albedo.rgb, albedo.a)
+    }
+}
+)";
+
 // Chunk-mesh variants sample baked atlas UVs directly. `atlasTexel.xy` is the
 // inverse atlas size uploaded per draw. The 4/9-tap variants are opt-in quality
 // filters for scaled/rotated presentation; Linear is the normal default.

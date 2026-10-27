@@ -47,6 +47,7 @@ using ayt::render::Backend;
 using ayt::render::DrawItem;
 using ayt::render::DrawPayload2D;
 using ayt::render::kSpriteRetroAaPhoskiaSource;
+using ayt::render::kSpriteNearestPhoskiaSource;
 using ayt::render::kPuppetMasked2DPhoskiaSource;
 using ayt::render::kTilemapPhoskiaSource;
 using ayt::render::RenderPassSlot;
@@ -512,6 +513,29 @@ TEST_CASE(sprite_retro_aa_shader_has_stable_texel_contract_and_compiles) {
     if (material.isValid()) {
         renderer.destroyMaterial(material);
     }
+    renderer.shutdown();
+}
+
+TEST_CASE(sprite_nearest_shader_clamps_to_source_rect_and_compiles) {
+    const std::string source(kSpriteNearestPhoskiaSource);
+    CHECK(source.find("uniform vec4 albedoTexel") != std::string::npos);
+    CHECK(source.find("floor(clampedUv.x / albedoTexel.x)") != std::string::npos);
+    CHECK(source.find("srcRect.z - albedoTexel.x * 0.5") != std::string::npos);
+
+    if (!shadercAvailable()) {
+        std::cerr << "[Renderer test] SKIP: shaderc not available.\n";
+        return;
+    }
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend = ayt::render::Backend::Noop;
+    desc.width = 800;
+    desc.height = 600;
+    CHECK(renderer.initialize(desc));
+    auto material = renderer.createMaterialFromPhoskia(
+        kSpriteNearestPhoskiaSource, "sprite_nearest_compile");
+    CHECK(material.isValid());
+    if (material.isValid()) renderer.destroyMaterial(material);
     renderer.shutdown();
 }
 

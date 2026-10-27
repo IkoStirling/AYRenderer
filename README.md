@@ -1,5 +1,13 @@
 # AYRenderer
 
+## SceneOverlay Sprite pixel sampling
+
+`kSpriteNearestPhoskiaSource` samples the center of the nearest atlas texel
+inside the authored source rectangle. Sprite render clients can select it for
+hard pixel edges while keeping the same texture and atlas gutter as linear or
+Retro AA sampling. The 2D pass supplies texel size from the live GPU image.
+Masked and WorldLit2D Sprites keep their existing materials.
+
 ## Camera output CPU frame delivery
 
 After `renderViews`, a host can call `requestCameraOutputReadback` before

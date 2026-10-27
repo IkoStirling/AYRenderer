@@ -1,5 +1,14 @@
 # AYRenderer Design
 
+## SceneOverlay Sprite nearest sampling (2026-10-28)
+
+The nearest Sprite shader receives the same atlas texel extent as Retro AA.
+It clamps UVs half a texel inside the authored source rectangle, rounds to a
+texel center and samples the shared texture there. This avoids neighbor-frame
+bleed without altering sampler state used by other Sprite or Tilemap draws.
+The SceneOverlay Sprite cache keys separate nearest, linear and Retro AA
+materials; masked and WorldLit2D materials ignore this Sprite-only mode.
+
 ## Camera output readback ownership (2026-10-27)
 
 View 112 executes after the runtime camera range 64..111 and before retained
