@@ -702,7 +702,8 @@ public:
     /// Explicit owner-thread observation outside resource mutation. Copies bounded
     /// diagnostic rows without loading/uploading/evicting or acquiring GPU leases.
     /// maxTextureRows=0 gives full-table totals only; rows clamp to the public
-    /// ResourceResidency limit and sort by id. Logical bytes are not total VRAM.
+    /// ResourceResidency limit and sort by id. Mesh totals cover current
+    /// vertex/index/optional wireframe upload lengths; logical bytes are not total VRAM.
     /// Uninitialized renderers return available=false. Not a gameplay loader.
     ResourceResidencySnapshot resourceResidencySnapshot(uint32_t maxTextureRows = 128) const;
 

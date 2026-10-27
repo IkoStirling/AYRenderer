@@ -81,6 +81,8 @@ ResourceResidencySnapshot RenderResourceManager::resourceResidencySnapshot(uint6
     result.available=true;result.contextId=contextId;
     result.meshEntries=_meshes.size();result.materialEntries=_materials.size();
     result.textureEntries=_textures.size();result.textureCacheKeys=_textureCacheByKey.size();
+    for(const auto& [id,mesh]:_meshes)
+        result.knownOwnedLogicalMeshBytes+=mesh.vertexBufferBytes+mesh.indexBufferBytes+mesh.wireframeIndexBufferBytes;
     const auto limit=std::min(maxTextureRows,kResourceResidencyMaxTextureRows);
     // Keep only the lowest K ids; scratch and returned rows remain bounded even
     // when the live cache contains far more textures. Totals still cover all.

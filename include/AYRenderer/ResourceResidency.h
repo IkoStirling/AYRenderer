@@ -56,6 +56,9 @@ struct ResourceResidencySnapshot {
     bool available = false;
     uint64_t contextId = 0;
     uint64_t meshEntries = 0, materialEntries = 0, textureEntries = 0;
+    // Current owned mesh buffer payloads, including optional wireframe indices.
+    // These are logical upload lengths, not actual device allocations or peaks.
+    uint64_t knownOwnedLogicalMeshBytes = 0;
     uint64_t ownedTextures = 0, borrowedTextures = 0;
     uint64_t knownOwnedLogicalTextureBytes = 0, unknownOwnedStorageTextures = 0;
     // Creation payload of current versions, not cumulative upload bandwidth.

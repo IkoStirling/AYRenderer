@@ -24,6 +24,31 @@ const TextureResidencyRow* find(const ResourceResidencySnapshot& snapshot,uint64
 }
 
 TEST_SUITE(ResourceResidencyTests)
+TEST_CASE(mesh_payload_totals_follow_creation_and_destruction)
+{
+    ResidencyFixture f;CHECK(f.ready);if(!f.ready)return;
+    const float vertices[]={0,0,0, 1,0,0, 0,1,0};
+    const uint16_t indices16[]={0,1,2};
+    const uint32_t indices32[]={0,1,2};
+    const auto layout=VertexLayoutDesc::position3();
+    auto plain=f.resources.createMesh(vertices,3,layout,indices16,3);
+    auto lines=f.resources.createMesh32(vertices,3,layout,indices32,3,true);
+    CHECK(plain.isValid());CHECK(lines.isValid());
+    if(!plain.isValid()||!lines.isValid())return;
+    const auto& plainMesh=f.resources.meshes().at(plain.id);
+    const auto& lineMesh=f.resources.meshes().at(lines.id);
+    const uint64_t expectedPlainLines=bgfx::isValid(plainMesh.wireframeIndexBuffer)
+        ? uint64_t(plainMesh.wireframeIndexCount)*sizeof(uint16_t) : 0;
+    const uint64_t expectedLines=bgfx::isValid(lineMesh.wireframeIndexBuffer)
+        ? uint64_t(lineMesh.wireframeIndexCount)*sizeof(uint32_t) : 0;
+    const auto observed=f.resources.resourceResidencySnapshot(71,0);
+    CHECK(observed.meshEntries==2);
+    CHECK(observed.knownOwnedLogicalMeshBytes==36+6+expectedPlainLines+36+12+expectedLines);
+    f.resources.destroyMesh(plain);
+    CHECK(f.resources.resourceResidencySnapshot(71,0).knownOwnedLogicalMeshBytes==48+expectedLines);
+    f.resources.destroyMesh(lines);
+    CHECK(f.resources.resourceResidencySnapshot(71,0).knownOwnedLogicalMeshBytes==0);
+}
 TEST_CASE(public_observation_is_unavailable_before_initialization_and_owned_after_destroy)
 {
     Renderer renderer;CHECK_FALSE(renderer.resourceResidencySnapshot().available);

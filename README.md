@@ -147,6 +147,7 @@ UIRenderBackend的wrapped文本在塑形前按LF/CRLF/CR和Unicode行/段分隔�
 高级Host持有Renderer时，可在资源提交线程显式调用`resourceResidencySnapshot(maxRows)`，
 配合`AYRenderer/ResourceResidency.h`取得拥有自身字符串和值的报告，不加载或保留GPU资源。
 Mesh/Material/Texture表总计覆盖当前RRM；纹理行最多512、按id排序，每行最多4个1024字节缓存key。
+Mesh总计另含当前成功版本的顶点、索引及可选线框缓冲上传长度；这是逻辑字节，不是驱动分配。
 `maxRows=0`只求总计；行遗漏、key截断与未知描述分别显示。
 
 逻辑存储、当前创建负载、来源像素/块负载、保留CPU图像分开计量；GPU拒绝重载保持旧版本描述。

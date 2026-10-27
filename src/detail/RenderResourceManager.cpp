@@ -473,6 +473,8 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
     mesh.layout = layout;
     mesh.vertexCount     = vertexCount;
     mesh.indexCount      = indexCount;
+    mesh.vertexBufferBytes = vertexBytes;
+    mesh.indexBufferBytes = indexBytes;
     mesh.hasSkinWeights  = hasSkinWeights;
     mesh.submissionInfo = std::move(submissionInfo);
     mesh.hasMorphTargets = morph.hasMorphTargets;
@@ -509,6 +511,8 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
                     wireIndices.data(),
                     static_cast<uint32_t>(wireIndices.size() * sizeof(uint32_t)),
                     BGFX_BUFFER_INDEX32);
+                if (bgfx::isValid(mesh.wireframeIndexBuffer))
+                    mesh.wireframeIndexBufferBytes = wireIndices.size() * sizeof(uint32_t);
             }
         } else {
             const auto wireIndices = hasWirePositions
@@ -523,6 +527,8 @@ MeshHandle RenderResourceManager::uploadMeshInternal(const void* vertices,
                     wireIndices.data(),
                     static_cast<uint32_t>(wireIndices.size() * sizeof(uint16_t)),
                     BGFX_BUFFER_NONE);
+                if (bgfx::isValid(mesh.wireframeIndexBuffer))
+                    mesh.wireframeIndexBufferBytes = wireIndices.size() * sizeof(uint16_t);
             }
         }
 

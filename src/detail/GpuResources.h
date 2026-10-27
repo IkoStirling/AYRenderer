@@ -23,6 +23,10 @@ struct GpuMesh {
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
     uint32_t wireframeIndexCount = 0;
+    // Byte lengths accepted by the adapter for the current GPU version.
+    uint64_t vertexBufferBytes = 0;
+    uint64_t indexBufferBytes = 0;
+    uint64_t wireframeIndexBufferBytes = 0;
     // Phase 0 RD-02: true when this GpuMesh's vertex layout includes BoneIndices /
     // BoneWeights channels and the IMesh supplied non-null skin weights. Phase 1's
     // SkinnedForwardPass (RD-05) uses this flag to bind bone matrices.
