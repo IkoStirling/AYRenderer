@@ -226,6 +226,23 @@ struct PosUvVertex {
     float v;
 };
 
+bool packDynamic2D(const DynamicVertex2D* vertices, uint32_t count,
+                   std::vector<PosUvVertex>& packed) {
+    if (!vertices || count < 3 || count > 4096) return false;
+    packed.clear();
+    packed.reserve(count);
+    for (uint32_t i=0;i<count;++i) {
+        const auto& vertex=vertices[i];
+        if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y) ||
+            !std::isfinite(vertex.u) || !std::isfinite(vertex.v) ||
+            std::abs(vertex.x)>1.0e7f || std::abs(vertex.y)>1.0e7f ||
+            vertex.u<0 || vertex.u>1 || vertex.v<0 || vertex.v>1)
+            return false;
+        packed.push_back({vertex.x,vertex.y,0.0f,vertex.u,vertex.v});
+    }
+    return true;
+}
+
 const PosVertex kUnitCubeVertices[] = {
     {-1.0f, -1.0f, -1.0f}, {1.0f, -1.0f, -1.0f}, {1.0f,  1.0f, -1.0f}, {-1.0f,  1.0f, -1.0f},
     {-1.0f, -1.0f,  1.0f}, {1.0f, -1.0f,  1.0f}, {1.0f,  1.0f,  1.0f}, {-1.0f,  1.0f,  1.0f},
@@ -322,6 +339,7 @@ void RenderResourceManager::destroyAllMeshes()
     for (auto& [id, mesh] : _meshes) {
         (void)id;
         _adapter.destroy(mesh.vertexBuffer);
+        _adapter.destroy(mesh.dynamicVertexBuffer);
         _adapter.destroy(mesh.indexBuffer);
         _adapter.destroy(mesh.wireframeIndexBuffer);
     }
@@ -378,6 +396,7 @@ void RenderResourceManager::destroyMeshGpuOnly(uint64_t id)
         return;
     }
     _adapter.destroy(it->second.vertexBuffer);
+    _adapter.destroy(it->second.dynamicVertexBuffer);
     _adapter.destroy(it->second.indexBuffer);
     _adapter.destroy(it->second.wireframeIndexBuffer);
     _meshes.erase(it);
@@ -695,6 +714,65 @@ MeshHandle RenderResourceManager::createUnitQuad()
                       static_cast<uint32_t>(sizeof(kUnitQuadIndices) / sizeof(uint16_t)));
 }
 
+MeshHandle RenderResourceManager::createDynamicMesh2D(
+    const DynamicVertex2D* vertices, uint32_t vertexCount,
+    const uint16_t* indices, uint32_t indexCount) {
+    if (!_adapter.isInitialized() || !indices || !indexCount ||
+        indexCount>24576 || indexCount%3) return {};
+    std::vector<PosUvVertex> packed;
+    if (!packDynamic2D(vertices,vertexCount,packed)) return {};
+    for (uint32_t i=0;i<indexCount;i+=3)
+        if (indices[i]>=vertexCount || indices[i+1]>=vertexCount ||
+            indices[i+2]>=vertexCount || indices[i]==indices[i+1] ||
+            indices[i]==indices[i+2] || indices[i+1]==indices[i+2])
+            return {};
+    const auto layout=VertexLayoutDesc::position3TexCoord2();
+    bgfx::VertexLayout gpuLayout;
+    if (!buildBgfxVertexLayout(layout,gpuLayout) ||
+        gpuLayout.getStride()!=sizeof(PosUvVertex)) return {};
+    GpuMesh mesh;
+    mesh.layout=layout;
+    mesh.vertexCount=vertexCount;
+    mesh.indexCount=indexCount;
+    mesh.vertexBufferBytes=std::uint64_t(vertexCount)*sizeof(PosUvVertex);
+    mesh.indexBufferBytes=std::uint64_t(indexCount)*sizeof(uint16_t);
+    mesh.localBoundsValid=computeMeshLocalBounds(packed.data(),vertexCount,
+        sizeof(PosUvVertex),layout,mesh.localBoundsMin,mesh.localBoundsMax);
+    mesh.dynamicVertexBuffer=_adapter.createDynamicVertexBuffer(
+        packed.data(),std::uint32_t(mesh.vertexBufferBytes),gpuLayout);
+    mesh.indexBuffer=_adapter.createIndexBuffer(indices,
+        std::uint32_t(mesh.indexBufferBytes));
+    if (!BGFXAdapter::isValid(mesh.dynamicVertexBuffer) ||
+        !BGFXAdapter::isValid(mesh.indexBuffer)) {
+        _adapter.destroy(mesh.dynamicVertexBuffer);
+        _adapter.destroy(mesh.indexBuffer);
+        return {};
+    }
+    const auto id=_nextMeshId++;
+    _meshes.emplace(id,std::move(mesh));
+    return MeshHandle{id};
+}
+
+bool RenderResourceManager::updateDynamicMesh2D(
+    MeshHandle handle, const DynamicVertex2D* vertices, uint32_t vertexCount) {
+    const auto found=_meshes.find(handle.id);
+    if (found==_meshes.end() ||
+        !BGFXAdapter::isValid(found->second.dynamicVertexBuffer) ||
+        vertexCount!=found->second.vertexCount) return false;
+    std::vector<PosUvVertex> packed;
+    if (!packDynamic2D(vertices,vertexCount,packed)) return false;
+    ayt::math::FVector3 boundsMin,boundsMax;
+    const bool boundsValid=computeMeshLocalBounds(packed.data(),vertexCount,
+        sizeof(PosUvVertex),found->second.layout,boundsMin,boundsMax);
+    if (!boundsValid || !_adapter.updateDynamicVertexBuffer(
+            found->second.dynamicVertexBuffer,packed.data(),
+            std::uint32_t(found->second.vertexBufferBytes))) return false;
+    found->second.localBoundsMin=boundsMin;
+    found->second.localBoundsMax=boundsMax;
+    found->second.localBoundsValid=true;
+    return true;
+}
+
 void RenderResourceManager::destroyMesh(MeshHandle& mesh)
 {
     if (!mesh.isValid()) {
@@ -713,6 +791,7 @@ void RenderResourceManager::destroyMesh(MeshHandle& mesh)
     const auto it = _meshes.find(mesh.id);
     if (it != _meshes.end()) {
         _adapter.destroy(it->second.vertexBuffer);
+        _adapter.destroy(it->second.dynamicVertexBuffer);
         _adapter.destroy(it->second.indexBuffer);
         _adapter.destroy(it->second.wireframeIndexBuffer);
         _meshes.erase(it);

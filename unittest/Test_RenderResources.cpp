@@ -6,6 +6,7 @@
 #include "detail/RenderResourceManager.h"
 #include <filesystem>
 #include <cstdint>
+#include <limits>
 
 #include "AYIO/File.h"
 
@@ -212,6 +213,37 @@ TEST_CASE(dynamic_texture_update_rgba8)
 
     renderer.destroyTexture(dyn);
     renderer.destroyTexture(stat);
+    renderer.shutdown();
+}
+
+TEST_CASE(dynamic_2d_mesh_reuses_topology_and_rejects_invalid_updates)
+{
+    using namespace ayt::render;
+    Renderer renderer;
+    InitDesc desc;
+    desc.backend=Backend::Noop;
+    CHECK(renderer.initialize(desc));
+    DynamicVertex2D vertices[]={{-.5f,-.5f,0,0},
+                                {.5f,-.5f,1,0},
+                                {0,.5f,.5f,1}};
+    const uint16_t indices[]={0,1,2};
+    auto mesh=renderer.createDynamicMesh2D(vertices,3,indices,3);
+    CHECK(mesh.isValid());
+    vertices[2].x=.25f;
+    CHECK(renderer.updateDynamicMesh2D(mesh,vertices,3));
+    CHECK_FALSE(renderer.updateDynamicMesh2D(mesh,vertices,2));
+    vertices[2].x=std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(renderer.updateDynamicMesh2D(mesh,vertices,3));
+    vertices[2].x=.25f;
+    CHECK(renderer.updateDynamicMesh2D(mesh,vertices,3));
+    const uint16_t invalid[]={0,1,3};
+    CHECK_FALSE(renderer.createDynamicMesh2D(vertices,3,invalid,3).isValid());
+    auto rigid=renderer.createUnitQuad();
+    CHECK_FALSE(renderer.updateDynamicMesh2D(rigid,vertices,3));
+    renderer.destroyMesh(rigid);
+    renderer.destroyMesh(mesh);
+    CHECK_FALSE(mesh.isValid());
+    CHECK_FALSE(renderer.updateDynamicMesh2D(mesh,vertices,3));
     renderer.shutdown();
 }
 

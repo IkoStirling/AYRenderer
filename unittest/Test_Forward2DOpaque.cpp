@@ -402,6 +402,56 @@ TEST_CASE(cm1_payload_item_drawn_exactly_once) {
     renderer.shutdown();
 }
 
+TEST_CASE(dynamic_mesh_2d_draws_after_repeated_vertex_updates) {
+    if (!shadercAvailable()) return;
+    ayt::render::Renderer renderer;
+    ayt::render::InitDesc desc;
+    desc.backend=Backend::Noop;
+    desc.width=320;
+    desc.height=240;
+    CHECK(renderer.initialize(desc));
+    auto material=renderer.createMaterialFromPhoskia(
+        kTilemapPhoskiaSource,"dynamic_mesh_2d_draw");
+    CHECK(material.isValid());
+    if (!material.isValid()) { renderer.shutdown(); return; }
+    ayt::render::DynamicVertex2D vertices[]={{-.5f,-.5f,0,0},
+        {.5f,-.5f,1,0},{0,.5f,.5f,1}};
+    const uint16_t indices[]={0,1,2};
+    auto mesh=renderer.createDynamicMesh2D(vertices,3,indices,3);
+    CHECK(mesh.isValid());
+    if (!mesh.isValid()) {
+        renderer.destroyMaterial(material);
+        renderer.shutdown();
+        return;
+    }
+    uint8_t pixels[8*8*4];
+    fillCheckerboard(pixels,8,8,4);
+    auto texture=renderer.createTextureFromRgba8(8,8,pixels,"dynamic_mesh_2d_texture");
+    CHECK(texture.isValid());
+    renderer.setMaterialTexture(material,"albedoMap",texture);
+    DrawPayload2D payload;
+    payload.packedSortKey=1;
+    payload.uvMapping=ayt::render::UvMapping2D::BakedAtlas;
+    RenderScene scene;
+    DrawItem item;
+    item.mesh=mesh;
+    item.material=material;
+    item.payload=&payload;
+    scene.add(item);
+    for (int frame=0;frame<2;++frame) {
+        vertices[2].x=frame==0 ? 0.0f : 0.25f;
+        CHECK(renderer.updateDynamicMesh2D(mesh,vertices,3));
+        renderer.beginFrame({});
+        renderer.render(scene);
+        renderer.endFrame();
+        CHECK(renderer.getFrameStats().drawCalls==1u);
+    }
+    renderer.destroyTexture(texture);
+    renderer.destroyMesh(mesh);
+    renderer.destroyMaterial(material);
+    renderer.shutdown();
+}
+
 TEST_CASE(sprite_retro_aa_shader_has_stable_texel_contract_and_compiles) {
     const std::string source(kSpriteRetroAaPhoskiaSource);
     CHECK(source.find("uniform vec4 albedoTexel") != std::string::npos);

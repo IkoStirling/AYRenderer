@@ -100,7 +100,8 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
         }
 
         const GpuMesh& mesh = meshIt->second;
-        if (!BGFXAdapter::isValid(mesh.vertexBuffer)
+        if ((!BGFXAdapter::isValid(mesh.vertexBuffer) &&
+             !BGFXAdapter::isValid(mesh.dynamicVertexBuffer))
             || !BGFXAdapter::isValid(mesh.indexBuffer)) {
             continue;
         }
@@ -118,7 +119,9 @@ uint32_t Forward2DOpaquePass::execute(PassExecContext& ctx)
         adapter.setTransform(item.world);
         if (item.particleBatch) {
             if (!adapter.bindParticleBatch(*item.particleBatch)) continue;
-        } else adapter.setVertexBuffer(mesh.vertexBuffer);
+        } else if (BGFXAdapter::isValid(mesh.dynamicVertexBuffer))
+            adapter.setVertexBuffer(mesh.dynamicVertexBuffer);
+        else adapter.setVertexBuffer(mesh.vertexBuffer);
         const bool wireframe = item.particleBatch ? false : bindDrawIndexBuffer(
             adapter, mesh, drawRange, ctx.wireframe);
         // Blend-only: BGFX_STATE_BLEND_ALPHA, no WRITE_Z.

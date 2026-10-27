@@ -18,6 +18,7 @@ namespace ayt::render::detail
 
 struct GpuMesh {
     bgfx::VertexBufferHandle vertexBuffer = BGFX_INVALID_HANDLE;
+    bgfx::DynamicVertexBufferHandle dynamicVertexBuffer = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle  indexBuffer  = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle  wireframeIndexBuffer = BGFX_INVALID_HANDLE;
     uint32_t vertexCount = 0;

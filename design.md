@@ -20,6 +20,17 @@ RGBA8 through a same-directory temporary file and refuses an existing target.
 PNG sequences are directly usable by compositors; live encoding/transport
 remains host-owned.
 
+## Dynamic overlay 2D mesh (2026-10-27)
+
+`Renderer::createDynamicMesh2D` allocates a dynamic bgfx vertex buffer and an
+immutable triangle index buffer. The upload packs local XY and final UV into
+the existing Position3/TexCoord2 shader layout and rejects a stride mismatch.
+`updateDynamicMesh2D` validates the same vertex count and finite, bounded
+coordinates before replacing all vertices and CPU local bounds. Rejected
+updates leave the previous buffer and bounds intact. Mesh destruction and
+backend reset release the dynamic buffer. Only Forward2DOpaquePass accepts
+this handle; the 3D passes continue to require a static vertex buffer.
+
 ## Explicit transparent 2D output (2026-10-27)
 
 `CameraRenderView::transparent2DOutput` is an opt-in branch of the existing

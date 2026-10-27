@@ -188,6 +188,17 @@ public:
     // (Forward2DOpaquePass) draws every tile / sprite through this mesh
     // + a per-draw DrawPayload2D.
     MeshHandle createUnitQuad();
+    /// Advanced 2D Host: fixed-topology mutable SceneOverlay mesh. Vertices
+    /// are local XY and final UVs; 3..4096 vertices and at most 24576
+    /// triangle indices. UVs require DrawPayload2D::uvMapping=BakedAtlas.
+    /// Only the Forward2D overlay pass consumes it. Destroy the MeshHandle
+    /// when the owning presentation layer is removed.
+    MeshHandle createDynamicMesh2D(const DynamicVertex2D* vertices,
+        uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount);
+    /// Rewrite all vertices on an existing dynamic mesh, keeping topology.
+    /// Invalid handles/counts/coordinates preserve the previous GPU version.
+    bool updateDynamicMesh2D(MeshHandle mesh, const DynamicVertex2D* vertices,
+        uint32_t vertexCount);
 
     MaterialHandle createMaterialFromPhoskia(const std::string& source,
                                              const std::string& cacheKey = "");

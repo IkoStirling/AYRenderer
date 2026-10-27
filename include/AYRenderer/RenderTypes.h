@@ -77,6 +77,12 @@ enum class UvMapping2D : uint8_t {
     Count,
 };
 
+/// Local XY geometry for a mutable SceneOverlay 2D mesh. UVs are final
+/// texture coordinates; the draw payload should use BakedAtlas mapping.
+struct DynamicVertex2D {
+    float x = 0.0f, y = 0.0f, u = 0.0f, v = 0.0f;
+};
+
 // Shared between the overlay tilemap shaders and WorldLit2D GBuffer draws.
 // Keep values stable because TilemapComponent serializes them as integers.
 enum class TilemapSamplingQuality : uint8_t {

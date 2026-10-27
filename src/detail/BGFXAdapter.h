@@ -92,12 +92,18 @@ public:
     bool bindInstances(const void* data, uint32_t count, uint16_t stride);
     void setVertexBuffer(bgfx::VertexBufferHandle vb, uint32_t start = 0,
                          uint32_t count = UINT32_MAX);
+    void setVertexBuffer(bgfx::DynamicVertexBufferHandle vb,
+                         uint32_t start = 0, uint32_t count = UINT32_MAX);
     void setIndexBuffer(bgfx::IndexBufferHandle ib, uint32_t start = 0,
                         uint32_t count = UINT32_MAX);
 
     bgfx::VertexBufferHandle createVertexBuffer(const void* data, uint32_t size,
                                                 const bgfx::VertexLayout& layout,
                                                 uint16_t flags = BGFX_BUFFER_NONE);
+    bgfx::DynamicVertexBufferHandle createDynamicVertexBuffer(
+        const void* data, uint32_t size, const bgfx::VertexLayout& layout);
+    bool updateDynamicVertexBuffer(bgfx::DynamicVertexBufferHandle buffer,
+        const void* data, uint32_t size);
     bgfx::IndexBufferHandle createIndexBuffer(const void* data, uint32_t size,
                                               uint16_t flags = BGFX_BUFFER_NONE);
 
@@ -350,6 +356,7 @@ public:
                 uint8_t  flags = BGFX_DISCARD_NONE);
 
     static bool isValid(bgfx::VertexBufferHandle h);
+    static bool isValid(bgfx::DynamicVertexBufferHandle h);
     static bool isValid(bgfx::IndexBufferHandle  h);
     static bool isValid(bgfx::TextureHandle     h);
     static bool isValid(bgfx::FrameBufferHandle h);
@@ -409,6 +416,7 @@ public:
     bgfx::TextureHandle getLitShadowFallbackTexture();
 
     void destroy(bgfx::VertexBufferHandle h);
+    void destroy(bgfx::DynamicVertexBufferHandle h);
     void destroy(bgfx::IndexBufferHandle h);
     void destroy(bgfx::TextureHandle h);
     void destroy(bgfx::FrameBufferHandle h);

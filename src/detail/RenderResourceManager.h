@@ -62,6 +62,10 @@ public:
     MeshHandle createTexturedUnitCube();
     // CM-1 (2026-08-11) — unit quad (XY plane, z=0), UV (0,0)..(1,1).
     MeshHandle createUnitQuad();
+    MeshHandle createDynamicMesh2D(const DynamicVertex2D* vertices,
+        uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount);
+    bool updateDynamicMesh2D(MeshHandle mesh,
+        const DynamicVertex2D* vertices, uint32_t vertexCount);
     void destroyMesh(MeshHandle& mesh);
     bool hasMorphTargets(MeshHandle mesh) const noexcept;
     uint32_t morphTargetCount(MeshHandle mesh) const noexcept;

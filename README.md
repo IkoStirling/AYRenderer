@@ -148,6 +148,13 @@ UIRenderBackend的wrapped文本在塑形前按LF/CRLF/CR和Unicode行/段分隔�
 配合`AYRenderer/ResourceResidency.h`取得拥有自身字符串和值的报告，不加载或保留GPU资源。
 Mesh/Material/Texture表总计覆盖当前RRM；纹理行最多512、按id排序，每行最多4个1024字节缓存key。
 Mesh总计另含当前成功版本的顶点、索引及可选线框缓冲上传长度；这是逻辑字节，不是驱动分配。
+
+高级 2D 宿主可用 `createDynamicMesh2D` 创建固定三角拓扑的 SceneOverlay 网格，
+再用 `updateDynamicMesh2D` 逐帧替换全部局部 XY 顶点和最终 UV；更新保留 MeshHandle、
+索引和材质。顶点数为 3..4096，索引数不超过 24576；无效数据或顶点数变化会拒绝，
+不更改已提交网格。它只由 Forward2D overlay 绘制，不进入 3D/WorldLit2D 路径。
+参数化角色可把 `evaluateMesh` 的顶点转换成 `DynamicVertex2D` 上传，并在 RenderScene
+提交带 `DrawPayload2D` 的 DrawItem；宿主仍管理层实体、GPU 贴图及网格销毁。
 高级宿主也可用 `observeMeshLogicalPayload` 或 `observeTextureLogicalPayload` 按当前
 句柄读取一项逻辑载荷与资源上下文 ID；缺失句柄会清空输出并返回 false。
 借用纹理的逻辑字节保持未知。单项值仍不能充当实际显存租约或硬预算上界。

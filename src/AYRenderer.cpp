@@ -2265,6 +2265,21 @@ MeshHandle Renderer::createUnitQuad()
     return _impl->resources.createUnitQuad();
 }
 
+MeshHandle Renderer::createDynamicMesh2D(const DynamicVertex2D* vertices,
+    uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount)
+{
+    if (!_impl || !_impl->adapter.isInitialized()) return {};
+    return _impl->resources.createDynamicMesh2D(
+        vertices,vertexCount,indices,indexCount);
+}
+
+bool Renderer::updateDynamicMesh2D(MeshHandle mesh,
+    const DynamicVertex2D* vertices, uint32_t vertexCount)
+{
+    return _impl && _impl->adapter.isInitialized() &&
+        _impl->resources.updateDynamicMesh2D(mesh,vertices,vertexCount);
+}
+
 MaterialHandle Renderer::createMaterialFromPhoskia(const std::string& source,
                                                    const std::string& cacheKey)
 {

@@ -402,6 +402,12 @@ void BGFXAdapter::setVertexBuffer(bgfx::VertexBufferHandle vb, uint32_t start, u
     bgfx::setVertexBuffer(0, vb, start, count);
 }
 
+void BGFXAdapter::setVertexBuffer(bgfx::DynamicVertexBufferHandle vb,
+                                  uint32_t start, uint32_t count)
+{
+    bgfx::setVertexBuffer(0, vb, start, count);
+}
+
 void BGFXAdapter::setIndexBuffer(bgfx::IndexBufferHandle ib, uint32_t start, uint32_t count)
 {
     bgfx::setIndexBuffer(ib, start, count);
@@ -413,6 +419,21 @@ bgfx::VertexBufferHandle BGFXAdapter::createVertexBuffer(const void* data, uint3
 {
     const bgfx::Memory* mem = bgfx::copy(data, size);
     return bgfx::createVertexBuffer(mem, layout, flags);
+}
+
+bgfx::DynamicVertexBufferHandle BGFXAdapter::createDynamicVertexBuffer(
+    const void* data, uint32_t size, const bgfx::VertexLayout& layout)
+{
+    if (!_initialized || !data || !size) return BGFX_INVALID_HANDLE;
+    return bgfx::createDynamicVertexBuffer(bgfx::copy(data,size),layout);
+}
+
+bool BGFXAdapter::updateDynamicVertexBuffer(
+    bgfx::DynamicVertexBufferHandle buffer, const void* data, uint32_t size)
+{
+    if (!_initialized || !bgfx::isValid(buffer) || !data || !size) return false;
+    bgfx::update(buffer,0,bgfx::copy(data,size));
+    return true;
 }
 
 bgfx::IndexBufferHandle BGFXAdapter::createIndexBuffer(const void* data, uint32_t size,
@@ -574,6 +595,11 @@ void BGFXAdapter::destroy(bgfx::VertexBufferHandle h)
     if (_initialized && bgfx::isValid(h)) {
         bgfx::destroy(h);
     }
+}
+
+void BGFXAdapter::destroy(bgfx::DynamicVertexBufferHandle h)
+{
+    if (_initialized && bgfx::isValid(h)) bgfx::destroy(h);
 }
 
 void BGFXAdapter::destroy(bgfx::IndexBufferHandle h)
@@ -1247,6 +1273,7 @@ void BGFXAdapter::submit(uint8_t viewId,
 }
 
 bool BGFXAdapter::isValid(bgfx::VertexBufferHandle h) { return bgfx::isValid(h); }
+bool BGFXAdapter::isValid(bgfx::DynamicVertexBufferHandle h) { return bgfx::isValid(h); }
 bool BGFXAdapter::isValid(bgfx::IndexBufferHandle  h) { return bgfx::isValid(h); }
 bool BGFXAdapter::isValid(bgfx::TextureHandle     h) { return bgfx::isValid(h); }
 bool BGFXAdapter::isValid(bgfx::FrameBufferHandle h) { return bgfx::isValid(h); }
