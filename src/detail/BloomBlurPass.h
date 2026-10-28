@@ -76,7 +76,7 @@ public:
     // fullscreen VB/IB. FG-owned RTs (BloomBlurA / BloomBlurB) are
     // released by FrameGraph::shutdown / FrameGraph::resize (the
     // Renderer's Impl shutdown path calls fg.shutdown()).
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     // §F3 (2026-07-24) — fields removed in F3:

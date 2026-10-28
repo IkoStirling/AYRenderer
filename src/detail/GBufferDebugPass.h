@@ -80,7 +80,7 @@ public:
     }
 
     // Call before adapter shutdown; releases the pass-owned triangle/program.
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     bgfx::VertexBufferHandle   _fullscreenVB = BGFX_INVALID_HANDLE;

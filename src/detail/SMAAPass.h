@@ -42,7 +42,7 @@ public:
     uint32_t execute(PassExecContext& ctx) override;
 
     bool isReady() const noexcept;
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     bool ensureLookupTextures(BGFXAdapter& adapter);

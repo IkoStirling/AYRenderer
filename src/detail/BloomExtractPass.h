@@ -68,7 +68,7 @@ public:
     // Pipeline teardown) 仍先调 destroyResources,确保 program
     // handle 计数归零后再让 ShaderResourcePool dtor 释放底层
     // GPU program。
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     // Transient RT ownership lives entirely in FrameGraph.

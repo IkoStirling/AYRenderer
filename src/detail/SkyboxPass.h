@@ -164,7 +164,7 @@ public:
     // and reset all cached handles. W/H + buildStamp reset
     // unconditionally so a host that calls setOutputSize(800,600)
     // → destroyResources() expects W/H back to 0.
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
     // §Skybox0 (2026-07-23) — lazy Phoskia Skybox VS/FS acquire.
     // Mirrors LightingPass::ensureProgram at LightingPass.cpp:358-397

@@ -191,6 +191,10 @@ Renderer自身shutdown先使旧resource context/alive注册失效，释放runtim
 再清理主Pass；借用GBuffer/Lighting附件的Transparent、Motion、Decal须在附件生产者之前释放。
 管线替换/关闭共用完整Pass清理；resize/MSAA共用主附件清理，包含借用方，并先于scene FBO销毁。
 reset后暂不render也须完成该边界，不能靠下一帧prepare补做回收。FrameGraph/RT池仍由原owner处理。
+完整清理遍历每个挂载实例的`RenderPass::destroyResources()`，包括关闭或重复类型，不依赖名称和类型分支。
+类型在构造时选择固定`RenderPassCleanupPhase`：附件借用者、独立私有资源、主附件持有者；
+完整关闭按该顺序、同阶段逆提交顺序清理。主附件重置只执行借用者和持有者，保持独立历史策略。
+新增Pass声明自身所有权并实现幂等清理，公共生命周期函数不再添加具体类型列表。
 随后处理scene FBO、FrameGraph目标/黑板和RT池，清理自己的刷新注册，再依次关闭RRM、shader pool、Adapter。
 最后推进截图sidecar并清除未提交请求；接受过截图请求不等于每个文件已由callback生成。
 
@@ -202,6 +206,7 @@ Noop保留进程级sticky设备，最后一个真实GPU实例才走设备shutdow
 
 新增可选颜色阶段按[阶段接入指南](presentation-stages.md)声明自身，不修改已有下游效果或主Renderer资格分支。
 其它 Pass 先明确产品开关、资源格式/尺寸/寿命和失败行为，核对静态合约、图/黑板及View清单；
+有私有GPU对象时覆写`destroyResources()`，借用/持有主附件时在基类构造中选择相应清理阶段；
 跑 CPU 合约、生产 shader 构建、Noop 生命周期以及实际两后端的输出/关闭重开/resize。
 修改共享私有布局时完整重建依赖，禁止用旧对象布局解释销毁崩溃。
 

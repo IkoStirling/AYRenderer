@@ -23,6 +23,23 @@ public:
     uint32_t execute(ayt::render::detail::PassExecContext&) override { return 0; }
 };
 
+class CleanupProbe final : public ayt::render::detail::RenderPass {
+public:
+    CleanupProbe(ayt::render::detail::RenderPassCleanupPhase phase,int id,std::vector<int>& trace)
+        : RenderPass(phase),_id(id),_trace(trace) {}
+    std::string_view name() const override {return "GBuffer";}
+    uint32_t execute(ayt::render::detail::PassExecContext&) override {return 0;}
+    void destroyResources(ayt::render::detail::BGFXAdapter&) override {
+        _trace.push_back(_id);++visits;
+        if(ownsResource){ownsResource=false;++releases;}
+    }
+    unsigned visits=0,releases=0;
+    bool ownsResource=true;
+private:
+    int _id;
+    std::vector<int>& _trace;
+};
+
 std::string readRendererSource(const char* relativePath)
 {
     std::ifstream file(std::string(AY_RENDERER_SOURCE_DIR) + "/" + relativePath);
@@ -79,6 +96,79 @@ TEST_CASE(pipeline_cleanup_preserves_instances_settings_and_borrowed_ui_without_
     CHECK(ui->backend()==&backend); CHECK(!backend.isInitialized());
     destroyPipelineGpuResources(pipeline,adapter); // Idempotent, still mounted.
     CHECK(pipeline.passes().size()==instances.size()); CHECK(ui->backend()==&backend);
+}
+
+TEST_CASE(cleanup_visits_unknown_duplicate_and_disabled_instances_in_ownership_order)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    using Phase=RenderPassCleanupPhase;
+    BGFXAdapter adapter;
+    struct Cleanup {BGFXAdapter& adapter;~Cleanup(){adapter.shutdown();}} cleanup{adapter};
+    std::vector<int> trace;
+    trace.reserve(12);
+    RenderPipeline unopened;
+    auto uninitialized=std::make_unique<CleanupProbe>(Phase::Independent,1,trace);
+    auto* untouched=uninitialized.get();unopened.addPass(std::move(uninitialized));
+    destroyPipelineGpuResources(unopened,adapter);CHECK(trace.empty());CHECK(untouched->ownsResource);
+    BGFXInitParams init;init.backend=Backend::Noop;init.width=init.height=16;
+    const bool ready=adapter.initialize(init);CHECK(ready);if(!ready)return;
+    const std::array<Phase,6> phases{Phase::AttachmentOwner,Phase::Independent,
+        Phase::AttachmentBorrower,Phase::AttachmentOwner,Phase::Independent,Phase::AttachmentBorrower};
+    for(int boundary=0;boundary<3;++boundary) {
+        RenderPipeline pipeline;std::array<CleanupProbe*,6> probes{};trace.clear();
+        for(size_t index=0;index<phases.size();++index) {
+            auto probe=std::make_unique<CleanupProbe>(phases[index],int(index+1),trace);
+            probes[index]=probe.get();probe->setEnabled(index%2==0);pipeline.addPass(std::move(probe));
+        }
+        pipeline.addPass(nullptr);
+        CHECK(pipeline.findPass<CleanupProbe>()==probes.front());
+        const auto invoke=[&] {
+            if(boundary==0)destroyAttachmentBorrowerResources(pipeline,adapter);
+            else if(boundary==1)destroyMainAttachmentResources(pipeline,adapter);
+            else destroyPipelineGpuResources(pipeline,adapter);
+        };
+        const std::vector<int> expected=boundary==0?std::vector<int>{6,3}:
+            boundary==1?std::vector<int>{6,3,4,1}:std::vector<int>{6,3,5,2,4,1};
+        invoke();CHECK(trace==expected);
+        for(size_t index=0;index<probes.size();++index) {
+            const bool selected=boundary==2 || phases[index]==Phase::AttachmentBorrower
+                || (boundary==1 && phases[index]==Phase::AttachmentOwner);
+            CHECK(probes[index]->cleanupPhase()==phases[index]);
+            CHECK(probes[index]->releases==(selected?1u:0u));
+            CHECK(probes[index]->ownsResource==!selected);
+            CHECK(probes[index]->isEnabled()==(index%2==0));
+        }
+        trace.clear();invoke();CHECK(trace==expected);
+        for(size_t index=0;index<probes.size();++index) {
+            const bool selected=boundary==2 || phases[index]==Phase::AttachmentBorrower
+                || (boundary==1 && phases[index]==Phase::AttachmentOwner);
+            CHECK(probes[index]->visits==(selected?2u:0u));
+            CHECK(probes[index]->releases==(selected?1u:0u));
+        }
+        CHECK(pipeline.passes().size()==7);
+        destroyPipelineGpuResources(pipeline,adapter);
+        for(const auto* probe:probes){CHECK_FALSE(probe->ownsResource);CHECK(probe->releases==1);}
+    }
+    destroyPipelineGpuResources(unopened,adapter);
+    CHECK_FALSE(untouched->ownsResource);CHECK(untouched->releases==1);
+}
+
+TEST_CASE(built_in_attachment_roles_are_declared_by_the_owning_types)
+{
+    using namespace ayt::render;
+    using namespace ayt::render::detail;
+    for(auto slot:{RenderPassSlot::GBuffer,RenderPassSlot::Lighting,RenderPassSlot::Shadow})
+        CHECK(makeRenderPass(slot)->cleanupPhase()==RenderPassCleanupPhase::AttachmentOwner);
+    for(auto slot:{RenderPassSlot::Transparent,RenderPassSlot::MotionVector,RenderPassSlot::DeferredDecal})
+        CHECK(makeRenderPass(slot)->cleanupPhase()==RenderPassCleanupPhase::AttachmentBorrower);
+    for(auto slot:RenderPipelineDesc::makeDeferred().passes) {
+        const auto phase=makeRenderPass(slot)->cleanupPhase();
+        const bool attachment=slot==RenderPassSlot::GBuffer || slot==RenderPassSlot::Lighting
+            || slot==RenderPassSlot::Shadow || slot==RenderPassSlot::Transparent
+            || slot==RenderPassSlot::MotionVector || slot==RenderPassSlot::DeferredDecal;
+        CHECK((phase!=RenderPassCleanupPhase::Independent)==attachment);
+    }
 }
 
 TEST_CASE(reinitialize_replaces_the_shutdown_hot_reload_token)

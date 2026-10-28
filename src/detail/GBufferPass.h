@@ -33,7 +33,7 @@ public:
         GBufferLayout::kColorAttachmentCount;
     static constexpr uint16_t kGBufferDefaultSize = 1280;
 
-    GBufferPass() = default;
+    GBufferPass() : RenderPass(RenderPassCleanupPhase::AttachmentOwner) {}
     ~GBufferPass() override;
 
     std::string_view name() const override { return "GBuffer"; }
@@ -100,7 +100,7 @@ public:
     void setGbufferSize(uint16_t width, uint16_t height) noexcept;
     // Decal graph preparation needs the base depth before dispatch. No clear/draw.
     void prepareOutput(BGFXAdapter& adapter) { ensure(adapter, _gbufferW, _gbufferH); }
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
     // §P5 B4b (2026-07-22) �?lazy Phoskia GBuffer VS/FS acquire.
     // Mirrors ShadowCaster::ensureProgram shape (public). Stamp-

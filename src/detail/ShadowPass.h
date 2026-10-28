@@ -45,7 +45,7 @@ public:
     // when no SceneLights instance is wired (pre-C byte-equivalent).
     static constexpr uint16_t kDefaultAtlasSize = kShadowAtlasDefaultSize;
 
-    ShadowPass() = default;
+    ShadowPass() : RenderPass(RenderPassCleanupPhase::AttachmentOwner) {}
     ~ShadowPass() override;
 
     std::string_view name() const override { return "Shadow"; }
@@ -178,7 +178,7 @@ public:
     const ShadowAtlasConfig& atlasConfig() const noexcept { return _atlasConfig; }
     const ShadowAtlasLayout& atlasLayout() const noexcept { return _atlasLayout; }
 
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     ShadowMapResources         _mapResources;

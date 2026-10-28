@@ -59,7 +59,7 @@ public:
 
     // Must run while the adapter and shader pool are alive. Renderer invokes
     // it before pipeline replacement and before adapter shutdown.
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     FullscreenPassGeometry _fullscreen;

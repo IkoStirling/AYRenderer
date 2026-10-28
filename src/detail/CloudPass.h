@@ -7,7 +7,7 @@ public:
  static constexpr uint8_t kViewId=54;
  std::string_view name()const override{return "Clouds";}
  uint32_t execute(PassExecContext& ctx)override;
- void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 private:
  FullscreenPassGeometry _geometry;
  shader::ShaderResource _program;

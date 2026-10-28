@@ -62,6 +62,7 @@ const char* selectionOutlinePhoskiaSourceForTests() noexcept;
 // and shadow-atlas arrays share the same CPU packing contract as LightingPass.
 class TransparentPass : public RenderPass {
 public:
+    TransparentPass() : RenderPass(RenderPassCleanupPhase::AttachmentBorrower) {}
     static constexpr uint8_t kSelectionStableMaskViewId = 244;
     static constexpr uint8_t kSelectionMaskViewId = 253;
     static constexpr uint8_t kSelectionCompositeViewId = 254;
@@ -70,7 +71,7 @@ public:
 
     uint32_t execute(PassExecContext& ctx) override;
     void setDebugLines(const std::vector<EditorDebugLine>& lines) { _debugDraw.setDebugLines(lines); }
-    void destroyResources(BGFXAdapter& adapter) noexcept;
+    void destroyResources(BGFXAdapter& adapter) noexcept override;
     void setSelectionProjectionJitter(float xPixels,
                                       float yPixels) noexcept {
         _selectionJitterXPixels = xPixels;

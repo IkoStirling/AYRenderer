@@ -36,7 +36,7 @@ public:
     const PresentationStageInfo& presentationInfo() const noexcept { return *_info; }
     std::string_view name() const override { return _info->name; }
     virtual bool active() const noexcept = 0;
-    virtual void destroyResources(BGFXAdapter& adapter) = 0;
+    void destroyResources(BGFXAdapter& adapter) override = 0;
     virtual void applyPresentationLook(const ColorStylizationSettings&,
         BGFXAdapter&, RenderResourceBlackboard*) {}
     virtual void invalidatePresentationHistory(ResourceInvalidationReason,

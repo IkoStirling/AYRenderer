@@ -395,17 +395,31 @@ inline void rateLimitedEarlyReturn(const char* passName, const char* reason)
 // dispatch. A pass may submit several GPU views; device execution follows the
 // explicit View remap rather than C++ dispatch order alone.
 //
-// The virtual destructor releases CPU state. Built-in GPU state is explicitly
-// cleaned through RenderPipelineLifecycle before pipeline replacement or device
-// shutdown; attachment borrowers precede their producers. Custom pass owners
-// provide corresponding cleanup. ShaderResource tokens and borrowed UI backends
-// do not become owning merely because a pass stores them.
+// The virtual destructor releases CPU state. GPU state is explicitly cleaned
+// through each mounted instance before replacement/device shutdown. Attachment
+// borrowers precede owners; neither names nor concrete type lists select cleanup.
+// ShaderResource tokens and borrowed UI backends retain their existing owners.
 //
 // execute() and cleanup run on the submission owner (currently the main thread).
 // PassExecContext references are borrowed for that synchronous call only.
+enum class RenderPassCleanupPhase : uint8_t {
+    Independent = 0,
+    AttachmentBorrower,
+    AttachmentOwner,
+};
+
 class RenderPass {
 public:
+    explicit RenderPass(RenderPassCleanupPhase phase=RenderPassCleanupPhase::Independent) noexcept
+        : _cleanupPhase(phase<=RenderPassCleanupPhase::AttachmentOwner
+            ?phase:RenderPassCleanupPhase::Independent) {}
     virtual ~RenderPass() = default;
+
+    // Override for pass-owned GPU objects. Must not throw; must be idempotent, preserve knobs
+    // and enable state, and never release a borrowed backend or attachment.
+    // The default is appropriate for stateless/non-owning passes only.
+    virtual void destroyResources(BGFXAdapter&) {}
+    RenderPassCleanupPhase cleanupPhase() const noexcept {return _cleanupPhase;}
 
     // Human-readable name for logs / debug overlay. Empty allowed.
     // Implementations return a static-lifetime string literal (no alloc).
@@ -444,6 +458,11 @@ protected:
     static void resolveAndApplyColorUniforms(GpuMaterial& material);
 
     bool _enabled = true;
+
+private:
+    // Fixed by construction so cleanup cannot change its classification while
+    // the boundary visits the remaining phases.
+    RenderPassCleanupPhase _cleanupPhase;
 };
 
 } // namespace ayt::render::detail

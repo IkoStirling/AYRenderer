@@ -38,6 +38,7 @@ shader inventory 使用同一份声明。已有槽、资源和 View 数值保持
    `resolveTargets()` 取得当前输入与输出目标/原点，成功提交后 `publishOutput()`。
    使用返回的 `x/y` 设置 View，不自行假定输出总从纹理原点开始。
    默认关闭时不取得 program、geometry 或目标。
+   清理由每个挂载实例直接调用，不向全局清理函数追加新类型；实现必须幂等、不抛异常并保留参数。
 3. 在本阶段 `.cpp` 定义 `AY_DEFINE_PRESENTATION_STAGE`。源码和额外依赖必须有稳定寿命，
    不返回临时字符串或容器。
 4. 在阶段声明增加一行，按颜色空间和既定效果顺序选择位置；View 撞区由检查拒绝。

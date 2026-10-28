@@ -8,6 +8,10 @@
 内部接入步骤、历史及失败边界见 [阶段接入指南](docs/presentation-stages.md)。公开设置、作品格式
 和独立相机/预览范围仍遵守各自 SDK 契约。
 
+所有已挂载Pass也通过自身`destroyResources()`参与统一GPU清理，包含未知类型、重复实例和关闭的阶段。
+借用主附件的类型在构造时选择`AttachmentBorrower`，主附件持有者选择`AttachmentOwner`；
+普通私有资源使用默认阶段。新增类型无需向公共清理函数追加类型分支，借用的UI后端仍由宿主管理。
+
 ## SceneOverlay Sprite pixel sampling
 
 `kSpriteNearestPhoskiaSource` samples the center of the nearest atlas texel

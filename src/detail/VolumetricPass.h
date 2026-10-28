@@ -11,7 +11,7 @@ public:
  static constexpr uint8_t kViewId=33;
  std::string_view name() const override{return "Volumetric";}
  uint32_t execute(PassExecContext& ctx) override;
- void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
  void prepareHistory(BGFXAdapter& adapter,const VolumetricSettings& settings,const VolumetricGridLayout& grid);
  void invalidateHistory() noexcept {_historyState.invalidate();}
  bgfx::FrameBufferHandle historyRead() const noexcept {return _history[_readIndex];}

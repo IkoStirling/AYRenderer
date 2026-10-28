@@ -29,7 +29,7 @@ public:
                      float darkenSpeed) noexcept;
     bool prepareFrame(BGFXAdapter& adapter, uint16_t width, uint16_t height);
     void invalidateHistory(ResourceInvalidationReason reason) noexcept;
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
     bool historyValid() const noexcept { return _historyValid; }
     ResourceInvalidationReason invalidationReason() const noexcept {

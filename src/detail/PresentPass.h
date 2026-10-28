@@ -27,7 +27,7 @@ public:
             && _tFinalColor != ayt::shader::InvalidBinding;
     }
 
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     void ensureProgram(shader::ShaderResourcePool& pool);

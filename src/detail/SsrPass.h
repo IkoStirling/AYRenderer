@@ -8,7 +8,7 @@ public:
     static constexpr uint8_t kViewId = 32;
     std::string_view name() const override { return "SSR"; }
     uint32_t execute(PassExecContext& ctx) override;
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 private:
     FullscreenPassGeometry _geometry;
     shader::ShaderResource _program;

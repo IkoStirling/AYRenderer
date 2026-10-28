@@ -78,7 +78,7 @@ public:
     static constexpr uint8_t  kLightingViewId      = 8;
     static constexpr uint16_t kLightingDefaultSize = 1280;
 
-    LightingPass() = default;
+    LightingPass() : RenderPass(RenderPassCleanupPhase::AttachmentOwner) {}
     ~LightingPass() override;
 
     std::string_view name() const override { return "Lighting"; }
@@ -146,7 +146,7 @@ public:
     float iblMaxSpecularLod() const noexcept {
         return _iblResources.maxSpecularLod();
     }
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
     // §P5 B5 (2026-07-22) — lazy Phoskia Lighting VS/FS acquire.
     // Mirrors GBufferPass::ensureProgram shape (GBufferPass.cpp:72-107)

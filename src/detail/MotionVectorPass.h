@@ -69,6 +69,7 @@ private:
 // consumer requests it.
 class MotionVectorPass final : public RenderPass {
 public:
+    MotionVectorPass() : RenderPass(RenderPassCleanupPhase::AttachmentBorrower) {}
     // View 3 is also the Forward transparent view. The two uses are mutually
     // exclusive: MotionVector is Deferred-only and executes after GBuffer 7.
     static constexpr uint8_t kMotionVectorViewId = 3;
@@ -90,7 +91,7 @@ public:
     }
     void resetFrameState() noexcept { _producedThisFrame = false; }
     void invalidateHistory() noexcept;
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
     bool producedThisFrame() const noexcept { return _producedThisFrame; }
     bool requestedThisFrame() const noexcept { return _requestedThisFrame; }

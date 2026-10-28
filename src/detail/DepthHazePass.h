@@ -36,7 +36,7 @@ public:
         return BGFX_INVALID_HANDLE;
     }
 
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     bgfx::VertexBufferHandle _fullscreenVB = BGFX_INVALID_HANDLE;

@@ -39,7 +39,7 @@ public:
 
     // Must run while the adapter is alive, before pipeline.clear() or adapter
     // shutdown. The destructor intentionally does not touch bgfx handles.
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     bgfx::VertexBufferHandle _fullscreenVB = BGFX_INVALID_HANDLE;

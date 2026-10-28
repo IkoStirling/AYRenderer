@@ -15,6 +15,7 @@
 #include "detail/PresentationPass.h"
 #include "detail/PresentationStage.h"
 #include "detail/RenderPipeline.h"
+#include "detail/RenderPipelineLifecycle.h"
 #include "AYShader/ShaderResourcePool.h"
 
 #include <algorithm>
@@ -84,8 +85,10 @@ public:
         _program.submit({presentationInfo().view,0});publishOutput(context);return 1;
     }
     void destroyResources(ayt::render::detail::BGFXAdapter& adapter) override {
-        _program.reset();_geometry.destroy(adapter);
+        ++cleanups;_program.reset();_geometry.destroy(adapter);
     }
+    bool resourcesReleased() const noexcept {return !_program.isValid() && !_geometry.isReady();}
+    unsigned cleanups=0;
     bgfx::FrameBufferHandle sharedInput=BGFX_INVALID_HANDLE;
     bool failSubmit=false;
 protected:
@@ -352,7 +355,7 @@ TEST_CASE(unknown_color_stages_execute_up_to_twenty_with_shared_inputs_failures_
         auto pass=std::make_unique<InvertPresentationProbe>(infos[index]);probes[index]=pass.get();
         pipeline.addPass(std::move(pass));
     }
-    auto present=std::make_unique<PresentPass>();auto* presentPtr=present.get();
+    auto present=std::make_unique<PresentPass>();
     pipeline.addPass(RenderPassSlot::Present,std::move(present));
     // The fixture owns a full permutation: all probe Views must precede the
     // production Present View, irrespective of their unused numeric IDs.
@@ -438,7 +441,10 @@ TEST_CASE(unknown_color_stages_execute_up_to_twenty_with_shared_inputs_failures_
             <<" differentBytes="<<differences<<'\n';
         CHECK(differences==0);
     }
-    destroyPresentationResources(pipeline,adapter);presentPtr->destroyResources(adapter);
+    destroyPipelineGpuResources(pipeline,adapter);
+    for(const auto* probe:probes){CHECK(probe->cleanups==1);CHECK(probe->resourcesReleased());}
+    destroyPipelineGpuResources(pipeline,adapter);
+    for(const auto* probe:probes){CHECK(probe->cleanups==2);CHECK(probe->resourcesReleased());}
     pipeline.clear();graph.shutdown();pool.shutdown();bgfx::destroy(input);bgfx::destroy(texture);adapter.shutdown();
 #else
     SKIP_TEST("Windows D3D device required");

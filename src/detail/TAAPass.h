@@ -87,7 +87,7 @@ public:
             ResourceInvalidationReason::Manual) noexcept;
     void finishFrame(MotionVectorPass* motion,
                      RenderResourceBlackboard* blackboard = nullptr) noexcept;
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     bool ensureHistory(BGFXAdapter& adapter, uint16_t width, uint16_t height);

@@ -84,7 +84,7 @@ public:
     static const char* orientationAxisFragmentShader() noexcept;
 
     // Must run while both adapter and shader pool are alive. Idempotent.
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     uint32_t submitDebugLines(PassExecContext& ctx, const FrameContext& frame, bool sceneDepth = false, uint8_t sceneView = 0);

@@ -12,6 +12,12 @@ AA后的五个可选阶段通过PresentationStages.def与PresentationPass接入�
 公开设置、作品格式、旧数值和实际效果顺序不变；该机制没有自动shader融合、全帧调度或跨视图扩展。
 接入、测试范围和后续融合门槛见[阶段指南](docs/presentation-stages.md)。
 
+完整Pass生命周期进一步按实际实例调度`destroyResources()`，不再用具体类型索引只取首个实例。
+构造时固定清理阶段：附件借用者→独立私有资源→主附件持有者，同阶段逆提交顺序。
+resize/MSAA的主附件边界只处理借用者与持有者，独立历史仍由原有显式失效策略处理。
+该阶段仅决定回收顺序，不重新拥有FrameGraph/RT池目标、共享program缓存或宿主UI后端，
+不增加逐帧调度或并发析构。类型负责幂等、不抛异常的私有回收，默认空实现只适用于无私有GPU资源的Pass。
+
 ## SceneOverlay Sprite nearest sampling (2026-10-28)
 
 The nearest Sprite shader receives the same atlas texel extent as Retro AA.
