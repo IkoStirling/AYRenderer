@@ -1,6 +1,6 @@
 # AYRenderer 当前架构
 
-**Version:** 1.4.0
+**Version:** 1.4.1
 **Date:** 2026-10-29
 **Status:** Active
 **Owner:** AYRenderer
@@ -58,6 +58,7 @@ Pass 工厂、FrameGraph、bgfx 句柄及资源表是内部结构，不作为新
 空描述回退保留Host的执行偏好，包括`integratePresentation=false`，只补齐默认产品的槽与路径。
 多步颜色阶段的内部View从自身声明展开，附加离线程序由自身cpp收集；
 接入选择和按资源形态验证的范围见[阶段指南](presentation-stages.md)§3.1。
+离屏UI的131个View是稳定预算上限，固定清单决定实际空闲量；内部View扩展不再触发旧容量等值断言。
 
 ## 3. 产品默认链
 

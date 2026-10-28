@@ -72,8 +72,9 @@ public:
     static constexpr uint8_t kViewId = 255;
     static constexpr uint8_t kFirstLayerViewId = 32;
     static constexpr uint8_t kLastLayerViewId = 242;
-    /// Maximum single-view offscreen paints after fixed scene and camera-view reservations.
-    /// The allocator skips reserved ranges; four-view scene previews may leave small gaps.
+    /// Stable upper budget in allocated offscreen Views (131 for the baseline catalog).
+    /// Additional fixed main Views and grouped previews may reduce actual paint capacity.
+    /// The allocator skips reservations; beginLayerPaint/Preview can fail before this budget.
     /// Combined reservations include point55..59, cameras64..111, readback112
     /// and volume240..242.
     static constexpr uint16_t kMaxOffscreenPaintsPerFrame = 131;

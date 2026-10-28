@@ -2,7 +2,9 @@
 #include "detail/RenderViewNamespaces.h"
 #include "detail/PreviewSceneValidation.h"
 #include "detail/UiTextParagraphs.h"
-static_assert(ayt::render::detail::uiViewCapacity() == ayt::render::UIRenderBackend::kMaxOffscreenPaintsPerFrame);
+static_assert(ayt::render::UIRenderBackend::kMaxOffscreenPaintsPerFrame > 0
+    && ayt::render::UIRenderBackend::kMaxOffscreenPaintsPerFrame
+        <= ayt::render::UIRenderBackend::kLastLayerViewId-ayt::render::UIRenderBackend::kFirstLayerViewId+1);
 
 #include "AYRenderer.h"
 #include "detail/BgfxFontAtlas.h"
@@ -1097,10 +1099,13 @@ struct UIRenderBackend::FrameState {
     uint16_t activeHeight = 0;
     uint8_t activeViewId = kViewId;
     uint16_t nextOffscreenViewId = kFirstLayerViewId;
+    uint16_t allocatedOffscreenViews = 0;
     bool reserveOffscreenViews(uint16_t count, uint8_t& first) {
+        if(uint32_t(allocatedOffscreenViews)+count>kMaxOffscreenPaintsPerFrame)return false;
         const auto next=detail::nextUiViewRange(nextOffscreenViewId,count);
         if(next==UINT16_MAX) return false;
-        first=static_cast<uint8_t>(next); nextOffscreenViewId=next+count; return true;
+        first=static_cast<uint8_t>(next); nextOffscreenViewId=next+count;
+        allocatedOffscreenViews+=count;return true;
     }
     Renderer* renderer = nullptr;
     uint64_t frameIndex = 0;
@@ -1968,6 +1973,7 @@ void UIRenderBackend::beginFrame()
     frame.activeWidth = _width;
     frame.activeHeight = _height;
     frame.nextOffscreenViewId = kFirstLayerViewId;
+    frame.allocatedOffscreenViews = 0;
     frame.originX = frame.originY = 0.0f;
     for (auto& entry : frame.layers) {
         const auto target = frame.renderTargets.find(entry.second.target.id);

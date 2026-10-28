@@ -1,6 +1,8 @@
 #include "AYRenderer.h"
 #include "AYRenderer/UIRenderBackend.h"
 #include "AYTest.h"
+#include "detail/RenderViewNamespaces.h"
+#include <algorithm>
 
 using ayt::math::FRectangle;
 using ayt::math::FVector2;
@@ -154,14 +156,15 @@ TEST_CASE(UIRenderBackend_LayerHandlesComplexPaintReuseAndDeviceReset)
     // isolate view allocation from the renderer-wide framebuffer budget.
     ui.beginFrame();
     int successfulPaints = 0;
-    for (uint16_t i = 0; i < UIRenderBackend::kMaxOffscreenPaintsPerFrame + 1u; ++i) {
+    const auto available=std::min(UIRenderBackend::kMaxOffscreenPaintsPerFrame,ayt::render::detail::uiViewCapacity());
+    for (uint16_t i = 0; i < available + 1u; ++i) {
         if (ui.beginLayerPaint(layer, paint)) {
             ++successfulPaints;
             ui.endLayerPaint(layer);
         }
     }
     ui.endFrame();
-    CHECK(successfulPaints == UIRenderBackend::kMaxOffscreenPaintsPerFrame);
+    CHECK(successfulPaints == available);
 
     ui.beginFrame();
     CHECK_TRUE(ui.beginLayerPaint(layer, paint));

@@ -5,6 +5,7 @@
 #include <AYRenderer/RendererSubSystem.h>
 #include <AYTest.h>
 #include <array>
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -15,9 +16,20 @@ namespace {
 TEST_SUITE(CameraViews)
 TEST_CASE(ui_and_preview_ranges_never_overlap_fixed_scene_or_runtime_camera_views) {
     using namespace ayt::render::detail;
-    CHECK(uiViewCapacity()==131);
-    CHECK(nextUiViewRange(32,1)==60); CHECK(nextUiViewRange(62,4)==113);
-    CHECK(nextUiViewRange(64,1)==113); CHECK(nextUiViewRange(242,2)==UINT16_MAX);
+    // Independent flat occupancy oracle, so adding main/internal Views does
+    // not require changing UI budget literals or expected free-view numbers.
+    std::array<bool,kRenderViewCapacity> occupied{};
+    for(auto view:kRenderViewOrder)occupied[view]=true;
+    for(size_t view=kCameraFirstView;view<=kCameraLastView;++view)occupied[view]=true;
+    occupied[kCameraReadbackView]=true;
+    const auto expectedRange=[&](uint16_t start,uint16_t count)->uint16_t {
+        for(uint16_t candidate=start;uint32_t(candidate)+count<=243;++candidate)
+            if(std::none_of(occupied.begin()+candidate,occupied.begin()+candidate+count,[](bool value){return value;}))return candidate;
+        return UINT16_MAX;
+    };
+    CHECK(uiViewCapacity()==std::count(occupied.begin()+32,occupied.begin()+243,false));
+    CHECK(nextUiViewRange(32,1)==expectedRange(32,1)); CHECK(nextUiViewRange(62,4)==expectedRange(62,4));
+    CHECK(nextUiViewRange(64,1)==expectedRange(64,1)); CHECK(nextUiViewRange(242,2)==UINT16_MAX);
     for(uint16_t next=32; next<=242;) {
         next=nextUiViewRange(next,1); if(next==UINT16_MAX) break;
         CHECK(next<kCameraFirstView || next>kCameraLastView);
