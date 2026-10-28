@@ -89,13 +89,20 @@ target_link_libraries(AYRenderer PRIVATE
     bgfx::bimg_encode
 )
 
-# UI text uses AYFont (FreeType glyph atlas).
+# Optional, bounded architecture cost probes; excluded from ordinary builds.
 add_executable(AYRenderer_PresentationPlanBench EXCLUDE_FROM_ALL tools/PresentationPlanBench.cpp)
 target_link_libraries(AYRenderer_PresentationPlanBench PRIVATE AYRenderer nlohmann_json::nlohmann_json)
 target_include_directories(AYRenderer_PresentationPlanBench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(WIN32)
     add_executable(AYRenderer_PresentationGpuBench EXCLUDE_FROM_ALL tools/PresentationGpuBench.cpp)
     target_link_libraries(AYRenderer_PresentationGpuBench PRIVATE AYRenderer nlohmann_json::nlohmann_json bgfx::bgfx user32)
+    add_executable(AYRenderer_PresentationScaleBench EXCLUDE_FROM_ALL tools/PresentationScaleBench.cpp)
+    target_link_libraries(AYRenderer_PresentationScaleBench PRIVATE AYRenderer nlohmann_json::nlohmann_json bgfx::bgfx user32)
+    target_include_directories(AYRenderer_PresentationScaleBench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(AYRenderer_PresentationScaleBench PRIVATE
+        AY_SHADER_SHADERC_HINT="${AY_SHADER_SHADERC_PATH}"
+        AY_SHADER_BGFX_COMMON_HINT="${AY_SHADER_BGFX_COMMON_DIR}"
+        AY_SHADER_BGFX_SRC_HINT="${AY_SHADER_BGFX_SRC_DIR}")
 endif()
 
 add_executable(AYRenderer_ShaderBuild tools/RendererShaderBuild.cpp)

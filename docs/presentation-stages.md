@@ -1,6 +1,6 @@
 # 可选颜色阶段的扩展与执行
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Date:** 2026-10-29
 **Status:** Active
 **Owner:** AYRenderer
@@ -25,6 +25,11 @@ shader inventory 使用同一份声明。已有槽、资源和 View 数值保持
 普通颜色阶段提供空依赖；Outline 和 TemporalFeedback 在自己的实现中声明几何和历史输入。
 公共工厂和 shader catalog 不包含具体效果头，也不增加效果专用分支。遗漏实现会产生链接错误，
 不依赖全局可变注册表或静态注册器初始化顺序。
+
+复杂阶段可用`AY_DEFINE_PRESENTATION_STAGE_WITH_EXTRA_PROGRAMS`提供本地附加程序收集函数。
+主程序从结构声明自动加入，回调只追加自己的预处理、滤波或合成程序；公共shader catalog无需增加
+新类型分支。程序名、变体预算和完整覆盖仍由生产构建校验。该回调负责离线清单，不代替GPU步骤、
+目标所有权及View时序。`Test_ShaderProduction.cpp`验证一主两辅程序的打包/回读，以及禁用运行时编译后的装载。
 
 全部固定主 View 的顺序与计时归属在 [`RenderViews.def`](../src/detail/RenderViews.def) 维护，
 颜色阶段从阶段声明自动展开。UI255 保留默认最后 rank，不提前到动态相机/UI View 之前。
@@ -135,6 +140,12 @@ Windows 的 `AYRenderer_PresentationGpuBench d3d11|d3d12 report.json [0|2|4 MSAA
 以1080p/4K、ABBA顺序短测独立与直接显示，记录实际draw、计划目标、CPU及有效GPU时间样本。
 每块24帧预热、48帧采样；空Forward场景用于隔离末尾显示成本，不代表游戏整帧性能。
 GPU值只采不同的已完成帧；没有时间查询时样本为空，不将0解释为免费。
+
+`AYRenderer_PresentationScaleBench d3d11|d3d12 report.json`以0/1/5/10/20个启用阶段短测1080p/4K，
+所有20个测试阶段保持挂载。分别记录CPU准备/建图、提交、GPU及目标池估算；ABBA每块24帧预热、48帧采样。
+这是复用同一program的单输入RGBA8拷贝负载，不模拟具体算法或不同PSO切换，开启profiler且需要开发shaderc。
+报告区分计划目标与池中保留目标，源图及驱动额外分配不在池估算中。FrameGraph当前不自动alias，
+默认256MiB是其软预算；RT池的严格预算策略不能被误解为主颜色链的显存硬上限。
 
 GPU 回读夹具必须排在被测 producer 后面；直接效果夹具用末端255，避开已前置保留的点计算55。
 独立缓存标识期望集中在 `unittest/ShaderIdentityExpectations.h`，避免各历史集成测试复制版本字面量。

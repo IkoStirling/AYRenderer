@@ -1,6 +1,8 @@
 #include "detail/PresentationStageCatalog.h"
 #include "detail/BuiltinShaderCatalog.h"
 
+#include <string>
+
 namespace ayt::render::detail {
 namespace {
 using Id=RenderPassResourceId;
@@ -63,10 +65,16 @@ RenderPassContract presentationStageContract(RenderPassSlot slot) noexcept
     return contract;
 }
 
+void appendPrimaryPresentationProgram(std::vector<shader::ShaderBuildJob>& jobs,
+    std::string_view name,const char* source)
+{
+    jobs.push_back(embeddedShader(std::string(name),source?source:""));
+}
+
 void appendPresentationStageShaders(std::vector<shader::ShaderBuildJob>& jobs)
 {
 #define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) \
-    jobs.push_back(embeddedShader(Job,presentationStageShaderSource<RenderPassSlot::Slot>()));
+    appendPresentationStagePrograms<RenderPassSlot::Slot>(jobs);
 #include "detail/PresentationStages.def"
 #undef AY_PRESENTATION_STAGE
 }
