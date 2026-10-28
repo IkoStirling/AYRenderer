@@ -1,6 +1,6 @@
 # AYRenderer 当前架构
 
-**Version:** 1.3.0
+**Version:** 1.4.0
 **Date:** 2026-10-29
 **Status:** Active
 **Owner:** AYRenderer
@@ -41,7 +41,7 @@ Pass 工厂、FrameGraph、bgfx 句柄及资源表是内部结构，不作为新
 | 提交包与 CPU 数据所有权 | [RenderScene.h](../include/AYRenderer/RenderScene.h)、`src/AYRenderScene.cpp` |
 | 装配时必需/可选资源验证 | [RenderPassContract.cpp](../src/detail/RenderPassContract.cpp) |
 | 每帧后处理图声明 | [PostProcessGraphPlan.cpp](../src/detail/PostProcessGraphPlan.cpp) |
-| 可选颜色阶段结构与纯图连接 | [PresentationStages.def](../src/detail/PresentationStages.def)、[PresentationStagePlan.cpp](../src/detail/PresentationStagePlan.cpp) |
+| 可选颜色阶段结构、内部View与纯图连接 | [PresentationStages.def](../src/detail/PresentationStages.def)、[PresentationStagePlan.cpp](../src/detail/PresentationStagePlan.cpp) |
 | 阶段准备/历史/清理扩展 | [PresentationPass.h](../src/detail/PresentationPass.h)，[接入指南](presentation-stages.md) |
 | 图编译、目标解析和 liveness | [FgResource.h](../src/detail/FgResource.h)、`FgResource.cpp` |
 | 资源内容、代际与失效原因 | [RenderResourceBlackboard.h](../src/detail/RenderResourceBlackboard.h) |
@@ -55,6 +55,9 @@ Pass 工厂、FrameGraph、bgfx 句柄及资源表是内部结构，不作为新
 `RenderPipelineDesc.cpp` 不持有设备或具体 Pass；policy 返回副本，不改原描述。
 空描述恢复产品默认，有 PostProcess 但缺 Present 的旧描述补入最终边界；
 已经显式存在但顺序错误的边界不偷偷重排，仍由静态合约拒绝并保留当前有效管线。
+空描述回退保留Host的执行偏好，包括`integratePresentation=false`，只补齐默认产品的槽与路径。
+多步颜色阶段的内部View从自身声明展开，附加离线程序由自身cpp收集；
+接入选择和按资源形态验证的范围见[阶段指南](presentation-stages.md)§3.1。
 
 ## 3. 产品默认链
 

@@ -1377,3 +1377,50 @@ geometry都完成两次幂等清理。七个核心实现静态分析0警告；AB
 附加程序接入验证：阶段本地一主两辅程序完成离线构建、原子发布、回读、覆盖检查及无运行时编译装载，
 定向1项/15断言通过；现有生产清单仍为78项，没有为探针增加生产效果或变体。
 随后Shader完整组13项/235断言通过，Contract组247项亦通过。
+
+2026-10-29 最终生产实现门禁：内部View展开、完整remap helper及空描述保留Host执行偏好的修复后，
+九组CPU全部重建并通过，共1120项/35257断言，0失败、0跳过：
+
+| 分组 | 用例 |
+| --- | ---: |
+| Contracts | 251 |
+| SceneMaterial | 116 |
+| Geometry | 99 |
+| LightingShadow | 138 |
+| PostProcess | 269 |
+| FrameGraph | 41 |
+| UI | 120 |
+| Shader | 13 |
+| Audit | 73 |
+
+D3D11/D3D12完整原生回归各95项/57566断言，0失败、0跳过；两后端另用
+`AY_SHADER_RUNTIME_COMPILE=0`和显式生产包根目录运行完整显示整合用例，各1项通过，
+包含Forward/Deferred、全部五阶段及17种效果/viewport/AA/MSAA组合的34对逐字节相同图像。
+78个生产变体重建成功。Editor主程序重建通过；最终ABI下的材质会话/保存重载与资源重导入
+在两后端共四项原生工作流全部通过。七个扩展/建图/生命周期核心源文件的MSVC静态分析0警告。
+
+常用定向入口（从根工程选择已有配置，GPU进程须串行）：
+
+```powershell
+cmake --build out/build/windows-debug-vs2026-insider --target AYRenderer_ContractsTests AYRenderer_GpuTests AYProductionShaders --parallel 2
+out/build/windows-debug-vs2026-insider/bin/AYRenderer_ContractsTests.exe --suite PresentationStages
+$env:AY_TAA_GPU_TEST='d3d11' # 完成后再运行d3d12
+out/build/windows-debug-vs2026-insider/bin/AYRenderer_GpuTests.exe --suite PresentationIntegrationGpu
+```
+
+完整GPU门禁还启用了Camera/Point/Emitter/PhysicsDebug对应设备开关，不能把仅设置一个开关的定向运行
+计作全部95项。成本探针为可选构建目标，不属于普通构建的额外等待；范围和参数见阶段指南§7。
+
+完整回归后只补强了同一GPU扩展夹具，未改生产实现：加入私有首步后失败，以及准备hook追加部分import后
+抛异常的中间/末尾情形。60种组合在两后端各定向1项/4493断言通过，所有画面对照差异字节为0；
+输出未发布时不会被draw计数误认为最终颜色，准备失败的末尾会让直接显示资格转交最后可用阶段。
+独立窗口clear帧标记对齐D3D12实际捕获的后台缓冲，未放宽像素阈值或用静态输入掩盖跨帧依赖。
+最终编译导出的75项主View顺序、256项完整remap与修改前快照逐项一致。
+
+最终Release ABBA：20阶段4K拷贝链的D3D11/12参考块GPU4.453/4.802ms，准备/建图6.3/6.9us，
+目标池估算632.81MiB；不含真实算法、不同PSO、输入图或驱动额外分配。
+四轮交错进程的20阶段普通颜色建图中位数约5.27→2.54us、普通C++分配124→42次，
+对照仅为FrameGraph深拷贝/重复扫描整理，两端使用相同公共阶段规划器。
+真实AnalogDisplay的独立/整合ABBA两参考块中位数均值在MSAA0下：1080p约0.120→0.063ms
+（D3D11）、0.151→0.086ms（D3D12）；4K约0.422→0.216、0.479→0.279ms。
+MSAA4两后端同样通过计数/时间查询；这些是同机局部工作样本，不能当作游戏帧率或显存立即回收承诺。

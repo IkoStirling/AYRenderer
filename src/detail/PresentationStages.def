@@ -1,10 +1,11 @@
 // Canonical post-AA color chain. Add a stage here once; factory, contracts,
 // product slots, View ordering/timing and offline shader inventory consume it.
-// Slot, output, View, order, input family, point sample, history, offline job, direct presentation.
+// Slot, output, final View, order, input family, point sample, history, offline
+// job, direct presentation, (ordered internal Views preceding the final View).
 // Concrete creation, source and extra reads live with the implementation.
 // Existing slot/resource/View IDs are stable.
-AY_PRESENTATION_STAGE(StylizedOutline, OutlinedColor, 51, 10, Geometry, false, false, "stylized_outline", false)
-AY_PRESENTATION_STAGE(ColorGrading, ColorGradedColor, 4, 20, Color, false, false, "color_grading", false)
-AY_PRESENTATION_STAGE(ColorStylization, StylizedColor, 50, 30, Color, true, false, "color_stylization", false)
-AY_PRESENTATION_STAGE(TemporalFeedback, TemporalColor, 53, 40, History, false, true, "temporal_feedback", false)
-AY_PRESENTATION_STAGE(AnalogDisplay, DisplayColor, 52, 50, Color, false, false, "analog_display", true)
+AY_PRESENTATION_STAGE(StylizedOutline, OutlinedColor, 51, 10, Geometry, false, false, "stylized_outline", false, ())
+AY_PRESENTATION_STAGE(ColorGrading, ColorGradedColor, 4, 20, Color, false, false, "color_grading", false, ())
+AY_PRESENTATION_STAGE(ColorStylization, StylizedColor, 50, 30, Color, true, false, "color_stylization", false, ())
+AY_PRESENTATION_STAGE(TemporalFeedback, TemporalColor, 53, 40, History, false, true, "temporal_feedback", false, ())
+AY_PRESENTATION_STAGE(AnalogDisplay, DisplayColor, 52, 50, Color, false, false, "analog_display", true, ())

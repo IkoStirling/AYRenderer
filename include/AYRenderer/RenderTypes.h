@@ -590,6 +590,7 @@ struct RenderPipelineDesc {
     /// saving its intermediate target and the Present copy. Logical ordering
     /// and failure fallback remain unchanged. Unsupported backends/targets
     /// retain the ordinary chain. Disable for image/performance comparisons.
+    /// Preserved when an empty pass list selects the default product.
     bool integratePresentation = true;
 
     /// Forward scene, shadow, overlay and post/presentation chain.

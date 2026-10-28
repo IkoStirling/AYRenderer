@@ -27,7 +27,7 @@ template<RenderPassSlot Slot> void appendPresentationStagePrograms(std::vector<s
 
 // Declarations make a missing implementation a link failure. No static
 // registrars, global mutable map or per-effect includes in the common factory.
-#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) \
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct, PreViews) \
     template<> std::unique_ptr<RenderPass> makePresentationStage<RenderPassSlot::Slot>(); \
     template<> const char* presentationStageShaderSource<RenderPassSlot::Slot>(); \
     template<> std::span<const RenderPassResourceRead> presentationStageExtraReads<RenderPassSlot::Slot>(); \
@@ -72,6 +72,9 @@ struct PresentationStageInfo {
     // Opt in only after validating backbuffer transfer/viewport equivalence.
     // History outputs must remain sampleable and cannot use this path.
     bool canPresentDirectly = false;
+    // Ordered private GPU steps preceding this stage's final color View.
+    // Borrowed immutable storage has the same lifetime as the descriptor.
+    std::span<const uint8_t> preViews{};
 };
 
 void appendPrimaryPresentationProgram(std::vector<shader::ShaderBuildJob>& jobs,
@@ -88,12 +91,20 @@ void appendPresentationStageProgramSet(std::vector<shader::ShaderBuildJob>& jobs
     std::forward<AppendExtra>(appendExtra)(jobs);
 }
 
+#define AY_PRESENTATION_UNPAREN(...) __VA_ARGS__
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct, PreViews) \
+    inline constexpr auto kPresentationPreViews_##Slot=std::to_array<uint8_t>({0, AY_PRESENTATION_UNPAREN PreViews});
+#include "detail/PresentationStages.def"
+#undef AY_PRESENTATION_STAGE
+#undef AY_PRESENTATION_UNPAREN
+
 inline constexpr auto kPresentationStages = std::to_array<PresentationStageInfo>({
-#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) \
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct, PreViews) \
     {RenderPassSlot::Slot, #Slot, FgResourceId::Output, \
      {RenderPassResourceId::Output, History ? RenderPassResourceLifetime::PersistentHistory \
                                           : RenderPassResourceLifetime::Transient, \
-      RenderPassResourceFormat::RGBA8}, View, Order, PresentationStageInputs::Inputs, Point, History, Job, #Output, Direct},
+      RenderPassResourceFormat::RGBA8}, View, Order, PresentationStageInputs::Inputs, Point, History, Job, #Output, Direct, \
+      std::span<const uint8_t>(kPresentationPreViews_##Slot).subspan(1)},
 #include "detail/PresentationStages.def"
 #undef AY_PRESENTATION_STAGE
 });
@@ -115,15 +126,23 @@ constexpr uint8_t presentationStageViewId(RenderPassSlot slot) noexcept
     return stage ? stage->view : UINT8_MAX;
 }
 
+constexpr bool presentationStageOwnsView(const PresentationStageInfo& stage,uint16_t view) noexcept
+{
+    if(stage.view==view)return true;
+    for(auto preceding:stage.preViews)if(preceding==view)return true;
+    return false;
+}
+
 constexpr std::string_view presentationStageNameForView(uint16_t view) noexcept
 {
     for (const auto& stage : kPresentationStages)
-        if (stage.view == view) return stage.name;
+        if (presentationStageOwnsView(stage,view)) return stage.name;
     return {};
 }
 
 constexpr bool validPresentationStageCatalog(std::span<const PresentationStageInfo> stages) noexcept
 {
+    std::array<bool,256> usedViews{};
     for (size_t i=0; i<stages.size(); ++i) {
         const auto& stage=stages[i];
         if (stage.name.empty() || stage.shaderJob.empty() || stage.outputName.empty() || !canReserveMainRenderView(stage.view)
@@ -135,7 +154,12 @@ constexpr bool validPresentationStageCatalog(std::span<const PresentationStageIn
             || (stage.history && stage.canPresentDirectly)
             || stage.write.lifetime!=(stage.history?RenderPassResourceLifetime::PersistentHistory
                                                  :RenderPassResourceLifetime::Transient)
-            || (i && stage.order<=stages[i-1].order)) return false;
+            || (i && stage.order<=stages[i-1].order) || usedViews[stage.view]) return false;
+        usedViews[stage.view]=true;
+        for(auto view:stage.preViews) {
+            if(!canReserveMainRenderView(view) || usedViews[view])return false;
+            usedViews[view]=true;
+        }
         for (size_t j=0; j<i; ++j) {
             const auto& previous=stages[j];
             if (stage.slot==previous.slot || stage.output==previous.output

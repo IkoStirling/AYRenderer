@@ -1,4 +1,6 @@
 #include "AYTest.h"
+#include "AYRenderer.h"
+#include "detail/RenderPipelinePolicy.h"
 #include "detail/PresentationPass.h"
 #include "detail/PostProcessGraphPlan.h"
 #include "detail/RenderPipeline.h"
@@ -125,6 +127,80 @@ TEST_CASE(catalog_drives_factories_contracts_views_and_shader_jobs)
     for(uint8_t view:{uint8_t(kCameraFirstView),uint8_t(kCameraLastView),uint8_t(kCameraReadbackView),uint8_t(kDefaultUiView)}) {
         bad=kPresentationStages;bad[1].view=view;CHECK_FALSE(validPresentationStageCatalog(bad));
     }
+}
+
+TEST_CASE(internal_views_expand_before_their_composite_and_share_owner_and_reservation_rules)
+{
+    const std::array<uint8_t,2> preceding{61,62};
+    const std::array<RenderViewDefinition,4> definitions{{
+        {60,"Earlier"},{63,"Composite",preceding},{113,"Later"},{255,"UI",{},false}}};
+    std::array<RenderViewInfo,5> ordered{};
+    CHECK(orderedRenderViewCount(definitions)==ordered.size());
+    CHECK(fillOrderedRenderViews(definitions,ordered));
+    const std::array<uint16_t,5> expected{60,61,62,63,113};
+    for(size_t index=0;index<expected.size();++index)CHECK(ordered[index].view==expected[index]);
+    CHECK(validMainRenderViews(ordered));
+    const auto owners=makeRenderViewOwners(definitions);
+    CHECK(owners[61]=="Composite");CHECK(owners[62]=="Composite");CHECK(owners[63]=="Composite");
+    CHECK(owners[255]=="UI");CHECK(owners[114].empty());
+    const auto reserved=makeRenderViewReservations(ordered);
+    for(auto view:expected)CHECK(reserved[view]);
+    CHECK_FALSE(reserved[114]);CHECK_FALSE(reserved[255]);
+    std::array<bgfx::ViewId,kRenderViewCapacity> remap{};
+    CHECK(fillRenderViewRemap(ordered,remap));
+    for(size_t index=0;index<expected.size();++index)CHECK(remap[index]==expected[index]);
+    std::array<bool,kRenderViewCapacity> seen{};
+    for(auto view:remap){CHECK_FALSE(seen[view]);seen[view]=true;}
+    CHECK(remap.back()==255);
+    std::array<RenderViewInfo,4> undersized{};CHECK_FALSE(fillOrderedRenderViews(definitions,undersized));
+    auto invalid=ordered;invalid[1].view=invalid[0].view;
+    CHECK_FALSE(validMainRenderViews(invalid));
+    remap.fill(77);CHECK_FALSE(fillRenderViewRemap(invalid,remap));
+    CHECK(std::all_of(remap.begin(),remap.end(),[](auto view){return view==77;}));
+    invalid=ordered;invalid[1].view=kCameraFirstView;CHECK_FALSE(validMainRenderViews(invalid));
+    invalid[1].view=kCameraReadbackView;CHECK_FALSE(validMainRenderViews(invalid));
+    invalid[1].view=kDefaultUiView;CHECK_FALSE(validMainRenderViews(invalid));
+}
+
+TEST_CASE(internal_view_collisions_are_rejected_even_for_disabled_stages)
+{
+    std::array<PresentationStageInfo,2> infos{
+        probeInfo(200,"CompositeOne",FgResourceId::ColorGradedColor,RenderPassResourceId::ColorGradedColor,10),
+        probeInfo(201,"CompositeTwo",FgResourceId::StylizedColor,RenderPassResourceId::StylizedColor,20)};
+    std::array<uint8_t,1> first{unusedProbeView(2)},second{unusedProbeView(3)};
+    infos[0].preViews=first;infos[1].preViews=second;
+    const std::array<PresentationStageFrame,2> stages{{{&infos[0],false},{&infos[1],false}}};
+    CHECK(validatePresentationStagePlan(stages,FgResourceId::FinalLdrColor).valid());
+    CHECK(presentationStageOwnsView(infos[0],first[0]));CHECK(presentationStageOwnsView(infos[0],infos[0].view));
+    CHECK_FALSE(presentationStageOwnsView(infos[0],second[0]));
+    second[0]=first[0];
+    auto problem=validatePresentationStagePlan(stages,FgResourceId::FinalLdrColor);
+    CHECK(problem.error==PresentationPlanError::DuplicateView);CHECK(problem.stageIndex==1);
+    second[0]=unusedProbeView(3);first[0]=infos[0].view;
+    CHECK(validatePresentationStagePlan(stages,FgResourceId::FinalLdrColor).error==PresentationPlanError::DuplicateView);
+    for(uint8_t view:{uint8_t(0),uint8_t(kCameraFirstView),uint8_t(kCameraReadbackView),uint8_t(kDefaultUiView)}) {
+        first[0]=view;
+        CHECK(validatePresentationStagePlan(stages,FgResourceId::FinalLdrColor).error==PresentationPlanError::ReservedView);
+    }
+    auto catalog=kPresentationStages;first[0]=catalog[0].view;catalog[0].preViews=first;
+    CHECK_FALSE(validPresentationStageCatalog(catalog));
+    first[0]=kCameraFirstView;CHECK_FALSE(validPresentationStageCatalog(catalog));
+    first[0]=unusedProbeView(0);CHECK(validPresentationStageCatalog(catalog));
+    catalog[1].preViews=first;CHECK_FALSE(validPresentationStageCatalog(catalog));
+}
+
+TEST_CASE(existing_main_view_execution_order_is_preserved_as_stages_gain_internal_views)
+{
+    // Independent pre-change order: new Views may be inserted, while the
+    // established dependency order of every existing main View stays intact.
+    constexpr std::array<uint8_t,75> original{
+        243,55,56,57,58,59,1,18,19,20,21,22,23,24,25,2,0,6,7,34,35,36,37,38,39,
+        40,41,42,43,44,45,46,47,48,49,3,14,8,32,13,241,240,33,242,54,9,244,253,
+        246,10,11,26,27,28,29,30,12,31,15,5,17,247,248,249,51,4,50,53,52,16,
+        245,250,254,251,252};
+    size_t next=0;
+    for(auto view:kRenderViewOrder)if(next<original.size() && view==original[next])++next;
+    CHECK(next==original.size());
 }
 
 TEST_CASE(all_effect_masks_connect_to_the_selected_aa_without_disabled_targets)
@@ -420,6 +496,20 @@ TEST_CASE(stage_slot_mismatch_is_rejected_without_changing_the_live_indexes)
     CHECK(pipeline.presentationPasses().size()==1);
     CHECK(pipeline.presentationPasses().front()==original);
     CHECK(pipeline.findPass<ExtensionProbe>()==original);
+}
+
+TEST_CASE(empty_product_fallback_preserves_host_execution_preferences)
+{
+    RenderPipelineDesc requested;requested.path=RenderPath::Deferred;requested.integratePresentation=false;
+    const auto resolved=resolveRenderPipelineDesc(requested);
+    CHECK(resolved.passes==RenderPipelineDesc::makeDefault().passes);
+    CHECK(resolved.path==RenderPath::Forward);CHECK_FALSE(resolved.integratePresentation);
+    CHECK(requested.passes.empty());CHECK(requested.path==RenderPath::Deferred);
+    CHECK_FALSE(requested.integratePresentation);
+    Renderer renderer;renderer.configurePipeline(requested);
+    CHECK_FALSE(renderer.pipelineDesc().integratePresentation);
+    CHECK(renderer.pipelineDesc().passes==RenderPipelineDesc::makeDefault().passes);
+    CHECK(renderer.pipelineDesc().path==RenderPath::Forward);
 }
 
 TEST_CASE(terminal_integration_saves_one_target_without_changing_the_logical_chain)

@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -44,6 +45,7 @@ constexpr const char* kExtensionInvertSource=R"(
 material PresentationExtensionProbe {
     texture2d inputColor
     texture2d sharedColor
+    uniform vec4 extensionParams
     vertex {
         in pos : position
         out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
@@ -54,7 +56,23 @@ material PresentationExtensionProbe {
         let uv = vec2(vUv.x, 1.0 - vUv.y)
         let source = sample(inputColor, uv)
         let auxiliary = sample(sharedColor, uv)
-        return vec4(1.0 - source.x, 1.0 - source.y, 1.0 - source.z, auxiliary.w)
+        let red = mix(1.0 - source.x, extensionParams.x, extensionParams.w)
+        return vec4(red, 1.0 - source.y, 1.0 - source.z, auxiliary.w)
+    }
+}
+)";
+
+constexpr const char* kExtensionCopySource=R"(
+material PresentationExtensionCopy {
+    texture2d inputColor
+    vertex {
+        in pos : position
+        out vUv : texcoord = pos.xy * vec2(0.5, 0.5) + vec2(0.5, 0.5)
+        return vec4(pos.x, pos.y, 0.0, 1.0)
+    }
+    fragment {
+        in vUv : texcoord
+        return sample(inputColor, vec2(vUv.x, 1.0 - vUv.y))
     }
 }
 )";
@@ -70,37 +88,79 @@ public:
         PresentationStageTargets targets;
         if(!resolveTargets(context,targets) || !_geometry.ensure(context.adapter))return 0;
         if(!_program.isValid())
-            _program=context.pool.acquire(kExtensionInvertSource,"test_presentation_extension_invert_v1");
+            _program=context.pool.acquire(kExtensionInvertSource,"test_presentation_extension_invert_v2");
         if(!_program.isValid())return 0;
         const auto color=_program.getTextureBinding("inputColor");
         const auto extra=_program.getTextureBinding("sharedColor");
-        if(color==ayt::shader::InvalidBinding || extra==ayt::shader::InvalidBinding)return 0;
-        configureFullscreenPassView(context.adapter,presentationInfo().view,targets.target,
-            targets.x,targets.y,context.viewportWidth,context.viewportHeight);
+        const auto parameters=_program.getUniformBinding("extensionParams");
+        if(color==ayt::shader::InvalidBinding || extra==ayt::shader::InvalidBinding
+            || parameters==ayt::shader::InvalidBinding)return 0;
+        ayt::shader::BindingId copied=ayt::shader::InvalidBinding;
+        if(composite) {
+            if(presentationInfo().preViews.empty() || !bgfx::isValid(_scratch))return 0;
+            if(!_copyProgram.isValid())_copyProgram=context.pool.acquire(kExtensionCopySource,"test_presentation_extension_copy_v1");
+            if(!_copyProgram.isValid())return 0;
+            copied=_copyProgram.getTextureBinding("inputColor");if(copied==ayt::shader::InvalidBinding)return 0;
+        }
+        const auto firstView=composite?presentationInfo().preViews.front():presentationInfo().view;
+        configureFullscreenPassView(context.adapter,firstView,composite?_scratch:targets.target,
+            composite?0:targets.x,composite?0:targets.y,context.viewportWidth,context.viewportHeight);
         _geometry.bind(context.adapter);
         _program.setTexture(_program.getTextureStage(color),color,toShaderTexture(targets.input));
         _program.setTexture(_program.getTextureStage(extra),extra,
             toShaderTexture(context.adapter.getFboAttachment(sharedInput,0)));
+        const float authored[4]={dynamicRed>=0?dynamicRed:0,0,0,dynamicRed>=0?1.0f:0.0f};
+        _program.setUniform(parameters,authored,sizeof(authored));
         context.adapter.setStateDepthTestAlways();
-        _program.submit({presentationInfo().view,0});publishOutput(context);return 1;
+        _program.submit({firstView,0});
+        // A private intermediate submission is real work, but does not publish
+        // this stage's final color if a later step cannot be submitted.
+        if(composite && failAfterPrepass)return 1;
+        if(composite) {
+            configureFullscreenPassView(context.adapter,presentationInfo().view,targets.target,
+                targets.x,targets.y,context.viewportWidth,context.viewportHeight);
+            _geometry.bind(context.adapter);
+            _copyProgram.setTexture(_copyProgram.getTextureStage(copied),copied,
+                toShaderTexture(context.adapter.getFboAttachment(_scratch,0)));
+            context.adapter.setStateDepthTestAlways();_copyProgram.submit({presentationInfo().view,0});
+        }
+        publishOutput(context);return composite?2:1;
     }
     void destroyResources(ayt::render::detail::BGFXAdapter& adapter) override {
-        ++cleanups;_program.reset();_geometry.destroy(adapter);
+        ++cleanups;_program.reset();_copyProgram.reset();_geometry.destroy(adapter);
+        adapter.destroy(_scratch);_scratch=BGFX_INVALID_HANDLE;_width=_height=0;
     }
-    bool resourcesReleased() const noexcept {return !_program.isValid() && !_geometry.isReady();}
+    bool resourcesReleased() const noexcept {return !_program.isValid() && !_copyProgram.isValid()
+        && !_geometry.isReady() && !bgfx::isValid(_scratch);}
     unsigned cleanups=0;
     bgfx::FrameBufferHandle sharedInput=BGFX_INVALID_HANDLE;
     bool failSubmit=false;
+    bool failAfterPrepass=false;
+    bool failPreparation=false;
+    bool composite=false;
+    float dynamicRed=-1;
 protected:
-    void preparePresentationResources(ayt::render::detail::PresentationFrameContext&,
+    void preparePresentationResources(ayt::render::detail::PresentationFrameContext& context,
         ayt::render::detail::PresentationStageFrame& stage) override {
         using namespace ayt::render::detail;
+        if(composite) {
+            if(!bgfx::isValid(_scratch) || _width!=context.width || _height!=context.height) {
+                context.adapter.destroy(_scratch);
+                _scratch=context.adapter.createFrameBuffer(context.width,context.height,bgfx::TextureFormat::RGBA8,false);
+                _width=context.width;_height=context.height;
+            }
+            if(!bgfx::isValid(_scratch)){stage.enabled=false;return;}
+        }
         stage.extraReads.push_back(FgResourceId::FeedbackHistory);
         stage.imports.push_back({FgResourceId::FeedbackHistory,sharedInput});
+        if(failPreparation)throw std::runtime_error("injected resource preparation failure after partial contribution");
     }
 private:
     ayt::render::detail::FullscreenPassGeometry _geometry;
     ayt::shader::ShaderResource _program;
+    ayt::shader::ShaderResource _copyProgram;
+    bgfx::FrameBufferHandle _scratch=BGFX_INVALID_HANDLE;
+    uint16_t _width=0,_height=0;
 };
 }
 #endif
@@ -157,7 +217,9 @@ TEST_CASE(terminal_display_matches_separate_present_across_effects_viewports_and
         std::vector<uint8_t> reference;uint16_t referenceTargets=0;
         for(bool integrate:{false,true}) {
             auto desc=deferred?RenderPipelineDesc::makeDeferred():RenderPipelineDesc::makeDefault();
-            desc.integratePresentation=integrate;renderer.configurePipeline(desc);
+            desc.integratePresentation=integrate;
+            if(!deferred && phase==0)desc.passes.clear(); // Empty product fallback must keep the host opt-out.
+            renderer.configurePipeline(desc);
             CHECK(renderer.pipelineDesc().integratePresentation==integrate);
             renderer.setShadowsEnabled(false);renderer.setFxaaEnabled(phase==10 || phase==15);
             renderer.setSmaaEnabled(false);renderer.setTaaEnabled(false);
@@ -327,15 +389,23 @@ TEST_CASE(unknown_color_stages_execute_up_to_twenty_with_shared_inputs_failures_
     pool.setShadercExecutable(AY_SHADER_SHADERC_HINT);
     pool.setBgfxIncludeDirs({AY_SHADER_BGFX_COMMON_HINT,AY_SHADER_BGFX_SRC_HINT});
     pool.resolvePlatformFromRenderer();
-    auto proofProgram=pool.acquire(kExtensionInvertSource,"test_presentation_extension_invert_v1");
+    auto proofProgram=pool.acquire(kExtensionInvertSource,"test_presentation_extension_invert_v2");
     CHECK(proofProgram.isValid());
     if(!proofProgram.isValid()) {
         for(const auto& error:pool.lastCompileErrors())std::cerr<<error<<'\n';
         pool.shutdown();adapter.shutdown();return;
     }
     proofProgram.reset();
+    auto copyProof=pool.acquire(kExtensionCopySource,"test_presentation_extension_copy_v1");
+    CHECK(copyProof.isValid());
+    if(!copyProof.isValid()) {
+        for(const auto& error:pool.lastCompileErrors())std::cerr<<error<<'\n';
+        pool.shutdown();adapter.shutdown();return;
+    }
+    copyProof.reset();
     constexpr size_t count=20;
     std::array<std::string,count> names;
+    std::array<uint8_t,count> preViews;
     std::array<PresentationStageInfo,count> infos;
     std::array<InvertPresentationProbe*,count> probes{};
     RenderPipeline pipeline;size_t output=0;uint16_t view=0;
@@ -343,15 +413,22 @@ TEST_CASE(unknown_color_stages_execute_up_to_twenty_with_shared_inputs_failures_
         while(output<static_cast<size_t>(FgResourceId::Count)
             && (output==static_cast<size_t>(FgResourceId::FinalLdrColor)
                 || contractResourceFor(static_cast<FgResourceId>(output))==RenderPassResourceId::Count))++output;
-        while(view<kRenderViewCapacity && (!canReserveMainRenderView(view) || isMainRenderViewReserved(view)))++view;
+        const auto takeView=[&] {
+            while(view<kRenderViewCapacity && (!canReserveMainRenderView(view) || isMainRenderViewReserved(view)))++view;
+            return view++;
+        };
+        const auto preceding=takeView(),primary=takeView();
         CHECK(output<static_cast<size_t>(FgResourceId::Count));CHECK(view<kRenderViewCapacity);
-        if(output>=static_cast<size_t>(FgResourceId::Count) || view>=kRenderViewCapacity){adapter.shutdown();return;}
+        if(output>=static_cast<size_t>(FgResourceId::Count) || primary>=kRenderViewCapacity) {
+            pool.shutdown();adapter.shutdown();return;
+        }
+        preViews[index]=static_cast<uint8_t>(preceding);
         names[index]="UnregisteredGpuStage"+std::to_string(index);
         const auto resource=static_cast<FgResourceId>(output++);
         infos[index]={static_cast<RenderPassSlot>(200+index),names[index],resource,
             {contractResourceFor(resource),RenderPassResourceLifetime::Transient,RenderPassResourceFormat::RGBA8},
-            static_cast<uint8_t>(view++),static_cast<uint16_t>(10+index),PresentationStageInputs::Color,
-            true,false,names[index],names[index],true};
+            static_cast<uint8_t>(primary),static_cast<uint16_t>(10+index),PresentationStageInputs::Color,
+            true,false,names[index],names[index],true,{&preViews[index],1}};
         auto pass=std::make_unique<InvertPresentationProbe>(infos[index]);probes[index]=pass.get();
         pipeline.addPass(std::move(pass));
     }
@@ -360,12 +437,15 @@ TEST_CASE(unknown_color_stages_execute_up_to_twenty_with_shared_inputs_failures_
     // The fixture owns a full permutation: all probe Views must precede the
     // production Present View, irrespective of their unused numeric IDs.
     std::array<bgfx::ViewId,kRenderViewCapacity> remap{};
-    std::array<bool,kRenderViewCapacity> used{};size_t rank=0;
-    remap[rank++]=3;used[3]=true;
-    for(const auto& info:infos){remap[rank++]=info.view;used[info.view]=true;}
-    remap[rank++]=PresentPass::kPresentViewId;used[PresentPass::kPresentViewId]=true;
-    for(size_t id=0;id<used.size();++id)if(!used[id])remap[rank++]=static_cast<bgfx::ViewId>(id);
-    CHECK(rank==remap.size());adapter.setViewOrder(0,static_cast<uint16_t>(remap.size()),remap.data());
+    std::array<RenderViewDefinition,count+2> definitions{};
+    definitions.front()={3,"Clear"};definitions.back()={PresentPass::kPresentViewId,"Present"};
+    for(size_t index=0;index<count;++index)
+        definitions[index+1]={infos[index].view,infos[index].name,infos[index].preViews};
+    std::array<RenderViewInfo,count*2+2> ordered{};
+    const bool expanded=fillOrderedRenderViews(definitions,ordered);CHECK(expanded);
+    const bool mapped=fillRenderViewRemap(ordered,remap);CHECK(mapped);
+    if(!expanded || !mapped){pool.shutdown();adapter.shutdown();return;}
+    adapter.setViewOrder(0,static_cast<uint16_t>(remap.size()),remap.data());
     std::vector<uint8_t> pixels(31*23*4);
     for(int y=0;y<23;++y)for(int x=0;x<31;++x) {
         const size_t p=size_t(y*31+x)*4;
@@ -393,15 +473,26 @@ TEST_CASE(unknown_color_stages_execute_up_to_twenty_with_shared_inputs_failures_
     const auto captures=std::filesystem::temp_directory_path()/(std::string("ay-extension-proof-")+backend+"-"+
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(captures);
-    for(const size_t enabled:{0u,1u,5u,10u,20u})for(int mode=0;mode<7;++mode) {
+    for(const size_t enabled:{0u,1u,5u,10u,20u})for(int mode=0;mode<12;++mode) {
         // 0 separate; 1 integrated; 2 extra reader; 3 semantic; 4 disabled
-        // reader; 5 middle failure; 6 terminal failure.
-        const int failed=enabled && mode>=5?int(mode==5?enabled/2:enabled-1):-1;
+        // reader; 5 middle failure; 6 terminal failure; 7 two internal GPU steps;
+        // 8/9 middle/terminal failure after a private intermediate submission;
+        // 10/11 middle/terminal preparation failure after partial imports.
+        const bool preparationFailure=mode==10 || mode==11;
+        const int failed=enabled && (mode==5 || mode==6 || mode>=8)
+            ?int(mode==5 || mode==8 || mode==10?enabled/2:enabled-1):-1;
         for(size_t index=0;index<count;++index) {
-            probes[index]->setEnabled(index<enabled);probes[index]->failSubmit=int(index)==failed;
+            probes[index]->setEnabled(index<enabled);probes[index]->failSubmit=mode<7 && int(index)==failed;
+            probes[index]->failAfterPrepass=(mode==8 || mode==9) && int(index)==failed;
+            probes[index]->failPreparation=preparationFailure && int(index)==failed;
+            probes[index]->composite=mode>=7;
         }
         const auto capture=captures/(std::to_string(enabled)+"-"+std::to_string(mode));
         for(int tick=0;tick<10;++tick) {
+            // An authored changing red channel in the first composite stage
+            // detects a one-frame dependency lag that a static image could hide.
+            for(size_t index=0;index<count;++index)
+                probes[index]->dynamicRed=mode==7 && enabled && index==0?float(17+tick*17)/255.0f:-1;
             preparePresentationStages(pipeline,preparation,stages);
             graph.beginFrame(31,23);graph.importExternal(FgResourceId::FinalLdrColor,input);
             auto source=FgResourceId::FinalLdrColor;
@@ -412,15 +503,19 @@ TEST_CASE(unknown_color_stages_execute_up_to_twenty_with_shared_inputs_failures_
             graph.setExecutionEligibility(RenderPassSlot::Present,true);
             graph.setResolvedSemantic(FgSemantic::PresentSource,FgResourceId::FinalLdrColor);
             CHECK(graph.compile());graph.markProduced(FgResourceId::FinalLdrColor);
-            const bool direct=enabled && mode!=0 && mode!=2 && mode!=3;
+            const size_t prepared=enabled-(preparationFailure && failed>=0?1:0);
+            const bool direct=prepared && mode!=0 && mode!=2 && mode!=3;
             CHECK(graph.isDirectPresentationOutput(source)==direct);
-            CHECK(graph.stats().physicalTargets==enabled-(direct?1:0));
-            ClearDesc clear;clear.r=.1f;clear.g=.2f;clear.b=.3f;
+            CHECK(graph.stats().physicalTargets==prepared-(direct?1:0));
+            ClearDesc clear;clear.r=mode==7?float(17+tick*17)/255.0f:.1f;clear.g=.2f;clear.b=.3f;
             adapter.setViewRect(3,0,0,64,48);adapter.setViewFrameBuffer(3,BGFX_INVALID_HANDLE);
             adapter.setViewClear(3,clear);bgfx::touch(3);
-            const bool presented=direct && failed!=int(enabled-1);
-            CHECK(pipeline.executeAll(context)==enabled-(failed>=0?1:0)+(presented?0:1));
+            const bool presented=direct && (preparationFailure || failed!=int(enabled-1));
+            const uint32_t privateOnlyDraw=failed>=0 && (mode==8 || mode==9)?1:0;
+            CHECK(pipeline.executeAll(context)==(enabled-(failed>=0?1:0))*(mode>=7?2:1)
+                +privateOnlyDraw+(presented?0:1));
             CHECK(graph.directlyPresentedThisFrame()==presented);
+            if(failed>=0)CHECK_FALSE(graph.producedThisFrame(infos[size_t(failed)].output));
             if(enabled && !direct) {
                 CHECK(bgfx::isValid(graph.resolve(source)));
                 CHECK(bgfx::isValid(adapter.getFboAttachment(graph.resolve(source),0)));
@@ -430,11 +525,18 @@ TEST_CASE(unknown_color_stages_execute_up_to_twenty_with_shared_inputs_failures_
         }
         const auto image=decodeImageFile(capture.string()+".tga");
         CHECK(image.width==64 && image.height==48);CHECK(image.rgba8.size()==64*48*4);
+        // D3D12's default screenshot callback can capture an earlier presented
+        // backbuffer. The independent clear outside the viewport identifies
+        // that captured frame; the stage result must match the same frame.
+        const uint8_t frameRed=image.rgba8.empty()?0:image.rgba8.front();
+        if(mode==7)CHECK(frameRed>=17 && frameRed<=170 && frameRed%17==0);
         const bool inverted=(enabled-(failed>=0?1:0))%2!=0;size_t differences=0;
         if(image.rgba8.size()==64*48*4)for(int y=0;y<23;++y)for(int x=0;x<31;++x)
             for(size_t channel=0;channel<4;++channel) {
                 const auto authored=pixels[size_t(y*31+x)*4+channel];
-                const uint8_t expected=inverted && channel<3?uint8_t(255-authored):authored;
+                const uint8_t expected=mode==7 && enabled && channel==0
+                    ?uint8_t((enabled-1)%2?255-frameRed:frameRed)
+                    :inverted && channel<3?uint8_t(255-authored):authored;
                 if(image.rgba8[size_t((y+11)*64+x+7)*4+channel]!=expected)++differences;
             }
         std::cout<<"[Extension GPU] backend="<<backend<<" stages="<<enabled<<" mode="<<mode

@@ -37,13 +37,14 @@ static_assert([] {
 // permutation. Passing only kRenderViewOrder left high editor views (250+)
 // mapped again at their default ranks, so the later duplicate won and those
 // views still executed after Present. Fill every unused rank exactly once.
-inline constexpr std::array<bgfx::ViewId, kRenderViewCapacity>
-makeRenderViewRemap()
+inline constexpr bool fillRenderViewRemap(std::span<const RenderViewInfo> views,
+    std::array<bgfx::ViewId,kRenderViewCapacity>& remap) noexcept
 {
-    std::array<bgfx::ViewId, kRenderViewCapacity> remap{};
+    if(views.size()>remap.size() || !validMainRenderViews(views))return false;
     std::array<bool, kRenderViewCapacity> used{};
     std::size_t rank = 0;
-    for (const bgfx::ViewId viewId : kRenderViewOrder) {
+    for (const auto& view : views) {
+        const auto viewId=static_cast<bgfx::ViewId>(view.view);
         remap[rank++] = viewId;
         used[static_cast<std::size_t>(viewId)] = true;
     }
@@ -52,6 +53,13 @@ makeRenderViewRemap()
             remap[rank++] = static_cast<bgfx::ViewId>(viewId);
         }
     }
+    return true;
+}
+
+inline constexpr std::array<bgfx::ViewId,kRenderViewCapacity> makeRenderViewRemap()
+{
+    std::array<bgfx::ViewId,kRenderViewCapacity> remap{};
+    fillRenderViewRemap(kOrderedRenderViews,remap);
     return remap;
 }
 

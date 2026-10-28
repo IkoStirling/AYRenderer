@@ -3,6 +3,7 @@
 #include "detail/PresentationStagePlan.h"
 #include "detail/BGFXAdapter.h"
 #include "detail/RenderViewCatalog.h"
+#include "detail/RenderViewOrder.h"
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -106,6 +107,9 @@ int main(int argc,char** argv)
             {"logical_passes",graph.stats().livePasses},{"owned_targets",graph.stats().physicalTargets}});
     }
     report["valid"]=valid;
+    report["main_view_order"]=nlohmann::json::array();
+    for(const auto& view:kOrderedRenderViews)report["main_view_order"].push_back(view.view);
+    report["view_remap"]=kRenderViewRemap;
     if(argc==2) {
         std::ofstream file(argv[1],std::ios::binary);file<<report.dump(2)<<'\n';file.close();
         if(!file) {std::cerr<<"Cannot write report\n";return 2;}

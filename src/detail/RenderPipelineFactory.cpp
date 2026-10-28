@@ -31,7 +31,7 @@ namespace ayt::render::detail {
 std::unique_ptr<RenderPass> makeRenderPass(RenderPassSlot slot)
 {
     switch (slot) {
-#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) \
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct, PreViews) \
     case RenderPassSlot::Slot: return makePresentationStage<RenderPassSlot::Slot>();
 #include "detail/PresentationStages.def"
 #undef AY_PRESENTATION_STAGE

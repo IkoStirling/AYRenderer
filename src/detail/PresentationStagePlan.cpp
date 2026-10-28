@@ -45,11 +45,17 @@ PresentationPlanValidation validatePresentationStagePlan(
             return {PresentationPlanError::InvalidOutput,index,info.output};
         if (outputs[output]) return {PresentationPlanError::DuplicateOutput,index,info.output};
         if (slots[slot]) return {PresentationPlanError::DuplicateSlot,index};
-        if (views[info.view]) return {PresentationPlanError::DuplicateView,index};
         const auto* canonical=presentationStageInfo(info.slot);
-        if(!canReserveMainRenderView(info.view)
-            || (isMainRenderViewReserved(info.view) && (!canonical || canonical->view!=info.view)))
-            return {PresentationPlanError::ReservedView,index};
+        const auto reserveView=[&](uint8_t view) {
+            if(views[view])return PresentationPlanError::DuplicateView;
+            if(!canReserveMainRenderView(view)
+                || (isMainRenderViewReserved(view) && (!canonical || !presentationStageOwnsView(*canonical,view))))
+                return PresentationPlanError::ReservedView;
+            views[view]=true;return PresentationPlanError::None;
+        };
+        if(const auto error=reserveView(info.view);error!=PresentationPlanError::None)return {error,index};
+        for(auto view:info.preViews)
+            if(const auto error=reserveView(view);error!=PresentationPlanError::None)return {error,index};
         if (info.write.format!=RenderPassResourceFormat::RGBA8
             || static_cast<size_t>(info.write.resource)>=static_cast<size_t>(RenderPassResourceId::Count)
             || info.write.resource!=contractResourceFor(info.output)
@@ -62,7 +68,6 @@ PresentationPlanValidation validatePresentationStagePlan(
             return {PresentationPlanError::InvalidOrder,index};
         outputs[output] = true;
         slots[slot] = true;
-        views[info.view] = true;
         previousOrder = info.order;
         havePrevious = true;
     }

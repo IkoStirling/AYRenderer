@@ -2,6 +2,7 @@
 #include "detail/RenderPipelinePolicy.h"
 #include "detail/PresentationStageCatalog.h"
 #include <algorithm>
+#include <utility>
 
 namespace ayt::render {
 
@@ -25,7 +26,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::PostProcess,
         RenderPassSlot::FXAA,
         RenderPassSlot::SMAA,
-#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) RenderPassSlot::Slot,
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct, PreViews) RenderPassSlot::Slot,
 #include "detail/PresentationStages.def"
 #undef AY_PRESENTATION_STAGE
         RenderPassSlot::Present,
@@ -126,7 +127,7 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::TAA,
         RenderPassSlot::FXAA,
         RenderPassSlot::SMAA,
-#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) RenderPassSlot::Slot,
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct, PreViews) RenderPassSlot::Slot,
 #include "detail/PresentationStages.def"
 #undef AY_PRESENTATION_STAGE
         RenderPassSlot::Present,
@@ -150,8 +151,14 @@ bool RenderPipelineDesc::contains(RenderPassSlot slot) const noexcept
 namespace detail {
 RenderPipelineDesc resolveRenderPipelineDesc(const RenderPipelineDesc& requested)
 {
-    RenderPipelineDesc resolved = requested.passes.empty()
-        ? RenderPipelineDesc::makeDefault() : requested;
+    RenderPipelineDesc resolved = requested;
+    if(resolved.passes.empty()) {
+        auto product=RenderPipelineDesc::makeDefault();
+        resolved.passes=std::move(product.passes);
+        resolved.path=product.path;
+        // Empty assembly selects the default product, while host execution
+        // preferences (including future appended knobs) remain the caller's.
+    }
     // Preserve source compatibility for descriptors predating Present.
     // Validation and GPU lifetime changes remain the caller's responsibility.
     ensurePresentAfterPostProcess(resolved);

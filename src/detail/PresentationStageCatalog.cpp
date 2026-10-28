@@ -13,7 +13,7 @@ constexpr auto kColorReads=std::to_array<RenderPassResourceRead>({
 std::span<const RenderPassResourceRead> extraReads(RenderPassSlot slot)
 {
     switch(slot) {
-#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) \
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct, PreViews) \
     case RenderPassSlot::Slot:return presentationStageExtraReads<RenderPassSlot::Slot>();
 #include "detail/PresentationStages.def"
 #undef AY_PRESENTATION_STAGE
@@ -73,7 +73,7 @@ void appendPrimaryPresentationProgram(std::vector<shader::ShaderBuildJob>& jobs,
 
 void appendPresentationStageShaders(std::vector<shader::ShaderBuildJob>& jobs)
 {
-#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) \
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct, PreViews) \
     appendPresentationStagePrograms<RenderPassSlot::Slot>(jobs);
 #include "detail/PresentationStages.def"
 #undef AY_PRESENTATION_STAGE

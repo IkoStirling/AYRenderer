@@ -65,7 +65,7 @@ AY_RENDER_VIEW(247, "SMAA")
 AY_RENDER_VIEW(248, "SMAA")
 AY_RENDER_VIEW(249, "SMAA")
 
-#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) AY_RENDER_VIEW(View, #Slot)
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct, PreViews) AY_RENDER_STAGE_VIEW(Slot, View)
 #include "detail/PresentationStages.def"
 #undef AY_PRESENTATION_STAGE
 
