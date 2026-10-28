@@ -1,11 +1,9 @@
 #include "detail/RenderPipelineLifecycle.h"
 #include "detail/RenderPipeline.h"
-#include "detail/AnalogDisplayPass.h"
+#include "detail/PresentationPass.h"
 #include "detail/AutoExposurePass.h"
 #include "detail/BloomBlurPass.h"
 #include "detail/BloomExtractPass.h"
-#include "detail/ColorGradingPass.h"
-#include "detail/ColorStylizationPass.h"
 #include "detail/DeferredDecalPass.h"
 #include "detail/DepthHazePass.h"
 #include "detail/EditorOverlayPass.h"
@@ -21,9 +19,7 @@
 #include "detail/SMAAPass.h"
 #include "detail/SSAOPass.h"
 #include "detail/SsrPass.h"
-#include "detail/StylizedOutlinePass.h"
 #include "detail/TAAPass.h"
-#include "detail/TemporalFeedbackPass.h"
 #include "detail/TransparentPass.h"
 #include "detail/VolumetricPass.h"
 #include "detail/CloudPass.h"
@@ -72,11 +68,7 @@ void destroyPipelineGpuResources(RenderPipeline& pipeline, BGFXAdapter& adapter)
     destroy<FXAAPass>(pipeline, adapter);
     destroy<SMAAPass>(pipeline, adapter);
     destroy<TAAPass>(pipeline, adapter);
-    destroy<ColorGradingPass>(pipeline, adapter);
-    destroy<ColorStylizationPass>(pipeline, adapter);
-    destroy<StylizedOutlinePass>(pipeline, adapter);
-    destroy<TemporalFeedbackPass>(pipeline, adapter);
-    destroy<AnalogDisplayPass>(pipeline, adapter);
+    destroyPresentationResources(pipeline, adapter);
     destroy<PresentPass>(pipeline, adapter);
     destroy<EditorOverlayPass>(pipeline, adapter);
     // ForwardOpaque/Forward2DOpaque own no private GPU objects. UIPass borrows

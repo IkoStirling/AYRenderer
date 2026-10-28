@@ -86,6 +86,18 @@ struct PhoskiaGpuFixture {
     bgfx::TextureHandle readback = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle target = BGFX_INVALID_HANDLE;
     static constexpr uint16_t size = 4;
+    // Fixture copies follow every main producer in the complete View remap.
+    // View55 is a point-compute reservation ordered before post-processing.
+    static constexpr bgfx::ViewId readbackView = 255;
+    static_assert([] {
+        size_t readbackRank=0;
+        for(size_t i=0;i<kRenderViewRemap.size();++i)
+            if(kRenderViewRemap[i]==readbackView)readbackRank=i;
+        for(const auto& stage:kPresentationStages)
+            for(size_t i=0;i<kRenderViewRemap.size();++i)
+                if(kRenderViewRemap[i]==stage.view && i>=readbackRank)return false;
+        return true;
+    }(), "GPU fixture readback must follow all registered color producers");
 
     ~PhoskiaGpuFixture() {
         if (adapter.isInitialized()) {
@@ -1233,7 +1245,7 @@ TEST_CASE(color_stylization_real_pass_matches_independent_pixel_and_bayer_oracle
         CHECK(graph.producedThisFrame(FgResourceId::StylizedColor));
         auto result=graph.resolveSemantic(FgSemantic::PresentSource);
         CHECK(result.idx==graph.resolve(FgResourceId::StylizedColor).idx);
-        bgfx::blit(55,readback,0,0,f.adapter.getFboAttachment(result,0));
+        bgfx::blit(PhoskiaGpuFixture::readbackView,readback,0,0,f.adapter.getFboAttachment(result,0));
         std::array<std::array<uint8_t,4>,16> actual{};
         const auto ready=bgfx::readTexture(readback,actual.data());
         for(int i=0;i<120 && f.adapter.gpuFrameCounter()<ready;++i)f.adapter.endFrame();
@@ -1336,7 +1348,7 @@ TEST_CASE(stylized_outline_real_pass_depth_normal_and_luminance_edges) {
         CHECK(pass.execute(ctx)==1);
         const auto output=graph.resolveSemantic(FgSemantic::PresentSource);
         CHECK(output.idx==graph.resolve(FgResourceId::OutlinedColor).idx);
-        bgfx::blit(55,readback,0,0,f.adapter.getFboAttachment(output,0));
+        bgfx::blit(PhoskiaGpuFixture::readbackView,readback,0,0,f.adapter.getFboAttachment(output,0));
         std::array<std::array<uint8_t,4>,16> actual{};const auto ready=bgfx::readTexture(readback,actual.data());
         for(int i=0;i<120 && f.adapter.gpuFrameCounter()<ready;++i)f.adapter.endFrame();
         CHECK(f.adapter.gpuFrameCounter()>=ready);
@@ -1389,7 +1401,7 @@ TEST_CASE(analog_display_real_pass_physical_mask_and_channel_offsets) {
         CHECK(graph.compile());CHECK(pass.execute(ctx)==0);graph.markProduced(FgResourceId::FinalLdrColor);
         CHECK(pass.execute(ctx)==1);const auto result=graph.resolveSemantic(FgSemantic::PresentSource);
         CHECK(result.idx==graph.resolve(FgResourceId::DisplayColor).idx);
-        bgfx::blit(55,readback,0,0,f.adapter.getFboAttachment(result,0));
+        bgfx::blit(PhoskiaGpuFixture::readbackView,readback,0,0,f.adapter.getFboAttachment(result,0));
         std::array<std::array<uint8_t,4>,16> actual{};const auto ready=bgfx::readTexture(readback,actual.data());
         for(int i=0;i<120 && f.adapter.gpuFrameCounter()<ready;++i)f.adapter.endFrame();
         CHECK(f.adapter.gpuFrameCounter()>=ready);int mismatch=0;
@@ -1451,7 +1463,7 @@ TEST_CASE(temporal_feedback_real_pass_sequences_and_history_lifecycle) {
         if(draws!=1)return Image{};
         const auto output=graph.resolveSemantic(FgSemantic::PresentSource);CHECK(output.idx==pass.readFbo().idx);
         CHECK(bb.findProduced(BlackboardResourceId::FeedbackHistoryWrite)!=nullptr);
-        bgfx::blit(55,readback,0,0,f.adapter.getFboAttachment(output,0));Image actual{};
+        bgfx::blit(PhoskiaGpuFixture::readbackView,readback,0,0,f.adapter.getFboAttachment(output,0));Image actual{};
         const auto readyFrame=bgfx::readTexture(readback,actual.data());
         for(int i=0;i<120 && f.adapter.gpuFrameCounter()<readyFrame;++i)f.adapter.endFrame();
         CHECK(f.adapter.gpuFrameCounter()>=readyFrame);return actual;
@@ -2164,6 +2176,9 @@ TEST_CASE(performance_spot_volume_perspective_rays_match_independent_cpu_integra
         const auto identity=ayt::math::Float4x4::identity();for(const auto* n:{"fogShadow0","fogShadow1","fogShadow2"})p.setUniform(p.getUniformBinding(n),&identity,64);
         for(const auto* n:{"fogShadowRect0","fogShadowRect1","fogShadowRect2"})u(n,{0,0,1,1});
         u("fogShadowParams",{0,0,0,0});u("fogCamera",{0,8,-8,0});u("fogMedium",{.1f,.8f,0,30});u("fogOptions",{64,0,0,2});
+        // One neutral optical lobe: zero is an empty prism, not the identity.
+        u("fogLens",{0,1,0,0});u("fogIntegration",{0,0,0,0});
+        u("fogNoise",{0,0,0,0});u("fogDensityGrid",{0,0,0,0});u("fogIesSettings",{0,0,0,0});
         u("fogCenter",{0,0,0,0});u("fogExtent",{100,100,100,0});u("fogTint",{1,1,1,0});
         u("fogLightPosition",{0,7,0,2});u("fogLightDirection",{0,-1,0,20});u("fogLightColor",{500,0,0,0});u("fogSpot",{.97f,.9f,std::tan(std::acos(.9f)),aperture});
         u("fogPatternSettings",{0,0,1,0});u("fogPatternOptics",{0,1,0,0});u("fogPatternRight",{1,0,0,std::tan(std::acos(.97f))});u("fogPatternUp",{0,0,1,0});
@@ -2414,6 +2429,9 @@ TEST_CASE(performance_surface_gpu_matches_brdf_pattern_shadow_and_unlit_contract
             tex("surfaceAlbedo",albedo);tex("surfaceNormal",normal);tex("surfacePosition",mode==4?unlit:mode==5?edge:world);tex("surfaceCoverage",coverage);tex("shadowAtlas",mode==7?softShadow:dark);tex("patternGobo",gobo);
             u("performancePosition",{0,0,-2,10});u("performanceDirection",{0,0,1,0});u("performanceColor",{10,0,0,0});
             u("performanceCone",{.95f,.8f,.75f,0});u("performanceRight",{1,0,0,0});u("performanceUp",{0,1,0,0});
+            // Preserve this BRDF/pattern oracle's original single-beam input
+            // after the production shader gained an explicit prism count.
+            u("performanceLens",{0,1,0,0});u("performanceIesSettings",{0,0,0,0});
             u("performancePatternSettings",{mode==1?1.f:mode==2?3.f:mode==6?5.f:0.f,0,1,0});u("performanceEye",{0,0,-1,0});
             u("performancePatternOptics",{0,mode==5?.1f:1.f,0,0});
             const auto identity=ayt::math::Float4x4::identity();p.setUniform(p.getUniformBinding("performanceShadow"),&identity,64);

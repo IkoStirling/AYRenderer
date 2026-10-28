@@ -37,6 +37,7 @@
 
 #include "AYRenderer/RenderTypes.h"
 #include "detail/RenderTargetPool.h"
+#include "detail/RenderResourceIds.h"
 
 #include <cstdint>
 #include <memory>
@@ -50,85 +51,9 @@ namespace ayt::render::detail
 // 实际实现文件 FgResource.cpp 才 include BGFXAdapter.h。
 class BGFXAdapter;
 
-// 资源 ID ── cutsheet §3 "命名资源"。enum 不是字符串,防拼写
-// 错误、零运行时查表、所有权清晰。append-only,后续若需新增 ID
-// 加到 `Count` 之前(ABI 锁)。
-enum class FgResourceId : uint8_t {
-    SceneColor   = 0,
-    BloomBright  = 1,
-    BloomBlurA   = 2,
-    BloomBlurB   = 3,
-    // Full-resolution scene-linear color after opaque depth haze. HazeHalf is
-    // retained as a source-compatible alias for the stable numeric resource
-    // id; new code must use HazeColor because the target is no longer half-res.
-    HazeColor    = 4,
-    HazeHalf     = HazeColor,
-    // §A1 SSAO MVP (2026-07-24, mid-term plan `frame-graph-mvp.md`
-    // §S2 / cutsheet SSAO MVP Gate) — append-only ABI value 5.
-    // SSAOPass writes the full-resolution RGBA8 occlusion RT
-    // (R = aoOcclusion; A = geometry coverage). Resolve stays invalid
-    // unless the complete enabled GBuffer -> SSAO -> Lighting chain and a
-    // non-zero sanitized strength/radius are present. Never reorder or repurpose
-    // existing values. Test pin:
-    //   static_cast<uint8_t>(FgResourceId::SSAOTexture) == 5
-    SSAOTexture  = 5,
-    // Display-referred RGBA8 output of PostProcess. PresentPass consumes this
-    // current-frame result; FXAA / grading nodes may read and replace
-    // the presentation source without writing the backbuffer directly.
-    FinalLdrColor = 6,
-    // Display-referred RGBA8 output of FXAAPass. The pass promotes
-    // PresentSource to this resource only after a successful current-frame
-    // submit; otherwise presentation remains on FinalLdrColor.
-    FxaaColor     = 7,
-    // Display-referred RGBA8 output of ColorGradingPass. The pass samples a
-    // 2D strip LUT and promotes PresentSource transactionally after submit.
-    ColorGradedColor = 8,
-    // SMAA 1x private intermediates and final display-referred output. Edge
-    // and blend targets use linear/clamp sampling because endpoint-pattern
-    // decoding intentionally samples at quarter-pixel offsets. SmaaColor
-    // transactionally replaces PresentSource after all three stages submit.
-    SmaaEdges        = 9,
-    SmaaBlendWeights = 10,
-    SmaaColor        = 11,
-    // Persistent display-referred TAA history/output. The physical FBO is
-    // imported from TAAPass because it must survive beginFrame/compile.
-    TaaColor         = 12,
-    // External deferred inputs used by SSAO/TAA. They remain pass-owned, but
-    // declaring them here makes temporal dependencies visible to the graph
-    // instead of hiding them behind PassExecContext producer pointers.
-    GBufferNormal        = 13,
-    GBufferWorldPosition = 14,
-    GBufferSurface       = 15,
-    GBufferDepth         = 16,
-    MotionVectors        = 17,
-    TaaHistory           = 18,
-    // Bloom v2 private pyramid. BloomBright remains the half-resolution
-    // thresholded root and BloomBlurB remains the stable composite source.
-    BloomPyramidQuarter  = 19,
-    BloomPyramidEighth   = 20,
-    BloomPyramidSixteenth = 21,
-    BloomPyramidUpEighth = 22,
-    BloomPyramidUpQuarter = 23,
-    AutoExposureHistory   = 24,
-    AutoExposure          = 25,
-    // Sentinel ── 测试和实现都靠它做数组大小 / 上界判断。
-    SsrColor = 26,
-    GBufferAlbedo = 27,
-    VolumetricColor = 28,
-    BaseGBuffer = 29,
-    StylizedColor = 30,
-    StylizationDepth = 31,
-    OutlinedColor = 32,
-    DisplayColor = 33,
-    TemporalColor = 34,
-    FeedbackHistory = 35,
-    CloudColor = 36,
-    VolumetricIntegration = 37,
-    FroxelField = 38,
-    FroxelHistoryRead = 39,
-    FroxelHistoryWrite = 40,
-    Count        = 41,
-};
+// Resource IDs retain their append-only numeric ABI. RenderResourceIds.def
+// generates both domains, counts, diagnostic names and explicit mappings.
+// Resource identities and the legacy HazeHalf alias come from RenderResourceIds.h.
 
 // 纹理缩放 ── full / half / quarter。MVP 只用 full + half。
 enum class FgTextureScale : uint8_t {
@@ -284,6 +209,10 @@ public:
     // 把一个外部 FBO 标记为某 logical 资源的物理来源。external RT
     // FG 不 own ── 不 destroy / 不 resize(由其 owner 管)。
     void importExternal(FgResourceId id, bgfx::FrameBufferHandle handle);
+    // Read-only declaration checks for extension boundaries. They do not
+    // resolve/allocate a target or alter the legacy replacement operation.
+    bool resourceDeclared(FgResourceId id) const noexcept;
+    bool canImportExternal(FgResourceId id, bgfx::FrameBufferHandle handle) const noexcept;
 
     // 声明一个 logical 资源。同一 ID 重复声明保留最后一次(用于
     // resize 后重新声明 format / size 变化)。`enabled==false` 的
@@ -292,7 +221,7 @@ public:
 
     // 声明一个 logical pass。`enabled==false` 的 pass 不进 live set；
     // terminal/side-effect pass 与 semantic 输出作为反向活跃性根。
-    void addPass(const FgPassDesc& desc);
+    void addPass(FgPassDesc desc);
 
     // Registers the runtime eligibility of a concrete pipeline slot. Compile
     // intersects this state with graph liveness; RenderPipeline then queries
@@ -336,6 +265,14 @@ public:
     bool producedThisFrame(FgResourceId id) const noexcept;
     bool semanticProducedThisFrame(FgSemantic sem) const noexcept;
 
+    // A logical terminal output may live on the default backbuffer. It cannot
+    // be sampled or promoted to PresentSource. Keep the last readable source
+    // intact so Present can fall back if the terminal draw does not submit.
+    void setDirectPresentationOutput(FgResourceId output) noexcept;
+    bool isDirectPresentationOutput(FgResourceId output) const noexcept;
+    void markDirectlyPresented(FgResourceId output) noexcept;
+    bool directlyPresentedThisFrame() const noexcept { return _directlyPresented; }
+
     // ─── 生命周期 / 统计 ───────────────────────────────────────
     // 释放 FG-owned pool leases(external 不动)。尺寸变化时 owned RT
     // 在下次 resolve 时按新 key 获取；logical 资源声明保留。
@@ -364,6 +301,8 @@ private:
     uint16_t        _viewportW   = 0;
     uint16_t        _viewportH   = 0;
     bool            _compiled    = false;
+    FgResourceId    _directPresentationOutput = FgResourceId::Count;
+    bool            _directlyPresented = false;
     static constexpr uint16_t kDefaultIdleReleaseFrames = 120;
     uint16_t        _idleReleaseFrames = kDefaultIdleReleaseFrames;
     uint16_t        _releasedIdleTargets = 0;

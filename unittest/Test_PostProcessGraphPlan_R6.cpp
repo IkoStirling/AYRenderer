@@ -1,7 +1,7 @@
 #include "AYTest.h"
 
 #include "detail/BGFXAdapter.h"
-#include "detail/PostProcessGraphPlan.h"
+#include "PostProcessGraphPlanFixture.h"
 
 #include <bgfx/bgfx.h>
 
@@ -9,7 +9,7 @@ using ayt::render::detail::BGFXAdapter;
 using ayt::render::detail::FgCompileErrorCode;
 using ayt::render::detail::FgResourceId;
 using ayt::render::detail::FrameGraph;
-using ayt::render::detail::PostProcessGraphPlanInput;
+using ayt::render::detail::PostProcessGraphPlanFixtureInput;
 using ayt::render::detail::PostProcessGraphPlanResult;
 using ayt::render::detail::buildPostProcessGraphPlan;
 
@@ -22,9 +22,9 @@ bgfx::FrameBufferHandle fakeHandle(uint16_t index)
     return handle;
 }
 
-PostProcessGraphPlanInput baseInput()
+PostProcessGraphPlanFixtureInput baseInput()
 {
-    PostProcessGraphPlanInput input{};
+    PostProcessGraphPlanFixtureInput input{};
     input.width = 1280;
     input.height = 720;
     input.sceneColor = fakeHandle(0x70);
@@ -60,7 +60,7 @@ TEST_CASE(full_temporal_chain_preserves_every_required_dependency)
 {
     BGFXAdapter adapter;
     FrameGraph graph(adapter);
-    PostProcessGraphPlanInput input = baseInput();
+    PostProcessGraphPlanFixtureInput input = baseInput();
     input.taaWriteTarget = fakeHandle(0x71);
     input.autoExposureHistory = fakeHandle(0x76);
     input.autoExposureTarget = fakeHandle(0x77);
@@ -97,7 +97,7 @@ TEST_CASE(spatial_chain_orders_fxaa_before_smaa)
 {
     BGFXAdapter adapter;
     FrameGraph graph(adapter);
-    PostProcessGraphPlanInput input = baseInput();
+    PostProcessGraphPlanFixtureInput input = baseInput();
     input.finalLdr = true;
     input.fxaa = true;
     input.smaa = true;
@@ -117,7 +117,7 @@ TEST_CASE(temporal_priority_culls_a_disconnected_spatial_branch)
 {
     BGFXAdapter adapter;
     FrameGraph graph(adapter);
-    PostProcessGraphPlanInput input = baseInput();
+    PostProcessGraphPlanFixtureInput input = baseInput();
     input.taaWriteTarget = fakeHandle(0x72);
     input.finalLdr = true;
     input.motionVector = true;
@@ -139,7 +139,7 @@ TEST_CASE(invalid_bloom_partial_chain_fails_closed_at_compile)
 {
     BGFXAdapter adapter;
     FrameGraph graph(adapter);
-    PostProcessGraphPlanInput input = baseInput();
+    PostProcessGraphPlanFixtureInput input = baseInput();
     input.bloomBlur = true;
     input.finalLdr = true;
 

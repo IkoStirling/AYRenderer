@@ -1,4 +1,5 @@
 #include "detail/RenderPassContract.h"
+#include "detail/PresentationStageCatalog.h"
 
 #include <array>
 #include <cstddef>
@@ -198,52 +199,11 @@ constexpr std::array<RenderPassResourceWrite, 3> kSmaaWrites = {{
     output(Id::SmaaBlendWeights, Life::Transient, Format::RGBA8),
     output(Id::SmaaColor, Life::Transient, Format::RGBA8),
 }};
-constexpr std::array<RenderPassResourceRead, 5> kGradingReads = {{
-    required(Id::FinalLdrColor),
-    optional(Id::TaaColor),
-    optional(Id::FxaaColor),
-    optional(Id::SmaaColor),
-    optional(Id::OutlinedColor),
-}};
-constexpr std::array<RenderPassResourceWrite, 1> kGradingWrites = {{
-    output(Id::ColorGradedColor, Life::Transient, Format::RGBA8),
-}};
-constexpr std::array<RenderPassResourceRead, 6> kStyleReads = {{
-    required(Id::FinalLdrColor), optional(Id::TaaColor), optional(Id::FxaaColor),
-    optional(Id::SmaaColor), optional(Id::ColorGradedColor),
-    optional(Id::OutlinedColor),
-}};
-constexpr std::array<RenderPassResourceWrite, 1> kStyleWrites = {{
-    output(Id::StylizedColor,Life::Transient,Format::RGBA8),
-}};
-constexpr std::array<RenderPassResourceRead, 8> kDisplayReads = {{
-    required(Id::FinalLdrColor),optional(Id::TaaColor),optional(Id::FxaaColor),optional(Id::SmaaColor),
-    optional(Id::OutlinedColor),optional(Id::ColorGradedColor),optional(Id::StylizedColor),
-    optional(Id::TemporalColor),
-}};
-constexpr std::array<RenderPassResourceWrite, 1> kDisplayWrites = {{output(Id::DisplayColor,Life::Transient,Format::RGBA8)}};
-constexpr std::array<RenderPassResourceRead, 9> kPresentReads = {{
-    required(Id::FinalLdrColor),
-    optional(Id::TaaColor),
-    optional(Id::FxaaColor),
-    optional(Id::SmaaColor),
-    optional(Id::ColorGradedColor),
-    optional(Id::StylizedColor),
-    optional(Id::OutlinedColor),
-    optional(Id::DisplayColor),
-    optional(Id::TemporalColor),
-}};
-constexpr std::array<RenderPassResourceRead, 8> kFeedbackReads = {{
-    required(Id::FinalLdrColor),optional(Id::TaaColor),optional(Id::FxaaColor),optional(Id::SmaaColor),
-    optional(Id::OutlinedColor),optional(Id::ColorGradedColor),optional(Id::StylizedColor),optional(Id::FeedbackHistory),
-}};
-constexpr std::array<RenderPassResourceWrite, 1> kFeedbackWrites = {{output(Id::TemporalColor,Life::PersistentHistory,Format::RGBA8)}};
-constexpr std::array<RenderPassResourceRead, 7> kOutlineReads = {{
-    required(Id::FinalLdrColor),optional(Id::TaaColor),optional(Id::FxaaColor),optional(Id::SmaaColor),
-    optional(Id::SceneDepth),optional(Id::GBufferDepth),optional(Id::GBufferNormal),
-}};
-constexpr std::array<RenderPassResourceWrite, 1> kOutlineWrites = {{
-    output(Id::OutlinedColor,Life::Transient,Format::RGBA8),
+// All registered presentation stages consume the previous valid color.
+// Their optional producer ordering is derived from the catalog in validation.
+constexpr std::array<RenderPassResourceRead, 4> kPresentReads = {{
+    required(Id::FinalLdrColor), optional(Id::TaaColor),
+    optional(Id::FxaaColor), optional(Id::SmaaColor),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kPresentWrites = {{
     output(Id::PresentedColor, Life::External, Format::RGBA8,
@@ -300,9 +260,7 @@ constexpr std::array<RenderPassResourceRead, 6> kCloudReads = {{
     optional(Id::SsrColor), optional(Id::HazeColor), optional(Id::VolumetricColor),
 }};
 constexpr std::array<RenderPassResourceWrite, 1> kCloudWrites = {{output(Id::CloudColor, Life::Transient, Format::RGBA16F)}};
-const std::array<RenderPassContract, 30>& contracts() noexcept
-{
-    static const std::array<RenderPassContract, 30> table = {{
+constexpr auto kCoreContracts = std::to_array<RenderPassContract>({
         {RenderPassSlot::Shadow, "Shadow", noReads, kShadowWrites, false},
         {RenderPassSlot::Skybox, "Skybox", noReads, kSkyboxWrites, false},
         {RenderPassSlot::ForwardOpaque, "ForwardOpaque", kForwardReads,
@@ -331,8 +289,6 @@ const std::array<RenderPassContract, 30>& contracts() noexcept
         {RenderPassSlot::Present, "Present", kPresentReads, kPresentWrites,
          true},
         {RenderPassSlot::FXAA, "FXAA", kFxaaReads, kFxaaWrites, false},
-        {RenderPassSlot::ColorGrading, "ColorGrading", kGradingReads,
-         kGradingWrites, false},
         {RenderPassSlot::SMAA, "SMAA", kSmaaReads, kSmaaWrites, false},
         // Optional diagnostic draw writes the backbuffer after Present;
         // the ordinary resolve only writes the persistent history target.
@@ -344,12 +300,27 @@ const std::array<RenderPassContract, 30>& contracts() noexcept
         {RenderPassSlot::SSR, "SSR", kSsrReads, kSsrWrites, false},
         {RenderPassSlot::Volumetric, "Volumetric", kVolumetricReads, kVolumetricWrites, false},
         {RenderPassSlot::DeferredDecal, "DeferredDecal", kDecalReads, kDecalWrites, true},
-        {RenderPassSlot::ColorStylization, "ColorStylization", kStyleReads, kStyleWrites, false},
-        {RenderPassSlot::StylizedOutline, "StylizedOutline", kOutlineReads, kOutlineWrites, false},
-        {RenderPassSlot::AnalogDisplay, "AnalogDisplay", kDisplayReads, kDisplayWrites, false},
-        {RenderPassSlot::TemporalFeedback, "TemporalFeedback", kFeedbackReads, kFeedbackWrites, true},
         {RenderPassSlot::Clouds, "Clouds", kCloudReads, kCloudWrites, false},
-    }};
+});
+
+const std::array<const RenderPassContract*, 256>& contracts() noexcept
+{
+    // Store each contract once. A sparse pointer index avoids constructing a
+    // large by-value temporary on the render thread's initialization stack.
+    static const auto stages = [] {
+        std::array<RenderPassContract, kPresentationStages.size()> result{};
+        for (size_t index = 0; index < result.size(); ++index)
+            result[index] = presentationStageContract(kPresentationStages[index].slot);
+        return result;
+    }();
+    static const auto table = [] {
+        std::array<const RenderPassContract*, 256> result{};
+        for (const auto& contract : kCoreContracts)
+            result[static_cast<uint8_t>(contract.slot)] = &contract;
+        for (const auto& contract : stages)
+            result[static_cast<uint8_t>(contract.slot)] = &contract;
+        return result;
+    }();
     return table;
 }
 
@@ -359,10 +330,10 @@ const RenderPassContract* renderPassContract(RenderPassSlot slot) noexcept
 {
     const auto index = static_cast<std::size_t>(slot);
     const auto& table = contracts();
-    if (index >= table.size() || table[index].slot != slot) {
+    if (index >= table.size()) {
         return nullptr;
     }
-    return &table[index];
+    return table[index];
 }
 
 RenderPipelineContractValidation validateRenderPipelineContracts(
@@ -419,6 +390,19 @@ RenderPipelineContractValidation validateRenderPipelineContracts(
                     static_cast<uint16_t>(passIndex), slot, read.resource});
             }
         }
+        // A chain consumer follows every mounted earlier color stage. This
+        // replaces per-consumer lists of every possible upstream effect.
+        const auto* colorStage = presentationStageInfo(slot);
+        if (colorStage || slot == RenderPassSlot::Present) {
+            for (const auto& producer : kPresentationStages) {
+                if (colorStage && producer.order >= colorStage->order) continue;
+                const auto resourceIndex = static_cast<std::size_t>(producer.write.resource);
+                if (mountedOutputs[resourceIndex] && !available[resourceIndex]) {
+                    result.errors.push_back({RenderPipelineContractErrorCode::OptionalProducerAfterConsumer,
+                        static_cast<uint16_t>(passIndex), slot, producer.write.resource});
+                }
+            }
+        }
         for (const RenderPassResourceWrite& write : contract->writes) {
             available[static_cast<std::size_t>(write.resource)] = true;
         }
@@ -445,25 +429,7 @@ const char* renderPipelineContractErrorName(
 
 const char* renderPassResourceName(RenderPassResourceId resource) noexcept
 {
-    static constexpr std::array<const char*,
-        static_cast<std::size_t>(RenderPassResourceId::Count)> names = {{
-        "SceneColor", "SceneDepth", "ShadowAtlas", "SkyColor",
-        "GBufferAlbedo", "GBufferNormal", "GBufferWorldPosition",
-        "GBufferSurface", "GBufferDepth", "MotionVectors", "SSAO",
-        "HazeColor", "BloomBright", "BloomBlurA", "BloomBlurB",
-        "FinalLdrColor", "TaaColor", "FxaaColor", "SmaaEdges",
-        "SmaaBlendWeights", "SmaaColor", "ColorGradedColor",
-        "SelectionMask", "PresentedColor", "BloomPyramidQuarter",
-        "BloomPyramidEighth", "BloomPyramidSixteenth",
-        "BloomPyramidUpEighth", "BloomPyramidUpQuarter",
-        "AutoExposureHistory", "AutoExposure", "SsrColor", "OpaqueLightingColor",
-        "VolumetricColor",
-        "DecalGBuffer",
-        "StylizedColor",
-        "OutlinedColor", "DisplayColor", "TemporalColor", "FeedbackHistory", "CloudColor",
-    }};
-    const auto index = static_cast<std::size_t>(resource);
-    return index < names.size() ? names[index] : "UnknownResource";
+    return contractResourceName(resource);
 }
 
 } // namespace ayt::render::detail

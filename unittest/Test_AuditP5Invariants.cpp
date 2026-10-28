@@ -19,6 +19,7 @@
 //                ordering stay pinned.
 
 #include "AYTest.h"
+#include "ShaderIdentityExpectations.h"
 
 #include "AYRenderer/RenderTypes.h"
 #include "detail/DebugOverlay.h"
@@ -254,7 +255,7 @@ TEST_SUITE(AuditP5_T5_CacheKeyAndFormat)
 TEST_CASE(post_process_cache_key_tracks_sanitized_parameter_abi) {
     // Pin the runtime key so shader ABI changes cannot reuse stale binaries.
     CHECK(std::string_view(kPostProcessCacheKeyCStr)
-          == "postprocess_tonemap_aces_v13_auto_exposure_fs");
+          == renderer_test::kPostProcessSourceKey);
 }
 
 TEST_CASE(renderer_pipeline_cleanup_precedes_pipeline_clear) {

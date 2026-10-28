@@ -43,6 +43,9 @@ const char* presentPhoskiaSourceForTests() noexcept
 uint32_t PresentPass::execute(PassExecContext& ctx)
 {
     BGFXAdapter& adapter = ctx.adapter;
+    if (ctx.frameGraph && ctx.frameGraph->directlyPresentedThisFrame()) {
+        return 0;
+    }
     if (!adapter.isInitialized() || adapter.isNoopBackend()
         || ctx.viewportWidth == 0 || ctx.viewportHeight == 0
         || ctx.frameGraph == nullptr

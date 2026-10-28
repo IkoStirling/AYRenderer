@@ -6,11 +6,28 @@
 #include "detail/BgfxMatrix.h"
 #include "detail/PresentationStage.h"
 namespace ayt::render::detail {
+namespace {
+constexpr auto kOutlineContractReads=std::to_array<RenderPassResourceRead>({
+    {RenderPassResourceId::SceneDepth,false},
+    {RenderPassResourceId::GBufferDepth,false},
+    {RenderPassResourceId::GBufferNormal,false}});
+}
+void StylizedOutlinePass::preparePresentationResources(PresentationFrameContext& c,
+    PresentationStageFrame& stage) {
+    if(_settings.outlineMode<StylizationOutlineMode::Depth || _settings.outlineStrength<=0)return;
+    stage.imports.push_back({FgResourceId::StylizationDepth,
+        BGFXAdapter::isValid(c.gbuffer)?c.gbuffer:c.sceneColor});
+    stage.extraReads.push_back(FgResourceId::StylizationDepth);
+    if(_settings.outlineMode==StylizationOutlineMode::DepthNormal && BGFXAdapter::isValid(c.gbuffer)) {
+        stage.imports.push_back({FgResourceId::GBufferNormal,c.gbuffer});
+        stage.extraReads.push_back(FgResourceId::GBufferNormal);
+    }
+}
 uint32_t StylizedOutlinePass::execute(PassExecContext& ctx) {
     auto& a=ctx.adapter;
     if(!active())return 0;
     PresentationStageTargets targets;
-    if(!resolvePresentationStage(ctx,FgResourceId::OutlinedColor,targets))return 0;
+    if(!resolveTargets(ctx,targets))return 0;
     const auto target=targets.target;const auto color=targets.input;
     BlackboardGBufferView gb;
     const bool hasGbuffer=ctx.resourceBlackboard && ctx.resourceBlackboard->resolveGBuffer(gb)
@@ -54,11 +71,13 @@ uint32_t StylizedOutlinePass::execute(PassExecContext& ctx) {
     uniform("outlineThresholds",thresholds,sizeof(thresholds));uniform("outlineAvailable",available,sizeof(available));
     uniform("outlineColor",rgba,sizeof(rgba));uniform("styleViewport",size,sizeof(size));
     if(!ready)return 0;
-    configureFullscreenPassView(a,kViewId,target,0,0,ctx.viewportWidth,ctx.viewportHeight);
+    configureFullscreenPassView(a,kViewId,target,targets.x,targets.y,ctx.viewportWidth,ctx.viewportHeight);
     _geometry.bind(a);a.setStateDepthTestAlways();_program.submit({kViewId,0});
-    publishPresentationStage(ctx,FgResourceId::OutlinedColor);return 1;
+    publishOutput(ctx);return 1;
 }
 void StylizedOutlinePass::destroyResources(BGFXAdapter& adapter) {
     _program.reset();_geometry.destroy(adapter);_retryFrames=0;
 }
+AY_DEFINE_PRESENTATION_STAGE(StylizedOutline, StylizedOutlinePass, kStylizedOutlinePhoskiaSource, kOutlineContractReads)
+
 } // namespace ayt::render::detail

@@ -85,6 +85,9 @@ public:
     void resetResolution(uint32_t width, uint32_t height, bool vsync);
     void setMsaaSampleCount(uint32_t samples);
     uint32_t msaaSampleCount() const noexcept { return _msaa; }
+    // Qualified default-backbuffer path; output transfer/format assumptions
+    // must be rechecked before extending this to another backend/reset mode.
+    bool supportsDirectPresentation() const noexcept;
 
     // World matrix: true AYMath → column-major for bgfx::setTransform.
     void setTransform(const ayt::math::Float4x4& world);

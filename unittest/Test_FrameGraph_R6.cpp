@@ -243,4 +243,55 @@ TEST_CASE(reenabled_resource_cancels_pending_idle_release)
     CHECK(graph.retentionStats().idleResources == 0u);
 }
 
+TEST_CASE(imported_previous_contents_do_not_depend_on_a_later_current_frame_writer)
+{
+    using ayt::render::RenderPassSlot;
+    BGFXAdapter adapter;FrameGraph graph(adapter);
+    graph.beginFrame(64,48);
+    graph.importExternal(FgResourceId::FeedbackHistory,fakeHandle(70));
+    addFullColor(graph,FgResourceId::FinalLdrColor);
+    graph.setExecutionEligibility(RenderPassSlot::ColorGrading,true);
+    graph.setExecutionEligibility(RenderPassSlot::TemporalFeedback,true);
+    graph.addPass({"ReadPreviousContents",{FgResourceId::FeedbackHistory},{FgResourceId::FinalLdrColor},
+        true,false,static_cast<int16_t>(RenderPassSlot::ColorGrading)});
+    graph.addPass({"WriteLater",{},{FgResourceId::FeedbackHistory},
+        true,false,static_cast<int16_t>(RenderPassSlot::TemporalFeedback)});
+    graph.addPass({"Present",{FgResourceId::FinalLdrColor},{},true,true});
+    CHECK(graph.compile());CHECK(graph.stats().livePasses==2);
+    CHECK(graph.shouldExecute(RenderPassSlot::ColorGrading));
+    CHECK_FALSE(graph.shouldExecute(RenderPassSlot::TemporalFeedback));
+    CHECK(graph.resolve(FgResourceId::FeedbackHistory).idx==70);
+}
+
+TEST_CASE(pass_declarations_own_their_reads_and_writes_after_the_caller_changes_them)
+{
+    BGFXAdapter adapter;FrameGraph graph(adapter);graph.beginFrame(64,48);
+    graph.importExternal(FgResourceId::SceneColor,fakeHandle(70));
+    addFullColor(graph,FgResourceId::FinalLdrColor);
+    ayt::render::detail::FgPassDesc descriptor{
+        "Producer",{FgResourceId::SceneColor},{FgResourceId::FinalLdrColor},true};
+    graph.addPass(descriptor);
+    descriptor.reads.assign(1,FgResourceId::BloomBright);descriptor.writes.clear();descriptor.enabled=false;
+    graph.addPass({"Present",{FgResourceId::FinalLdrColor},{},true,true});
+    CHECK(graph.compile());CHECK(graph.stats().livePasses==2);CHECK(graph.stats().physicalTargets==1);
+    CHECK(graph.compileErrors().empty());
+}
+
+TEST_CASE(unimported_external_handles_are_not_counted_as_current_frame_resources)
+{
+    BGFXAdapter adapter;FrameGraph graph(adapter);
+    graph.beginFrame(64,48);
+    graph.importExternal(FgResourceId::SceneColor,fakeHandle(70));
+    graph.importExternal(FgResourceId::FeedbackHistory,fakeHandle(71));
+    graph.addPass({"Consumer",{FgResourceId::SceneColor},{},true});
+    CHECK(graph.compile());CHECK(graph.stats().logicalResources==2);
+    graph.beginFrame(64,48);
+    graph.importExternal(FgResourceId::SceneColor,fakeHandle(72));
+    graph.addPass({"Consumer",{FgResourceId::SceneColor},{},true});
+    CHECK(graph.compile());CHECK(graph.stats().logicalResources==1);
+    CHECK_FALSE(graph.resourceDeclared(FgResourceId::FeedbackHistory));
+    CHECK_FALSE(BGFXAdapter::isValid(graph.resolve(FgResourceId::FeedbackHistory)));
+    graph.beginFrame(64,48);CHECK(graph.compile());CHECK(graph.stats().logicalResources==0);
+}
+
 TEST_SUITE_END

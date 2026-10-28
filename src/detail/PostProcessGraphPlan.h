@@ -2,10 +2,12 @@
 
 #include "detail/FgResource.h"
 #include "detail/VolumetricGrid.h"
+#include "detail/PresentationStagePlan.h"
 
 #include <bgfx/bgfx.h>
 
 #include <cstdint>
+#include <span>
 
 namespace ayt::render::detail
 {
@@ -25,6 +27,10 @@ struct PostProcessGraphPlanInput {
     bgfx::FrameBufferHandle autoExposureHistory = BGFX_INVALID_HANDLE;
     bgfx::FrameBufferHandle autoExposureTarget = BGFX_INVALID_HANDLE;
 
+    // Prepared contributions are authoritative, including an empty chain.
+    std::span<const PresentationStageFrame> presentationStages;
+    bool allowDirectPresentation = false;
+
     bool ssao = false;
     bool haze = false;
     bool bloomExtract = false;
@@ -35,7 +41,6 @@ struct PostProcessGraphPlanInput {
     bool taa = false;
     bool fxaa = false;
     bool smaa = false;
-    bool colorGrading = false;
     bool smaaIntermediatePointSampled = false;
     bool ssr = false;
     bool volumetric = false;
@@ -46,18 +51,11 @@ struct PostProcessGraphPlanInput {
     bgfx::FrameBufferHandle volumetricHistoryWrite=BGFX_INVALID_HANDLE;
     bool decals = false;
     bgfx::FrameBufferHandle baseGBuffer = BGFX_INVALID_HANDLE;
-    bool colorStylization = false;
-    bool stylizedOutline = false;
-    bool analogDisplay = false;
-    bool temporalFeedback = false;
-    bgfx::FrameBufferHandle feedbackReadHistory = BGFX_INVALID_HANDLE;
-    bgfx::FrameBufferHandle feedbackWriteTarget = BGFX_INVALID_HANDLE;
-    bool stylizationDepth = false;
-    bool stylizationNormals = false;
 };
 
 struct PostProcessGraphPlanResult {
     bool compileSucceeded = false;
+    PresentationPlanValidation presentationValidation;
     FgResourceId hdrSceneSource = FgResourceId::SceneColor;
     FgResourceId antialiasingSource = FgResourceId::FinalLdrColor;
     FgResourceId presentationSource = FgResourceId::FinalLdrColor;

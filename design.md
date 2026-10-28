@@ -1,5 +1,17 @@
 # AYRenderer Design
 
+## 可选颜色阶段接入收敛（2026-10-29）
+
+AA后的五个可选阶段通过PresentationStages.def与PresentationPass接入，结构声明同时供工厂、产品链、
+静态合同、图连接、View/计时归属和离线shader清单使用。具体创建、源码和额外读依赖定义在各阶段cpp，
+公共装配不包含新效果头或专用资格分支。颜色前驱按顺序推导，Present不枚举全部艺术输出。
+
+附加几何与历史准备保留在对应阶段；成功提交才发布当前颜色，失败保留上游，关闭不产生identity draw。
+阶段索引在装配时建立，逐帧贡献容器保留容量但清除旧imports/targets。纯图声明与GPU准备分别归属，
+重复/逆序/不兼容输出和颜色import覆盖可诊断。全部固定View的顺序及统计归属进一步集中到RenderViews.def。
+公开设置、作品格式、旧数值和实际效果顺序不变；该机制没有自动shader融合、全帧调度或跨视图扩展。
+接入、测试范围和后续融合门槛见[阶段指南](docs/presentation-stages.md)。
+
 ## SceneOverlay Sprite nearest sampling (2026-10-28)
 
 The nearest Sprite shader receives the same atlas texel extent as Retro AA.

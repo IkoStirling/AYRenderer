@@ -1,6 +1,7 @@
 #pragma once
 
 #include "detail/BGFXAdapter.h"
+#include "detail/RenderViewCatalog.h"
 
 #include <array>
 #include <cstddef>
@@ -9,20 +10,27 @@ namespace ayt::render::detail
 {
 
 // AYRenderer reserves the 8-bit ViewId range (0..255); UI owns 255.
-inline constexpr std::size_t kRenderViewCapacity = 256u;
 
 // Stable view IDs are kept for ABI/debug tooling, while execution follows the
 // actual data dependencies. SSAO consumes GBuffer and completes before
 // Lighting, which applies AO only to ambient/IBL. Opaque haze then completes
 // before transparent composition, and Bloom consumes the resulting HDR color.
 // GPU particle compute runs before both transparent 3D and overlay 2D draws.
-inline constexpr std::array<bgfx::ViewId, 75> kRenderViewOrder = {
-    243, 55, 56, 57, 58, 59, 1, 18, 19, 20, 21, 22, 23, 24, 25,
-    2, 0,
-    6, 7, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 3, 14,
-    8, 32, 13, 241, 240, 33, 242, 54, 9, 244, 253, 246, 10, 11, 26, 27, 28, 29, 30, 12, 31,
-    15, 5, 17, 247, 248, 249, 51, 4, 50, 53, 52, 16, 245, 250, 254, 251, 252
-};
+inline constexpr auto kRenderViewOrder = [] {
+    std::array<bgfx::ViewId,kOrderedRenderViews.size()> order{};
+    for(std::size_t i=0;i<order.size();++i)order[i]=kOrderedRenderViews[i].view;
+    return order;
+}();
+
+static_assert([] {
+    if(kRenderViewOrder.size()>kRenderViewCapacity)return false;
+    std::array<bool,kRenderViewCapacity> used{};
+    for(auto view:kRenderViewOrder) {
+        if(view>=used.size() || used[view])return false;
+        used[view]=true;
+    }
+    return true;
+}(), "Built-in and presentation GPU Views must be unique and fit the remap");
 
 // bgfx::setViewOrder does not accept a sparse execution list. Its remap table
 // is a complete rank -> ViewId permutation, and Frame::sort later inverts that

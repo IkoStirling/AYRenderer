@@ -7,6 +7,7 @@ struct PresentationStageTargets {
     bgfx::FrameBufferHandle target=BGFX_INVALID_HANDLE;
     bgfx::TextureHandle input=BGFX_INVALID_HANDLE;
     const char* failure=nullptr;
+    uint16_t x=0, y=0;
 };
 // Common safety boundary only; each stage retains its shader, algorithm,
 // settings and resource ownership. No target is resolved on Noop/stale input.

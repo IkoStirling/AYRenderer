@@ -1,0 +1,86 @@
+// Canonical resource identities; explicit numeric values are append-only.
+// SHARED(FgName, FgValue, ContractName, ContractValue).
+// Separate FRAME/CONTRACT rows keep graph and contract identities distinct.
+// Counts, labels and cross-domain mappings are generated from these rows.
+
+AY_RENDER_RESOURCE_SHARED(SceneColor, 0, SceneColor, 0)
+AY_RENDER_RESOURCE_SHARED(BloomBright, 1, BloomBright, 12)
+AY_RENDER_RESOURCE_SHARED(BloomBlurA, 2, BloomBlurA, 13)
+AY_RENDER_RESOURCE_SHARED(BloomBlurB, 3, BloomBlurB, 14)
+    // Full-resolution scene-linear color after opaque depth haze. HazeHalf is
+    // retained as a source-compatible alias for the stable numeric resource
+    // id; new code must use HazeColor because the target is no longer half-res.
+AY_RENDER_RESOURCE_SHARED(HazeColor, 4, HazeColor, 11)
+    // §A1 SSAO MVP (2026-07-24, mid-term plan `frame-graph-mvp.md`
+    // §S2 / cutsheet SSAO MVP Gate) — append-only ABI value 5.
+    // SSAOPass writes the full-resolution RGBA8 occlusion RT
+    // (R = aoOcclusion; A = geometry coverage). Resolve stays invalid
+    // unless the complete enabled GBuffer -> SSAO -> Lighting chain and a
+    // non-zero sanitized strength/radius are present. Never reorder or repurpose
+    // existing values. Test pin:
+    //   static_cast<uint8_t>(FgResourceId::SSAOTexture) == 5
+AY_RENDER_RESOURCE_SHARED(SSAOTexture, 5, SSAO, 10)
+    // Display-referred RGBA8 output of PostProcess. PresentPass consumes this
+    // current-frame result; FXAA / grading nodes may read and replace
+    // the presentation source without writing the backbuffer directly.
+AY_RENDER_RESOURCE_SHARED(FinalLdrColor, 6, FinalLdrColor, 15)
+    // Display-referred RGBA8 output of FXAAPass. The pass promotes
+    // PresentSource to this resource only after a successful current-frame
+    // submit; otherwise presentation remains on FinalLdrColor.
+AY_RENDER_RESOURCE_SHARED(FxaaColor, 7, FxaaColor, 17)
+    // Display-referred RGBA8 output of ColorGradingPass. The pass samples a
+    // 2D strip LUT and promotes PresentSource transactionally after submit.
+AY_RENDER_RESOURCE_SHARED(ColorGradedColor, 8, ColorGradedColor, 21)
+    // SMAA 1x private intermediates and final display-referred output. Edge
+    // and blend targets use linear/clamp sampling because endpoint-pattern
+    // decoding intentionally samples at quarter-pixel offsets. SmaaColor
+    // transactionally replaces PresentSource after all three stages submit.
+AY_RENDER_RESOURCE_SHARED(SmaaEdges, 9, SmaaEdges, 18)
+AY_RENDER_RESOURCE_SHARED(SmaaBlendWeights, 10, SmaaBlendWeights, 19)
+AY_RENDER_RESOURCE_SHARED(SmaaColor, 11, SmaaColor, 20)
+    // Persistent display-referred TAA history/output. The physical FBO is
+    // imported from TAAPass because it must survive beginFrame/compile.
+AY_RENDER_RESOURCE_SHARED(TaaColor, 12, TaaColor, 16)
+    // External deferred inputs used by SSAO/TAA. They remain pass-owned, but
+    // declaring them here makes temporal dependencies visible to the graph
+    // instead of hiding them behind PassExecContext producer pointers.
+AY_RENDER_RESOURCE_SHARED(GBufferNormal, 13, GBufferNormal, 5)
+AY_RENDER_RESOURCE_SHARED(GBufferWorldPosition, 14, GBufferWorldPosition, 6)
+AY_RENDER_RESOURCE_SHARED(GBufferSurface, 15, GBufferSurface, 7)
+AY_RENDER_RESOURCE_SHARED(GBufferDepth, 16, GBufferDepth, 8)
+AY_RENDER_RESOURCE_SHARED(MotionVectors, 17, MotionVectors, 9)
+AY_RENDER_RESOURCE_FRAME(TaaHistory, 18)
+    // Bloom v2 private pyramid. BloomBright remains the half-resolution
+    // thresholded root and BloomBlurB remains the stable composite source.
+AY_RENDER_RESOURCE_SHARED(BloomPyramidQuarter, 19, BloomPyramidQuarter, 24)
+AY_RENDER_RESOURCE_SHARED(BloomPyramidEighth, 20, BloomPyramidEighth, 25)
+AY_RENDER_RESOURCE_SHARED(BloomPyramidSixteenth, 21, BloomPyramidSixteenth, 26)
+AY_RENDER_RESOURCE_SHARED(BloomPyramidUpEighth, 22, BloomPyramidUpEighth, 27)
+AY_RENDER_RESOURCE_SHARED(BloomPyramidUpQuarter, 23, BloomPyramidUpQuarter, 28)
+AY_RENDER_RESOURCE_SHARED(AutoExposureHistory, 24, AutoExposureHistory, 29)
+AY_RENDER_RESOURCE_SHARED(AutoExposure, 25, AutoExposure, 30)
+AY_RENDER_RESOURCE_SHARED(SsrColor, 26, SsrColor, 31)
+AY_RENDER_RESOURCE_SHARED(GBufferAlbedo, 27, GBufferAlbedo, 4)
+AY_RENDER_RESOURCE_SHARED(VolumetricColor, 28, VolumetricColor, 33)
+AY_RENDER_RESOURCE_FRAME(BaseGBuffer, 29)
+AY_RENDER_RESOURCE_SHARED(StylizedColor, 30, StylizedColor, 35)
+AY_RENDER_RESOURCE_FRAME(StylizationDepth, 31)
+AY_RENDER_RESOURCE_SHARED(OutlinedColor, 32, OutlinedColor, 36)
+AY_RENDER_RESOURCE_SHARED(DisplayColor, 33, DisplayColor, 37)
+AY_RENDER_RESOURCE_SHARED(TemporalColor, 34, TemporalColor, 38)
+AY_RENDER_RESOURCE_SHARED(FeedbackHistory, 35, FeedbackHistory, 39)
+AY_RENDER_RESOURCE_SHARED(CloudColor, 36, CloudColor, 40)
+AY_RENDER_RESOURCE_FRAME(VolumetricIntegration, 37)
+AY_RENDER_RESOURCE_FRAME(FroxelField, 38)
+AY_RENDER_RESOURCE_FRAME(FroxelHistoryRead, 39)
+AY_RENDER_RESOURCE_FRAME(FroxelHistoryWrite, 40)
+
+// Pass-contract-only boundaries/aggregates are not interchangeable with a
+// similarly named FrameGraph input (for example BaseGBuffer vs DecalGBuffer).
+AY_RENDER_RESOURCE_CONTRACT(SceneDepth, 1)
+AY_RENDER_RESOURCE_CONTRACT(ShadowAtlas, 2)
+AY_RENDER_RESOURCE_CONTRACT(SkyColor, 3)
+AY_RENDER_RESOURCE_CONTRACT(SelectionMask, 22)
+AY_RENDER_RESOURCE_CONTRACT(PresentedColor, 23)
+AY_RENDER_RESOURCE_CONTRACT(OpaqueLightingColor, 32)
+AY_RENDER_RESOURCE_CONTRACT(DecalGBuffer, 34)

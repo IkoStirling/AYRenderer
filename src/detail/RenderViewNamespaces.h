@@ -1,11 +1,9 @@
 #pragma once
 #include "detail/RenderViewOrder.h"
+#include "detail/RenderViewRanges.h"
 #include <cstdint>
 
 namespace ayt::render::detail {
-inline constexpr uint16_t kCameraFirstView = 64;
-inline constexpr uint16_t kCameraLastView = 111;
-inline constexpr uint16_t kCameraReadbackView = 112;
 // Offscreen UI may consume only views absent from the fixed scene/editor order
 // and the runtime camera range. Grouped previews must not straddle a reservation.
 inline constexpr uint16_t nextUiViewRange(uint16_t next, uint16_t count) noexcept {

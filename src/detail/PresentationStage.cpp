@@ -11,6 +11,11 @@ bool resolvePresentationStage(PassExecContext& c,FgResourceId output,Presentatio
     if(!BGFXAdapter::isValid(source))return fail("presentation framebuffer unavailable");
     const auto input=c.adapter.getFboAttachment(source,0);
     if(!BGFXAdapter::isValid(input))return fail("presentation color unavailable");
+    if(c.frameGraph->isDirectPresentationOutput(output)) {
+        targets.input=input;
+        targets.x=c.viewportX;targets.y=c.viewportY;
+        return true;
+    }
     const auto target=c.frameGraph->resolve(output);
     if(!BGFXAdapter::isValid(target))return fail("output framebuffer unavailable");
     if(target.idx==source.idx)return fail("presentation/output framebuffer alias");
@@ -20,6 +25,10 @@ bool resolvePresentationStage(PassExecContext& c,FgResourceId output,Presentatio
     targets={target,input};return true;
 }
 void publishPresentationStage(PassExecContext& c,FgResourceId output) {
+    if(c.frameGraph->isDirectPresentationOutput(output)) {
+        c.frameGraph->markDirectlyPresented(output);
+        return;
+    }
     c.frameGraph->markProduced(output);c.frameGraph->setResolvedSemantic(FgSemantic::PresentSource,output);
 }
 } // namespace ayt::render::detail

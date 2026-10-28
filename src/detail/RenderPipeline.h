@@ -13,12 +13,15 @@
 namespace ayt::render::detail
 {
 
+class PresentationPass;
+
 enum class PassExecutionState : uint8_t {
     Submitted = 0,
     CompletedNoDraws,
     Disabled,
     GraphCulled,
     Failed,
+    Integrated,
 };
 
 struct PassExecutionOutcome {
@@ -93,7 +96,9 @@ public:
 
     // Non-owning access; valid until next addPass/clear or destruction.
     const std::vector<std::unique_ptr<RenderPass>>& passes() const noexcept { return _passes; }
-    std::vector<std::unique_ptr<RenderPass>>&       passes()       noexcept { return _passes; }
+    // Indexed once at assembly; per-frame presentation hooks need no RTTI scan.
+    // Like the type index, this borrows instances until addPass/clear/destruction.
+    const std::vector<PresentationPass*>& presentationPasses() const noexcept { return _presentationPasses; }
 
     // Dispatch every enabled pass in registration order. Returns sum
     // of per-pass execute() return values (used to update
@@ -119,13 +124,15 @@ public:
     }
 
 private:
+    void addPassImpl(int16_t slot, std::unique_ptr<RenderPass> pass);
     std::vector<std::unique_ptr<RenderPass>> _passes;
+    std::vector<PresentationPass*> _presentationPasses;
     // Non-owning pointers into _passes. Moving a unique_ptr during vector
     // growth does not move its pointee. try_emplace keeps the first instance
     // if a pipeline intentionally registers the same concrete type twice.
     std::unordered_map<std::type_index, RenderPass*> _passesByType;
-    // Parallel to _passes. Negative entries are legacy/test passes that are
-    // intentionally not governed by the renderer-owned FrameGraph.
+    // Parallel to _passes. Plain legacy/test passes remain untracked; a
+    // PresentationPass infers its own declared slot even through legacy add.
     std::vector<int16_t> _passSlots;
     std::vector<RenderPassFrameStats>         _lastPassStats;
     std::vector<PassExecutionOutcome>         _lastPassOutcomes;

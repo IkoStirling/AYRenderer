@@ -1,7 +1,7 @@
 # AYRenderer 当前架构
 
-**Version:** 1.2.2
-**Date:** 2026-10-22
+**Version:** 1.3.0
+**Date:** 2026-10-29
 **Status:** Active
 **Owner:** AYRenderer
 
@@ -41,9 +41,11 @@ Pass 工厂、FrameGraph、bgfx 句柄及资源表是内部结构，不作为新
 | 提交包与 CPU 数据所有权 | [RenderScene.h](../include/AYRenderer/RenderScene.h)、`src/AYRenderScene.cpp` |
 | 装配时必需/可选资源验证 | [RenderPassContract.cpp](../src/detail/RenderPassContract.cpp) |
 | 每帧后处理图声明 | [PostProcessGraphPlan.cpp](../src/detail/PostProcessGraphPlan.cpp) |
+| 可选颜色阶段结构与纯图连接 | [PresentationStages.def](../src/detail/PresentationStages.def)、[PresentationStagePlan.cpp](../src/detail/PresentationStagePlan.cpp) |
+| 阶段准备/历史/清理扩展 | [PresentationPass.h](../src/detail/PresentationPass.h)，[接入指南](presentation-stages.md) |
 | 图编译、目标解析和 liveness | [FgResource.h](../src/detail/FgResource.h)、`FgResource.cpp` |
 | 资源内容、代际与失效原因 | [RenderResourceBlackboard.h](../src/detail/RenderResourceBlackboard.h) |
-| GPU View 顺序和命名空间 | [RenderViewOrder.h](../src/detail/RenderViewOrder.h)、[RenderViewNamespaces.h](../src/detail/RenderViewNamespaces.h) |
+| GPU View 顺序、统计归属和命名空间 | [RenderViews.def](../src/detail/RenderViews.def)、[RenderViewOrder.h](../src/detail/RenderViewOrder.h)、[RenderViewNamespaces.h](../src/detail/RenderViewNamespaces.h) |
 | 分类、静态剔除、连续刚体实例化 | [FrameDrawLists.cpp](../src/detail/FrameDrawLists.cpp)、[RigidInstancing.h](../src/detail/RigidInstancing.h) |
 | L3 缓存和桥接 | [RenderResourceManager.cpp](../src/detail/RenderResourceManager.cpp)、[RenderAssetBridge.cpp](../src/detail/RenderAssetBridge.cpp) |
 | 纹理准备和设备接纳 | [TextureUploadPlan.cpp](../src/detail/TextureUploadPlan.cpp)、[BGFXAdapter.cpp](../src/detail/BGFXAdapter.cpp) |
@@ -103,6 +105,10 @@ UI与主视图通过既有Composite/Present边界复合，独立预览/相机输
 
 静态合约在拆除旧管线之前校验槽、重复项、必需输入和可选生产者顺序。
 Renderer 结合实际设备、开关与历史状态构建 `PostProcessGraphPlanInput`；纯图计划声明资源和边。
+AA后五个可选颜色阶段自行贡献当帧资格与额外资源，Renderer不逐效果组装命名开关。
+结构清单同时供默认产品链、工厂、静态合同、颜色前驱排序、View/计时归属和离线shader清单使用。
+阶段创建、实际源码和额外静态读依赖在各自cpp定义，缺失实现由链接拒绝。
+普通颜色前驱按顺序推导，Present不再枚举所有艺术输出；历史准备和失效仍由实际owner处理。
 FrameGraph 编译和裁枝决定带槽节点是否 live，RenderPipeline 按注册顺序 dispatch。
 黑板要求当前生产状态，防止残留 handle 绕过失效门禁。
 
@@ -194,7 +200,8 @@ Noop保留进程级sticky设备，最后一个真实GPU实例才走设备shutdow
 
 ## 6. 修改与验证路径
 
-新增或修改 Pass：先明确产品开关、资源格式/尺寸/寿命和失败行为；更新静态合约、图/黑板及 View 表；
+新增可选颜色阶段按[阶段接入指南](presentation-stages.md)声明自身，不修改已有下游效果或主Renderer资格分支。
+其它 Pass 先明确产品开关、资源格式/尺寸/寿命和失败行为，核对静态合约、图/黑板及View清单；
 跑 CPU 合约、生产 shader 构建、Noop 生命周期以及实际两后端的输出/关闭重开/resize。
 修改共享私有布局时完整重建依赖，禁止用旧对象布局解释销毁崩溃。
 

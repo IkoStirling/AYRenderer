@@ -1344,3 +1344,16 @@ Inventory1046/10 and120/3; SDK129 capabilities/53 modules/99 searches/566 symbol
 Same Debug/D3D11 90 samples: point CPU1.9881->.9917ms; GPU compute.7098ms.
 Frame CPU23.5177->22.0014ms, GPU12.0987->12.6955ms, a measured tradeoff.
 Async sample10000/10000; D3D12 combined sample1000/1000 with froxel history/contact/shutter passed.
+
+2026-10-29 可选颜色阶段收敛验收：九组CPU共1110项、34658断言，0失败、0跳过；
+完整原生GPU在D3D11/D3D12各94项、54633断言，0失败、0跳过。78个生产Shader变体通过离线打包验证。
+两条主管线、17种效果/viewport/AA/MSAA组合的独立Present与直接输出每后端34组画面逐字节相同，
+另有缺少预编译Shader的真实失败回退；8x/16x及未验证后端仍保持独立输出。
+20阶段、256帧确定性开关测试覆盖共享输入和历史目标，无长稳等待。
+85个既有资源名/别名/Count的数值保持不变；View注册、Shader清单及资源映射共用结构声明。
+六个建图/扩展核心实现通过MSVC静态分析；合约索引改用静态指针表以消除初始化栈占用警告。
+SDK doctor检查203项能力、60个模块，0错误、0警告。
+
+此轮还修正了既有GPU测试的过期Shader缓存标识、未初始化的镜头光学参数，以及回读View55早于
+被测颜色生产者的问题；未修改效果算法或放宽像素阈值。扩展范围限于AA之后的颜色链，
+不代表几何、HDR、Motion、HiZ或任意Shader融合已经统一，接入步骤见[presentation-stages.md](presentation-stages.md)。

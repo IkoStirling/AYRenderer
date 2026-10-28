@@ -39,6 +39,7 @@
 //        substring check that detects "all-lights-shadow" shape.
 
 #include "AYTest.h"
+#include "ShaderIdentityExpectations.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYShader/ShaderResourcePool.h"
 
@@ -95,7 +96,7 @@ namespace {
 // Live extern drift detection; this mirror MUST match
 // `kLightingCacheKeyCStr` or this test fails (Bug fix #3).
 inline constexpr const char* kExpectedB5p5CacheKey =
-    "lighting_v34_scene_background_pbr_parity";
+    renderer_test::kLightingSourceKey;
 
 // Mirror of LightingPass.cpp worldPos+shadow contract (abbreviated).
 // Full FS also has 8-light Lambert + sky Mix + §P5.5 D envCube

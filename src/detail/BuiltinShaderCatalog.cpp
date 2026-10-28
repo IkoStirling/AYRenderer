@@ -17,17 +17,13 @@
 #include "AYRenderer/VolumetricShaderSources.h"
 #include "AYRenderer/CloudShaderSources.h"
 #include "AYRenderer/DeferredDecalShaderSources.h"
-#include "AYRenderer/ColorStylizationShaderSources.h"
-#include "AYRenderer/StylizedOutlineShaderSources.h"
-#include "AYRenderer/AnalogDisplayShaderSources.h"
-#include "AYRenderer/TemporalFeedbackShaderSources.h"
 #include "AYRenderer/ParticleDraw.h"
 #include "AYRenderer/FallbackMeshShaderSources.h"
 #include "AYRenderer/TilemapShaderSources.h"
 namespace ayt::render::detail {
 std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
     std::vector<shader::ShaderBuildJob> jobs;
-    appendGBufferPassShaders(jobs); appendColorGradingPassShaders(jobs);
+    appendGBufferPassShaders(jobs); appendPresentationStageShaders(jobs);
     appendGBufferDebugPassShaders(jobs); appendMotionVectorPassShaders(jobs);
     appendPostProcessPassShaders(jobs); appendPresentPassShaders(jobs);
     appendSkyboxPassShaders(jobs); appendTAAPassShaders(jobs);
@@ -47,10 +43,6 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
             std::pair{"froxel_density",kFroxelDensitySource},
         std::pair{"froxel_integration",kFroxelIntegrationSource},
         std::pair{"deferred_decal",kDeferredDecalPhoskiaSource},
-        std::pair{"color_stylization",kColorStylizationPhoskiaSource},
-        std::pair{"stylized_outline",kStylizedOutlinePhoskiaSource},
-        std::pair{"analog_display",analogDisplayPhoskiaSource()},
-        std::pair{"temporal_feedback",temporalFeedbackPhoskiaSource()},
         std::pair{"particle_unlit",kParticlePhoskiaSource},
         std::pair{"emissive_point_instanced",kEmissivePointInstancedPhoskiaSource},
         std::pair{"bloom_extract",kBloomExtractPhoskiaSource},

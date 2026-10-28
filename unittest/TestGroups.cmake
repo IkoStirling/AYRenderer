@@ -18,6 +18,7 @@ set(AYRENDERER_TEST_Contracts_SOURCES
     Test_GBufferContractHardening.cpp
     Test_GBufferMaterialContract.cpp
     Test_PostProcessGraphPlan_R6.cpp
+    Test_PresentationStages.cpp
     Test_PublicHeaderSurface.cpp
     Test_RenderPassContracts_R6.cpp
     Test_RenderPassLifecycleHardening.cpp
@@ -151,6 +152,7 @@ set(AYRENDERER_TEST_Audit_SOURCES
     Test_AuditP5Invariants.cpp)
 
 set(AYRENDERER_TEST_Gpu_SOURCES
+    Test_PresentationIntegrationGpu.cpp
     Test_PreviewSceneGpu.cpp
     Test_EditorDebugGpu.cpp
     Test_CameraViewsGpu.cpp

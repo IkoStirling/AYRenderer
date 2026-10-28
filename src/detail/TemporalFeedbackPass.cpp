@@ -12,6 +12,28 @@ void invalidateFeedbackEntries(RenderResourceBlackboard* bb,ResourceInvalidation
     bb->invalidate(BlackboardResourceId::FeedbackHistoryWrite,reason);
 }
 }
+namespace {
+constexpr auto kFeedbackContractReads=std::to_array<RenderPassResourceRead>({
+    {RenderPassResourceId::FeedbackHistory,false}});
+}
+void TemporalFeedbackPass::applyPresentationLook(const ColorStylizationSettings& look,
+    BGFXAdapter& adapter,RenderResourceBlackboard* blackboard) {
+    setSettings(look);
+    if(!active())releaseHistory(adapter,blackboard);
+}
+void TemporalFeedbackPass::invalidatePresentationHistory(ResourceInvalidationReason reason,
+    RenderResourceBlackboard* blackboard) {
+    invalidateHistory(reason);invalidateFeedbackEntries(blackboard,reason);
+}
+void TemporalFeedbackPass::preparePresentationResources(PresentationFrameContext& context,
+    PresentationStageFrame& stage) {
+    stage.enabled=prepareFrame(context.adapter,context.pool,context.frame,
+        context.x,context.y,context.width,context.height,context.blackboard);
+    if(!stage.enabled)return;
+    stage.historyTarget=writeFbo();
+    stage.imports.push_back({FgResourceId::FeedbackHistory,readFbo()});
+    stage.extraReads.push_back(FgResourceId::FeedbackHistory);
+}
 void TemporalFeedbackPass::setSettings(const ColorStylizationSettings& look) noexcept {
     auto s=sanitizeTemporalFeedback(look.temporal);s.enabled &= look.enabled;
     if(s.enabled!=_settings.enabled || s.mode!=_settings.mode || s.holdFrames!=_settings.holdFrames
@@ -95,7 +117,7 @@ uint32_t TemporalFeedbackPass::execute(PassExecContext& c) {
         rateLimitedEarlyReturn("TemporalFeedbackPass","viewport differs from prepared history");return 0;
     }
     PresentationStageTargets targets;
-    if(!resolvePresentationStage(c,FgResourceId::TemporalColor,targets)) {
+    if(!resolveTargets(c,targets)) {
         invalidateHistory(ResourceInvalidationReason::ProducerFailure);invalidateFeedbackEntries(c.resourceBlackboard,_reason);
         rateLimitedEarlyReturn("TemporalFeedbackPass",targets.failure?targets.failure:"presentation unavailable");return 0;
     }
@@ -117,9 +139,9 @@ uint32_t TemporalFeedbackPass::execute(PassExecContext& c) {
     const float offset[4]={_settings.historyOffsetX,_settings.historyOffsetY,historyAvailable?1.f:0.f,0};
     texture("currentColor",targets.input);texture("previousColor",previous);
     uniform("feedbackParams",params);uniform("feedbackGrid",grid);uniform("feedbackOffset",offset);
-    configureFullscreenPassView(c.adapter,kViewId,targets.target,0,0,c.viewportWidth,c.viewportHeight);
+    configureFullscreenPassView(c.adapter,kViewId,targets.target,targets.x,targets.y,c.viewportWidth,c.viewportHeight);
     _geometry.bind(c.adapter);c.adapter.setStateDepthTestAlways();_program.submit({kViewId,0});
-    publishPresentationStage(c,FgResourceId::TemporalColor);
+    publishOutput(c);
     _readIndex=1-_readIndex;_historyValid=true;_reason=ResourceInvalidationReason::None;_produced=true;++_frameIndex;
     if(c.resourceBlackboard)c.resourceBlackboard->markProduced(BlackboardResourceId::FeedbackHistoryWrite);
     return 1;
@@ -131,4 +153,6 @@ void TemporalFeedbackPass::finishFrame(RenderResourceBlackboard* bb) {
 void TemporalFeedbackPass::destroyResources(BGFXAdapter& a) {
     releaseHistory(a,nullptr,ResourceInvalidationReason::Shutdown);_program.reset();_geometry.destroy(a);_retryFrames=0;
 }
+AY_DEFINE_PRESENTATION_STAGE(TemporalFeedback, TemporalFeedbackPass, temporalFeedbackPhoskiaSource(), kFeedbackContractReads)
+
 } // namespace ayt::render::detail

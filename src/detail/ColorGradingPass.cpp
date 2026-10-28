@@ -3,6 +3,7 @@
 
 #include "detail/FgResource.h"
 #include "detail/GpuResources.h"
+#include "detail/PresentationStage.h"
 
 #include <algorithm>
 #include <cmath>
@@ -107,8 +108,10 @@ const char* const kColorGradingCacheKeyCStr = kColorGradingCacheKey;
 
 const char* colorGradingPhoskiaSourceForTests() noexcept
 {
-    return kColorGradingPhoskiaSource;
+    return colorGradingPhoskiaSource();
 }
+
+const char* colorGradingPhoskiaSource() noexcept {return kColorGradingPhoskiaSource;}
 
 std::vector<uint8_t> generateColorGradingLutRgba8(ColorGradingPreset preset)
 {
@@ -165,31 +168,14 @@ bool ColorGradingPass::isReady() const noexcept
 uint32_t ColorGradingPass::execute(PassExecContext& ctx)
 {
     BGFXAdapter& adapter = ctx.adapter;
-    if (!adapter.isInitialized() || adapter.isNoopBackend()
-        || ctx.viewportWidth == 0 || ctx.viewportHeight == 0
-        || ctx.frameGraph == nullptr || _strength <= 0.0f
-        || _preset == ColorGradingPreset::Neutral
-        || !ctx.frameGraph->semanticProducedThisFrame(FgSemantic::PresentSource)) {
+    if(!active())return 0;
+    PresentationStageTargets targets;
+    if(!resolveTargets(ctx,targets)) {
+        rateLimitedEarlyReturn("ColorGradingPass",targets.failure?targets.failure:"presentation unavailable");
         return 0;
     }
-
-    const bgfx::FrameBufferHandle source =
-        ctx.frameGraph->resolveSemantic(FgSemantic::PresentSource);
-    const bgfx::FrameBufferHandle target =
-        ctx.frameGraph->resolve(FgResourceId::ColorGradedColor);
-    if (!BGFXAdapter::isValid(source)) {
-        rateLimitedEarlyReturn("ColorGradingPass", "PresentSource resolve invalid");
-        return 0;
-    }
-    if (!BGFXAdapter::isValid(target)) {
-        rateLimitedEarlyReturn("ColorGradingPass", "ColorGradedColor resolve invalid");
-        return 0;
-    }
-    const bgfx::TextureHandle color = adapter.getFboAttachment(source, 0);
-    if (!BGFXAdapter::isValid(color)) {
-        rateLimitedEarlyReturn("ColorGradingPass", "PresentSource attachment invalid");
-        return 0;
-    }
+    const auto target=targets.target;
+    const auto color=targets.input;
 
     if (!_geometry.ensure(adapter) || !ensureLut(adapter)) {
         rateLimitedEarlyReturn("ColorGradingPass", "geometry/LUT unavailable");
@@ -204,8 +190,8 @@ uint32_t ColorGradingPass::execute(PassExecContext& ctx)
     configureFullscreenPassView(adapter,
                                 kColorGradingViewId,
                                 target,
-                                0,
-                                0,
+                                targets.x,
+                                targets.y,
                                 ctx.viewportWidth,
                                 ctx.viewportHeight);
     _geometry.bind(adapter);
@@ -243,9 +229,7 @@ uint32_t ColorGradingPass::execute(PassExecContext& ctx)
         _firstDispatchLogged = true;
     }
 
-    ctx.frameGraph->markProduced(FgResourceId::ColorGradedColor);
-    ctx.frameGraph->setResolvedSemantic(FgSemantic::PresentSource,
-                                        FgResourceId::ColorGradedColor);
+    publishOutput(ctx);
     return 1;
 }
 
@@ -327,6 +311,8 @@ void ColorGradingPass::destroyResources(BGFXAdapter& adapter)
     _uGradingParams = ayt::shader::InvalidBinding;
     _programRetryFrames = 0;
 }
+
+AY_DEFINE_PRESENTATION_STAGE(ColorGrading, ColorGradingPass, colorGradingPhoskiaSource(), std::span<const RenderPassResourceRead>{})
 
 } // namespace ayt::render::detail
 

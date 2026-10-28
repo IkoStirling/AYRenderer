@@ -1,5 +1,6 @@
 #include "AYRenderer/RenderTypes.h"
 #include "detail/RenderPipelinePolicy.h"
+#include "detail/PresentationStageCatalog.h"
 #include <algorithm>
 
 namespace ayt::render {
@@ -24,11 +25,9 @@ RenderPipelineDesc RenderPipelineDesc::makeDefault()
         RenderPassSlot::PostProcess,
         RenderPassSlot::FXAA,
         RenderPassSlot::SMAA,
-        RenderPassSlot::StylizedOutline,
-        RenderPassSlot::ColorGrading,
-        RenderPassSlot::ColorStylization,
-        RenderPassSlot::TemporalFeedback,
-        RenderPassSlot::AnalogDisplay,
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) RenderPassSlot::Slot,
+#include "detail/PresentationStages.def"
+#undef AY_PRESENTATION_STAGE
         RenderPassSlot::Present,
         RenderPassSlot::UI,
     }};
@@ -55,21 +54,9 @@ void ensurePresentAfterPostProcess(RenderPipelineDesc& desc)
         if (fxaaIt != desc.passes.end() && fxaaIt > insertAfter) {
             insertAfter = fxaaIt;
         }
-        const auto feedbackIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::TemporalFeedback);
-        if(feedbackIt!=desc.passes.end() && feedbackIt>insertAfter)insertAfter=feedbackIt;
-        const auto displayIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::AnalogDisplay);
-        if(displayIt!=desc.passes.end() && displayIt>insertAfter)insertAfter=displayIt;
-        const auto outlineIt=std::find(desc.passes.begin(),desc.passes.end(),RenderPassSlot::StylizedOutline);
-        if(outlineIt!=desc.passes.end() && outlineIt>insertAfter)insertAfter=outlineIt;
-        const auto gradingIt = std::find(desc.passes.begin(), desc.passes.end(),
-                                         RenderPassSlot::ColorGrading);
-        if (gradingIt != desc.passes.end() && gradingIt > insertAfter) {
-            insertAfter = gradingIt;
-        }
-        const auto styleIt = std::find(desc.passes.begin(), desc.passes.end(),
-                                        RenderPassSlot::ColorStylization);
-        if (styleIt != desc.passes.end() && styleIt > insertAfter) {
-            insertAfter = styleIt;
+        for (const auto& stage : detail::kPresentationStages) {
+            const auto it = std::find(desc.passes.begin(), desc.passes.end(), stage.slot);
+            if (it != desc.passes.end() && it > insertAfter) insertAfter = it;
         }
         const auto smaaIt = std::find(desc.passes.begin(), desc.passes.end(),
                                       RenderPassSlot::SMAA);
@@ -139,11 +126,9 @@ RenderPipelineDesc RenderPipelineDesc::makeDeferred()
         RenderPassSlot::TAA,
         RenderPassSlot::FXAA,
         RenderPassSlot::SMAA,
-        RenderPassSlot::StylizedOutline,
-        RenderPassSlot::ColorGrading,
-        RenderPassSlot::ColorStylization,
-        RenderPassSlot::TemporalFeedback,
-        RenderPassSlot::AnalogDisplay,
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) RenderPassSlot::Slot,
+#include "detail/PresentationStages.def"
+#undef AY_PRESENTATION_STAGE
         RenderPassSlot::Present,
         RenderPassSlot::UI,
         // Fullscreen attachment overlay on view 250. It is mounted only in

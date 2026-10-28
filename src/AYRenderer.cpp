@@ -10,10 +10,7 @@
 #include "detail/CameraMath.h"
 #include "detail/CameraViewsTestAccess.h"
 #include "detail/ColorGradingPass.h"
-#include "detail/ColorStylizationPass.h"
-#include "detail/StylizedOutlinePass.h"
-#include "detail/AnalogDisplayPass.h"
-#include "detail/TemporalFeedbackPass.h"
+#include "detail/PresentationPass.h"
 #include "detail/BloomExtractPass.h"
 #include "detail/BloomBlurPass.h"
 #include "detail/BloomPipeline.h"
@@ -93,19 +90,6 @@ std::size_t detailDiagSizeofFrameContext()
 {
     return sizeof(detail::FrameContext);
 }
-
-namespace {
-
-template<class Visitor>
-void visitStylePasses(detail::RenderPipeline& pipeline,Visitor&& visitor)
-{
-    if(auto* p=pipeline.findPass<detail::ColorStylizationPass>())visitor(*p);
-    if(auto* p=pipeline.findPass<detail::StylizedOutlinePass>())visitor(*p);
-    if(auto* p=pipeline.findPass<detail::TemporalFeedbackPass>())visitor(*p);
-    if(auto* p=pipeline.findPass<detail::AnalogDisplayPass>())visitor(*p);
-}
-
-} // namespace
 
 struct Renderer::Impl {
     detail::BGFXAdapter           adapter;
@@ -335,12 +319,11 @@ struct Renderer::Impl {
 
     ClearDesc sceneClear{};
     ColorStylizationSettings colorStylization{};
+    std::vector<detail::PresentationStageFrame> presentationStageFrames;
 
     void applyColorStylizationKnobs()
     {
-        visitStylePasses(pipeline,[&](auto& pass){pass.setSettings(colorStylization);});
-        if(auto* feedback=pipeline.findPass<detail::TemporalFeedbackPass>();feedback && !feedback->active())
-            feedback->releaseHistory(adapter,&resourceBlackboard);
+        detail::configurePresentationLook(pipeline,colorStylization,adapter,&resourceBlackboard);
     }
 
     void applyEditorOverlayKnobs()
@@ -361,7 +344,7 @@ struct Renderer::Impl {
         detail::ResourceInvalidationReason reason)
     {
         resourceBlackboard.invalidateTemporal(reason);
-        if(auto* feedback=pipeline.findPass<detail::TemporalFeedbackPass>())feedback->invalidateHistory(reason);
+        detail::invalidatePresentationHistories(pipeline,reason,&resourceBlackboard);
         if(auto* fog=pipeline.findPass<detail::VolumetricPass>())fog->invalidateHistory();
         if (detail::TAAPass* taa = pipeline.findPass<detail::TAAPass>()) {
             taa->invalidateHistory(reason);
@@ -606,6 +589,7 @@ void Renderer::Impl::applyPipelineDesc(const RenderPipelineDesc& desc)
     detail::destroyPipelineGpuResources(pipeline, adapter);
 
     pipeline.clear();
+    presentationStageFrames.clear();
     // E5 (§5.4, 2026-07-22): default pipeline now mounts EVERY slot
     // at its RenderPass base default (_enabled == true), Shadow
     // included. The E4 "canonical-default ⇒ Shadow disabled" override
@@ -1314,10 +1298,6 @@ void Renderer::render(const RenderScene& scene)
         _impl->pipeline.findPass<detail::FXAAPass>();
     detail::SMAAPass* smaaPassPtr =
         _impl->pipeline.findPass<detail::SMAAPass>();
-    detail::ColorGradingPass* colorGradingPassPtr =
-        _impl->pipeline.findPass<detail::ColorGradingPass>();
-    auto* colorStylizationPassPtr =
-        _impl->pipeline.findPass<detail::ColorStylizationPass>();
     detail::PresentPass* presentPassPtr =
         _impl->pipeline.findPass<detail::PresentPass>();
 
@@ -1423,12 +1403,6 @@ void Renderer::render(const RenderScene& scene)
         && fxaaPassPtr != nullptr && fxaaPassPtr->isEnabled();
     const bool smaaStageEnabled = finalLdrStageEnabled
         && smaaPassPtr != nullptr && smaaPassPtr->isEnabled();
-    const bool colorGradingStageEnabled = finalLdrStageEnabled
-        && colorGradingPassPtr != nullptr
-        && colorGradingPassPtr->isEnabled()
-        && colorGradingPassPtr->strength() > 0.0f
-        && colorGradingPassPtr->preset() != ColorGradingPreset::Neutral;
-
     detail::PostProcessGraphPlanInput graphInput{};
     graphInput.width = fgW;
     graphInput.height = fgH;
@@ -1518,38 +1492,16 @@ void Renderer::render(const RenderScene& scene)
     graphInput.taa = taaStageEnabled;
     graphInput.fxaa = fxaaStageEnabled;
     graphInput.smaa = smaaStageEnabled;
-    graphInput.colorGrading = colorGradingStageEnabled;
-    graphInput.colorStylization = finalLdrStageEnabled && colorStylizationPassPtr
-        && colorStylizationPassPtr->isEnabled() && colorStylizationPassPtr->active();
-    auto* feedbackPass=_impl->pipeline.findPass<detail::TemporalFeedbackPass>();
-    if(feedbackPass && feedbackPass->isEnabled() && feedbackPass->active()) {
-        if(finalLdrStageEnabled) {
-            graphInput.temporalFeedback=feedbackPass->prepareFrame(_impl->adapter,_impl->shaderPool,frame,
-                _impl->viewportX,_impl->viewportY,_impl->viewportW,_impl->viewportH,&_impl->resourceBlackboard);
-            if(graphInput.temporalFeedback) {
-                graphInput.feedbackReadHistory=feedbackPass->readFbo();
-                graphInput.feedbackWriteTarget=feedbackPass->writeFbo();
-            }
-        } else {
-            feedbackPass->invalidateHistory(detail::ResourceInvalidationReason::ProducerFailure);
-            _impl->resourceBlackboard.invalidate(detail::BlackboardResourceId::FeedbackHistoryRead,detail::ResourceInvalidationReason::ProducerFailure);
-            _impl->resourceBlackboard.invalidate(detail::BlackboardResourceId::FeedbackHistoryWrite,detail::ResourceInvalidationReason::ProducerFailure);
-        }
-    }
-    const auto* displayPass=_impl->pipeline.findPass<detail::AnalogDisplayPass>();
-    graphInput.analogDisplay=finalLdrStageEnabled && displayPass && displayPass->isEnabled() && displayPass->active();
-    auto* outlinePassPtr=_impl->pipeline.findPass<detail::StylizedOutlinePass>();
-    graphInput.stylizedOutline=finalLdrStageEnabled && outlinePassPtr
-        && outlinePassPtr->isEnabled() && outlinePassPtr->active();
-    graphInput.stylizationDepth = graphInput.stylizedOutline
-        && _impl->colorStylization.outlineMode >= StylizationOutlineMode::Depth
-        && _impl->colorStylization.outlineStrength>0;
-    graphInput.stylizationNormals = graphInput.stylizationDepth
-        && _impl->colorStylization.outlineMode == StylizationOutlineMode::DepthNormal
-        && gbufferPassPtr && gbufferPassPtr->isEnabled();
-    if(graphInput.stylizationDepth && gbufferPassPtr && gbufferPassPtr->isEnabled()
-        && !detail::BGFXAdapter::isValid(graphInput.gbuffer))
-        graphInput.gbuffer=gbufferPassPtr->gbufferFbo();
+    const auto presentationGBuffer=detail::BGFXAdapter::isValid(graphInput.gbuffer)
+        ? graphInput.gbuffer : gbufferStagePresent
+        ? gbufferPassPtr->gbufferFbo() : bgfx::FrameBufferHandle{BGFX_INVALID_HANDLE};
+    detail::PresentationFrameContext presentationContext{
+        _impl->adapter,_impl->shaderPool,frame,_impl->viewportX,_impl->viewportY,
+        fgW,fgH,finalLdrStageEnabled,sceneFbo,presentationGBuffer,&_impl->resourceBlackboard};
+    detail::preparePresentationStages(_impl->pipeline,presentationContext,_impl->presentationStageFrames);
+    graphInput.presentationStages=_impl->presentationStageFrames;
+    graphInput.allowDirectPresentation=_impl->pipelineDesc.integratePresentation
+        && _impl->adapter.supportsDirectPresentation();
     graphInput.smaaIntermediatePointSampled =
         detail::SMAAPass::kIntermediatePointSampled;
 
@@ -1564,13 +1516,29 @@ void Renderer::render(const RenderScene& scene)
     // game viewport on view 250. No hidden host-owned FBO is allocated; UI
     // view 255 still renders afterwards, so Editor chrome remains intact.
 
+    const size_t graphErrorCount=fg.compileErrors().size()
+        +(graphPlan.presentationValidation.valid()?0u:1u);
     if (!graphPlan.compileSucceeded) {
+        if(!graphPlan.presentationValidation.valid()) {
+            const auto& issue=graphPlan.presentationValidation;
+            std::string_view stageName="<unknown>";
+            if(issue.stageIndex<graphInput.presentationStages.size())
+                if(const auto* info=graphInput.presentationStages[issue.stageIndex].info)stageName=info->name;
+            char resourceLabel[96]="none";
+            if(issue.resource!=detail::FgResourceId::Count)
+                std::snprintf(resourceLabel,sizeof(resourceLabel),"%s(%u)",
+                    detail::frameGraphResourceName(issue.resource),static_cast<unsigned>(issue.resource));
+            std::fprintf(stderr,"[FrameGraph] presentation stage=%.*s[%zu] reason=%s resource=%s\n",
+                static_cast<int>(stageName.size()),stageName.data(),issue.stageIndex,
+                detail::presentationPlanErrorName(issue.error),resourceLabel);
+        }
         std::fprintf(stderr, "[FrameGraph] compile failed: %zu structural error(s)\n",
-                     fg.compileErrors().size());
+                     graphErrorCount);
         for (const detail::FgCompileError& error : fg.compileErrors()) {
             std::fprintf(stderr,
-                         "[FrameGraph]   pass=%u resource=%u reason=%s\n",
+                         "[FrameGraph]   pass=%u resource=%s(%u) reason=%s\n",
                          static_cast<unsigned>(error.passIndex),
+                         detail::frameGraphResourceName(error.resource),
                          static_cast<unsigned>(error.resource),
                          detail::fgCompileErrorName(error.code));
         }
@@ -1684,7 +1652,7 @@ void Renderer::render(const RenderScene& scene)
     // cleanly when the adapter is uninitialized or Noop.
     detail::configureRenderViewOrder(_impl->adapter);
     _impl->lastDrawCalls = _impl->pipeline.executeAll(ctx);
-    if(feedbackPass)feedbackPass->finishFrame(&_impl->resourceBlackboard);
+    detail::finishPresentationStages(_impl->pipeline,&_impl->resourceBlackboard);
     if (_impl->resourceBlackboard.findProduced(detail::BlackboardResourceId::VolumetricColor)) {
         if (const auto* volume=_impl->pipeline.findPass<detail::VolumetricPass>())
             _impl->debugOverlay.setVolumetricStats(volume->stats());
@@ -1707,7 +1675,7 @@ void Renderer::render(const RenderScene& scene)
     graphStats.compiled = true;
     graphStats.compileSucceeded = graphPlan.compileSucceeded;
     graphStats.compileErrors = static_cast<uint16_t>(std::min<size_t>(
-        fg.compileErrors().size(), UINT16_MAX));
+        graphErrorCount, UINT16_MAX));
     graphStats.declaredPasses = fgStats.declaredPasses;
     graphStats.livePasses = fgStats.livePasses;
     graphStats.logicalResources = fgStats.logicalResources;
@@ -3731,10 +3699,8 @@ void Renderer::setColorStylizationSettings(const ColorStylizationSettings& setti
 void Renderer::resetStylizationHistory()
 {
     if(!_impl)return;
-    if(auto* pass=_impl->pipeline.findPass<detail::TemporalFeedbackPass>())
-        pass->invalidateHistory(detail::ResourceInvalidationReason::Manual);
-    _impl->resourceBlackboard.invalidate(detail::BlackboardResourceId::FeedbackHistoryRead,detail::ResourceInvalidationReason::Manual);
-    _impl->resourceBlackboard.invalidate(detail::BlackboardResourceId::FeedbackHistoryWrite,detail::ResourceInvalidationReason::Manual);
+    detail::invalidatePresentationHistories(_impl->pipeline,
+        detail::ResourceInvalidationReason::Manual,&_impl->resourceBlackboard);
 }
 ColorStylizationSettings Renderer::colorStylizationSettings() const noexcept
 {

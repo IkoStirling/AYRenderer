@@ -1,36 +1,55 @@
 #include "detail/RenderPipeline.h"
+#include "detail/PresentationPass.h"
 #include "detail/FgResource.h"
 
 #include <chrono>
 #include <cstdio>
 #include <utility>
+#include <stdexcept>
 
 namespace ayt::render::detail
 {
 
 void RenderPipeline::addPass(std::unique_ptr<RenderPass> pass)
 {
-    if (pass) {
-        _passesByType.try_emplace(std::type_index(typeid(*pass)), pass.get());
-    }
-    _passes.push_back(std::move(pass));
-    _passSlots.push_back(-1);
+    addPassImpl(-1,std::move(pass));
 }
 
 void RenderPipeline::addPass(RenderPassSlot slot,
                              std::unique_ptr<RenderPass> pass)
 {
-    if (pass) {
-        _passesByType.try_emplace(std::type_index(typeid(*pass)), pass.get());
+    addPassImpl(static_cast<int16_t>(static_cast<uint8_t>(slot)),std::move(pass));
+}
+
+void RenderPipeline::addPassImpl(int16_t slot,std::unique_ptr<RenderPass> pass)
+{
+    auto* stage=dynamic_cast<PresentationPass*>(pass.get());
+    if(stage) {
+        const auto declared=static_cast<int16_t>(static_cast<uint8_t>(stage->presentationInfo().slot));
+        if(slot>=0 && slot!=declared)
+            throw std::invalid_argument("Presentation stage registered under a different slot");
+        slot=declared;
     }
+    // Finish all potentially throwing capacity growth before inserting borrowed
+    // indexes. Subsequent vector appends cannot strand pointers on allocation
+    // failure; the unique_ptr parameter still owns an unregistered candidate.
+    const auto ensureSpare=[](auto& values) {
+        if(values.size()==values.capacity())
+            values.reserve(values.size()+std::max<size_t>(values.size()/2,1));
+    };
+    ensureSpare(_passes);
+    ensureSpare(_passSlots);
+    if(stage)ensureSpare(_presentationPasses);
+    if(pass)_passesByType.try_emplace(std::type_index(typeid(*pass)),pass.get());
     _passes.push_back(std::move(pass));
-    _passSlots.push_back(
-        static_cast<int16_t>(static_cast<uint8_t>(slot)));
+    _passSlots.push_back(slot);
+    if(stage)_presentationPasses.push_back(stage);
 }
 
 void RenderPipeline::clear()
 {
     _passesByType.clear();
+    _presentationPasses.clear();
     _passes.clear();
     _passSlots.clear();
     _lastPassStats.clear();
@@ -134,8 +153,13 @@ uint32_t RenderPipeline::executeAll(PassExecContext& ctx)
         stats.cpuTimeMs = std::chrono::duration<float, std::milli>(
             end - begin).count();
         _lastPassStats.push_back(std::move(stats));
+        const bool integrated=!failed && draws==0
+            && slot==static_cast<int16_t>(RenderPassSlot::Present)
+            && ctx.frameGraph && ctx.frameGraph->directlyPresentedThisFrame();
+        if(integrated)failureDetail="terminal color stage already presented";
         recordOutcome(failed
                           ? PassExecutionState::Failed
+                          : integrated ? PassExecutionState::Integrated
                           : (draws != 0
                                  ? PassExecutionState::Submitted
                                  : PassExecutionState::CompletedNoDraws),

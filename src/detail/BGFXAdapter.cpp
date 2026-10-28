@@ -14,6 +14,14 @@
 
 namespace ayt::render::detail
 {
+
+bool BGFXAdapter::supportsDirectPresentation() const noexcept
+{
+    if (!_initialized || _msaa > 4) return false;
+    const auto backend = bgfx::getRendererType();
+    return backend == bgfx::RendererType::Direct3D11
+        || backend == bgfx::RendererType::Direct3D12;
+}
 uint32_t BGFXAdapter::availableInstances(uint32_t requested, uint16_t stride) const
 {
     if (!_initialized || isNoopBackend() || !stride || stride % 16) return 0;

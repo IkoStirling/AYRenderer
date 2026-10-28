@@ -1,5 +1,13 @@
 # AYRenderer
 
+## 可选颜色阶段扩展
+
+主视口 AA 后的轮廓、调色、颜色风格化、时间反馈和显示模拟共用阶段声明与颜色链接续。
+新增普通颜色阶段不再修改已有下游效果的候选输入表或主 Renderer 的效果专用准备分支。
+创建、实际 shader 源码与额外依赖由阶段自身提供；固定 View 顺序和计时归属共用清单。
+内部接入步骤、历史及失败边界见 [阶段接入指南](docs/presentation-stages.md)。公开设置、作品格式
+和独立相机/预览范围仍遵守各自 SDK 契约。
+
 ## SceneOverlay Sprite pixel sampling
 
 `kSpriteNearestPhoskiaSource` samples the center of the nearest atlas texel

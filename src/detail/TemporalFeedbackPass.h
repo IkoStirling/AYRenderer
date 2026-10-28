@@ -2,17 +2,22 @@
 #include "AYRenderer/ColorStylizationSettings.h"
 #include "AYShader/ShaderResource.h"
 #include "detail/FullscreenPassGeometry.h"
-#include "detail/RenderPass.h"
+#include "detail/PresentationPass.h"
 #include "detail/RenderResourceBlackboard.h"
 #include "detail/FrameContext.h"
 #include <array>
 namespace ayt::render::detail {
-class TemporalFeedbackPass final : public RenderPass {
+class TemporalFeedbackPass final : public PresentationPass {
 public:
-    static constexpr uint8_t kViewId=53;
-    std::string_view name() const override {return "TemporalFeedback";}
+    TemporalFeedbackPass() : PresentationPass(RenderPassSlot::TemporalFeedback) {}
+    static constexpr uint8_t kViewId=presentationStageViewId(RenderPassSlot::TemporalFeedback);
     void setSettings(const ColorStylizationSettings& look) noexcept;
-    bool active() const noexcept {return temporalFeedbackActive(_settings);}
+    bool active() const noexcept override {return temporalFeedbackActive(_settings);}
+    void applyPresentationLook(const ColorStylizationSettings&, BGFXAdapter&,
+        RenderResourceBlackboard*) override;
+    void invalidatePresentationHistory(ResourceInvalidationReason,
+        RenderResourceBlackboard*) override;
+    void finishPresentationFrame(RenderResourceBlackboard* blackboard) override {finishFrame(blackboard);}
     bool prepareFrame(BGFXAdapter& adapter,shader::ShaderResourcePool& pool,
         const FrameContext& frame,uint16_t x,uint16_t y,uint16_t width,uint16_t height,
         RenderResourceBlackboard* blackboard=nullptr);
@@ -21,7 +26,7 @@ public:
     void invalidateHistory(ResourceInvalidationReason reason=ResourceInvalidationReason::Manual) noexcept;
     void releaseHistory(BGFXAdapter& adapter,RenderResourceBlackboard* blackboard=nullptr,
         ResourceInvalidationReason reason=ResourceInvalidationReason::FeatureDisabled);
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
     bgfx::FrameBufferHandle readFbo() const noexcept {return _history[_readIndex];}
     bgfx::FrameBufferHandle writeFbo() const noexcept {return _history[1-_readIndex];}
     bool historyValid() const noexcept {return _historyValid;}
@@ -30,6 +35,8 @@ public:
     uint32_t generation() const noexcept {return _generation;}
     ResourceInvalidationReason invalidationReason() const noexcept {return _reason;}
 private:
+    void preparePresentationResources(PresentationFrameContext&,
+        PresentationStageFrame&) override;
     TemporalFeedbackSettings _settings;
     FullscreenPassGeometry _geometry;
     shader::ShaderResource _program;

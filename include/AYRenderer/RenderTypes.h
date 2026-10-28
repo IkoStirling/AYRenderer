@@ -586,6 +586,12 @@ struct RenderPipelineDesc {
     std::vector<RenderPassSlot> passes;
     RenderPath path = RenderPath::Forward;
 
+    /// Let a compatible terminal color stage write the backbuffer directly,
+    /// saving its intermediate target and the Present copy. Logical ordering
+    /// and failure fallback remain unchanged. Unsupported backends/targets
+    /// retain the ordinary chain. Disable for image/performance comparisons.
+    bool integratePresentation = true;
+
     /// Forward scene, shadow, overlay and post/presentation chain.
     /// Optional effect stages remain controlled by their runtime settings.
     static RenderPipelineDesc makeDefault();

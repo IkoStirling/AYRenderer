@@ -1,4 +1,5 @@
 #include "detail/PostProcessGraphPlan.h"
+#include "detail/PresentationStagePlan.h"
 #include "detail/RenderPassContract.h"
 #include "detail/BGFXAdapter.h"
 
@@ -102,6 +103,9 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     PostProcessGraphPlanResult result{};
 
     graph.beginFrame(input.width, input.height);
+    result.presentationValidation=validatePresentationStagePlan(input.presentationStages,
+        FgResourceId::FinalLdrColor);
+    if(!result.presentationValidation.valid())return result;
     graph.importExternal(FgResourceId::SceneColor, input.sceneColor);
 
     // Runtime eligibility is distinct from pipeline mounting and graph
@@ -124,15 +128,13 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     graph.setExecutionEligibility(RenderPassSlot::TAA, input.taa);
     graph.setExecutionEligibility(RenderPassSlot::FXAA, input.fxaa);
     graph.setExecutionEligibility(RenderPassSlot::SMAA, input.smaa);
-    graph.setExecutionEligibility(RenderPassSlot::ColorGrading,
-                                  input.colorGrading);
     graph.setExecutionEligibility(RenderPassSlot::Present, input.finalLdr);
-    graph.setExecutionEligibility(RenderPassSlot::ColorStylization, input.colorStylization);
-    graph.setExecutionEligibility(RenderPassSlot::StylizedOutline, input.stylizedOutline);
-    graph.setExecutionEligibility(RenderPassSlot::AnalogDisplay, input.analogDisplay);
-    graph.setExecutionEligibility(RenderPassSlot::TemporalFeedback, input.temporalFeedback);
+    for (const auto& stage : kPresentationStages)
+        graph.setExecutionEligibility(stage.slot, false);
+    for (const auto& stage : input.presentationStages)
+        if (stage.info) graph.setExecutionEligibility(stage.info->slot, input.finalLdr && stage.enabled);
 
-    if (input.ssao || input.taa || input.ssr || input.volumetric || input.clouds || input.decals || input.stylizationNormals) {
+    if (input.ssao || input.taa || input.ssr || input.volumetric || input.clouds || input.decals) {
         // These are multiple logical views of one pass-owned MRT. FrameGraph
         // borrows the FBO only for dependency/lifetime description; concrete
         // passes continue binding the individual attachments directly.
@@ -415,57 +417,9 @@ PostProcessGraphPlanResult buildPostProcessGraphPlan(
     }
 
     result.presentationSource = result.antialiasingSource;
-    if(input.stylizedOutline) {
-        std::vector<FgResourceId> styleReads{result.presentationSource};
-        if(input.stylizationDepth) {
-            graph.importExternal(FgResourceId::StylizationDepth,
-                BGFXAdapter::isValid(input.gbuffer) ? input.gbuffer : input.sceneColor);
-            styleReads.push_back(FgResourceId::StylizationDepth);
-        }
-        if(input.stylizationNormals) styleReads.push_back(FgResourceId::GBufferNormal);
-        graph.addResource(FgResourceId::OutlinedColor,
-            graphTextureDesc(RenderPassSlot::StylizedOutline,RenderPassResourceId::OutlinedColor));
-        graph.addPass({contractName(RenderPassSlot::StylizedOutline),std::move(styleReads),
-            {FgResourceId::OutlinedColor},true,false,executionSlot(RenderPassSlot::StylizedOutline)});
-        result.presentationSource=FgResourceId::OutlinedColor;
-    }
-
-    if (input.colorGrading) {
-        graph.addResource(FgResourceId::ColorGradedColor,
-                          graphTextureDesc(
-                              RenderPassSlot::ColorGrading,
-                              RenderPassResourceId::ColorGradedColor));
-        graph.addPass({contractName(RenderPassSlot::ColorGrading),
-                       {result.presentationSource},
-                       {FgResourceId::ColorGradedColor},
-                       true, false,
-                       executionSlot(RenderPassSlot::ColorGrading)});
-        result.presentationSource = FgResourceId::ColorGradedColor;
-    }
-
-    if (input.colorStylization) {
-        graph.addResource(FgResourceId::StylizedColor,
-            graphTextureDesc(RenderPassSlot::ColorStylization,RenderPassResourceId::StylizedColor,true));
-        graph.addPass({contractName(RenderPassSlot::ColorStylization),
-            {result.presentationSource},{FgResourceId::StylizedColor},true,false,
-            executionSlot(RenderPassSlot::ColorStylization)});
-        result.presentationSource = FgResourceId::StylizedColor;
-    }
-
-    if(input.temporalFeedback) {
-        graph.importExternal(FgResourceId::FeedbackHistory,input.feedbackReadHistory);
-        graph.importExternal(FgResourceId::TemporalColor,input.feedbackWriteTarget);
-        graph.addPass({contractName(RenderPassSlot::TemporalFeedback),{result.presentationSource,FgResourceId::FeedbackHistory},
-            {FgResourceId::TemporalColor},true,true,executionSlot(RenderPassSlot::TemporalFeedback)});
-        result.presentationSource=FgResourceId::TemporalColor;
-    }
-
-    if(input.analogDisplay) {
-        graph.addResource(FgResourceId::DisplayColor,graphTextureDesc(RenderPassSlot::AnalogDisplay,RenderPassResourceId::DisplayColor));
-        graph.addPass({contractName(RenderPassSlot::AnalogDisplay),{result.presentationSource},
-            {FgResourceId::DisplayColor},true,false,executionSlot(RenderPassSlot::AnalogDisplay)});
-        result.presentationSource=FgResourceId::DisplayColor;
-    }
+    const auto stages=input.presentationStages;
+    if(!declarePresentationStages(graph,stages,result.presentationSource,
+        &result.presentationValidation,input.allowDirectPresentation)) return result;
 
     graph.addPass({contractName(RenderPassSlot::Present),
                    {result.presentationSource}, {}, true,

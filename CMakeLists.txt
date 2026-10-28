@@ -90,6 +90,14 @@ target_link_libraries(AYRenderer PRIVATE
 )
 
 # UI text uses AYFont (FreeType glyph atlas).
+add_executable(AYRenderer_PresentationPlanBench EXCLUDE_FROM_ALL tools/PresentationPlanBench.cpp)
+target_link_libraries(AYRenderer_PresentationPlanBench PRIVATE AYRenderer nlohmann_json::nlohmann_json)
+target_include_directories(AYRenderer_PresentationPlanBench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+if(WIN32)
+    add_executable(AYRenderer_PresentationGpuBench EXCLUDE_FROM_ALL tools/PresentationGpuBench.cpp)
+    target_link_libraries(AYRenderer_PresentationGpuBench PRIVATE AYRenderer nlohmann_json::nlohmann_json bgfx::bgfx user32)
+endif()
+
 add_executable(AYRenderer_ShaderBuild tools/RendererShaderBuild.cpp)
 target_link_libraries(AYRenderer_ShaderBuild PRIVATE AYRenderer)
 target_include_directories(AYRenderer_ShaderBuild PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -98,6 +106,9 @@ target_compile_definitions(AYRenderer_ShaderBuild PRIVATE
     AY_SHADER_BGFX_COMMON_HINT="${AY_SHADER_BGFX_COMMON_DIR}"
     AY_SHADER_BGFX_SRC_HINT="${AY_SHADER_BGFX_SRC_DIR}")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AYShaderProduction.cmake")
+if(TARGET AYRenderer_PresentationGpuBench)
+    ay_stage_production_shaders(AYRenderer_PresentationGpuBench)
+endif()
 
 if(MSVC)
     # bgfx/bx headers require conforming preprocessor and __cplusplus on MSVC.

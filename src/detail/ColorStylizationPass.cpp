@@ -11,7 +11,7 @@ uint32_t ColorStylizationPass::execute(PassExecContext& ctx)
 {
     if(!active())return 0;
     PresentationStageTargets targets;
-    if(!resolvePresentationStage(ctx,FgResourceId::StylizedColor,targets) || !_geometry.ensure(ctx.adapter))return 0;
+    if(!resolveTargets(ctx,targets) || !_geometry.ensure(ctx.adapter))return 0;
     const auto target=targets.target;const auto color=targets.input;
     if (!_program.isValid()) {
         if (_retryFrames) { --_retryFrames; return 0; }
@@ -50,7 +50,7 @@ uint32_t ColorStylizationPass::execute(PassExecContext& ctx)
         palette[i][0]=_settings.palette[i].r;palette[i][1]=_settings.palette[i].g;
         palette[i][2]=_settings.palette[i].b;palette[i][3]=1;
     }
-    configureFullscreenPassView(ctx.adapter,kViewId,target,0,0,ctx.viewportWidth,ctx.viewportHeight);
+    configureFullscreenPassView(ctx.adapter,kViewId,target,targets.x,targets.y,ctx.viewportWidth,ctx.viewportHeight);
     _geometry.bind(ctx.adapter);
     _program.setTexture(_program.getTextureStage(texture),texture,toShaderTexture(color));
     _program.setUniform(params,settings,sizeof(settings));
@@ -65,8 +65,7 @@ uint32_t ColorStylizationPass::execute(PassExecContext& ctx)
     colorUniform("paperColor",_settings.paperColor);
     ctx.adapter.setStateDepthTestAlways();
     _program.submit({kViewId,0});
-    ctx.frameGraph->markProduced(FgResourceId::StylizedColor);
-    ctx.frameGraph->setResolvedSemantic(FgSemantic::PresentSource,FgResourceId::StylizedColor);
+    publishOutput(ctx);
     return 1;
 }
 
@@ -76,5 +75,7 @@ void ColorStylizationPass::destroyResources(BGFXAdapter& adapter)
     _retryFrames = 0;
     _geometry.destroy(adapter);
 }
+
+AY_DEFINE_PRESENTATION_STAGE(ColorStylization, ColorStylizationPass, kColorStylizationPhoskiaSource, std::span<const RenderPassResourceRead>{})
 
 } // namespace ayt::render::detail

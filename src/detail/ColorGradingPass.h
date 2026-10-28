@@ -2,7 +2,7 @@
 
 #include "detail/FullscreenPassGeometry.h"
 #include "detail/PassExecContext.h"
-#include "detail/RenderPass.h"
+#include "detail/PresentationPass.h"
 
 #include "AYRenderer/RenderTypes.h"
 #include "AYShader/ShaderResource.h"
@@ -17,14 +17,15 @@ namespace ayt::render::detail
 // Display-referred 2D-strip LUT grading after FXAA and before Present. The
 // pass reads the current PresentSource semantic so FXAA failure naturally
 // falls back to FinalLdrColor, and promotes the semantic only after submit.
-class ColorGradingPass final : public RenderPass {
+class ColorGradingPass final : public PresentationPass {
 public:
+    ColorGradingPass() : PresentationPass(RenderPassSlot::ColorGrading) {}
     // View 4 was the legacy pre-FinalLdr PostProcess id and has no current
     // producer. Reusing it avoids shrinking the retained-UI view range.
-    static constexpr uint8_t kColorGradingViewId = 4;
+    static constexpr uint8_t kColorGradingViewId = presentationStageViewId(RenderPassSlot::ColorGrading);
     static constexpr uint16_t kLutSize = 32;
 
-    std::string_view name() const override { return "ColorGrading"; }
+    bool active() const noexcept override { return _strength > 0.0f && _preset != ColorGradingPreset::Neutral; }
     uint32_t execute(PassExecContext& ctx) override;
 
     void setStrength(float strength) noexcept;
@@ -33,7 +34,7 @@ public:
     ColorGradingPreset preset() const noexcept { return _preset; }
 
     bool isReady() const noexcept;
-    void destroyResources(BGFXAdapter& adapter);
+    void destroyResources(BGFXAdapter& adapter) override;
 
 private:
     void ensureProgram(shader::ShaderResourcePool& pool);
@@ -54,6 +55,7 @@ private:
 
 extern const char* const kColorGradingCacheKeyCStr;
 const char* colorGradingPhoskiaSourceForTests() noexcept;
+const char* colorGradingPhoskiaSource() noexcept;
 std::vector<uint8_t> generateColorGradingLutRgba8(ColorGradingPreset preset);
 
 } // namespace ayt::render::detail

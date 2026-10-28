@@ -49,6 +49,7 @@
 //      broadcast).
 
 #include "AYTest.h"
+#include "ShaderIdentityExpectations.h"
 #include "AYRenderer/RenderScene.h"
 #include "AYShader/ShaderResource.h"
 #include "AYShader/ShaderResourcePool.h"
@@ -103,7 +104,7 @@ namespace {
 // key via `kLightingCacheKeyCStr` in LightingPass.h, so this test
 // compares the mirror against the live key �?drift now fails.
 inline constexpr const char* kExpectedLightingCacheKey =
-    "lighting_v34_scene_background_pbr_parity";
+    renderer_test::kLightingSourceKey;
 inline constexpr const char* kExpectedLightingBuildStamp =
     "lighting-hdr-v1-2026-08-28";
 

@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "ShaderIdentityExpectations.h"
 
 #include "AYRenderer/SSAOShaderSources.h"
 #include "AYShader/BGFXConverter.h"
@@ -164,7 +165,7 @@ TEST_CASE(a3_cache_keys_and_latch_are_current)
     CHECK(std::string(ayt::render::detail::kSSAOCacheKeyCStr)
           == "ssao_v5_8tap_viewdepth_tbn_coverage_fs");
     CHECK(std::string(ayt::render::detail::kLightingCacheKeyCStr)
-          == "lighting_v34_scene_background_pbr_parity");
+          == renderer_test::kLightingSourceKey);
     ayt::render::detail::SSAOPass pass;
     CHECK_FALSE(pass.isReady());
     CHECK_FALSE(pass.producedThisFrame());

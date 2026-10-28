@@ -1,10 +1,8 @@
 #include "detail/RenderPipelineFactory.h"
-#include "detail/AnalogDisplayPass.h"
+#include "detail/PresentationStageCatalog.h"
 #include "detail/AutoExposurePass.h"
 #include "detail/BloomBlurPass.h"
 #include "detail/BloomExtractPass.h"
-#include "detail/ColorGradingPass.h"
-#include "detail/ColorStylizationPass.h"
 #include "detail/DeferredDecalPass.h"
 #include "detail/DepthHazePass.h"
 #include "detail/EditorOverlayPass.h"
@@ -22,9 +20,7 @@
 #include "detail/SMAAPass.h"
 #include "detail/SSAOPass.h"
 #include "detail/SsrPass.h"
-#include "detail/StylizedOutlinePass.h"
 #include "detail/TAAPass.h"
-#include "detail/TemporalFeedbackPass.h"
 #include "detail/TransparentPass.h"
 #include "detail/UIPass.h"
 #include "detail/VolumetricPass.h"
@@ -35,6 +31,10 @@ namespace ayt::render::detail {
 std::unique_ptr<RenderPass> makeRenderPass(RenderPassSlot slot)
 {
     switch (slot) {
+#define AY_PRESENTATION_STAGE(Slot, Output, View, Order, Inputs, Point, History, Job, Direct) \
+    case RenderPassSlot::Slot: return makePresentationStage<RenderPassSlot::Slot>();
+#include "detail/PresentationStages.def"
+#undef AY_PRESENTATION_STAGE
     case RenderPassSlot::Shadow: return std::make_unique<ShadowPass>();
     case RenderPassSlot::ForwardOpaque: return std::make_unique<ForwardOpaquePass>();
     case RenderPassSlot::Transparent: return std::make_unique<TransparentPass>();
@@ -44,11 +44,6 @@ std::unique_ptr<RenderPass> makeRenderPass(RenderPassSlot slot)
     case RenderPassSlot::TAA: return std::make_unique<TAAPass>();
     case RenderPassSlot::MotionVector: return std::make_unique<MotionVectorPass>();
     case RenderPassSlot::AutoExposure: return std::make_unique<AutoExposurePass>();
-    case RenderPassSlot::ColorStylization: return std::make_unique<ColorStylizationPass>();
-    case RenderPassSlot::StylizedOutline: return std::make_unique<StylizedOutlinePass>();
-    case RenderPassSlot::AnalogDisplay: return std::make_unique<AnalogDisplayPass>();
-    case RenderPassSlot::TemporalFeedback: return std::make_unique<TemporalFeedbackPass>();
-    case RenderPassSlot::ColorGrading: return std::make_unique<ColorGradingPass>();
     case RenderPassSlot::Present: return std::make_unique<PresentPass>();
     case RenderPassSlot::EditorOverlay: return std::make_unique<EditorOverlayPass>();
     case RenderPassSlot::UI: return std::make_unique<UIPass>();

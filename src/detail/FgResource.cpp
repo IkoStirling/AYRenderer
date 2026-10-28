@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <iterator>
 #include <limits>
+#include <utility>
 
 namespace ayt::render::detail
 {
@@ -81,6 +82,8 @@ FrameGraph::~FrameGraph()
 
 void FrameGraph::beginFrame(uint16_t width, uint16_t height)
 {
+    _directPresentationOutput = FgResourceId::Count;
+    _directlyPresented = false;
     _viewportW = width;
     _viewportH = height;
     _compiled  = false;
@@ -137,6 +140,20 @@ void FrameGraph::importExternal(FgResourceId id, bgfx::FrameBufferHandle handle)
     // live 标记在 compile() 阶段根据是否有 pass 读取它来设置。
 }
 
+bool FrameGraph::resourceDeclared(FgResourceId id) const noexcept
+{
+    const auto index=static_cast<size_t>(id);
+    return index<static_cast<size_t>(FgResourceId::Count) && _resources[index].declared;
+}
+
+bool FrameGraph::canImportExternal(FgResourceId id,bgfx::FrameBufferHandle handle) const noexcept
+{
+    const auto index=static_cast<size_t>(id);
+    if(index>=static_cast<size_t>(FgResourceId::Count))return false;
+    const auto& resource=_resources[index];
+    return !resource.declared || (resource.isExternal && resource.physical.idx==handle.idx);
+}
+
 void FrameGraph::addResource(FgResourceId id, const FgTextureDesc& desc)
 {
     if (static_cast<size_t>(id) >= static_cast<size_t>(FgResourceId::Count)) {
@@ -154,13 +171,13 @@ void FrameGraph::addResource(FgResourceId id, const FgTextureDesc& desc)
     // resolve() 检测尺寸变化重建。
 }
 
-void FrameGraph::addPass(const FgPassDesc& desc)
+void FrameGraph::addPass(FgPassDesc desc)
 {
     PassEntry p{};
-    p.desc     = desc;
+    p.desc     = std::move(desc);
     p.declared = true;
-    p.live     = desc.enabled;
-    _passes.push_back(p);
+    p.live     = p.desc.enabled;
+    _passes.push_back(std::move(p));
 }
 
 void FrameGraph::setExecutionEligibility(RenderPassSlot slot,
@@ -200,6 +217,7 @@ void FrameGraph::setResolvedSemantic(FgSemantic sem, FgResourceId logicalId)
 
 bool FrameGraph::compile()
 {
+    _directlyPresented = false;
     _stats = FgCompileStats{};
     _stats.declaredPasses = static_cast<uint16_t>(_passes.size());
     _compileErrors.clear();
@@ -339,27 +357,14 @@ bool FrameGraph::compile()
             const PassEntry& consumer = _passes[consumerIndex];
             for (FgResourceId id : consumer.desc.reads) {
                 const size_t index = resourceIndex(id);
-                bool foundCurrentFrameProducer = false;
-                for (size_t candidate = consumerIndex; candidate > 0; --candidate) {
-                    const size_t producerIndex = candidate - 1;
-                    const PassEntry& producer = _passes[producerIndex];
-                    if (!producer.desc.enabled) {
-                        continue;
-                    }
-                    if (std::find(producer.desc.writes.begin(),
-                                  producer.desc.writes.end(), id)
-                        != producer.desc.writes.end()) {
-                        markPassLive(producerIndex);
-                        foundCurrentFrameProducer = true;
-                        break;
-                    }
-                }
-                // Imported resources are valid prior-frame/upstream inputs,
-                // but only when no earlier pass overwrites them this frame.
-                // TAA history is imported and then written before Present.
-                if (!foundCurrentFrameProducer && _resources[index].isExternal) {
-                    continue;
-                }
+                // Validation above guarantees one enabled writer per ID.
+                // Reuse that index instead of rescanning all earlier passes
+                // for every read (especially shared external geometry inputs).
+                const int16_t producer=latestWriter[index];
+                if(producer!=kNoWriter && static_cast<size_t>(producer)<consumerIndex)
+                    markPassLive(static_cast<size_t>(producer));
+                // An external read before its only writer consumes imported
+                // contents, so that later writer must not become a dependency.
             }
         }
     } else {
@@ -396,7 +401,9 @@ bool FrameGraph::compile()
     int16_t nextAliasGroup = 0;
     for (size_t i = 0; i < static_cast<size_t>(FgResourceId::Count); ++i) {
         ResourceEntry& r = _resources[i];
-        if (r.live || r.isExternal) {
+        // Borrowed handles can remain in storage after a frame ends. They are
+        // not logical resources of this frame unless imported again.
+        if (r.declared && (r.live || r.isExternal)) {
             ++_stats.logicalResources;
         }
         if (r.isExternal || !r.live) {
@@ -578,10 +585,34 @@ bool FrameGraph::semanticProducedThisFrame(FgSemantic sem) const noexcept
     return semantic.hasLogical && producedThisFrame(semantic.logical);
 }
 
+void FrameGraph::setDirectPresentationOutput(FgResourceId output) noexcept
+{
+    _directPresentationOutput = output;
+    _directlyPresented = false;
+}
+
+bool FrameGraph::isDirectPresentationOutput(FgResourceId output) const noexcept
+{
+    const auto index=static_cast<size_t>(output);
+    return _compiled && output==_directPresentationOutput
+        && index<static_cast<size_t>(FgResourceId::Count)
+        && _resources[index].declared && _resources[index].live
+        && _resources[index].isExternal;
+}
+
+void FrameGraph::markDirectlyPresented(FgResourceId output) noexcept
+{
+    if (!isDirectPresentationOutput(output)) return;
+    markProduced(output);
+    _directlyPresented = producedThisFrame(output);
+}
+
 // ─── 生命周期 ─────────────────────────────────────────────────
 
 void FrameGraph::resize(uint16_t width, uint16_t height)
 {
+    _directPresentationOutput = FgResourceId::Count;
+    _directlyPresented = false;
     _viewportW = width;
     _viewportH = height;
     // Shared pools keep released targets quarantined for later exact-key
@@ -607,6 +638,8 @@ void FrameGraph::resize(uint16_t width, uint16_t height)
 
 void FrameGraph::shutdown()
 {
+    _directPresentationOutput = FgResourceId::Count;
+    _directlyPresented = false;
     // Release leases; external handles remain borrowed and untouched.
     for (ResourceEntry& r : _resources) {
         if (!r.isExternal && _targetPool != nullptr && r.pooled.isValid()) {

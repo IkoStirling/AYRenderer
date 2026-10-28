@@ -12,7 +12,7 @@
 #include "AYRenderer/TemporalFeedbackShaderSources.h"
 #include "detail/TemporalFeedbackPass.h"
 #include "detail/FgResource.h"
-#include "detail/PostProcessGraphPlan.h"
+#include "PostProcessGraphPlanFixture.h"
 #include "detail/RenderPassContract.h"
 #include "detail/RenderViewNamespaces.h"
 
@@ -112,7 +112,7 @@ TEST_CASE(graph_splices_after_each_aa_and_grading_and_has_no_disabled_target)
     BGFXAdapter adapter;
     FrameGraph graph(adapter);
     for (int aa=0;aa<4;++aa) for (bool grading : {false,true}) {
-        PostProcessGraphPlanInput input{};
+        PostProcessGraphPlanFixtureInput input{};
         input.width=319;input.height=181;input.sceneColor={17};
         input.finalLdr=true;input.fxaa=aa==1;input.smaa=aa==2;
         input.taa=aa==3;input.taaWriteTarget={18};input.taaReadHistory={19};
@@ -265,7 +265,7 @@ TEST_CASE(outline_has_independent_gate_and_graph_dependency)
     CHECK_FALSE(colorStylizationActive(s));CHECK(stylizationOutlineActive(s));
     s.outlineStrength=0;CHECK_FALSE(stylizationOutlineActive(s));
     BGFXAdapter adapter;FrameGraph graph(adapter);
-    PostProcessGraphPlanInput in;in.width=320;in.height=180;in.sceneColor={17};in.gbuffer={18};
+    PostProcessGraphPlanFixtureInput in;in.width=320;in.height=180;in.sceneColor={17};in.gbuffer={18};
     in.finalLdr=true;in.stylizedOutline=true;in.stylizationDepth=true;in.stylizationNormals=true;
     auto plan=buildPostProcessGraphPlan(graph,in);CHECK(plan.compileSucceeded);
     CHECK(plan.presentationSource==FgResourceId::OutlinedColor);
@@ -297,7 +297,7 @@ TEST_CASE(display_bypasses_identity_and_migrates_v1_look_with_display_off)
     const auto text=serializeColorStylizationLook(modern);ColorStylizationSettings restored;
     CHECK(parseColorStylizationLook(text,restored,&error));
     CHECK(serializeColorStylizationLook(restored)==text);
-    BGFXAdapter a;FrameGraph graph(a);PostProcessGraphPlanInput in;
+    BGFXAdapter a;FrameGraph graph(a);PostProcessGraphPlanFixtureInput in;
     in.width=320;in.height=180;in.sceneColor={1};in.finalLdr=true;in.analogDisplay=true;
     const auto plan=buildPostProcessGraphPlan(graph,in);CHECK(plan.compileSucceeded);
     CHECK(plan.presentationSource==FgResourceId::DisplayColor);
@@ -325,7 +325,7 @@ TEST_CASE(temporal_settings_identity_schema_migration_and_no_device_gate)
     CHECK_FALSE(BGFXAdapter::isValid(pass.readFbo()));CHECK_FALSE(BGFXAdapter::isValid(pass.writeFbo()));
     CHECK(pass.generation()==0);CHECK(pass.completedFrames()==0);CHECK(pool.cacheStats().sourceMisses==0);
     pass.destroyResources(a);pass.destroyResources(a);
-    FrameGraph graph(a);PostProcessGraphPlanInput in;in.width=320;in.height=180;
+    FrameGraph graph(a);PostProcessGraphPlanFixtureInput in;in.width=320;in.height=180;
     in.sceneColor={1};in.finalLdr=true;in.temporalFeedback=true;in.feedbackReadHistory={2};in.feedbackWriteTarget={3};
     const auto plan=buildPostProcessGraphPlan(graph,in);CHECK(plan.compileSucceeded);
     CHECK(plan.presentationSource==FgResourceId::TemporalColor);CHECK(graph.shouldExecute(RenderPassSlot::TemporalFeedback));
