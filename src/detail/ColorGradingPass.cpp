@@ -315,9 +315,3 @@ void ColorGradingPass::destroyResources(BGFXAdapter& adapter)
 AY_DEFINE_PRESENTATION_STAGE(ColorGrading, ColorGradingPass, colorGradingPhoskiaSource(), std::span<const RenderPassResourceRead>{})
 
 } // namespace ayt::render::detail
-
-namespace ayt::render::detail {
-void appendColorGradingPassShaders(std::vector<shader::ShaderBuildJob>& jobs) {
-    jobs.push_back(embeddedShader("color_grading",kColorGradingPhoskiaSource));
-}
-}

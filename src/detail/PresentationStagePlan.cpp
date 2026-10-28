@@ -112,7 +112,8 @@ bool declarePresentationStages(FrameGraph& graph, std::span<const PresentationSt
             graph.importExternal(imported.resource, imported.framebuffer);
         if (&stage==terminal && info.canPresentDirectly) {
             graph.importExternal(info.output,BGFX_INVALID_HANDLE);
-            graph.setDirectPresentationOutput(info.output);
+            graph.setDirectPresentationOutput(info.output, {bgfx::TextureFormat::RGBA8,
+                FgTextureScale::Full, true, false, info.pointSampled});
         } else if (info.history) {
             graph.importExternal(info.output, stage.historyTarget);
         } else {

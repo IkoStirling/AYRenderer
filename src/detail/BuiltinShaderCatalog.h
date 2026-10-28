@@ -10,7 +10,6 @@ inline shader::ShaderBuildJob rawShader(const std::string& name,const std::strin
     job.vertexSc=vertex; job.fragmentSc=fragment; job.varyingSc=varying; return job;
 }
 void appendGBufferPassShaders(std::vector<shader::ShaderBuildJob>& jobs);
-void appendColorGradingPassShaders(std::vector<shader::ShaderBuildJob>& jobs);
 void appendPresentationStageShaders(std::vector<shader::ShaderBuildJob>& jobs);
 void appendGBufferDebugPassShaders(std::vector<shader::ShaderBuildJob>& jobs);
 void appendMotionVectorPassShaders(std::vector<shader::ShaderBuildJob>& jobs);

@@ -268,7 +268,11 @@ public:
     // A logical terminal output may live on the default backbuffer. It cannot
     // be sampled or promoted to PresentSource. Keep the last readable source
     // intact so Present can fall back if the terminal draw does not submit.
-    void setDirectPresentationOutput(FgResourceId output) noexcept;
+    // Eligibility is provisional until compile: any enabled texture consumer
+    // other than the typed Present boundary, or any semantic reference, keeps
+    // an ordinary sampled target. New consumers need no effect-specific gate.
+    void setDirectPresentationOutput(FgResourceId output,
+        const FgTextureDesc& sampledTarget = {}) noexcept;
     bool isDirectPresentationOutput(FgResourceId output) const noexcept;
     void markDirectlyPresented(FgResourceId output) noexcept;
     bool directlyPresentedThisFrame() const noexcept { return _directlyPresented; }
@@ -302,6 +306,7 @@ private:
     uint16_t        _viewportH   = 0;
     bool            _compiled    = false;
     FgResourceId    _directPresentationOutput = FgResourceId::Count;
+    FgTextureDesc   _directPresentationSampledTarget{};
     bool            _directlyPresented = false;
     static constexpr uint16_t kDefaultIdleReleaseFrames = 120;
     uint16_t        _idleReleaseFrames = kDefaultIdleReleaseFrames;

@@ -487,6 +487,87 @@ TEST_CASE(terminal_integration_never_bypasses_a_later_color_consumer_or_history_
     graph.shutdown();CHECK_FALSE(graph.directlyPresentedThisFrame());
 }
 
+TEST_CASE(any_enabled_texture_consumer_or_semantic_cancels_terminal_integration)
+{
+    auto info=probeInfo(200,"SampleableTerminal",FgResourceId::DisplayColor,
+        RenderPassResourceId::DisplayColor,10);
+    info.canPresentDirectly=true;info.pointSampled=true;
+    PresentationStageFrame stage;stage.info=&info;stage.enabled=true;
+    BGFXAdapter adapter;FrameGraph graph(adapter);
+    // 0: Present only; 1: extra reader; 2: disabled reader; 3: semantic;
+    // 4: untyped consumer named Present. Names never grant the exemption.
+    for(int mode:{0,1,2,3,4,0}) {
+        graph.beginFrame(31,23);graph.importExternal(FgResourceId::FinalLdrColor,{70});
+        auto source=FgResourceId::FinalLdrColor;
+        CHECK(declarePresentationStages(graph,{&stage,1},source,nullptr,true));
+        if(mode==1 || mode==2)
+            graph.addPass({"AdditionalTextureReader",{source},{},mode==1,true,220});
+        if(mode==3)graph.setResolvedSemantic(FgSemantic::BloomSource,source);
+        graph.addPass({"Present",{source},{},true,true,
+            mode==4?int16_t(-1):static_cast<int16_t>(RenderPassSlot::Present)});
+        graph.setResolvedSemantic(FgSemantic::PresentSource,FgResourceId::FinalLdrColor);
+        CHECK(graph.compile());
+        const bool direct=mode==0 || mode==2;
+        CHECK(graph.isDirectPresentationOutput(info.output)==direct);
+        CHECK(graph.stats().physicalTargets==(direct?0:1));
+        graph.markDirectlyPresented(info.output);
+        CHECK(graph.directlyPresentedThisFrame()==direct);
+        if(!direct) {
+            // Recompiling an already restored target must not revive the
+            // optimization or lose its producer/consumer relationships.
+            CHECK(graph.compile());CHECK(graph.stats().physicalTargets==1);
+            CHECK_FALSE(graph.isDirectPresentationOutput(info.output));
+        }
+    }
+}
+
+TEST_CASE(terminal_texture_fallback_keeps_producer_order_and_later_declarations_authoritative)
+{
+    PresentationStageFrame stage;stage.info=presentationStageInfo(RenderPassSlot::AnalogDisplay);stage.enabled=true;
+    BGFXAdapter adapter;FrameGraph graph(adapter);
+    graph.beginFrame(31,23);graph.importExternal(FgResourceId::FinalLdrColor,{70});
+    graph.addPass({"ReaderBeforeProducer",{stage.info->output},{},true,true});
+    auto source=FgResourceId::FinalLdrColor;
+    CHECK(declarePresentationStages(graph,{&stage,1},source,nullptr,true));
+    CHECK_FALSE(graph.compile());
+    CHECK(graph.compileErrors().size()==1);
+    if(!graph.compileErrors().empty()) {
+        CHECK(graph.compileErrors().front().code==FgCompileErrorCode::ReadBeforeWrite);
+        CHECK(graph.compileErrors().front().resource==stage.info->output);
+    }
+    for(bool external:{false,true}) {
+        graph.beginFrame(31,23);graph.importExternal(FgResourceId::FinalLdrColor,{70});
+        source=FgResourceId::FinalLdrColor;
+        CHECK(declarePresentationStages(graph,{&stage,1},source,nullptr,true));
+        if(external)graph.importExternal(source,{77});else graph.addResource(source,{});
+        graph.addPass({"Present",{source},{},true,true,static_cast<int16_t>(RenderPassSlot::Present)});
+        CHECK(graph.compile());CHECK_FALSE(graph.isDirectPresentationOutput(source));
+        CHECK(graph.stats().physicalTargets==(external?0:1));
+        if(external)CHECK(graph.resolve(source).idx==77);
+    }
+}
+
+TEST_CASE(appending_a_chain_fragment_restores_the_previous_direct_candidate)
+{
+    auto info=probeInfo(200,"AppendedTerminal",FgResourceId::HazeColor,
+        RenderPassResourceId::HazeColor,60);info.canPresentDirectly=true;
+    PresentationStageFrame first;first.info=presentationStageInfo(RenderPassSlot::AnalogDisplay);first.enabled=true;
+    PresentationStageFrame later;later.info=&info;
+    BGFXAdapter adapter;FrameGraph graph(adapter);
+    for(bool append:{false,true,false}) {
+        graph.beginFrame(31,23);graph.importExternal(FgResourceId::FinalLdrColor,{70});
+        auto source=FgResourceId::FinalLdrColor;
+        CHECK(declarePresentationStages(graph,{&first,1},source,nullptr,true));
+        later.enabled=append;
+        CHECK(declarePresentationStages(graph,{&later,1},source,nullptr,true));
+        graph.addPass({"Present",{source},{},true,true,static_cast<int16_t>(RenderPassSlot::Present)});
+        CHECK(graph.compile());CHECK(graph.stats().physicalTargets==(append?1:0));
+        CHECK(graph.isDirectPresentationOutput(first.info->output)==!append);
+        CHECK(graph.isDirectPresentationOutput(later.info->output)==append);
+        CHECK(source==(append?later.info->output:first.info->output));
+    }
+}
+
 TEST_CASE(shared_extra_imports_must_agree_and_cannot_replace_upstream_declarations)
 {
     auto first=probeInfo(200,"First",FgResourceId::ColorGradedColor,

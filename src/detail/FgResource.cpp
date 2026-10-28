@@ -224,6 +224,37 @@ bool FrameGraph::compile()
     _compiled = false;
     std::fill(std::begin(_executionLive), std::end(_executionLive), false);
 
+    // A backbuffer output cannot be sampled. Registration only proposes the
+    // optimization; the complete graph decides whether another consumer needs
+    // its texture. Be conservative about enabled dead branches as declaration
+    // validation below still checks them before liveness is known.
+    const auto directIndex = static_cast<size_t>(_directPresentationOutput);
+    if (directIndex < static_cast<size_t>(FgResourceId::Count)) {
+        const auto& candidate = _resources[directIndex];
+        if (!candidate.declared || !candidate.isExternal
+            || bgfx::isValid(candidate.physical)) {
+            _directPresentationOutput = FgResourceId::Count;
+        } else {
+            bool needsTexture = false;
+            for (const PassEntry& pass : _passes) {
+                if (!pass.desc.enabled
+                    || pass.desc.executionSlot == static_cast<int16_t>(RenderPassSlot::Present))
+                    continue;
+                if (std::find(pass.desc.reads.begin(), pass.desc.reads.end(),
+                        _directPresentationOutput) != pass.desc.reads.end()) {
+                    needsTexture = true;
+                    break;
+                }
+            }
+            for (const SemanticEntry& semantic : _semantics)
+                needsTexture |= semantic.hasLogical && semantic.logical == _directPresentationOutput;
+            if (needsTexture) {
+                addResource(_directPresentationOutput, _directPresentationSampledTarget);
+                _directPresentationOutput = FgResourceId::Count;
+            }
+        }
+    }
+
     constexpr size_t kResourceCount =
         static_cast<size_t>(FgResourceId::Count);
     constexpr int16_t kNoWriter = -1;
@@ -585,9 +616,20 @@ bool FrameGraph::semanticProducedThisFrame(FgSemantic sem) const noexcept
     return semantic.hasLogical && producedThisFrame(semantic.logical);
 }
 
-void FrameGraph::setDirectPresentationOutput(FgResourceId output) noexcept
+void FrameGraph::setDirectPresentationOutput(FgResourceId output,
+    const FgTextureDesc& sampledTarget) noexcept
 {
+    // Independent extension contributors may append chain fragments. Only
+    // the final candidate may lose its texture; replacing the candidate must
+    // restore the previous fragment before it becomes an ordinary input.
+    const auto previousIndex=static_cast<size_t>(_directPresentationOutput);
+    if(output!=_directPresentationOutput && previousIndex<static_cast<size_t>(FgResourceId::Count)) {
+        const auto& previous=_resources[previousIndex];
+        if(previous.declared && previous.isExternal && !bgfx::isValid(previous.physical))
+            addResource(_directPresentationOutput,_directPresentationSampledTarget);
+    }
     _directPresentationOutput = output;
+    _directPresentationSampledTarget = sampledTarget;
     _directlyPresented = false;
 }
 
