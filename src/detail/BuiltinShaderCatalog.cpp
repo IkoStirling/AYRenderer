@@ -53,6 +53,7 @@ std::vector<shader::ShaderBuildJob> builtinShaderJobs() {
         std::pair{"simple_lit",kSimpleLitShadowPhoskiaSource},
         std::pair{"world_lit_2d",kWorldLit2DMaterialPhoskiaSource},
         std::pair{"tilemap",kTilemapPhoskiaSource},std::pair{"sprite_retro",kSpriteRetroAaPhoskiaSource},
+        std::pair{"sprite_nearest",kSpriteNearestPhoskiaSource},
         std::pair{"tile_nearest",kTilemapChunkNearestPhoskiaSource},std::pair{"tile_linear",kTilemapChunkLinearPhoskiaSource},
         std::pair{"tile_4tap",kTilemapChunk4TapPhoskiaSource},std::pair{"tile_9tap",kTilemapChunk9TapPhoskiaSource},
         std::pair{"tile_semantic_shadow",kTilemapSemanticShadowPhoskiaSource}})

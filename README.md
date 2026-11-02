@@ -22,6 +22,14 @@ hard pixel edges while keeping the same texture and atlas gutter as linear or
 Retro AA sampling. The 2D pass supplies texel size from the live GPU image.
 Masked and WorldLit2D Sprites keep their existing materials.
 
+The production catalog includes `sprite_nearest` alongside `sprite_retro` and
+the tilemap variants (79 built-in jobs). This closes the case where hard-nearest
+Sprites worked with a development compiler but had no packaged program.
+`ShaderProductionTests.complete_catalog_prewarms_normal_paths_without_compiler`
+checks the named job, compilation, manifest coverage and compiler-free loading.
+The existing source-rectangle clamp/compile test remains in `Test_Forward2DOpaque`.
+
+
 ## Camera output CPU frame delivery
 
 After `renderViews`, a host can call `requestCameraOutputReadback` before
